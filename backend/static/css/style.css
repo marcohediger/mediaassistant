@@ -687,3 +687,45 @@ select:focus {
     color: var(--text-muted);
     overflow-x: auto;
 }
+
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid var(--border);
+}
+
+.tab {
+    padding: 0.625rem 1.25rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.9rem;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.tab:hover { color: var(--text); }
+
+.tab-active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    font-weight: 600;
+}
+
+/* Level Badges */
+.level-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.level-info { background: rgba(96, 165, 250, 0.15); color: var(--info); }
+.level-warning { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+.level-error { background: rgba(248, 113, 113, 0.15); color: var(--error); }
+
+.cell-nowrap { white-space: nowrap; }

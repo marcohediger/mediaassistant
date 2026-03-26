@@ -44,6 +44,17 @@ class Module(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
+class SystemLog(Base):
+    __tablename__ = "system_logs"
+
+    id = Column(Integer, primary_key=True)
+    level = Column(Text, nullable=False)  # INFO / WARNING / ERROR
+    source = Column(Text, nullable=False)  # module name or system component
+    message = Column(Text, nullable=False)
+    detail = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class InboxDirectory(Base):
     __tablename__ = "inbox_directories"
 

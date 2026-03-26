@@ -4,7 +4,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
-from models import Job
+from models import Job, SystemLog
 
 router = APIRouter(prefix="/logs")
 templates = Jinja2Templates(directory="templates")
@@ -17,42 +17,62 @@ async def logs_page(request: Request):
     if not await config_manager.is_setup_complete():
         return RedirectResponse(url="/setup", status_code=302)
 
+    tab = request.query_params.get("tab", "system")
     page = int(request.query_params.get("page", 1))
     status_filter = request.query_params.get("status", "")
+    level_filter = request.query_params.get("level", "")
     search = request.query_params.get("q", "")
 
-    async with async_session() as session:
-        query = select(Job)
+    jobs = []
+    system_logs = []
+    total = 0
+    total_pages = 1
 
-        if status_filter:
-            query = query.where(Job.status == status_filter)
-        if search:
-            query = query.where(
-                Job.filename.contains(search) | Job.debug_key.contains(search)
-            )
-
-        # Total count
-        count_query = select(func.count()).select_from(query.subquery())
-        total = (await session.execute(count_query)).scalar() or 0
-
-        # Paginated results
-        query = query.order_by(Job.updated_at.desc()).offset((page - 1) * ITEMS_PER_PAGE).limit(ITEMS_PER_PAGE)
-        result = await session.execute(query)
-        jobs = result.scalars().all()
+    if tab == "jobs":
+        async with async_session() as session:
+            query = select(Job)
+            if status_filter:
+                query = query.where(Job.status == status_filter)
+            if search:
+                query = query.where(
+                    Job.filename.contains(search) | Job.debug_key.contains(search)
+                )
+            count_query = select(func.count()).select_from(query.subquery())
+            total = (await session.execute(count_query)).scalar() or 0
+            query = query.order_by(Job.updated_at.desc()).offset((page - 1) * ITEMS_PER_PAGE).limit(ITEMS_PER_PAGE)
+            result = await session.execute(query)
+            jobs = result.scalars().all()
+    else:
+        async with async_session() as session:
+            query = select(SystemLog)
+            if level_filter:
+                query = query.where(SystemLog.level == level_filter)
+            if search:
+                query = query.where(
+                    SystemLog.message.contains(search) | SystemLog.source.contains(search)
+                )
+            count_query = select(func.count()).select_from(query.subquery())
+            total = (await session.execute(count_query)).scalar() or 0
+            query = query.order_by(SystemLog.created_at.desc()).offset((page - 1) * ITEMS_PER_PAGE).limit(ITEMS_PER_PAGE)
+            result = await session.execute(query)
+            system_logs = result.scalars().all()
 
     total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
 
     return templates.TemplateResponse(request, "logs.html", {
+        "tab": tab,
         "jobs": jobs,
+        "system_logs": system_logs,
         "page": page,
         "total_pages": total_pages,
         "total": total,
         "status_filter": status_filter,
+        "level_filter": level_filter,
         "search": search,
     })
 
 
-@router.get("/{debug_key}")
+@router.get("/job/{debug_key}")
 async def log_detail(request: Request, debug_key: str):
     if not await config_manager.is_setup_complete():
         return RedirectResponse(url="/setup", status_code=302)
@@ -62,6 +82,6 @@ async def log_detail(request: Request, debug_key: str):
         job = result.scalar()
 
     if not job:
-        return RedirectResponse(url="/logs", status_code=302)
+        return RedirectResponse(url="/logs?tab=jobs", status_code=302)
 
     return templates.TemplateResponse(request, "log_detail.html", {"job": job})
