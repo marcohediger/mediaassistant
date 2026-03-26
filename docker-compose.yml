@@ -1,0 +1,17 @@
+services:
+  mediaassistant:
+    build:
+      context: ./backend
+    container_name: mediaassistant
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ${INBOX_PATH:-/volume1/inbox}:/inbox
+      - ${LIBRARY_PATH:-/volume1/bibliothek}:/bibliothek
+    environment:
+      - DATABASE_PATH=/app/data/mediaassistant.db
+      - INBOX_PATH=/inbox
+      - LIBRARY_PATH=/bibliothek
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}

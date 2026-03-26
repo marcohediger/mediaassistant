@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+.git
+data/
+test_inbox/
+test_library/
+*.md
+.env

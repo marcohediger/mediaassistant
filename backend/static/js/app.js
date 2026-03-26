@@ -1,0 +1,1 @@
+// MediaAssistant Frontend JS

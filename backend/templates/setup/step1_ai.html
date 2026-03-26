@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Setup — KI Backend{% endblock %}
+{% block content %}
+<div class="setup-container">
+    <div class="setup-progress">
+        <span class="step active">1. KI Backend</span>
+        <span class="step">2. SMTP</span>
+        <span class="step">3. Pfade</span>
+        <span class="step">4. Fertig</span>
+    </div>
+
+    <h1>KI Backend konfigurieren</h1>
+    <p>Verbindung zu LM Studio oder einem OpenAI-kompatiblen Endpunkt.</p>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+    {% endif %}
+
+    <form method="post" action="/setup/step/1" class="setup-form">
+        <div class="form-group">
+            <label for="ai_url">Backend URL</label>
+            <input type="url" id="ai_url" name="ai_url" value="{{ ai_url or 'http://localhost:1234/v1' }}" required>
+            <small>z.B. http://192.168.0.100:1234/v1 (LM Studio)</small>
+        </div>
+        <div class="form-group">
+            <label for="ai_api_key">API Key (optional)</label>
+            <input type="password" id="ai_api_key" name="ai_api_key" value="{{ ai_api_key or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="ai_model">Modell</label>
+            <input type="text" id="ai_model" name="ai_model" value="{{ ai_model or '' }}" required>
+            <small>z.B. qwen2-vl, llava, gpt-4o</small>
+        </div>
+        <div class="form-actions">
+            <button type="submit" formaction="/setup/step/1/test" class="btn btn-secondary">Verbindung testen</button>
+            <button type="submit" class="btn btn-primary">Weiter</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
