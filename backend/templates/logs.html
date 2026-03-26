@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Logs — MediaAssistant{% endblock %}
+{% block content %}
+<h1>Verarbeitungs-Log</h1>
+
+<div class="log-filters">
+    <form method="get" action="/logs" class="filter-form">
+        <div class="form-group">
+            <input type="text" name="q" value="{{ search }}" placeholder="Dateiname oder Debug-Key suchen...">
+        </div>
+        <div class="form-group">
+            <select name="status">
+                <option value="">Alle Status</option>
+                <option value="queued" {{ 'selected' if status_filter == 'queued' else '' }}>Wartend</option>
+                <option value="processing" {{ 'selected' if status_filter == 'processing' else '' }}>In Arbeit</option>
+                <option value="done" {{ 'selected' if status_filter == 'done' else '' }}>Fertig</option>
+                <option value="error" {{ 'selected' if status_filter == 'error' else '' }}>Fehler</option>
+                <option value="duplicate" {{ 'selected' if status_filter == 'duplicate' else '' }}>Duplikat</option>
+                <option value="review" {{ 'selected' if status_filter == 'review' else '' }}>Review</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-small btn-secondary">Filtern</button>
+    </form>
+    <span class="log-count">{{ total }} Einträge</span>
+</div>
+
+{% if jobs %}
+<div class="log-table-wrap">
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>Debug-Key</th>
+                <th>Datei</th>
+                <th>Quelle</th>
+                <th>Status</th>
+                <th>Schritt</th>
+                <th>Ziel</th>
+                <th>Zeit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr class="log-row log-{{ job.status }}">
+                <td><a href="/logs/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
+                <td>{{ job.filename }}</td>
+                <td>{{ job.source_label or '—' }}</td>
+                <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
+                <td>{{ job.current_step or '—' }}</td>
+                <td class="cell-path">{{ job.target_path or '—' }}</td>
+                <td>{{ job.updated_at.strftime('%d.%m.%Y %H:%M') if job.updated_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/logs?page={{ page - 1 }}&status={{ status_filter }}&q={{ search }}" class="btn btn-small btn-secondary">Zurück</a>
+    {% endif %}
+    <span class="page-info">Seite {{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/logs?page={{ page + 1 }}&status={{ status_filter }}&q={{ search }}" class="btn btn-small btn-secondary">Weiter</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<p class="section-note">Keine Einträge gefunden.</p>
+{% endif %}
+{% endblock %}

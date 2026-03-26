@@ -10,6 +10,92 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
+<!-- Eingangsverzeichnisse -->
+<div class="settings-section">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>Eingangsverzeichnisse</h2>
+            <span class="section-desc">Überwachte Ordner für die automatische Verarbeitung</span>
+        </div>
+    </div>
+    <div class="section-body">
+        {% if inboxes %}
+        <div class="inbox-list">
+            {% for inbox in inboxes %}
+            <form method="post" action="/settings/inbox/{{ inbox.id }}/update" class="inbox-item">
+                <div class="inbox-row">
+                    <div class="form-group">
+                        <label>Pfad</label>
+                        <input type="text" name="inbox_path" value="{{ inbox.path }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Label</label>
+                        <input type="text" name="inbox_label" value="{{ inbox.label }}">
+                    </div>
+                </div>
+                <div class="inbox-options">
+                    <label class="switch-inline">
+                        <input type="checkbox" name="inbox_folder_tags_{{ inbox.id }}" value="1" {{ 'checked' if inbox.folder_tags else '' }}>
+                        <span class="switch-slider-sm"></span>
+                        <span>Ordner-Tags</span>
+                    </label>
+                    <label class="switch-inline">
+                        <input type="checkbox" name="inbox_dry_run_{{ inbox.id }}" value="1" {{ 'checked' if inbox.dry_run else '' }}>
+                        <span class="switch-slider-sm"></span>
+                        <span>Dry-Run</span>
+                    </label>
+                    <label class="switch-inline">
+                        <input type="checkbox" name="inbox_active_{{ inbox.id }}" value="1" {{ 'checked' if inbox.active else '' }}>
+                        <span class="switch-slider-sm"></span>
+                        <span>Aktiv</span>
+                    </label>
+                    <div class="inbox-actions">
+                        <button type="submit" class="btn btn-small btn-secondary">Speichern</button>
+                    </div>
+                </div>
+            </form>
+            <form method="post" action="/settings/inbox/{{ inbox.id }}/delete" class="inbox-delete-form">
+                <button type="submit" class="btn btn-small btn-danger" onclick="return confirm('Verzeichnis wirklich löschen?')">Löschen</button>
+            </form>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="section-note">Noch keine Eingangsverzeichnisse konfiguriert.</p>
+        {% endif %}
+
+        <div class="inbox-add">
+            <h3>Neues Verzeichnis hinzufügen</h3>
+            <form method="post" action="/settings/inbox/add">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="new_inbox_path">Pfad</label>
+                        <input type="text" id="new_inbox_path" name="inbox_path" placeholder="/inbox/mobile">
+                    </div>
+                    <div class="form-group">
+                        <label for="new_inbox_label">Label</label>
+                        <input type="text" id="new_inbox_label" name="inbox_label" placeholder="Handy">
+                    </div>
+                </div>
+                <div class="inbox-options">
+                    <label class="switch-inline">
+                        <input type="checkbox" name="inbox_folder_tags" value="1">
+                        <span class="switch-slider-sm"></span>
+                        <span>Ordner-Tags</span>
+                    </label>
+                    <label class="switch-inline">
+                        <input type="checkbox" name="inbox_dry_run" value="1">
+                        <span class="switch-slider-sm"></span>
+                        <span>Dry-Run</span>
+                    </label>
+                    <div class="inbox-actions">
+                        <button type="submit" class="btn btn-small btn-primary">Hinzufügen</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <form method="post" action="/settings/save">
 
 <!-- KI-Analyse -->
@@ -174,9 +260,10 @@
                 <input type="email" id="smtp_recipient" name="smtp_recipient" value="{{ cfg.smtp_recipient }}">
             </div>
             <div class="form-group">
-                <label for="smtp_ssl">
-                    <input type="checkbox" id="smtp_ssl" name="smtp_ssl" value="1" {{ 'checked' if cfg.smtp_ssl else '' }}>
-                    SSL/TLS verwenden
+                <label class="switch-inline" style="margin-top: 1.75rem;">
+                    <input type="checkbox" name="smtp_ssl" value="1" {{ 'checked' if cfg.smtp_ssl else '' }}>
+                    <span class="switch-slider-sm"></span>
+                    <span>SSL/TLS</span>
                 </label>
             </div>
         </div>

@@ -4,7 +4,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from config import config_manager
 from database import async_session
-from models import Module
+from models import Module, InboxDirectory
 
 router = APIRouter(prefix="/settings")
 templates = Jinja2Templates(directory="templates")
@@ -44,9 +44,14 @@ async def settings_page(request: Request):
     modules = await _get_modules_dict()
     cfg = await _get_cfg()
 
+    async with async_session() as session:
+        result = await session.execute(select(InboxDirectory).order_by(InboxDirectory.id))
+        inboxes = result.scalars().all()
+
     return templates.TemplateResponse(request, "settings.html", {
         "modules": type("M", (), modules)(),
         "cfg": type("C", (), cfg)(),
+        "inboxes": inboxes,
         "success": request.query_params.get("success"),
         "error": request.query_params.get("error"),
     })
@@ -102,3 +107,61 @@ async def save_settings(request: Request):
     await config_manager.set("filewatcher.schedule_mode", form.get("schedule_mode", "continuous"))
 
     return RedirectResponse(url="/settings?success=Einstellungen+gespeichert", status_code=302)
+
+
+@router.post("/inbox/add")
+async def add_inbox(
+    request: Request,
+):
+    form = await request.form()
+    path = form.get("inbox_path", "").strip()
+    label = form.get("inbox_label", "").strip()
+
+    if not path or not label:
+        return RedirectResponse(url="/settings?error=Pfad+und+Label+sind+erforderlich", status_code=302)
+
+    async with async_session() as session:
+        existing = await session.execute(select(InboxDirectory).where(InboxDirectory.path == path))
+        if existing.scalar():
+            return RedirectResponse(url="/settings?error=Verzeichnis+existiert+bereits", status_code=302)
+
+        session.add(InboxDirectory(
+            path=path,
+            label=label,
+            folder_tags="inbox_folder_tags" in form,
+            dry_run="inbox_dry_run" in form,
+            active=True,
+        ))
+        await session.commit()
+
+    return RedirectResponse(url="/settings?success=Verzeichnis+hinzugefügt", status_code=302)
+
+
+@router.post("/inbox/{inbox_id}/update")
+async def update_inbox(request: Request, inbox_id: int):
+    form = await request.form()
+
+    async with async_session() as session:
+        inbox = await session.get(InboxDirectory, inbox_id)
+        if not inbox:
+            return RedirectResponse(url="/settings?error=Verzeichnis+nicht+gefunden", status_code=302)
+
+        inbox.path = form.get("inbox_path", inbox.path).strip()
+        inbox.label = form.get("inbox_label", inbox.label).strip()
+        inbox.folder_tags = f"inbox_folder_tags_{inbox_id}" in form
+        inbox.dry_run = f"inbox_dry_run_{inbox_id}" in form
+        inbox.active = f"inbox_active_{inbox_id}" in form
+        await session.commit()
+
+    return RedirectResponse(url="/settings?success=Verzeichnis+aktualisiert", status_code=302)
+
+
+@router.post("/inbox/{inbox_id}/delete")
+async def delete_inbox(request: Request, inbox_id: int):
+    async with async_session() as session:
+        inbox = await session.get(InboxDirectory, inbox_id)
+        if inbox:
+            await session.delete(inbox)
+            await session.commit()
+
+    return RedirectResponse(url="/settings?success=Verzeichnis+gelöscht", status_code=302)
