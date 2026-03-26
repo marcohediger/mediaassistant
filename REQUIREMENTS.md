@@ -478,7 +478,7 @@ Flach:               photos/{YYYY}/
 - Regeln werden in SQLite gespeichert
 
 ## Offene Tasks
-- [ ] SETUP: Projektstruktur anlegen (backend, docker-compose, volumes)
+- [x] SETUP: Projektstruktur anlegen (backend, docker-compose, volumes)
 - [ ] FEAT: Dateiformat-Handling (HEIC/DNG/GIF → temp JPEG vor KI-Analyse)
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
 - [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
@@ -486,10 +486,10 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: Geocoding-Cache in SQLite (keine doppelten Requests)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 - [ ] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
-- [ ] FEAT: Eingangsverzeichnisse konfigurierbar im Webinterface (Pfad, Label, Ordner-Tags, Aktiv/inaktiv, Verarbeitungszeiten)
-- [ ] FEAT: Filewatcher (Watchdog) auf allen konfigurierten Eingangsverzeichnissen
+- [x] FEAT: Eingangsverzeichnisse konfigurierbar im Webinterface (Pfad, Label, Ordner-Tags, Aktiv/inaktiv, Verarbeitungszeiten)
+- [x] FEAT: Filewatcher (Polling) auf allen konfigurierten Eingangsverzeichnissen
 - [ ] FEAT: Manuelle Imports — Ordnerstruktur als Tags (jede Ebene = ein EXIF-Keyword, pro Verzeichnis konfigurierbar)
-- [ ] FEAT: EXIF-Auslesen via ExifTool subprocess
+- [x] FEAT: EXIF-Auslesen via ExifTool subprocess (IA-01)
 - [ ] FEAT: Regel-basierte Klassifizierung (WA, Screenshot, EXIF-leer)
 - [ ] FEAT: LM Studio Vision API Integration
 - [ ] FEAT: KI-Prompt für Typ + Inhalt + Qualität + Beschreibung
@@ -500,23 +500,23 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: Duplikat-Review Webinterface (Original + alle Duplikate gruppiert, Side-by-Side, Batch-Löschen)
 - [ ] FEAT: Fehlerbehandlung → /inbox/error/ + .log Datei
 - [ ] FEAT: SMTP Fehlerbenachrichtigung (zusammengefasst, max 1x/Stunde)
-- [ ] FEAT: Debugschlüssel (IA-YYYY-NNNN) + Step-Codes (IA-01 bis IA-10) pro Verarbeitung
-- [ ] FEAT: Job-System (SQLite, Eintrag bei Erkennung, Status + current_step + step_result JSON)
-- [ ] FEAT: Resume-Logik (nach Absturz ab fehlendem Step weitermachen)
-- [ ] FEAT: SQLite Logging
-- [ ] FEAT: Setup-Wizard beim ersten Start (/setup, 4 Schritte, danach gesperrt)
+- [x] FEAT: Debugschlüssel (MA-YYYY-NNNN) + Step-Codes (IA-01 bis IA-09) pro Verarbeitung
+- [x] FEAT: Job-System (SQLite, Eintrag bei Erkennung, Status + current_step + step_result JSON)
+- [x] FEAT: Resume-Logik (nach Absturz ab fehlendem Step weitermachen)
+- [x] FEAT: SQLite Logging (System-Log + Verarbeitungs-Log)
+- [x] FEAT: Setup-Wizard beim ersten Start (/setup, 4 Schritte, danach gesperrt)
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
-- [ ] FEAT: FastAPI Webinterface (Dashboard, Live-Log, Queue)
-- [ ] FEAT: Alle Module einzeln ein/ausschaltbar im Webinterface (KI, Geocoding, Duplikat, OCR, Ordner-Tags, SMTP, Filewatcher)
+- [x] FEAT: FastAPI Webinterface (Dashboard, Live-Log, Queue)
+- [x] FEAT: Alle Module einzeln ein/ausschaltbar im Webinterface (KI, Geocoding, Duplikat, OCR, Ordner-Tags, SMTP, Filewatcher)
 - [ ] FEAT: Webinterface — Verarbeitungszeiten konfigurierbar (kontinuierlich / Zeitfenster / geplant / manuell)
 - [ ] FEAT: Webinterface — Ablage-Ordnerstruktur konfigurierbar (Schema pro Kategorie, Platzhalter, Live-Vorschau)
-- [ ] FEAT: Webinterface — KI Backend konfigurierbar (URL, API-Key, Modell, Test-Button)
-- [ ] FEAT: Webinterface — SMTP Konfiguration (Server, Port, SSL, User, Passwort, Test-Button)
+- [x] FEAT: Webinterface — KI Backend konfigurierbar (URL, API-Key, Modell, Test-Button)
+- [x] FEAT: Webinterface — SMTP Konfiguration (Server, Port, SSL, User, Passwort, Test-Button)
 - [ ] FEAT: Webinterface — KI Prompts editierbar (gespeichert in SQLite, mit Reset + Test)
 - [ ] FEAT: Webinterface — Sortier-Regeln editierbar (Drag-and-Drop Reihenfolge, CRUD)
 - [ ] FEAT: Dry-Run Modus pro Eingangsverzeichnis (nur Report, keine Dateien verschieben)
 - [ ] FEAT: HTML-Report nach Dry-Run (Anzahl Dateien, Kategorien, Duplikate, Fehler)
-- [ ] DOCKER: docker-compose.yml mit Volumes und Umgebungsvariablen
+- [x] DOCKER: docker-compose.yml mit Volumes und Umgebungsvariablen
 - [ ] CONFIG: config.yml (LM Studio URL, SMTP, Pfade, Schwellwerte)
 - [ ] OPTIONAL: SSO Login via OIDC (fastapi-sso + sso.marcohediger.ch)
 - [ ] OPTIONAL: Video KI-Analyse (Thumbnail → LM Studio Vision)

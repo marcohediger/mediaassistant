@@ -1,14 +1,24 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from database import init_db
+from filewatcher import start_filewatcher
 from routers import dashboard, setup, settings, logs, api
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    shutdown_event = asyncio.Event()
+    watcher_task = asyncio.create_task(start_filewatcher(shutdown_event))
     yield
+    shutdown_event.set()
+    watcher_task.cancel()
+    try:
+        await watcher_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(title="MediaAssistant", lifespan=lifespan)
