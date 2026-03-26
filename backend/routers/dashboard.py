@@ -8,7 +8,11 @@ from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
 from models import Job, Module, InboxDirectory
-from system_logger import log_error, log_info
+from system_logger import log_error, log_info, log_warning
+from models import SystemLog
+
+# Track last known status per module to avoid duplicate log entries
+_last_module_status: dict[str, str] = {}
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -156,19 +160,25 @@ async def _get_module_status() -> list[dict]:
             if not configured:
                 status = "misconfigured"
                 detail = f"Fehlend: {', '.join(missing)}"
-                await log_warning(m.name, f"Modul nicht konfiguriert", f"Fehlende Keys: {', '.join(missing)}")
+                if _last_module_status.get(m.name) != "misconfigured":
+                    await log_warning(m.name, "Modul nicht konfiguriert", f"Fehlende Keys: {', '.join(missing)}")
             else:
                 health_check = MODULE_HEALTH_CHECKS.get(m.name)
                 if health_check:
                     healthy, detail = await health_check()
                     if healthy:
                         status = "ready"
+                        if _last_module_status.get(m.name) == "error":
+                            await log_info(m.name, "Verbindung wiederhergestellt", detail)
                     else:
                         status = "error"
-                        await log_error(m.name, detail)
+                        if _last_module_status.get(m.name) != "error":
+                            await log_error(m.name, detail)
                 else:
                     status = "ready"
                     detail = "OK"
+
+            _last_module_status[m.name] = status
 
         statuses.append({
             "name": m.name,
