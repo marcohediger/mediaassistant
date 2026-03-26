@@ -68,7 +68,7 @@
         <tbody>
             {% for job in recent_jobs %}
             <tr class="log-row log-{{ job.status }}">
-                <td><a href="/logs/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
+                <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
                 <td>{{ job.filename }}</td>
                 <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
                 <td>{{ job.current_step or '—' }}</td>

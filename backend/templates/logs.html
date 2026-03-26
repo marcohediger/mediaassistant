@@ -1,10 +1,68 @@
 {% extends "base.html" %}
 {% block title %}Logs — MediaAssistant{% endblock %}
 {% block content %}
-<h1>Verarbeitungs-Log</h1>
+<h1>Logs</h1>
 
+<div class="tabs">
+    <a href="/logs?tab=system" class="tab {{ 'tab-active' if tab == 'system' else '' }}">System-Log</a>
+    <a href="/logs?tab=jobs" class="tab {{ 'tab-active' if tab == 'jobs' else '' }}">Verarbeitungs-Log</a>
+</div>
+
+{% if tab == 'system' %}
+<!-- System Logs -->
 <div class="log-filters">
     <form method="get" action="/logs" class="filter-form">
+        <input type="hidden" name="tab" value="system">
+        <div class="form-group">
+            <input type="text" name="q" value="{{ search }}" placeholder="Nachricht oder Quelle suchen...">
+        </div>
+        <div class="form-group">
+            <select name="level">
+                <option value="">Alle Level</option>
+                <option value="INFO" {{ 'selected' if level_filter == 'INFO' else '' }}>Info</option>
+                <option value="WARNING" {{ 'selected' if level_filter == 'WARNING' else '' }}>Warnung</option>
+                <option value="ERROR" {{ 'selected' if level_filter == 'ERROR' else '' }}>Fehler</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-small btn-secondary">Filtern</button>
+    </form>
+    <span class="log-count">{{ total }} Einträge</span>
+</div>
+
+{% if system_logs %}
+<div class="log-table-wrap">
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>Zeit</th>
+                <th>Level</th>
+                <th>Quelle</th>
+                <th>Nachricht</th>
+                <th>Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in system_logs %}
+            <tr class="log-row">
+                <td class="cell-nowrap">{{ log.created_at.strftime('%d.%m.%Y %H:%M:%S') if log.created_at else '—' }}</td>
+                <td><span class="level-badge level-{{ log.level | lower }}">{{ log.level }}</span></td>
+                <td>{{ log.source }}</td>
+                <td>{{ log.message }}</td>
+                <td class="cell-error">{{ log.detail or '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="section-note">Keine System-Logs vorhanden.</p>
+{% endif %}
+
+{% else %}
+<!-- Job Logs -->
+<div class="log-filters">
+    <form method="get" action="/logs" class="filter-form">
+        <input type="hidden" name="tab" value="jobs">
         <div class="form-group">
             <input type="text" name="q" value="{{ search }}" placeholder="Dateiname oder Debug-Key suchen...">
         </div>
@@ -42,7 +100,7 @@
         <tbody>
             {% for job in jobs %}
             <tr class="log-row log-{{ job.status }}">
-                <td><a href="/logs/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
+                <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
                 <td>{{ job.filename }}</td>
                 <td>{{ job.source_label or '—' }}</td>
                 <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
@@ -55,20 +113,20 @@
         </tbody>
     </table>
 </div>
+{% else %}
+<p class="section-note">Keine Einträge gefunden.</p>
+{% endif %}
+{% endif %}
 
 {% if total_pages > 1 %}
 <div class="pagination">
     {% if page > 1 %}
-    <a href="/logs?page={{ page - 1 }}&status={{ status_filter }}&q={{ search }}" class="btn btn-small btn-secondary">Zurück</a>
+    <a href="/logs?tab={{ tab }}&page={{ page - 1 }}&status={{ status_filter }}&level={{ level_filter }}&q={{ search }}" class="btn btn-small btn-secondary">Zurück</a>
     {% endif %}
     <span class="page-info">Seite {{ page }} / {{ total_pages }}</span>
     {% if page < total_pages %}
-    <a href="/logs?page={{ page + 1 }}&status={{ status_filter }}&q={{ search }}" class="btn btn-small btn-secondary">Weiter</a>
+    <a href="/logs?tab={{ tab }}&page={{ page + 1 }}&status={{ status_filter }}&level={{ level_filter }}&q={{ search }}" class="btn btn-small btn-secondary">Weiter</a>
     {% endif %}
 </div>
-{% endif %}
-
-{% else %}
-<p class="section-note">Keine Einträge gefunden.</p>
 {% endif %}
 {% endblock %}

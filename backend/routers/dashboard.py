@@ -8,9 +8,7 @@ from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
 from models import Job, Module, InboxDirectory
-import logging
-
-logger = logging.getLogger(__name__)
+from system_logger import log_error, log_info
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -158,11 +156,16 @@ async def _get_module_status() -> list[dict]:
             if not configured:
                 status = "misconfigured"
                 detail = f"Fehlend: {', '.join(missing)}"
+                await log_warning(m.name, f"Modul nicht konfiguriert", f"Fehlende Keys: {', '.join(missing)}")
             else:
                 health_check = MODULE_HEALTH_CHECKS.get(m.name)
                 if health_check:
                     healthy, detail = await health_check()
-                    status = "ready" if healthy else "error"
+                    if healthy:
+                        status = "ready"
+                    else:
+                        status = "error"
+                        await log_error(m.name, detail)
                 else:
                     status = "ready"
                     detail = "OK"
