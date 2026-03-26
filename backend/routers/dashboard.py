@@ -1,3 +1,6 @@
+import smtplib
+import ssl
+import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -5,8 +8,9 @@ from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
 from models import Job, Module, InboxDirectory
-import httpx
-import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -21,10 +25,9 @@ MODULE_LABELS = {
     "filewatcher": "Filewatcher",
 }
 
-# Config keys that must be non-empty for a module to be "ready"
 MODULE_REQUIREMENTS = {
     "ki_analyse": ["ai.backend_url", "ai.model"],
-    "geocoding": ["geo.provider"],
+    "geocoding": ["geo.provider", "geo.url"],
     "duplikat_erkennung": [],
     "ocr": ["ai.backend_url", "ai.model"],
     "ordner_tags": [],
@@ -33,32 +36,98 @@ MODULE_REQUIREMENTS = {
 }
 
 
-async def _check_ai_backend() -> bool:
+async def _check_ai_backend() -> tuple[bool, str]:
     url = await config_manager.get("ai.backend_url")
     if not url:
-        return False
+        return False, "Keine URL konfiguriert"
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{url.rstrip('/')}/models")
-            return resp.status_code == 200
-    except Exception:
-        return False
+            if resp.status_code == 200:
+                return True, "Verbunden"
+            return False, f"HTTP {resp.status_code}"
+    except httpx.ConnectError:
+        return False, f"Verbindung zu {url} fehlgeschlagen"
+    except httpx.TimeoutException:
+        return False, f"Timeout bei {url}"
+    except Exception as e:
+        return False, str(e)
 
 
-async def _check_smtp() -> bool:
+async def _check_geocoding() -> tuple[bool, str]:
+    url = await config_manager.get("geo.url")
+    provider = await config_manager.get("geo.provider", "nominatim")
+    if not url:
+        return False, "Keine URL konfiguriert"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            if provider == "nominatim":
+                test_url = f"{url.rstrip('/')}/reverse?lat=47.3769&lon=8.5417&format=json"
+            elif provider == "photon":
+                test_url = f"{url.rstrip('/')}/reverse?lat=47.3769&lon=8.5417"
+            elif provider == "google":
+                api_key = await config_manager.get("geo.api_key", "")
+                test_url = f"{url.rstrip('/')}/json?latlng=47.3769,8.5417&key={api_key}"
+            else:
+                test_url = url
+
+            resp = await client.get(test_url)
+            if resp.status_code == 200:
+                return True, "Verbunden"
+            return False, f"HTTP {resp.status_code}"
+    except httpx.ConnectError:
+        return False, f"Verbindung zu {url} fehlgeschlagen"
+    except httpx.TimeoutException:
+        return False, f"Timeout bei {url}"
+    except Exception as e:
+        return False, str(e)
+
+
+async def _check_smtp() -> tuple[bool, str]:
     server = await config_manager.get("smtp.server")
-    return bool(server)
+    if not server:
+        return False, "Kein Server konfiguriert"
+    port = await config_manager.get("smtp.port", 587)
+    use_ssl = await config_manager.get("smtp.ssl", True)
+    try:
+        if use_ssl:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(server, port, timeout=5, context=context) as smtp:
+                smtp.noop()
+        else:
+            with smtplib.SMTP(server, port, timeout=5) as smtp:
+                smtp.noop()
+        return True, "Verbunden"
+    except smtplib.SMTPAuthenticationError:
+        return True, "Verbunden (Auth erforderlich)"
+    except Exception as e:
+        return False, f"Verbindung zu {server}:{port} fehlgeschlagen: {e}"
 
 
-async def _check_filewatcher() -> bool:
+async def _check_filewatcher() -> tuple[bool, str]:
     async with async_session() as session:
-        result = await session.execute(select(func.count(InboxDirectory.id)).where(InboxDirectory.active == True))
-        count = result.scalar() or 0
-    return count > 0
+        result = await session.execute(
+            select(InboxDirectory).where(InboxDirectory.active == True)
+        )
+        inboxes = result.scalars().all()
+
+    if not inboxes:
+        return False, "Keine aktiven Eingangsverzeichnisse"
+
+    import os
+    errors = []
+    for inbox in inboxes:
+        if not os.path.isdir(inbox.path):
+            errors.append(f"{inbox.label}: {inbox.path} nicht gefunden")
+
+    if errors:
+        return False, "; ".join(errors)
+    return True, f"{len(inboxes)} Verzeichnis(se) aktiv"
 
 
 MODULE_HEALTH_CHECKS = {
     "ki_analyse": _check_ai_backend,
+    "geocoding": _check_geocoding,
     "ocr": _check_ai_backend,
     "smtp": _check_smtp,
     "filewatcher": _check_filewatcher,
@@ -72,34 +141,38 @@ async def _get_module_status() -> list[dict]:
 
     statuses = []
     for m in modules:
+        detail = ""
         if not m.enabled:
             status = "disabled"
+            detail = "Deaktiviert"
         else:
-            # Check required config keys
             required_keys = MODULE_REQUIREMENTS.get(m.name, [])
             configured = True
+            missing = []
             for key in required_keys:
                 val = await config_manager.get(key)
                 if not val:
                     configured = False
-                    break
+                    missing.append(key)
 
             if not configured:
                 status = "misconfigured"
+                detail = f"Fehlend: {', '.join(missing)}"
             else:
-                # Run health check if available
                 health_check = MODULE_HEALTH_CHECKS.get(m.name)
                 if health_check:
-                    healthy = await health_check()
+                    healthy, detail = await health_check()
                     status = "ready" if healthy else "error"
                 else:
                     status = "ready"
+                    detail = "OK"
 
         statuses.append({
             "name": m.name,
             "label": MODULE_LABELS.get(m.name, m.name),
             "enabled": m.enabled,
             "status": status,
+            "detail": detail,
         })
     return statuses
 

@@ -90,15 +90,35 @@ h2 { margin: 2rem 0 1rem; font-size: 1.25rem; color: var(--text-muted); }
     border-radius: 6px;
     padding: 0.75rem 1rem;
     display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.module-top {
+    display: flex;
     align-items: center;
     gap: 0.5rem;
 }
 
 .module-ready .module-status { color: var(--success); }
+.module-error .module-status { color: var(--error); }
 .module-misconfigured .module-status { color: var(--warning); }
 .module-disabled .module-status { color: var(--text-muted); }
 .module-disabled .module-name { color: var(--text-muted); }
+.module-disabled .module-detail { color: var(--text-muted); }
 .module-name { font-size: 0.9rem; }
+
+.module-detail {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding-left: 1.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.module-error .module-detail { color: var(--error); }
+.module-misconfigured .module-detail { color: var(--warning); }
 
 .module-legend {
     display: flex;
@@ -459,9 +479,14 @@ select:focus {
     background: var(--success);
 }
 
-/* Module error status */
-.module-error .module-status { color: var(--error); }
-.legend-error { color: var(--error); }
+.cell-error {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--error);
+    font-size: 0.8rem;
+}
 
 /* Log Table */
 .log-table-wrap {
