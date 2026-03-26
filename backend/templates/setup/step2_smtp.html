@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Setup — SMTP{% endblock %}
+{% block content %}
+<div class="setup-container">
+    <div class="setup-progress">
+        <span class="step done">1. KI Backend</span>
+        <span class="step active">2. SMTP</span>
+        <span class="step">3. Pfade</span>
+        <span class="step">4. Fertig</span>
+    </div>
+
+    <h1>SMTP konfigurieren</h1>
+    <p>Fehlerbenachrichtigungen per E-Mail (optional, kann später eingerichtet werden).</p>
+
+    <form method="post" action="/setup/step/2" class="setup-form">
+        <div class="form-group">
+            <label for="smtp_server">SMTP Server</label>
+            <input type="text" id="smtp_server" name="smtp_server" value="{{ smtp_server or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="smtp_port">Port</label>
+            <input type="number" id="smtp_port" name="smtp_port" value="{{ smtp_port or 587 }}">
+        </div>
+        <div class="form-group">
+            <label for="smtp_ssl">
+                <input type="checkbox" id="smtp_ssl" name="smtp_ssl" value="true" {{ 'checked' if smtp_ssl else '' }}>
+                SSL/TLS verwenden
+            </label>
+        </div>
+        <div class="form-group">
+            <label for="smtp_user">Benutzername</label>
+            <input type="text" id="smtp_user" name="smtp_user" value="{{ smtp_user or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="smtp_password">Passwort</label>
+            <input type="password" id="smtp_password" name="smtp_password">
+        </div>
+        <div class="form-group">
+            <label for="smtp_recipient">Empfänger</label>
+            <input type="email" id="smtp_recipient" name="smtp_recipient" value="{{ smtp_recipient or '' }}">
+        </div>
+        <div class="form-actions">
+            <a href="/setup/step/1" class="btn btn-secondary">Zurück</a>
+            <button type="submit" class="btn btn-primary">Weiter</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

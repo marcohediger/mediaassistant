@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Setup — Pfade{% endblock %}
+{% block content %}
+<div class="setup-container">
+    <div class="setup-progress">
+        <span class="step done">1. KI Backend</span>
+        <span class="step done">2. SMTP</span>
+        <span class="step active">3. Pfade</span>
+        <span class="step">4. Fertig</span>
+    </div>
+
+    <h1>Pfade prüfen</h1>
+    <p>Die Pfade werden über Docker Volumes gemountet. Hier siehst du die aktuellen Mounts.</p>
+
+    <form method="post" action="/setup/step/3" class="setup-form">
+        <div class="form-group">
+            <label>Inbox-Verzeichnis</label>
+            <input type="text" value="{{ inbox_path }}" disabled>
+            <small>Konfiguriert via Docker Volume Mount</small>
+        </div>
+        <div class="form-group">
+            <label>Bibliothek-Verzeichnis</label>
+            <input type="text" value="{{ library_path }}" disabled>
+            <small>Konfiguriert via Docker Volume Mount</small>
+        </div>
+        <div class="form-actions">
+            <a href="/setup/step/2" class="btn btn-secondary">Zurück</a>
+            <button type="submit" class="btn btn-primary">Weiter</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

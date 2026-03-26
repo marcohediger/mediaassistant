@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — MediaAssistant{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-label">Total</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-value">{{ stats.done }}</div>
+        <div class="stat-label">Fertig</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-value">{{ stats.queued }}</div>
+        <div class="stat-label">Wartend</div>
+    </div>
+    <div class="stat-card stat-info">
+        <div class="stat-value">{{ stats.processing }}</div>
+        <div class="stat-label">In Arbeit</div>
+    </div>
+    <div class="stat-card stat-error">
+        <div class="stat-value">{{ stats.errors }}</div>
+        <div class="stat-label">Fehler</div>
+    </div>
+</div>
+
+<h2>Module</h2>
+<div class="modules-grid">
+    {% for module in modules %}
+    <div class="module-card {{ 'module-active' if module.enabled else 'module-inactive' }}">
+        <span class="module-status">{{ '●' if module.enabled else '○' }}</span>
+        <span class="module-name">{{ module.name }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
