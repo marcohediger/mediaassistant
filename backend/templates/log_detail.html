@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ job.debug_key }} — MediaAssistant{% endblock %}
+{% block content %}
+<div class="detail-header">
+    <a href="/logs" class="btn btn-small btn-secondary">Zurück</a>
+    <h1><code>{{ job.debug_key }}</code></h1>
+</div>
+
+<div class="detail-grid">
+    <div class="detail-card">
+        <h3>Datei</h3>
+        <p>{{ job.filename }}</p>
+    </div>
+    <div class="detail-card">
+        <h3>Status</h3>
+        <span class="status-badge status-{{ job.status }}">{{ job.status }}</span>
+    </div>
+    <div class="detail-card">
+        <h3>Aktueller Schritt</h3>
+        <p>{{ job.current_step or '—' }}</p>
+    </div>
+    <div class="detail-card">
+        <h3>Quelle</h3>
+        <p>{{ job.source_label or '—' }}</p>
+    </div>
+</div>
+
+<div class="detail-section">
+    <h2>Pfade</h2>
+    <table class="detail-table">
+        <tr><td>Original</td><td><code>{{ job.original_path }}</code></td></tr>
+        <tr><td>Ziel</td><td><code>{{ job.target_path or '—' }}</code></td></tr>
+    </table>
+</div>
+
+{% if job.error_message %}
+<div class="detail-section">
+    <h2>Fehler</h2>
+    <div class="alert alert-error">{{ job.error_message }}</div>
+</div>
+{% endif %}
+
+{% if job.step_result %}
+<div class="detail-section">
+    <h2>Step-Ergebnisse</h2>
+    <div class="step-results">
+        {% for step, result in job.step_result.items() %}
+        <div class="step-item">
+            <span class="step-code">{{ step }}</span>
+            <pre class="step-data">{{ result | tojson(indent=2) }}</pre>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="detail-section">
+    <h2>Zeitstempel</h2>
+    <table class="detail-table">
+        <tr><td>Erstellt</td><td>{{ job.created_at.strftime('%d.%m.%Y %H:%M:%S') if job.created_at else '—' }}</td></tr>
+        <tr><td>Aktualisiert</td><td>{{ job.updated_at.strftime('%d.%m.%Y %H:%M:%S') if job.updated_at else '—' }}</td></tr>
+        <tr><td>Abgeschlossen</td><td>{{ job.completed_at.strftime('%d.%m.%Y %H:%M:%S') if job.completed_at else '—' }}</td></tr>
+    </table>
+</div>
+
+{% if job.file_hash %}
+<div class="detail-section">
+    <h2>Hashes</h2>
+    <table class="detail-table">
+        <tr><td>SHA256</td><td><code>{{ job.file_hash }}</code></td></tr>
+        <tr><td>pHash</td><td><code>{{ job.phash or '—' }}</code></td></tr>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

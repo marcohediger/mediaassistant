@@ -32,6 +32,7 @@
     <div class="module-card module-{{ module.status }}">
         <span class="module-status">
             {% if module.status == 'ready' %}●
+            {% elif module.status == 'error' %}●
             {% elif module.status == 'misconfigured' %}●
             {% else %}○
             {% endif %}
@@ -42,7 +43,41 @@
 </div>
 <div class="module-legend">
     <span><span class="legend-dot legend-ready">●</span> Aktiv</span>
+    <span><span class="legend-dot legend-error">●</span> Fehler</span>
     <span><span class="legend-dot legend-misconfig">●</span> Nicht konfiguriert</span>
     <span><span class="legend-dot legend-disabled">○</span> Deaktiviert</span>
 </div>
+
+<h2>Letzte Verarbeitungen</h2>
+{% if recent_jobs %}
+<div class="log-table-wrap">
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>Debug-Key</th>
+                <th>Datei</th>
+                <th>Status</th>
+                <th>Schritt</th>
+                <th>Zeit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in recent_jobs %}
+            <tr class="log-row log-{{ job.status }}">
+                <td><code>{{ job.debug_key or '—' }}</code></td>
+                <td>{{ job.filename }}</td>
+                <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
+                <td>{{ job.current_step or '—' }}</td>
+                <td>{{ job.updated_at.strftime('%d.%m. %H:%M') if job.updated_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div class="log-link">
+    <a href="/logs" class="btn btn-small btn-secondary">Alle Logs anzeigen</a>
+</div>
+{% else %}
+<p class="section-note">Noch keine Verarbeitungen.</p>
+{% endif %}
 {% endblock %}
