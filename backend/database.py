@@ -8,13 +8,13 @@ engine = create_async_engine(f"sqlite+aiosqlite:///{DATABASE_PATH}", echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 DEFAULT_MODULES = [
-    ("ki_analyse", True),
-    ("geocoding", True),
-    ("duplikat_erkennung", True),
-    ("ocr", True),
-    ("ordner_tags", True),
-    ("smtp", True),
-    ("filewatcher", True),
+    ("ki_analyse", False),
+    ("geocoding", False),
+    ("duplikat_erkennung", False),
+    ("ocr", False),
+    ("ordner_tags", False),
+    ("smtp", False),
+    ("filewatcher", False),
 ]
 
 

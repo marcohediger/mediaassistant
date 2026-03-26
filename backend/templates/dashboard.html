@@ -29,10 +29,20 @@
 <h2>Module</h2>
 <div class="modules-grid">
     {% for module in modules %}
-    <div class="module-card {{ 'module-active' if module.enabled else 'module-inactive' }}">
-        <span class="module-status">{{ '●' if module.enabled else '○' }}</span>
-        <span class="module-name">{{ module.name }}</span>
+    <div class="module-card module-{{ module.status }}">
+        <span class="module-status">
+            {% if module.status == 'ready' %}●
+            {% elif module.status == 'misconfigured' %}●
+            {% else %}○
+            {% endif %}
+        </span>
+        <span class="module-name">{{ module.label }}</span>
     </div>
     {% endfor %}
+</div>
+<div class="module-legend">
+    <span><span class="legend-dot legend-ready">●</span> Aktiv</span>
+    <span><span class="legend-dot legend-misconfig">●</span> Nicht konfiguriert</span>
+    <span><span class="legend-dot legend-disabled">○</span> Deaktiviert</span>
 </div>
 {% endblock %}
