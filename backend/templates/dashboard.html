@@ -30,14 +30,17 @@
 <div class="modules-grid">
     {% for module in modules %}
     <div class="module-card module-{{ module.status }}">
-        <span class="module-status">
-            {% if module.status == 'ready' %}●
-            {% elif module.status == 'error' %}●
-            {% elif module.status == 'misconfigured' %}●
-            {% else %}○
-            {% endif %}
-        </span>
-        <span class="module-name">{{ module.label }}</span>
+        <div class="module-top">
+            <span class="module-status">
+                {% if module.status == 'ready' %}●
+                {% elif module.status == 'error' %}●
+                {% elif module.status == 'misconfigured' %}●
+                {% else %}○
+                {% endif %}
+            </span>
+            <span class="module-name">{{ module.label }}</span>
+        </div>
+        <div class="module-detail">{{ module.detail }}</div>
     </div>
     {% endfor %}
 </div>
@@ -58,16 +61,18 @@
                 <th>Datei</th>
                 <th>Status</th>
                 <th>Schritt</th>
+                <th>Fehler</th>
                 <th>Zeit</th>
             </tr>
         </thead>
         <tbody>
             {% for job in recent_jobs %}
             <tr class="log-row log-{{ job.status }}">
-                <td><code>{{ job.debug_key or '—' }}</code></td>
+                <td><a href="/logs/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
                 <td>{{ job.filename }}</td>
                 <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
                 <td>{{ job.current_step or '—' }}</td>
+                <td class="cell-error">{{ job.error_message or '' }}</td>
                 <td>{{ job.updated_at.strftime('%d.%m. %H:%M') if job.updated_at else '—' }}</td>
             </tr>
             {% endfor %}
