@@ -1,3 +1,80 @@
+import asyncio
+import subprocess
+
+
 async def execute(job, session) -> dict:
-    """IA-06: EXIF-Tags schreiben (noch nicht implementiert)."""
-    return {"status": "skipped", "reason": "not yet implemented"}
+    """IA-06: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben."""
+    step_results = job.step_result or {}
+    ai_result = step_results.get("IA-02", {})
+    ocr_result = step_results.get("IA-04", {})
+    geo_result = step_results.get("IA-05", {})
+
+    # Collect keywords
+    keywords = []
+
+    # From AI analysis
+    if ai_result.get("tags"):
+        keywords.extend(ai_result["tags"])
+    if ai_result.get("type") and ai_result["type"] != "unknown":
+        keywords.append(ai_result["type"])
+    if ai_result.get("mood"):
+        keywords.append(ai_result["mood"])
+    if ai_result.get("quality"):
+        keywords.append(f"quality:{ai_result['quality']}")
+
+    # From geocoding
+    if geo_result.get("country"):
+        keywords.append(geo_result["country"])
+    if geo_result.get("city"):
+        keywords.append(geo_result["city"])
+    if geo_result.get("suburb"):
+        keywords.append(geo_result["suburb"])
+
+    # From OCR
+    if ocr_result.get("has_text") and ocr_result.get("text_type"):
+        keywords.append(f"text:{ocr_result['text_type']}")
+
+    # Build description
+    description_parts = []
+    if ai_result.get("description"):
+        description_parts.append(ai_result["description"])
+    if geo_result.get("city") and geo_result.get("country"):
+        location = geo_result["city"]
+        if geo_result.get("suburb"):
+            location = f"{geo_result['suburb']}, {location}"
+        description_parts.append(f"Aufgenommen in {location}, {geo_result['country']}.")
+
+    description = " ".join(description_parts)
+
+    if not keywords and not description:
+        return {"status": "skipped", "reason": "no tags to write"}
+
+    # Build ExifTool command
+    cmd = ["exiftool", "-overwrite_original"]
+
+    # Write keywords
+    for kw in keywords:
+        cmd.append(f"-Keywords+={kw}")
+        cmd.append(f"-Subject+={kw}")
+
+    # Write description
+    if description:
+        cmd.append(f"-ImageDescription={description}")
+        cmd.append(f"-XPComment={description}")
+
+    cmd.append(job.original_path)
+
+    result = await asyncio.to_thread(
+        subprocess.run,
+        cmd,
+        capture_output=True, text=True, timeout=30
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"ExifTool Write Fehler: {result.stderr.strip()}")
+
+    return {
+        "keywords_written": keywords,
+        "description_written": description,
+        "tags_count": len(keywords),
+    }

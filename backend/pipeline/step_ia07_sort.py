@@ -47,16 +47,33 @@ def _resolve_path(template: str, exif: dict, date: datetime | None) -> str:
 
 async def execute(job, session) -> dict:
     """IA-07: Datei in Zielordner verschieben."""
-    exif = (job.step_result or {}).get("IA-01", {})
+    step_results = job.step_result or {}
+    exif = step_results.get("IA-01", {})
+    ai_result = step_results.get("IA-02", {})
+    geo_result = step_results.get("IA-05", {})
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
 
-    # Determine category
+    # Determine category from AI analysis, fallback to EXIF
+    ai_type = ai_result.get("type", "")
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
+
     if is_video:
         category = "video"
+    elif ai_type == "whatsapp":
+        category = "whatsapp"
+    elif ai_type == "screenshot":
+        category = "screenshot"
+    elif ai_type in ("personal_photo", ""):
+        category = "photo"
+    elif ai_result.get("confidence", 1.0) < 0.5:
+        category = "unknown"
     else:
         category = "photo"
+
+    # Merge geocoding data into exif for path resolution
+    if geo_result.get("country"):
+        exif = {**exif, "country": geo_result["country"], "city": geo_result.get("city", "")}
 
     # Get path template from config
     category_key_map = {
