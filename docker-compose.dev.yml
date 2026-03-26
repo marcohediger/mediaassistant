@@ -10,6 +10,8 @@ services:
       - ./data:/app/data
       - ./test_inbox:/inbox
       - ./test_library:/bibliothek
+    env_file:
+      - .env
     environment:
       - DATABASE_PATH=/app/data/mediaassistant.db
       - INBOX_PATH=/inbox

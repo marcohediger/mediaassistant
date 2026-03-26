@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from database import init_db
-from routers import dashboard, setup, api
+from routers import dashboard, setup, settings, api
 
 
 @asynccontextmanager
@@ -17,4 +17,5 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.include_router(dashboard.router)
 app.include_router(setup.router)
+app.include_router(settings.router)
 app.include_router(api.router)

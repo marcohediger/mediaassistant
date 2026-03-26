@@ -9,6 +9,55 @@ from models import Job, Module
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
+MODULE_LABELS = {
+    "ki_analyse": "KI-Analyse",
+    "geocoding": "Geocoding",
+    "duplikat_erkennung": "Duplikat-Erkennung",
+    "ocr": "OCR",
+    "ordner_tags": "Ordner-Tags",
+    "smtp": "SMTP Benachrichtigung",
+    "filewatcher": "Filewatcher",
+}
+
+# Config keys that must be non-empty for a module to be "ready"
+MODULE_REQUIREMENTS = {
+    "ki_analyse": ["ai.backend_url", "ai.model"],
+    "geocoding": ["geo.provider"],
+    "duplikat_erkennung": [],
+    "ocr": ["ai.backend_url", "ai.model"],
+    "ordner_tags": [],
+    "smtp": ["smtp.server", "smtp.recipient"],
+    "filewatcher": [],
+}
+
+
+async def _get_module_status() -> list[dict]:
+    async with async_session() as session:
+        result = await session.execute(select(Module))
+        modules = result.scalars().all()
+
+    statuses = []
+    for m in modules:
+        if not m.enabled:
+            status = "disabled"
+        else:
+            required_keys = MODULE_REQUIREMENTS.get(m.name, [])
+            configured = True
+            for key in required_keys:
+                val = await config_manager.get(key)
+                if not val:
+                    configured = False
+                    break
+            status = "ready" if configured else "misconfigured"
+
+        statuses.append({
+            "name": m.name,
+            "label": MODULE_LABELS.get(m.name, m.name),
+            "enabled": m.enabled,
+            "status": status,
+        })
+    return statuses
+
 
 @router.get("/")
 async def dashboard(request: Request):
@@ -22,8 +71,7 @@ async def dashboard(request: Request):
         queued = (await session.execute(select(func.count(Job.id)).where(Job.status == "queued"))).scalar() or 0
         processing = (await session.execute(select(func.count(Job.id)).where(Job.status == "processing"))).scalar() or 0
 
-        modules_result = await session.execute(select(Module))
-        modules = modules_result.scalars().all()
+    modules = await _get_module_status()
 
     return templates.TemplateResponse(request, "dashboard.html", {
         "stats": {

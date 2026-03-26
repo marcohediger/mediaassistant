@@ -28,9 +28,9 @@ async def setup_step(request: Request, step: int):
     context = {"step": step, "error": None, "success": None}
 
     if step == 1:
-        context["ai_url"] = await config_manager.get("ai.backend_url", "http://localhost:1234/v1")
-        context["ai_api_key"] = await config_manager.get("ai.api_key", "")
-        context["ai_model"] = await config_manager.get("ai.model", "")
+        context["ai_url"] = await config_manager.get("ai.backend_url", config_manager.get_env("AI_BACKEND_URL", "http://localhost:1234/v1"))
+        context["ai_api_key"] = await config_manager.get("ai.api_key", config_manager.get_env("AI_API_KEY", ""))
+        context["ai_model"] = await config_manager.get("ai.model", config_manager.get_env("AI_MODEL", ""))
         return render(request, "setup/step1_ai.html", context)
     elif step == 2:
         context["smtp_server"] = await config_manager.get("smtp.server", "")
