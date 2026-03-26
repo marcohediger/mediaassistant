@@ -1,0 +1,39 @@
+<svg width="400" height="120" viewBox="0 0 400 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FCD34D"/>
+      <stop offset="100%" stop-color="#FBBF24"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Icon square -->
+  <rect x="0" y="0" width="100" height="100" rx="22" fill="#1e1b4b" stroke="#818CF8" stroke-width="1" opacity="0.8"/>
+
+  <!-- Hexagon outer -->
+  <polygon points="50,16 74,30 74,58 50,72 26,58 26,30" fill="none" stroke="#818CF8" stroke-width="1" opacity="0.3"/>
+  <!-- Hexagon inner -->
+  <polygon points="50,22 68,33 68,55 50,66 32,55 32,33" fill="#1e1b4b" stroke="#818CF8" stroke-width="1" opacity="0.8"/>
+
+  <!-- Mountain -->
+  <path d="M35 62 L45 44 L52 53 L62 38 L76 62 Z" fill="url(#accent)" opacity="0.9"/>
+  <path d="M62 38 L58 47 L66 47 Z" fill="#1e1b4b" opacity="0.9"/>
+
+  <!-- Sun -->
+  <circle cx="37" cy="34" r="7" fill="url(#sun)"/>
+  <line x1="37" y1="24" x2="37" y2="21" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="45" y1="27" x2="47" y2="25" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="48" y1="34" x2="51" y2="34" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="29" y1="27" x2="27" y2="25" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="26" y1="34" x2="23" y2="34" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Divider -->
+  <line x1="118" y1="8" x2="118" y2="92" stroke="#818CF8" stroke-width="1" opacity="0.2"/>
+
+  <!-- Wordmark -->
+  <text x="134" y="52" font-family="system-ui, sans-serif" font-size="38" font-weight="600" fill="#f3f4f6" letter-spacing="-1.2">Media</text>
+  <text x="134" y="90" font-family="system-ui, sans-serif" font-size="38" font-weight="400" fill="#818CF8" letter-spacing="-0.8">Assistant</text>
+</svg>
