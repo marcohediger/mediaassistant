@@ -22,8 +22,8 @@ class Job(Base):
     source_label = Column(Text)  # which inbox this came from
     file_hash = Column(Text)  # SHA256
     phash = Column(Text)  # perceptual hash
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
     completed_at = Column(DateTime)
 
 
@@ -33,7 +33,7 @@ class Config(Base):
     key = Column(Text, primary_key=True)
     value = Column(Text)  # JSON-encoded
     encrypted = Column(Boolean, default=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
 
 
 class Module(Base):
@@ -41,7 +41,7 @@ class Module(Base):
 
     name = Column(Text, primary_key=True)
     enabled = Column(Boolean, default=True)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
 
 
 class SystemLog(Base):
@@ -52,7 +52,7 @@ class SystemLog(Base):
     source = Column(Text, nullable=False)  # module name or system component
     message = Column(Text, nullable=False)
     detail = Column(Text)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now())
 
 
 class InboxDirectory(Base):
@@ -64,5 +64,5 @@ class InboxDirectory(Base):
     folder_tags = Column(Boolean, default=False)
     dry_run = Column(Boolean, default=False)
     active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
