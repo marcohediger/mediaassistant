@@ -35,6 +35,14 @@ async def _get_cfg() -> dict:
         "smtp_ssl": await config_manager.get("smtp.ssl", True),
         "watch_interval": await config_manager.get("filewatcher.interval", 5),
         "schedule_mode": await config_manager.get("filewatcher.schedule_mode", "continuous"),
+        "library_path": await config_manager.get("library.base_path", "/bibliothek"),
+        "path_photo": await config_manager.get("library.path_photo", "photos/{YYYY}/{YYYY-MM}/"),
+        "path_whatsapp": await config_manager.get("library.path_whatsapp", "whatsapp/{YYYY}/"),
+        "path_screenshot": await config_manager.get("library.path_screenshot", "screenshots/{YYYY}/"),
+        "path_video": await config_manager.get("library.path_video", "videos/{YYYY}/{YYYY-MM}/"),
+        "path_unknown": await config_manager.get("library.path_unknown", "unknown/review/"),
+        "path_error": await config_manager.get("library.path_error", "error/"),
+        "path_duplicate": await config_manager.get("library.path_duplicate", "error/duplicates/"),
     }
 
 
@@ -99,6 +107,16 @@ async def save_settings(request: Request):
         await config_manager.set("smtp.password", form["smtp_password"], encrypted=True)
     await config_manager.set("smtp.recipient", form.get("smtp_recipient", ""))
     await config_manager.set("smtp.ssl", "smtp_ssl" in form)
+
+    # Ziel-Ablage
+    await config_manager.set("library.base_path", form.get("library_path", "/bibliothek"))
+    await config_manager.set("library.path_photo", form.get("path_photo", "photos/{YYYY}/{YYYY-MM}/"))
+    await config_manager.set("library.path_whatsapp", form.get("path_whatsapp", "whatsapp/{YYYY}/"))
+    await config_manager.set("library.path_screenshot", form.get("path_screenshot", "screenshots/{YYYY}/"))
+    await config_manager.set("library.path_video", form.get("path_video", "videos/{YYYY}/{YYYY-MM}/"))
+    await config_manager.set("library.path_unknown", form.get("path_unknown", "unknown/review/"))
+    await config_manager.set("library.path_error", form.get("path_error", "error/"))
+    await config_manager.set("library.path_duplicate", form.get("path_duplicate", "error/duplicates/"))
 
     # Filewatcher
     try:

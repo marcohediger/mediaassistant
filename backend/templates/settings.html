@@ -270,6 +270,57 @@
     </div>
 </div>
 
+<!-- Ziel-Ablage -->
+<div class="settings-section">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>Ziel-Ablage</h2>
+            <span class="section-desc">Ordnerstruktur in der Bibliothek — Platzhalter: {YYYY}, {MM}, {DD}, {YYYY-MM}, {CAMERA}, {TYPE}, {COUNTRY}, {CITY}</span>
+        </div>
+    </div>
+    <div class="section-body">
+        <div class="form-group">
+            <label for="library_path">Bibliothek-Basispfad</label>
+            <input type="text" id="library_path" name="library_path" value="{{ cfg.library_path }}">
+            <small>Basis-Verzeichnis für die sortierte Ablage (z.B. /bibliothek)</small>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="path_photo">Fotos</label>
+                <input type="text" id="path_photo" name="path_photo" value="{{ cfg.path_photo }}" placeholder="photos/{YYYY}/{YYYY-MM}/">
+            </div>
+            <div class="form-group">
+                <label for="path_whatsapp">WhatsApp</label>
+                <input type="text" id="path_whatsapp" name="path_whatsapp" value="{{ cfg.path_whatsapp }}" placeholder="whatsapp/{YYYY}/">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="path_screenshot">Screenshots</label>
+                <input type="text" id="path_screenshot" name="path_screenshot" value="{{ cfg.path_screenshot }}" placeholder="screenshots/{YYYY}/">
+            </div>
+            <div class="form-group">
+                <label for="path_video">Videos</label>
+                <input type="text" id="path_video" name="path_video" value="{{ cfg.path_video }}" placeholder="videos/{YYYY}/{YYYY-MM}/">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="path_unknown">Unbekannt / Review</label>
+                <input type="text" id="path_unknown" name="path_unknown" value="{{ cfg.path_unknown }}" placeholder="unknown/review/">
+            </div>
+            <div class="form-group">
+                <label for="path_error">Fehler</label>
+                <input type="text" id="path_error" name="path_error" value="{{ cfg.path_error }}" placeholder="error/">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="path_duplicate">Duplikate</label>
+            <input type="text" id="path_duplicate" name="path_duplicate" value="{{ cfg.path_duplicate }}" placeholder="error/duplicates/">
+        </div>
+    </div>
+</div>
+
 <!-- Filewatcher -->
 <div class="settings-section">
     <div class="section-header">

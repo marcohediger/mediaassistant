@@ -15,9 +15,20 @@
         <h3>Status</h3>
         <span class="status-badge status-{{ job.status }}">{{ job.status }}</span>
     </div>
+    {% set step_names = {
+        "IA-01": "EXIF auslesen",
+        "IA-02": "KI-Analyse",
+        "IA-03": "Duplikat-Erkennung",
+        "IA-04": "OCR",
+        "IA-05": "Geocoding",
+        "IA-06": "EXIF-Tags schreiben",
+        "IA-07": "Zielordner sortieren",
+        "IA-08": "Benachrichtigung",
+        "IA-09": "Aufräumen"
+    } %}
     <div class="detail-card">
         <h3>Aktueller Schritt</h3>
-        <p>{{ job.current_step or '—' }}</p>
+        <p>{{ job.current_step or '—' }}{% if job.current_step %} — {{ step_names.get(job.current_step, '') }}{% endif %}</p>
     </div>
     <div class="detail-card">
         <h3>Quelle</h3>
@@ -44,9 +55,21 @@
 <div class="detail-section">
     <h2>Step-Ergebnisse</h2>
     <div class="step-results">
+        {% set step_labels = {
+            "IA-01": "EXIF auslesen",
+            "IA-02": "KI-Analyse",
+            "IA-03": "Duplikat-Erkennung",
+            "IA-04": "OCR",
+            "IA-05": "Geocoding",
+            "IA-06": "EXIF-Tags schreiben",
+            "IA-07": "Zielordner sortieren",
+            "IA-08": "Benachrichtigung",
+            "IA-09": "Aufräumen"
+        } %}
         {% for step, result in job.step_result.items() %}
         <div class="step-item">
             <span class="step-code">{{ step }}</span>
+            <span class="step-label">{{ step_labels.get(step, step) }}</span>
             <pre class="step-data">{{ result | tojson(indent=2) }}</pre>
         </div>
         {% endfor %}
