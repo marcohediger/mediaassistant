@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -5,6 +6,7 @@ from sqlalchemy import select
 from config import config_manager
 from database import async_session
 from models import Module, InboxDirectory
+from system_logger import log_warning, log_info
 
 router = APIRouter(prefix="/settings")
 templates = Jinja2Templates(directory="templates")
@@ -134,6 +136,11 @@ async def add_inbox(
         ))
         await session.commit()
 
+    if not os.path.isdir(path):
+        await log_warning("filewatcher", f"Verzeichnis nicht gefunden: {path}", f"Inbox '{label}' hinzugefügt, aber Pfad existiert nicht")
+        return RedirectResponse(url="/settings?success=Verzeichnis+hinzugefügt+(Pfad+nicht+gefunden)", status_code=302)
+
+    await log_info("filewatcher", f"Verzeichnis hinzugefügt: {path}", f"Label: {label}")
     return RedirectResponse(url="/settings?success=Verzeichnis+hinzugefügt", status_code=302)
 
 
@@ -151,7 +158,13 @@ async def update_inbox(request: Request, inbox_id: int):
         inbox.folder_tags = f"inbox_folder_tags_{inbox_id}" in form
         inbox.dry_run = f"inbox_dry_run_{inbox_id}" in form
         inbox.active = f"inbox_active_{inbox_id}" in form
+        path = inbox.path
+        label = inbox.label
         await session.commit()
+
+    if not os.path.isdir(path):
+        await log_warning("filewatcher", f"Verzeichnis nicht gefunden: {path}", f"Inbox '{label}' aktualisiert, aber Pfad existiert nicht")
+        return RedirectResponse(url="/settings?success=Verzeichnis+aktualisiert+(Pfad+nicht+gefunden)", status_code=302)
 
     return RedirectResponse(url="/settings?success=Verzeichnis+aktualisiert", status_code=302)
 
@@ -161,7 +174,10 @@ async def delete_inbox(request: Request, inbox_id: int):
     async with async_session() as session:
         inbox = await session.get(InboxDirectory, inbox_id)
         if inbox:
+            label = inbox.label
+            path = inbox.path
             await session.delete(inbox)
             await session.commit()
+            await log_info("filewatcher", f"Verzeichnis entfernt: {path}", f"Label: {label}")
 
     return RedirectResponse(url="/settings?success=Verzeichnis+gelöscht", status_code=302)

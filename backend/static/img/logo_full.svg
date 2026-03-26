@@ -1,0 +1,83 @@
+<svg width="640" height="320" viewBox="0 0 640 320" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="accent-light" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="accent-dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="sun-light" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FBBF24"/>
+      <stop offset="100%" stop-color="#F59E0B"/>
+    </linearGradient>
+    <linearGradient id="sun-dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FCD34D"/>
+      <stop offset="100%" stop-color="#FBBF24"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ── LIGHT VERSION (top) ── -->
+  <text x="0" y="18" font-family="system-ui, sans-serif" font-size="11" fill="#9ca3af">Light</text>
+
+  <!-- Icon square -->
+  <rect x="0" y="26" width="88" height="88" rx="20" fill="#ffffff" stroke="#4F46E5" stroke-width="1" opacity="0.15"/>
+
+  <!-- Hexagon outer -->
+  <polygon points="44,42 66,55 66,81 44,94 22,81 22,55" fill="none" stroke="#4F46E5" stroke-width="1" opacity="0.2"/>
+  <!-- Hexagon inner -->
+  <polygon points="44,48 62,59 62,79 44,90 26,79 26,59" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1"/>
+
+  <!-- Mountain -->
+  <path d="M29 86 L39 68 L46 77 L56 62 L70 86 Z" fill="url(#accent-light)" opacity="0.9"/>
+  <path d="M56 62 L52 71 L60 71 Z" fill="#ffffff" opacity="0.9"/>
+  <!-- Sun -->
+  <circle cx="31" cy="58" r="7" fill="url(#sun-light)"/>
+  <line x1="31" y1="48" x2="31" y2="45" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="39" y1="51" x2="41" y2="49" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="42" y1="58" x2="45" y2="58" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="23" y1="51" x2="21" y2="49" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="20" y1="58" x2="17" y2="58" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Divider -->
+  <line x1="106" y1="32" x2="106" y2="108" stroke="#4F46E5" stroke-width="1" opacity="0.12"/>
+
+  <!-- Wordmark -->
+  <text x="122" y="74" font-family="system-ui, sans-serif" font-size="38" font-weight="600" fill="#1e1b4b" letter-spacing="-1.2">Media</text>
+  <text x="122" y="110" font-family="system-ui, sans-serif" font-size="38" font-weight="400" fill="#4F46E5" letter-spacing="-0.8">Assistant</text>
+
+
+  <!-- ── DARK VERSION (bottom) ── -->
+  <text x="0" y="178" font-family="system-ui, sans-serif" font-size="11" fill="#6b7280">Dark</text>
+
+  <!-- Dark bg strip for preview -->
+  <rect x="-10" y="185" width="660" height="120" fill="#111827" rx="8"/>
+
+  <!-- Icon square -->
+  <rect x="0" y="192" width="88" height="88" rx="20" fill="#1e1b4b" stroke="#818CF8" stroke-width="1" opacity="0.5"/>
+
+  <!-- Hexagon outer -->
+  <polygon points="44,208 66,221 66,247 44,260 22,247 22,221" fill="none" stroke="#818CF8" stroke-width="1" opacity="0.3"/>
+  <!-- Hexagon inner -->
+  <polygon points="44,214 62,225 62,245 44,256 26,245 26,225" fill="#1e1b4b" stroke="#818CF8" stroke-width="1" opacity="0.8"/>
+
+  <!-- Mountain -->
+  <path d="M29 252 L39 234 L46 243 L56 228 L70 252 Z" fill="url(#accent-dark)" opacity="0.9"/>
+  <path d="M56 228 L52 237 L60 237 Z" fill="#1e1b4b" opacity="0.9"/>
+  <!-- Sun -->
+  <circle cx="31" cy="224" r="7" fill="url(#sun-dark)"/>
+  <line x1="31" y1="214" x2="31" y2="211" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="39" y1="217" x2="41" y2="215" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="42" y1="224" x2="45" y2="224" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="23" y1="217" x2="21" y2="215" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="20" y1="224" x2="17" y2="224" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Divider -->
+  <line x1="106" y1="198" x2="106" y2="274" stroke="#818CF8" stroke-width="1" opacity="0.2"/>
+
+  <!-- Wordmark -->
+  <text x="122" y="240" font-family="system-ui, sans-serif" font-size="38" font-weight="600" fill="#f3f4f6" letter-spacing="-1.2">Media</text>
+  <text x="122" y="276" font-family="system-ui, sans-serif" font-size="38" font-weight="400" fill="#818CF8" letter-spacing="-0.8">Assistant</text>
+
+</svg>
