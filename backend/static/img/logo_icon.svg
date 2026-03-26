@@ -1,0 +1,28 @@
+<svg width="36" height="36" viewBox="18 204 52 60" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="accent-dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="sun-dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FCD34D"/>
+      <stop offset="100%" stop-color="#FBBF24"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Hexagon outer -->
+  <polygon points="44,208 66,221 66,247 44,260 22,247 22,221" fill="none" stroke="#818CF8" stroke-width="1" opacity="0.3"/>
+  <!-- Hexagon inner -->
+  <polygon points="44,214 62,225 62,245 44,256 26,245 26,225" fill="#1e1b4b" stroke="#818CF8" stroke-width="1" opacity="0.8"/>
+
+  <!-- Mountain -->
+  <path d="M29 252 L39 234 L46 243 L56 228 L70 252 Z" fill="url(#accent-dark)" opacity="0.9"/>
+  <path d="M56 228 L52 237 L60 237 Z" fill="#1e1b4b" opacity="0.9"/>
+  <!-- Sun -->
+  <circle cx="31" cy="224" r="7" fill="url(#sun-dark)"/>
+  <line x1="31" y1="214" x2="31" y2="211" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="39" y1="217" x2="41" y2="215" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="42" y1="224" x2="45" y2="224" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="23" y1="217" x2="21" y2="215" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="20" y1="224" x2="17" y2="224" stroke="#FCD34D" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
