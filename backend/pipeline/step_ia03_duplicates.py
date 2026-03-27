@@ -97,6 +97,18 @@ async def execute(job, session) -> dict:
 
 async def _handle_duplicate(job, session, original, match_type: str, distance: int):
     """Move duplicate file to duplicates/ directory and write .log file."""
+    original_path = original.target_path or original.original_path
+    if match_type == "exact":
+        desc = f"Exact duplicate of: {original_path} ({original.debug_key})"
+    else:
+        desc = f"Similar to: {original_path} ({original.debug_key}, pHash distance: {distance})"
+
+    # Dry-run: detect but don't move
+    if job.dry_run:
+        job.status = "duplicate"
+        await log_info("IA-03", f"{job.debug_key} [dry-run] {desc}")
+        return
+
     base_path = await config_manager.get("library.base_path", "/bibliothek")
     dup_rel = await config_manager.get("library.path_duplicate", "error/duplicates/")
     dup_dir = os.path.join(base_path, dup_rel)
@@ -116,12 +128,6 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     await asyncio.to_thread(safe_move, job.original_path, dup_path, job.debug_key)
 
     # Write .log file
-    original_path = original.target_path or original.original_path
-    if match_type == "exact":
-        desc = f"Exact duplicate of: {original_path} ({original.debug_key})"
-    else:
-        desc = f"Similar to: {original_path} ({original.debug_key}, pHash distance: {distance})"
-
     log_lines = [
         f"Debug-Key: {job.debug_key}",
         f"File: {job.filename}",
