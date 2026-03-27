@@ -20,6 +20,9 @@ async def execute(job, session) -> dict:
         if rel and rel != ".":
             folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
             keywords.extend(folder_parts)
+            # Add album: prefixed tags for album identification
+            for part in folder_parts:
+                keywords.append(f"album:{part}")
 
     # From AI analysis
     if ai_result.get("tags"):

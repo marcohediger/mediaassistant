@@ -161,7 +161,14 @@ async def execute(job, session) -> dict:
 
     # Route: Immich upload or target directory
     if job.use_immich:
-        immich_result = await upload_asset(job.original_path)
+        # Extract folder tags as album names
+        album_names = None
+        if job.source_inbox_path:
+            rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
+            if rel and rel != ".":
+                album_names = [p for p in rel.split(os.sep) if p and p != "."]
+
+        immich_result = await upload_asset(job.original_path, album_names=album_names)
 
         # Remove source file after successful upload
         await asyncio.to_thread(os.remove, job.original_path)

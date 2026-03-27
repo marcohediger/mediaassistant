@@ -11,8 +11,8 @@ async def get_immich_config() -> tuple[str, str]:
     return url.rstrip("/") if url else "", api_key
 
 
-async def upload_asset(file_path: str) -> dict:
-    """Upload a file to Immich and return the response."""
+async def upload_asset(file_path: str, album_names: list[str] | None = None) -> dict:
+    """Upload a file to Immich and optionally add it to albums (created from folder tags)."""
     url, api_key = await get_immich_config()
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
@@ -34,9 +34,45 @@ async def upload_asset(file_path: str) -> dict:
                 files={"assetData": (filename, f)},
             )
 
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Immich upload failed: HTTP {resp.status_code} — {resp.text[:200]}")
+
+    result = resp.json()
+    asset_id = result.get("id")
+
+    # Add asset to albums based on folder tags
+    if album_names and asset_id:
+        async with httpx.AsyncClient(timeout=30) as client:
+            for album_name in album_names:
+                album_id = await _get_or_create_album(client, url, headers, album_name)
+                if album_id:
+                    await client.put(
+                        f"{url}/api/albums/{album_id}/assets",
+                        headers={**headers, "Content-Type": "application/json"},
+                        json={"ids": [asset_id]},
+                    )
+
+    return result
+
+
+async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dict, name: str) -> str | None:
+    """Find an existing album by name or create a new one. Returns album ID."""
+    # Search existing albums
+    resp = await client.get(f"{url}/api/albums", headers=headers)
+    if resp.status_code == 200:
+        for album in resp.json():
+            if album.get("albumName") == name:
+                return album["id"]
+
+    # Create new album
+    resp = await client.post(
+        f"{url}/api/albums",
+        headers={**headers, "Content-Type": "application/json"},
+        json={"albumName": name},
+    )
     if resp.status_code in (200, 201):
-        return resp.json()
-    raise RuntimeError(f"Immich upload failed: HTTP {resp.status_code} — {resp.text[:200]}")
+        return resp.json().get("id")
+    return None
 
 
 async def check_connection() -> tuple[bool, str]:
