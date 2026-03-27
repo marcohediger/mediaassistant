@@ -88,6 +88,10 @@ async def run_pipeline(job_id: int):
                 pipeline_failed = True
                 break
 
+        # Move failed file to error/ immediately (before finalizers)
+        if pipeline_failed:
+            await _move_to_error(job, session)
+
         # Finalizers (IA-09, IA-10, IA-11) — always run, even after critical errors
         for step_code, step_fn in FINALIZERS:
             if step_code in existing_results:
@@ -107,10 +111,7 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
 
-        if pipeline_failed:
-            # Move file to error directory with .log file
-            await _move_to_error(job, session)
-        else:
+        if not pipeline_failed:
             job.status = "done"
             job.completed_at = datetime.now()
             await session.commit()

@@ -1,5 +1,7 @@
+import asyncio
 import smtplib
 import ssl
+import time
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
@@ -13,6 +15,11 @@ from models import SystemLog
 
 # Track last known status per module to avoid duplicate log entries
 _last_module_status: dict[str, str] = {}
+
+# Cache for module health checks (avoid blocking event loop on every poll)
+_module_cache: list[dict] = []
+_module_cache_time: float = 0
+MODULE_CACHE_TTL = 30  # seconds
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -85,25 +92,17 @@ async def _check_geocoding() -> tuple[bool, str]:
         return False, str(e)
 
 
-async def _check_smtp() -> tuple[bool, str]:
-    server = await config_manager.get("smtp.server")
-    if not server:
-        return False, "Kein Server konfiguriert"
-    port = int(await config_manager.get("smtp.port", 587))
-    use_ssl = await config_manager.get("smtp.ssl", False)
-    user = await config_manager.get("smtp.user", "")
-    password = await config_manager.get("smtp.password", "")
+def _check_smtp_sync(server, port, use_ssl, user, password) -> tuple[bool, str]:
+    """Blocking SMTP check — runs in a thread to avoid blocking the event loop."""
     context = ssl.create_default_context()
     try:
         if use_ssl:
-            # Direct SSL (port 465)
             with smtplib.SMTP_SSL(server, port, timeout=5, context=context) as smtp:
                 if user and password:
                     smtp.login(user, password)
                 else:
                     smtp.noop()
         else:
-            # STARTTLS (port 587) — Office 365, Gmail etc.
             with smtplib.SMTP(server, port, timeout=5) as smtp:
                 smtp.ehlo()
                 smtp.starttls(context=context)
@@ -117,6 +116,17 @@ async def _check_smtp() -> tuple[bool, str]:
         return False, f"Auth fehlgeschlagen: {e.smtp_error.decode() if isinstance(e.smtp_error, bytes) else e.smtp_error}"
     except Exception as e:
         return False, f"Verbindung zu {server}:{port} fehlgeschlagen: {e}"
+
+
+async def _check_smtp() -> tuple[bool, str]:
+    server = await config_manager.get("smtp.server")
+    if not server:
+        return False, "Kein Server konfiguriert"
+    port = int(await config_manager.get("smtp.port", 587))
+    use_ssl = await config_manager.get("smtp.ssl", False)
+    user = await config_manager.get("smtp.user", "")
+    password = await config_manager.get("smtp.password", "")
+    return await asyncio.to_thread(_check_smtp_sync, server, port, use_ssl, user, password)
 
 
 async def _check_filewatcher() -> tuple[bool, str]:
@@ -150,6 +160,10 @@ MODULE_HEALTH_CHECKS = {
 
 
 async def _get_module_status() -> list[dict]:
+    global _module_cache, _module_cache_time
+    if _module_cache and (time.monotonic() - _module_cache_time) < MODULE_CACHE_TTL:
+        return _module_cache
+
     async with async_session() as session:
         result = await session.execute(select(Module))
         modules = result.scalars().all()
@@ -200,6 +214,9 @@ async def _get_module_status() -> list[dict]:
             "status": status,
             "detail": detail,
         })
+
+    _module_cache = statuses
+    _module_cache_time = time.monotonic()
     return statuses
 
 
