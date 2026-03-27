@@ -68,16 +68,16 @@ async def execute(job, session) -> dict:
     has_no_exif = not exif.get("has_exif", False)
     has_uuid_name = bool(_WHATSAPP_UUID_RE.match(filename))
     # Keine EXIF + UUID-Name oder -WA = Messenger-Bild (WhatsApp, Telegram, Signal etc.)
-    is_no_source = has_uuid_name or "-WA" in filename.upper() or (has_no_exif and ai_type in ("internet_image", "meme", "whatsapp", ""))
+    is_sourceless = has_uuid_name or "-WA" in filename.upper() or (has_no_exif and ai_type in ("internet_image", "meme", "whatsapp", ""))
 
-    if is_video and is_no_source:
-        category = "no_source"
+    if is_video and is_sourceless:
+        category = "sourceless"
     elif is_video:
         category = "video"
     elif ai_type == "screenshot" or "screenshot" in filename.lower():
         category = "screenshot"
-    elif is_no_source and ai_type != "personal_photo":
-        category = "no_source"
+    elif is_sourceless and ai_type != "personal_photo":
+        category = "sourceless"
     elif ai_type in ("personal_photo", ""):
         category = "photo"
     elif ai_result.get("confidence", 1.0) < 0.5:
@@ -92,14 +92,14 @@ async def execute(job, session) -> dict:
     # Get path template from config
     category_key_map = {
         "photo": "library.path_photo",
-        "no_source": "library.path_no_source",
+        "sourceless": "library.path_sourceless",
         "screenshot": "library.path_screenshot",
         "video": "library.path_video",
         "unknown": "library.path_unknown",
     }
     defaults = {
         "photo": "photos/{YYYY}/{YYYY-MM}/",
-        "no_source": "unbekannte_quelle/{YYYY}/",
+        "sourceless": "sourceless/{YYYY}/",
         "screenshot": "screenshots/{YYYY}/",
         "video": "videos/{YYYY}/{YYYY-MM}/",
         "unknown": "unknown/review/",

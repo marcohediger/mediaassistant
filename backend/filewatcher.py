@@ -44,6 +44,8 @@ def _scan_directory(path: str, min_age: float) -> list[str]:
     try:
         for entry in os.scandir(path):
             if entry.is_file():
+                if ".tmp." in entry.name:
+                    continue
                 ext = os.path.splitext(entry.name)[1].lower()
                 if ext in SUPPORTED_EXTENSIONS:
                     if now - entry.stat().st_mtime > min_age:
@@ -72,10 +74,13 @@ async def _scan_and_process():
         if not os.path.isdir(inbox.path):
             continue
 
-        # Get existing job paths for this inbox
+        # Get paths of jobs that are still active (queued/processing)
         async with async_session() as session:
             existing = await session.execute(
-                select(Job.original_path).where(Job.original_path.like(f"{inbox.path}%"))
+                select(Job.original_path).where(
+                    Job.original_path.like(f"{inbox.path}%"),
+                    Job.status.in_(("queued", "processing")),
+                )
             )
             known_paths = {row[0] for row in existing.all()}
 

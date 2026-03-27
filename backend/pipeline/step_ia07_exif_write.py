@@ -81,10 +81,10 @@ async def execute(job, session) -> dict:
     if result.returncode != 0:
         raise RuntimeError(f"ExifTool Write Fehler: {result.stderr.strip()}")
 
-    # Update file hash in DB (file changed due to new EXIF tags)
+    # Compute new hash for result (don't overwrite job.file_hash — it must
+    # stay as the original hash so IA-05 duplicate detection works correctly)
     new_hash = await asyncio.to_thread(_sha256, job.original_path)
     new_size = os.path.getsize(job.original_path)
-    job.file_hash = new_hash
 
     return {
         "keywords_written": keywords,

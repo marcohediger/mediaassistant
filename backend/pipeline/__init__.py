@@ -45,6 +45,7 @@ async def run_pipeline(job_id: int):
         await session.commit()
 
         # Main pipeline steps (IA-01 to IA-08)
+        duplicate_detected = False
         for step_code, step_fn in MAIN_STEPS:
             if step_code in existing_results:
                 continue
@@ -58,6 +59,12 @@ async def run_pipeline(job_id: int):
                 job.step_result = existing_results
                 flag_modified(job, "step_result")
                 await session.commit()
+
+                # IA-05: If duplicate detected, skip remaining main steps
+                if step_code == "IA-05" and isinstance(result, dict) and result.get("status") == "duplicate":
+                    duplicate_detected = True
+                    break
+
             except Exception as e:
                 non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}
                 if step_code in non_critical:
@@ -111,8 +118,11 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
 
-        if not pipeline_failed:
+        if not pipeline_failed and not duplicate_detected:
             job.status = "done"
+            job.completed_at = datetime.now()
+            await session.commit()
+        elif duplicate_detected:
             job.completed_at = datetime.now()
             await session.commit()
 
