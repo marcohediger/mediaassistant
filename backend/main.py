@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from config import config_manager
 from database import init_db
 from filewatcher import start_filewatcher
-from routers import dashboard, setup, settings, logs, api
+from routers import dashboard, setup, settings, logs, api, duplicates
 
 
 @asynccontextmanager
@@ -32,3 +32,4 @@ app.include_router(setup.router)
 app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(api.router)
+app.include_router(duplicates.router)

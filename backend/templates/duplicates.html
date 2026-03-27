@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Duplikat-Review — MediaAssistant{% endblock %}
+{% block content %}
+<div class="dup-header">
+    <h1>Duplikat-Review</h1>
+    <div class="dup-header-actions">
+        <span class="dup-count">{{ total_groups }} Gruppe{{ 'n' if total_groups != 1 else '' }}</span>
+        {% if exact_groups > 0 %}
+        <form method="post" action="/api/duplicates/batch-clean" class="inline-form"
+              onsubmit="return confirm('{{ exact_groups }} exakte Duplikat-Gruppe(n) automatisch bereinigen? Originale bleiben erhalten.')">
+            <button type="submit" class="btn btn-small btn-secondary">Batch-Clean ({{ exact_groups }} exakt)</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if groups %}
+{% for group in groups %}
+<div class="dup-group">
+    <div class="dup-group-header">
+        <span class="dup-group-title">{{ group.original_key }}</span>
+        {% if group.all_exact %}
+            <span class="match-badge match-exact">SHA256 exakt</span>
+        {% else %}
+            <span class="match-badge match-similar">pHash</span>
+        {% endif %}
+        <span class="dup-group-count">{{ group.count }} Dateien</span>
+    </div>
+
+    <div class="dup-compare">
+        {% for member in group.members %}
+        <div class="dup-card {{ 'dup-card-original' if member.is_original }}">
+            <div class="dup-thumb">
+                {% if member.exists %}
+                <img src="/api/thumbnail/{{ member.job_id }}" alt="{{ member.filename }}" loading="lazy">
+                {% else %}
+                <div class="dup-thumb-missing">Nicht gefunden</div>
+                {% endif %}
+            </div>
+
+            <div class="dup-card-body">
+                <div class="dup-filename" title="{{ member.filename }}">{{ member.filename }}</div>
+
+                <div class="dup-badges">
+                    {% if member.is_original %}
+                        <span class="match-badge match-original">Original</span>
+                    {% elif member.match_type == 'exact' %}
+                        <span class="match-badge match-exact">Exakt</span>
+                    {% else %}
+                        <span class="match-badge match-similar">{{ ((64 - member.phash_distance) / 64 * 100) | round(0) | int }}%</span>
+                    {% endif %}
+                </div>
+
+                <div class="dup-props">
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">Grösse</span>
+                        <span>{% if member.file_size %}{{ (member.file_size / 1024 / 1024) | round(1) }} MB{% else %}—{% endif %}</span>
+                    </div>
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">Auflösung</span>
+                        <span>{% if member.width %}{{ member.width }}x{{ member.height }}{% else %}—{% endif %}</span>
+                    </div>
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">Megapixel</span>
+                        <span>{% if member.megapixel %}{{ member.megapixel }} MP{% else %}—{% endif %}</span>
+                    </div>
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">EXIF</span>
+                        <span>{% if member.has_exif %}Ja{% else %}Nein{% endif %}</span>
+                    </div>
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">GPS</span>
+                        <span>{% if member.has_gps %}Ja{% else %}Nein{% endif %}</span>
+                    </div>
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">Qualität</span>
+                        <span>{{ member.quality }}</span>
+                    </div>
+                </div>
+
+                <div class="dup-key"><code>{{ member.debug_key }}</code></div>
+            </div>
+
+            <div class="dup-card-actions">
+                {% if not member.is_original and member.exists %}
+                <form method="post" action="/api/duplicates/delete-all" class="inline-form"
+                      onsubmit="return confirm('{{ member.filename }} löschen?')">
+                    <input type="hidden" name="debug_key" value="{{ member.debug_key }}">
+                    <button type="submit" class="btn btn-small btn-danger">Löschen</button>
+                </form>
+                {% elif member.is_original %}
+                <span class="dup-kept-label">Wird behalten</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="dup-group-actions">
+        <form method="post" action="/api/duplicates/keep" class="inline-form">
+            <input type="hidden" name="keep_key" value="{{ group.original_key }}">
+            <input type="hidden" name="group_key" value="{{ group.original_key }}">
+            <button type="submit" class="btn btn-small btn-primary">Original behalten, Rest löschen</button>
+        </form>
+        <form method="post" action="/api/duplicates/skip" class="inline-form">
+            <button type="submit" class="btn btn-small btn-secondary">Überspringen</button>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<p class="section-note">Keine offenen Duplikate.</p>
+{% endif %}
+{% endblock %}
