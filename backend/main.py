@@ -23,7 +23,9 @@ async def lifespan(app: FastAPI):
         pass
 
 
-app = FastAPI(title="MediaAssistant", lifespan=lifespan)
+from version import VERSION
+
+app = FastAPI(title="MediaAssistant", version=VERSION, lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

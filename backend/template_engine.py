@@ -4,6 +4,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from i18n import load_lang, get_section, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE
 from config import config_manager
+from version import VERSION, VERSION_DATE
 
 templates = Jinja2Templates(directory="templates")
 
@@ -29,6 +30,8 @@ async def render(request: Request, template: str, context: dict = None) -> templ
         "lang": lang,
         "theme": ui["theme"],
         "supported_languages": SUPPORTED_LANGUAGES,
+        "version": VERSION,
+        "version_date": VERSION_DATE,
     }
     if context:
         ctx.update(context)
