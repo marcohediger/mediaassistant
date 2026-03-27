@@ -83,6 +83,8 @@ class ConfigManager:
             "GEO_URL": ("geo.url", False),
             "GEO_API_KEY": ("geo.api_key", True),
             "LIBRARY_BASE_PATH": ("library.base_path", False),
+            "IMMICH_URL": ("immich.url", False),
+            "IMMICH_API_KEY": ("immich.api_key", True),
         }
         for env_key, (config_key, encrypted) in env_map.items():
             env_value = os.environ.get(env_key)

@@ -14,6 +14,7 @@ DEFAULT_MODULES = [
     ("ocr", False),
     ("smtp", False),
     ("filewatcher", False),
+    ("immich", False),
 ]
 
 
@@ -23,6 +24,8 @@ async def _migrate_columns(conn):
     migrations = [
         ("jobs", "source_inbox_path", "ALTER TABLE jobs ADD COLUMN source_inbox_path TEXT"),
         ("jobs", "dry_run", "ALTER TABLE jobs ADD COLUMN dry_run BOOLEAN DEFAULT 0"),
+        ("jobs", "use_immich", "ALTER TABLE jobs ADD COLUMN use_immich BOOLEAN DEFAULT 0"),
+        ("inbox_directories", "use_immich", "ALTER TABLE inbox_directories ADD COLUMN use_immich BOOLEAN DEFAULT 0"),
     ]
     for table, column, sql in migrations:
         try:

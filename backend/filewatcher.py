@@ -106,6 +106,7 @@ async def _scan_and_process():
                     source_label=inbox.label,
                     source_inbox_path=inbox.path if inbox.folder_tags else None,
                     dry_run=inbox.dry_run,
+                    use_immich=inbox.use_immich,
                     file_hash=file_hash,
                 )
                 session.add(job)

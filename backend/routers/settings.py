@@ -10,7 +10,7 @@ from template_engine import render
 
 router = APIRouter(prefix="/settings")
 
-MODULE_NAMES = ["ki_analyse", "geocoding", "duplikat_erkennung", "ocr", "smtp", "filewatcher"]
+MODULE_NAMES = ["ki_analyse", "geocoding", "duplikat_erkennung", "ocr", "smtp", "filewatcher", "immich"]
 
 
 async def _get_modules_dict() -> dict:
@@ -49,6 +49,7 @@ async def _get_cfg() -> dict:
         "path_unknown": await config_manager.get("library.path_unknown", "unknown/review/"),
         "path_error": await config_manager.get("library.path_error", "error/"),
         "path_duplicate": await config_manager.get("library.path_duplicate", "error/duplicates/"),
+        "immich_url": await config_manager.get("immich.url", ""),
     }
 
 
@@ -152,6 +153,11 @@ async def save_settings(request: Request):
     await config_manager.set("library.path_error", form.get("path_error", "error/"))
     await config_manager.set("library.path_duplicate", form.get("path_duplicate", "error/duplicates/"))
 
+    # Immich
+    await config_manager.set("immich.url", form.get("immich_url", ""))
+    if form.get("immich_api_key"):
+        await config_manager.set("immich.api_key", form["immich_api_key"], encrypted=True)
+
     # Filewatcher
     try:
         interval = int(form.get("watch_interval", 5))
@@ -184,6 +190,7 @@ async def add_inbox(
             label=label,
             folder_tags="inbox_folder_tags" in form,
             dry_run="inbox_dry_run" in form,
+            use_immich="inbox_use_immich" in form,
             active=True,
         ))
         await session.commit()
@@ -209,6 +216,7 @@ async def update_inbox(request: Request, inbox_id: int):
         inbox.label = form.get("inbox_label", inbox.label).strip()
         inbox.folder_tags = f"inbox_folder_tags_{inbox_id}" in form
         inbox.dry_run = f"inbox_dry_run_{inbox_id}" in form
+        inbox.use_immich = f"inbox_use_immich_{inbox_id}" in form
         inbox.active = f"inbox_active_{inbox_id}" in form
         path = inbox.path
         label = inbox.label

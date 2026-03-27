@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from config import config_manager
 from safe_file import safe_move
+from immich_client import upload_asset
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -153,11 +154,34 @@ async def execute(job, session) -> dict:
             "target_dir": target_dir,
             "target_path": target_path,
             "moved": False,
+            "immich_upload": False,
         }
 
-    # Create directory and move file (safe: copy → verify → delete)
-    await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
     source_dir = os.path.dirname(job.original_path)
+
+    # Route: Immich upload or target directory
+    if job.use_immich:
+        immich_result = await upload_asset(job.original_path)
+
+        # Remove source file after successful upload
+        await asyncio.to_thread(os.remove, job.original_path)
+
+        # Clean up empty parent directories in inbox
+        if job.source_inbox_path:
+            await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
+
+        job.target_path = f"immich:{immich_result.get('id', '')}"
+
+        return {
+            "category": category,
+            "target_path": job.target_path,
+            "moved": False,
+            "immich_upload": True,
+            "immich_id": immich_result.get("id", ""),
+        }
+
+    # Move file to library (safe: copy → verify → delete)
+    await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
     await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
 
     # Clean up empty parent directories in inbox (up to inbox root)
@@ -172,4 +196,5 @@ async def execute(job, session) -> dict:
         "target_dir": target_dir,
         "target_path": target_path,
         "moved": True,
+        "immich_upload": False,
     }
