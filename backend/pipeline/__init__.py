@@ -1,6 +1,9 @@
 import asyncio
+import os
+import shutil
 from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
+from config import config_manager
 from database import async_session
 from models import Job
 from system_logger import log_error, log_warning
@@ -104,7 +107,95 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
 
-        if not pipeline_failed:
+        if pipeline_failed:
+            # Move file to error directory with .log file
+            await _move_to_error(job, session)
+        else:
             job.status = "done"
             job.completed_at = datetime.now()
             await session.commit()
+
+
+async def _move_to_error(job, session):
+    """Move failed file to error/ directory and write a .log file."""
+    if not os.path.exists(job.original_path):
+        return
+
+    base_path = await config_manager.get("library.base_path", "/bibliothek")
+    error_dir = os.path.join(base_path, "error")
+    await asyncio.to_thread(os.makedirs, error_dir, exist_ok=True)
+
+    filename = os.path.basename(job.original_path)
+    error_path = os.path.join(error_dir, filename)
+
+    # Handle name conflicts
+    if os.path.exists(error_path):
+        name, ext = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(error_path):
+            error_path = os.path.join(error_dir, f"{name}_{counter}{ext}")
+            counter += 1
+
+    await asyncio.to_thread(shutil.move, job.original_path, error_path)
+
+    # Write .log file
+    log_path = error_path + ".log"
+    log_lines = [
+        f"Debug-Key: {job.debug_key}",
+        f"Datei: {job.filename}",
+        f"Original: {job.original_path}",
+        f"Fehler: {job.error_message}",
+        f"Zeitpunkt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "Step-Ergebnisse:",
+    ]
+    for step_code, result in (job.step_result or {}).items():
+        status = result.get("status", "ok") if isinstance(result, dict) else "ok"
+        log_lines.append(f"  [{step_code}] {status}")
+    await asyncio.to_thread(_write_log, log_path, "\n".join(log_lines))
+
+    job.target_path = error_path
+    await session.commit()
+
+
+def _write_log(path: str, content: str):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+async def retry_job(job_id: int):
+    """Reset a failed job and re-run the pipeline from the failed step."""
+    async with async_session() as session:
+        job = await session.get(Job, job_id)
+        if not job or job.status != "error":
+            return False
+
+        # If file was moved to error/, move it back
+        if job.target_path and os.path.exists(job.target_path):
+            original_dir = os.path.dirname(job.original_path)
+            if os.path.exists(original_dir):
+                await asyncio.to_thread(shutil.move, job.target_path, job.original_path)
+                # Remove .log file
+                log_path = job.target_path + ".log"
+                if os.path.exists(log_path):
+                    os.remove(log_path)
+                job.target_path = None
+
+        # Remove failed step results so pipeline resumes from there
+        step_results = dict(job.step_result or {})
+        for step_code in list(step_results.keys()):
+            if isinstance(step_results[step_code], dict) and step_results[step_code].get("status") == "error":
+                del step_results[step_code]
+        # Also remove finalizer results so they re-run
+        for code in ("IA-09", "IA-10", "IA-11"):
+            step_results.pop(code, None)
+
+        job.step_result = step_results
+        flag_modified(job, "step_result")
+        job.status = "queued"
+        job.error_message = None
+        await session.commit()
+
+    # Re-run pipeline
+    await run_pipeline(job_id)
+    return True

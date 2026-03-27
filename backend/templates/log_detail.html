@@ -50,6 +50,11 @@
 <div class="detail-section">
     <h2>Fehler</h2>
     <div class="alert alert-error">{{ job.error_message }}</div>
+    {% if job.status == 'error' %}
+    <form method="post" action="/api/job/{{ job.debug_key }}/retry" style="margin-top: 0.75rem;">
+        <button type="submit" class="btn btn-primary">Erneut verarbeiten</button>
+    </form>
+    {% endif %}
 </div>
 {% endif %}
 
