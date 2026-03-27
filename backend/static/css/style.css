@@ -889,6 +889,15 @@ select:focus {
     color: var(--text-muted);
 }
 
+.dup-path {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 0.125rem;
+}
+
 .dup-key {
     font-size: 0.7rem;
     color: var(--text-muted);
