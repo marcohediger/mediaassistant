@@ -119,7 +119,10 @@
     "exif": "EXIF",
     "gps": "GPS",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "immich_exists": "Exists in Immich",
+    "view_in_immich": "View in Immich",
+    "delete_local": "Delete local copy"
   },
   "settings": {
     "title": "Settings",
