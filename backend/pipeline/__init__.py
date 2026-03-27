@@ -21,6 +21,15 @@ STEPS = [
 ]
 
 
+FINALIZERS = [
+    ("IA-09", step_ia09_notify.execute),
+    ("IA-10", step_ia10_cleanup.execute),
+    ("IA-11", step_ia11_log.execute),
+]
+
+MAIN_STEPS = [s for s in STEPS if s[0] not in {"IA-09", "IA-10", "IA-11"}]
+
+
 async def run_pipeline(job_id: int):
     async with async_session() as session:
         job = await session.get(Job, job_id)
@@ -29,9 +38,11 @@ async def run_pipeline(job_id: int):
 
         job.status = "processing"
         existing_results = dict(job.step_result or {})
+        pipeline_failed = False
         await session.commit()
 
-        for step_code, step_fn in STEPS:
+        # Main pipeline steps (IA-01 to IA-08)
+        for step_code, step_fn in MAIN_STEPS:
             if step_code in existing_results:
                 continue
 
@@ -45,12 +56,10 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
             except Exception as e:
-                # Non-critical steps: log warning and continue with fallback
-                non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06", "IA-09", "IA-11"}
+                non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}
                 if step_code in non_critical:
                     await log_warning("pipeline", f"{job.debug_key} {step_code} übersprungen", str(e))
                     existing_results[step_code] = {"status": "error", "reason": str(e)}
-                    # Provide fallback for IA-03 so sorting still works
                     if step_code == "IA-03":
                         existing_results[step_code].update({
                             "type": "unknown",
@@ -65,13 +74,37 @@ async def run_pipeline(job_id: int):
                     flag_modified(job, "step_result")
                     await session.commit()
                     continue
-                # Critical steps: stop pipeline
+                # Critical step failed — mark error, then run finalizers
                 job.status = "error"
                 job.error_message = f"[{step_code}] {e}"
+                existing_results[step_code] = {"status": "error", "reason": str(e)}
+                job.step_result = existing_results
+                flag_modified(job, "step_result")
                 await session.commit()
                 await log_error("pipeline", f"{job.debug_key} Fehler bei {step_code}", str(e))
-                return
+                pipeline_failed = True
+                break
 
-        job.status = "done"
-        job.completed_at = datetime.now()
-        await session.commit()
+        # Finalizers (IA-09, IA-10, IA-11) — always run, even after critical errors
+        for step_code, step_fn in FINALIZERS:
+            if step_code in existing_results:
+                continue
+            job.current_step = step_code
+            await session.commit()
+            try:
+                result = await step_fn(job, session)
+                existing_results[step_code] = result
+                job.step_result = existing_results
+                flag_modified(job, "step_result")
+                await session.commit()
+            except Exception as e:
+                await log_warning("pipeline", f"{job.debug_key} {step_code} übersprungen", str(e))
+                existing_results[step_code] = {"status": "error", "reason": str(e)}
+                job.step_result = existing_results
+                flag_modified(job, "step_result")
+                await session.commit()
+
+        if not pipeline_failed:
+            job.status = "done"
+            job.completed_at = datetime.now()
+            await session.commit()
