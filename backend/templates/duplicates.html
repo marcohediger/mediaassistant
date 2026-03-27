@@ -123,7 +123,9 @@
             </div>
 
             <div class="dup-card-actions">
-                {% if group.is_immich_duplicate and not member.immich_asset_id and member.exists %}
+                {% if member.immich_asset_id and member.immich_link %}
+                <a href="{{ member.immich_link }}" target="_blank" class="btn btn-small btn-secondary">{{ t.duplicates.view_in_immich }}</a>
+                {% elif group.is_immich_duplicate and member.exists %}
                 <form method="post" action="/api/duplicates/delete-all" class="inline-form"
                       onsubmit="return confirm('{{ t.duplicates.delete_local }}?')">
                     <input type="hidden" name="debug_key" value="{{ member.debug_key }}">
