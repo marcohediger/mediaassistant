@@ -3,31 +3,31 @@
 {% block content %}
 <h1>Dashboard</h1>
 
-<div class="stats-grid">
+<div class="stats-grid" id="stats-grid">
     <div class="stat-card">
-        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-value" data-stat="total">{{ stats.total }}</div>
         <div class="stat-label">Total</div>
     </div>
     <div class="stat-card stat-success">
-        <div class="stat-value">{{ stats.done }}</div>
+        <div class="stat-value" data-stat="done">{{ stats.done }}</div>
         <div class="stat-label">Fertig</div>
     </div>
     <div class="stat-card stat-warning">
-        <div class="stat-value">{{ stats.queued }}</div>
+        <div class="stat-value" data-stat="queued">{{ stats.queued }}</div>
         <div class="stat-label">Wartend</div>
     </div>
     <div class="stat-card stat-info">
-        <div class="stat-value">{{ stats.processing }}</div>
+        <div class="stat-value" data-stat="processing">{{ stats.processing }}</div>
         <div class="stat-label">In Arbeit</div>
     </div>
     <div class="stat-card stat-error">
-        <div class="stat-value">{{ stats.errors }}</div>
+        <div class="stat-value" data-stat="errors">{{ stats.errors }}</div>
         <div class="stat-label">Fehler</div>
     </div>
 </div>
 
 <h2>Module</h2>
-<div class="modules-grid">
+<div class="modules-grid" id="modules-grid">
     {% for module in modules %}
     <div class="module-card module-{{ module.status }}">
         <div class="module-top">
@@ -65,7 +65,7 @@
                 <th>Zeit</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="recent-jobs">
             {% for job in recent_jobs %}
             <tr class="log-row log-{{ job.status }}">
                 <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
