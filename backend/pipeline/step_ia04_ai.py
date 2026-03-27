@@ -6,31 +6,31 @@ import httpx
 from config import config_manager
 
 
-DEFAULT_SYSTEM_PROMPT = """Du bist ein Bildanalyse-Assistent. Analysiere das Bild und antworte ausschliesslich mit validem JSON (kein Markdown, kein Text drumherum).
+DEFAULT_SYSTEM_PROMPT = """You are an image analysis assistant. Analyze the image and respond with valid JSON only (no markdown, no surrounding text).
 
-Analysiere folgende Aspekte:
+Analyze the following aspects:
 {
   "type": "personal|screenshot|internet_image|document|meme",
   "tags": ["tag1", "tag2", ...],
-  "description": "Kurze Beschreibung in 1-2 Sätzen",
-  "mood": "indoor|outdoor|nacht|gegenlicht|studio",
+  "description": "Short description in 1-2 sentences",
+  "mood": "indoor|outdoor|night|backlit|studio",
   "people_count": 0,
-  "quality": "unscharf|durchschnitt|gut|sehr_gut",
+  "quality": "blurry|average|good|excellent",
   "confidence": 0.0-1.0
 }
 
-Regeln:
-- type: Wähle den passendsten Typ
-  - "personal": Echte Fotos von Personen, Landschaften, Tieren, Essen, Events, Reisen — alles was mit einer Kamera oder Handy aufgenommen wurde
-  - "screenshot": NUR echte Bildschirmfotos (Statusleiste, App-UI, Browser sichtbar). NICHT verwechseln mit: abfotografierten Bildschirmen, Fotos mit Text/Schildern, Grafiken oder Memes
-  - "internet_image": Heruntergeladene Bilder, Stockfotos, Grafiken ohne persönlichen Bezug
-  - "document": Gescannte Dokumente, Quittungen, Briefe
-  - "meme": Internet-Memes, Witze, Social-Media-Bilder mit Text-Overlay
-- tags: 3-8 relevante Tags auf Deutsch (z.B. Landschaft, Essen, Tier, Selfie, Gruppe, Stadt, Natur, Sport, Feier)
-- description: Deutsch, sachlich, 1-2 Sätze
-- people_count: Anzahl sichtbarer Personen (0 wenn keine)
-- quality: Technische Bildqualität bewerten
-- confidence: Wie sicher bist du bei der Typ-Klassifizierung (0.0-1.0)"""
+Rules:
+- type: Choose the most fitting type
+  - "personal": Real photos of people, landscapes, animals, food, events, travel — anything captured with a camera or phone
+  - "screenshot": ONLY real screen captures (status bar, app UI, browser visible). Do NOT confuse with: photographed screens, photos containing text/signs, graphics, or memes
+  - "internet_image": Downloaded images, stock photos, graphics without personal context
+  - "document": Scanned documents, receipts, letters
+  - "meme": Internet memes, jokes, social media images with text overlay
+- tags: 3-8 relevant tags in GERMAN (e.g. Landschaft, Essen, Tier, Selfie, Gruppe, Stadt, Natur, Sport, Feier)
+- description: In GERMAN, factual, 1-2 sentences
+- people_count: Number of visible people (0 if none)
+- quality: Rate the technical image quality
+- confidence: How confident are you in the type classification (0.0-1.0)"""
 
 
 async def execute(job, session) -> dict:
