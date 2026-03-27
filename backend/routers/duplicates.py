@@ -363,12 +363,6 @@ async def keep_file(request: Request):
     return RedirectResponse(url="/duplicates", status_code=303)
 
 
-@router.post("/api/duplicates/skip")
-async def skip_group(request: Request):
-    """Skip a group for now (no action)."""
-    return RedirectResponse(url="/duplicates", status_code=303)
-
-
 @router.post("/api/duplicates/delete-all")
 async def delete_duplicate(request: Request):
     """Delete a single duplicate file."""

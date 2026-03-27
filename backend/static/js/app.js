@@ -74,9 +74,9 @@
   const STEP_NAMES = {
     "IA-01": "EXIF auslesen",
     "IA-02": "Formatkonvertierung",
-    "IA-03": "KI-Analyse",
-    "IA-04": "OCR",
-    "IA-05": "Duplikat-Erkennung",
+    "IA-03": "Duplikat-Erkennung",
+    "IA-04": "KI-Analyse",
+    "IA-05": "OCR",
     "IA-06": "Geocoding",
     "IA-07": "EXIF-Tags schreiben",
     "IA-08": "Zielordner sortieren",
