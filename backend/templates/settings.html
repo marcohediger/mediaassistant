@@ -260,10 +260,11 @@
                 <input type="email" id="smtp_recipient" name="smtp_recipient" value="{{ cfg.smtp_recipient }}">
             </div>
             <div class="form-group">
-                <label class="switch-inline" style="margin-top: 1.75rem;">
+                <label>SSL/TLS</label>
+                <label class="switch-inline" style="height: 2.5rem; display: flex; align-items: center;">
                     <input type="checkbox" name="smtp_ssl" value="1" {{ 'checked' if cfg.smtp_ssl else '' }}>
                     <span class="switch-slider-sm"></span>
-                    <span>SSL/TLS</span>
+                    <span>Aktiviert</span>
                 </label>
             </div>
         </div>
