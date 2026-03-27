@@ -21,10 +21,14 @@ async def _get_modules_dict() -> dict:
     return {m.name: m.enabled for m in modules}
 
 
+from pipeline.step_ia04_ai import DEFAULT_SYSTEM_PROMPT as _DEFAULT_AI_PROMPT
+
+
 async def _get_cfg() -> dict:
     return {
         "ai_url": await config_manager.get("ai.backend_url", ""),
         "ai_model": await config_manager.get("ai.model", ""),
+        "ai_prompt": await config_manager.get("ai.prompt", "") or _DEFAULT_AI_PROMPT,
         "geo_provider": await config_manager.get("geo.provider", "nominatim"),
         "geo_url": await config_manager.get("geo.url", "https://nominatim.openstreetmap.org"),
         "phash_threshold": await config_manager.get("duplikat.phash_threshold", 5),
@@ -82,6 +86,12 @@ async def save_settings(request: Request):
     await config_manager.set("ai.model", form.get("ai_model", ""))
     if form.get("ai_api_key"):
         await config_manager.set("ai.api_key", form["ai_api_key"], encrypted=True)
+    ai_prompt = form.get("ai_prompt", "").strip()
+    if ai_prompt:
+        await config_manager.set("ai.prompt", ai_prompt)
+    elif "ai_prompt_reset" in form:
+        # Reset to default by deleting the config entry
+        await config_manager.set("ai.prompt", "")
 
     # Geocoding
     await config_manager.set("geo.provider", form.get("geo_provider", "nominatim"))
