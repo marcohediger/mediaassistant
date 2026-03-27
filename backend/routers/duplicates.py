@@ -63,19 +63,56 @@ def _generate_thumbnail(filepath: str) -> bytes | None:
 
 
 def _get_image_info(filepath: str) -> dict:
-    """Get image dimensions and file size via exiftool (works for all formats)."""
-    info = {"file_size": 0, "width": 0, "height": 0, "megapixel": 0.0}
+    """Get image dimensions, file size, EXIF details and keywords via exiftool."""
+    info = {
+        "file_size": 0, "width": 0, "height": 0, "megapixel": 0.0,
+        "exif_date": "", "exif_camera": "", "exif_iso": "", "exif_aperture": "",
+        "exif_shutter": "", "exif_focal": "", "exif_keywords": [], "exif_description": "",
+        "exif_has_gps": False, "exif_has_exif": False,
+    }
     try:
         info["file_size"] = os.path.getsize(filepath)
         result = subprocess.run(
-            ["exiftool", "-ImageWidth", "-ImageHeight", "-s3", filepath],
+            ["exiftool", "-j",
+             "-ImageWidth", "-ImageHeight",
+             "-DateTimeOriginal", "-CreateDate",
+             "-Make", "-Model",
+             "-ISO", "-FNumber", "-ExposureTime", "-FocalLength",
+             "-Keywords", "-Subject",
+             "-ImageDescription",
+             "-GPSLatitude", "-GPSLongitude",
+             filepath],
             capture_output=True, text=True, timeout=10,
         )
-        lines = result.stdout.strip().split("\n")
-        if len(lines) >= 2:
-            info["width"] = int(lines[0])
-            info["height"] = int(lines[1])
-            info["megapixel"] = round(info["width"] * info["height"] / 1_000_000, 1)
+        import json as _json
+        data = _json.loads(result.stdout)[0] if result.stdout.strip() else {}
+
+        w = data.get("ImageWidth", 0)
+        h = data.get("ImageHeight", 0)
+        if w and h:
+            info["width"] = int(w)
+            info["height"] = int(h)
+            info["megapixel"] = round(int(w) * int(h) / 1_000_000, 1)
+
+        date = data.get("DateTimeOriginal") or data.get("CreateDate") or ""
+        info["exif_date"] = date
+        make = data.get("Make", "")
+        model = data.get("Model", "")
+        info["exif_camera"] = f"{make} {model}".strip() if (make or model) else ""
+        info["exif_iso"] = str(data.get("ISO", ""))
+        info["exif_aperture"] = str(data.get("FNumber", ""))
+        info["exif_shutter"] = str(data.get("ExposureTime", ""))
+        info["exif_focal"] = str(data.get("FocalLength", ""))
+
+        # Keywords can be string or list
+        kw = data.get("Keywords") or data.get("Subject") or []
+        if isinstance(kw, str):
+            kw = [kw]
+        info["exif_keywords"] = kw
+
+        info["exif_description"] = data.get("ImageDescription", "")
+        info["exif_has_gps"] = bool(data.get("GPSLatitude"))
+        info["exif_has_exif"] = bool(date or make or model)
     except Exception:
         pass
     return info
@@ -120,50 +157,12 @@ def _resolve_filepath(job) -> str:
 
 
 async def _build_member(job, session) -> dict:
-    """Build a member dict for a single job."""
+    """Build a member dict for a single job — all info read directly from the file."""
     filepath = _resolve_filepath(job)
     dup_info = (job.step_result or {}).get("IA-03", {})
-    ai_result = (job.step_result or {}).get("IA-04", {})
-    exif = (job.step_result or {}).get("IA-01", {})
     is_dup = dup_info.get("status") == "duplicate"
     exists = os.path.exists(filepath)
     img_info = await asyncio.to_thread(_get_image_info, filepath) if exists else {}
-
-    # EXIF details
-    date = exif.get("date", "")
-    camera_make = exif.get("make", "")
-    camera_model = exif.get("model", "")
-    camera = f"{camera_make} {camera_model}".strip() if (camera_make or camera_model) else ""
-    iso = exif.get("iso", "")
-    aperture = exif.get("aperture", "")
-    shutter = exif.get("shutter_speed", "")
-    focal = exif.get("focal_length", "")
-
-    # All tags: prefer IA-07 keywords_written (complete list), fallback to collecting
-    ia07_result = (job.step_result or {}).get("IA-07", {})
-    tags = ia07_result.get("keywords_written", [])
-    if not tags:
-        # Collect from all sources like IA-07 does
-        geo_result = (job.step_result or {}).get("IA-06", {})
-        ocr_result = (job.step_result or {}).get("IA-05", {})
-        if ai_result.get("tags"):
-            tags.extend(ai_result["tags"])
-        if ai_result.get("type") and ai_result["type"] != "unknown":
-            tags.append(ai_result["type"])
-        if ai_result.get("mood"):
-            tags.append(ai_result["mood"])
-        if ai_result.get("quality"):
-            tags.append(f"quality:{ai_result['quality']}")
-        if geo_result.get("country"):
-            tags.append(geo_result["country"])
-        if geo_result.get("city"):
-            tags.append(geo_result["city"])
-        if geo_result.get("suburb"):
-            tags.append(geo_result["suburb"])
-        if ocr_result.get("has_text") and ocr_result.get("text_type"):
-            tags.append(f"text:{ocr_result['text_type']}")
-    ai_type = ai_result.get("type", "")
-    description = ai_result.get("description", "")
 
     return {
         "job_id": job.id,
@@ -174,19 +173,6 @@ async def _build_member(job, session) -> dict:
         "is_original": not is_dup,
         "match_type": dup_info.get("match_type", "original") if is_dup else "original",
         "phash_distance": dup_info.get("phash_distance", 0),
-        "quality": ai_result.get("quality", "—"),
-        "confidence": ai_result.get("confidence", 0),
-        "has_exif": exif.get("has_exif", False),
-        "has_gps": bool(exif.get("gps")),
-        "date": date,
-        "camera": camera,
-        "iso": iso,
-        "aperture": aperture,
-        "shutter": shutter,
-        "focal_length": focal,
-        "tags": tags,
-        "ai_type": ai_type,
-        "description": description,
         **img_info,
     }
 

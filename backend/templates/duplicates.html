@@ -66,54 +66,44 @@
                     </div>
                     <div class="dup-prop">
                         <span class="dup-prop-label">Datum</span>
-                        <span>{{ member.date or '—' }}</span>
+                        <span>{{ member.exif_date or '—' }}</span>
                     </div>
                     <div class="dup-prop">
                         <span class="dup-prop-label">Kamera</span>
-                        <span>{{ member.camera or '—' }}</span>
+                        <span>{{ member.exif_camera or '—' }}</span>
                     </div>
-                    {% if member.iso or member.aperture or member.shutter %}
+                    {% if member.exif_iso or member.exif_aperture or member.exif_shutter %}
                     <div class="dup-prop">
                         <span class="dup-prop-label">Einstellungen</span>
-                        <span>{% if member.iso %}ISO {{ member.iso }}{% endif %}{% if member.aperture %} f/{{ member.aperture }}{% endif %}{% if member.shutter %} {{ member.shutter }}s{% endif %}</span>
+                        <span>{% if member.exif_iso %}ISO {{ member.exif_iso }}{% endif %}{% if member.exif_aperture %} f/{{ member.exif_aperture }}{% endif %}{% if member.exif_shutter %} {{ member.exif_shutter }}s{% endif %}</span>
                     </div>
                     {% endif %}
-                    {% if member.focal_length %}
+                    {% if member.exif_focal %}
                     <div class="dup-prop">
                         <span class="dup-prop-label">Brennweite</span>
-                        <span>{{ member.focal_length }}</span>
+                        <span>{{ member.exif_focal }}</span>
                     </div>
                     {% endif %}
                     <div class="dup-prop">
                         <span class="dup-prop-label">EXIF</span>
-                        <span>{% if member.has_exif %}Ja{% else %}Nein{% endif %}</span>
+                        <span>{% if member.exif_has_exif %}Ja{% else %}Nein{% endif %}</span>
                     </div>
                     <div class="dup-prop">
                         <span class="dup-prop-label">GPS</span>
-                        <span>{% if member.has_gps %}Ja{% else %}Nein{% endif %}</span>
+                        <span>{% if member.exif_has_gps %}Ja{% else %}Nein{% endif %}</span>
                     </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">Qualität</span>
-                        <span>{{ member.quality }}</span>
-                    </div>
-                    {% if member.ai_type %}
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">Typ</span>
-                        <span>{{ member.ai_type }}</span>
-                    </div>
-                    {% endif %}
                 </div>
 
-                {% if member.tags %}
+                {% if member.exif_keywords %}
                 <div class="dup-tags">
-                    {% for tag in member.tags %}
+                    {% for tag in member.exif_keywords %}
                     <span class="dup-tag">{{ tag }}</span>
                     {% endfor %}
                 </div>
                 {% endif %}
 
-                {% if member.description %}
-                <div class="dup-description">{{ member.description }}</div>
+                {% if member.exif_description %}
+                <div class="dup-description">{{ member.exif_description }}</div>
                 {% endif %}
 
                 <div class="dup-path" title="{{ member.filepath }}">{{ member.filepath }}</div>
