@@ -521,57 +521,63 @@ Flach:               photos/{YYYY}/
   4. EXIF komplett leer → unknown (→ KI-Analyse)
 - Regeln werden in SQLite gespeichert
 
-## Offene Tasks
+## Tasks
+
+### Erledigt ✅
 - [x] SETUP: Projektstruktur anlegen (backend, docker-compose, volumes)
+- [x] DOCKER: docker-compose.yml mit Volumes und Umgebungsvariablen
 - [x] FEAT: Dateiformat-Handling (HEIC/DNG/GIF → temp JPEG vor KI-Analyse, IA-02)
-- [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
-- [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
-- [x] FEAT: Geocoding Provider-Schnittstelle (Nominatim / Photon / Google Maps, einheitlicher Output, IA-06)
-- [ ] FEAT: Geocoding-Cache in SQLite (keine doppelten Requests)
-- [ ] DOCKER: Photon-Container optional in docker-compose.yml
-- [ ] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
-- [x] FEAT: Eingangsverzeichnisse konfigurierbar im Webinterface (Pfad, Label, Ordner-Tags, Aktiv/inaktiv, Verarbeitungszeiten)
-- [x] FEAT: Filewatcher (Polling) auf allen konfigurierten Eingangsverzeichnissen
-- [x] FEAT: Manuelle Imports — Ordnerstruktur als Tags (jede Ebene = ein EXIF-Keyword, pro Verzeichnis konfigurierbar)
 - [x] FEAT: EXIF-Auslesen via ExifTool subprocess (IA-01)
-- [ ] FEAT: Regel-basierte Klassifizierung (WA, Screenshot, EXIF-leer)
+- [x] FEAT: Duplikat-Erkennung SHA256 (exakt) + pHash (ähnlich) via imagehash (IA-03)
+- [x] FEAT: Duplikate → /error/duplicates/ + .log mit Verweis auf Original
+- [x] FEAT: Duplikat-Review Webinterface (gruppiert, Side-by-Side, Batch-Löschen, EXIF/Tags direkt aus Datei)
 - [x] FEAT: LM Studio Vision API Integration (IA-04)
 - [x] FEAT: KI-Prompt für Typ + Inhalt + Qualität + Beschreibung (IA-04)
 - [x] FEAT: EXIF-Tags schreiben via ExifTool (IA-07)
-- [x] FEAT: Zielstruktur-Logik (Ordner bestimmen, Datei verschieben, IA-08)
-- [x] FEAT: Duplikat-Erkennung SHA256 (exakt) + pHash (ähnlich) via imagehash
-- [x] FEAT: Duplikate → /inbox/error/duplicates/ + .log mit Verweis auf Original
-- [x] FEAT: Duplikat-Review Webinterface (Original + alle Duplikate gruppiert, Side-by-Side, Batch-Löschen, EXIF/Tags direkt aus Datei)
-- [x] FEAT: Fehlerbehandlung → /inbox/error/ + .log Datei + Retry-Button
-- [x] FEAT: Sichere Dateiverschiebung (safe_move: Copy → SHA256-Verify → Delete, kein Datenverlust)
+- [x] FEAT: Manuelle Imports — Ordnerstruktur als Tags (jede Ebene = ein EXIF-Keyword, pro Verzeichnis konfigurierbar)
+- [x] FEAT: Zielstruktur-Logik (Ordner bestimmen, Datei verschieben, leere Ordner aufräumen, IA-08)
+- [x] FEAT: Geocoding Provider-Schnittstelle (Nominatim / Photon / Google Maps, einheitlicher Output, IA-06)
 - [x] FEAT: SMTP Fehlerbenachrichtigung (IA-09, STARTTLS/Office 365 Support)
+- [x] FEAT: Fehlerbehandlung → /error/ + .log Datei + Retry-Button + Löschen-Button
+- [x] FEAT: Sichere Dateiverschiebung (safe_move: Copy → SHA256-Verify → Delete, kein Datenverlust)
 - [x] FEAT: Debugschlüssel (MA-YYYY-NNNN) + Step-Codes (IA-01 bis IA-11) pro Verarbeitung
 - [x] FEAT: Job-System (SQLite, Eintrag bei Erkennung, Status + current_step + step_result JSON)
 - [x] FEAT: Resume-Logik (nach Absturz ab fehlendem Step weitermachen)
 - [x] FEAT: SQLite Logging (System-Log + Verarbeitungs-Log)
+- [x] FEAT: Eingangsverzeichnisse konfigurierbar im Webinterface (Pfad, Label, Ordner-Tags, Aktiv/inaktiv, Verarbeitungszeiten)
+- [x] FEAT: Filewatcher (Polling) auf allen konfigurierten Eingangsverzeichnissen
 - [x] FEAT: Setup-Wizard beim ersten Start (/setup, 4 Schritte, danach gesperrt)
-- [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
 - [x] FEAT: FastAPI Webinterface (Dashboard, Live-Log, Queue)
 - [x] FEAT: Alle Module einzeln ein/ausschaltbar im Webinterface (KI, Geocoding, Duplikat, OCR, Ordner-Tags, SMTP, Filewatcher)
-- [ ] FEAT: Webinterface — Verarbeitungszeiten konfigurierbar (kontinuierlich / Zeitfenster / geplant / manuell)
-- [ ] FEAT: Webinterface — Ablage-Ordnerstruktur konfigurierbar (Schema pro Kategorie, Platzhalter, Live-Vorschau)
 - [x] FEAT: Webinterface — KI Backend konfigurierbar (URL, API-Key, Modell, Test-Button)
 - [x] FEAT: Webinterface — SMTP Konfiguration (Server, Port, SSL, User, Passwort, Test-Button)
+
+### Offen
+- [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
+- [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
+- [ ] FEAT: Geocoding-Cache in SQLite (keine doppelten Requests)
+- [ ] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
+- [ ] FEAT: Regel-basierte Klassifizierung (WA, Screenshot, EXIF-leer)
+- [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
+- [ ] FEAT: Webinterface — Verarbeitungszeiten konfigurierbar (kontinuierlich / Zeitfenster / geplant / manuell)
+- [ ] FEAT: Webinterface — Ablage-Ordnerstruktur konfigurierbar (Schema pro Kategorie, Platzhalter, Live-Vorschau)
 - [ ] FEAT: Webinterface — KI Prompts editierbar (gespeichert in SQLite, mit Reset + Test)
 - [ ] FEAT: Webinterface — Sortier-Regeln editierbar (Drag-and-Drop Reihenfolge, CRUD)
 - [ ] FEAT: Dry-Run Modus pro Eingangsverzeichnis (nur Report, keine Dateien verschieben)
 - [ ] FEAT: HTML-Report nach Dry-Run (Anzahl Dateien, Kategorien, Duplikate, Fehler)
-- [x] DOCKER: docker-compose.yml mit Volumes und Umgebungsvariablen
 - [ ] CONFIG: config.yml (LM Studio URL, SMTP, Pfade, Schwellwerte)
-- [ ] OPTIONAL: SSO Login via OIDC (fastapi-sso + sso.marcohediger.ch)
-- [ ] OPTIONAL: Video KI-Analyse (Thumbnail → LM Studio Vision)
-- [ ] OPTIONAL: KI-basierte Ortschätzung für Bilder ohne GPS (Vision → "estimated_location" Tag, niedrige Konfidenz, nicht als EXIF-GPS schreiben)
-- [ ] OPTIONAL: GeoCLIP (geo-clip) für präzise GPS-Schätzung ohne GPS-EXIF (Konfidenz-Score, dann via Geocoding in Ortsnamen, als "estimated_location" Tag)
-- [ ] OPTIONAL: Google Vision API Landmark Detection (für alte Fotos ohne GPS, API-Key erforderlich, Ergebnis als "estimated_location" Tag + optional GPS-Koordinaten in EXIF schreiben)
-- [ ] OPTIONAL: README.md (Projektbeschreibung, Features, Quick Start, Screenshots)
-- [ ] OPTIONAL: config.example.yml (alle Optionen mit Kommentaren)
-- [ ] OPTIONAL: docs/ (installation.md, configuration.md, migration.md)
-- [ ] OPTIONAL: GitHub Actions Workflow → automatischer Docker Hub Build
+- [ ] DOCKER: Photon-Container optional in docker-compose.yml
+
+### Optional (v2)
+- [ ] SSO Login via OIDC (fastapi-sso + sso.marcohediger.ch)
+- [ ] Video KI-Analyse (Thumbnail → LM Studio Vision)
+- [ ] KI-basierte Ortschätzung für Bilder ohne GPS (Vision → "estimated_location" Tag)
+- [ ] GeoCLIP für präzise GPS-Schätzung ohne GPS-EXIF
+- [ ] Google Vision API Landmark Detection (für alte Fotos ohne GPS)
+- [ ] README.md (Projektbeschreibung, Features, Quick Start, Screenshots)
+- [ ] config.example.yml (alle Optionen mit Kommentaren)
+- [ ] docs/ (installation.md, configuration.md, migration.md)
+- [ ] GitHub Actions Workflow → automatischer Docker Hub Build
 
 ## Dateiformat-Unterstützung
 
