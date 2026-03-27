@@ -117,7 +117,7 @@ All system log messages are always written in English, regardless of the UI lang
 - **Immich duplicates**: Thumbnail fetched from Immich, "View in Immich" button, "Delete local copy" for the local file
 - Actions: "Keep this" (moves to library, deletes all others)
 - Batch-Clean: auto-delete all exact SHA256 duplicates
-- Orphaned entries: if a referenced original file no longer exists on disk, the match is skipped and the new file is treated as a fresh original
+- Orphaned entries: if a referenced original file no longer exists on disk (or was deleted from Immich), the match is skipped and the new file is treated as a fresh original
 
 ### Log Viewer
 - System log (errors, warnings, info)
