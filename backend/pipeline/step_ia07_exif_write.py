@@ -56,6 +56,15 @@ async def execute(job, session) -> dict:
     if not keywords and not description:
         return {"status": "skipped", "reason": "no tags to write"}
 
+    # Dry-run: report what would be written, but don't modify file
+    if job.dry_run:
+        return {
+            "status": "dry_run",
+            "keywords_planned": keywords,
+            "description_planned": description,
+            "tags_count": len(keywords),
+        }
+
     # Build ExifTool command
     cmd = ["exiftool", "-overwrite_original"]
 
