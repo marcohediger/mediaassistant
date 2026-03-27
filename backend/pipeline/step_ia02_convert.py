@@ -2,6 +2,8 @@ import asyncio
 import os
 import subprocess
 
+TEMP_DIR = os.path.join(os.path.dirname(os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")), "tmp")
+
 
 async def execute(job, session) -> dict:
     """IA-02: Formatkonvertierung — HEIC/DNG/RAW in temp JPEG für KI-Analyse."""
@@ -11,7 +13,9 @@ async def execute(job, session) -> dict:
     if ext in (".jpg", ".jpeg", ".png", ".webp"):
         return {"converted": False, "reason": "format natively supported"}
 
-    temp_path = filepath + ".tmp.jpg"
+    await asyncio.to_thread(os.makedirs, TEMP_DIR, exist_ok=True)
+    temp_path = os.path.join(TEMP_DIR, f"{job.debug_key}.jpg")
+
     try:
         if ext in (".heic", ".heif"):
             await asyncio.to_thread(
@@ -20,15 +24,14 @@ async def execute(job, session) -> dict:
                 capture_output=True, timeout=30, check=True
             )
         elif ext in (".dng", ".cr2", ".nef", ".arw", ".tiff", ".tif"):
-            await asyncio.to_thread(
+            # exiftool -w writes next to source, so extract to stdout and redirect
+            result = await asyncio.to_thread(
                 subprocess.run,
-                ["exiftool", "-b", "-PreviewImage", "-w", ".tmp.jpg", filepath],
+                ["exiftool", "-b", "-PreviewImage", filepath],
                 capture_output=True, timeout=30
             )
-            # exiftool writes to filename.tmp.jpg
-            expected = os.path.splitext(filepath)[0] + ".tmp.jpg"
-            if os.path.exists(expected) and expected != temp_path:
-                os.rename(expected, temp_path)
+            if result.stdout:
+                await asyncio.to_thread(_write_bytes, temp_path, result.stdout)
         elif ext == ".gif":
             await asyncio.to_thread(
                 subprocess.run,
@@ -46,3 +49,8 @@ async def execute(job, session) -> dict:
         raise RuntimeError(f"Formatkonvertierung fehlgeschlagen: {e}")
 
     return {"converted": False, "reason": "conversion produced no output"}
+
+
+def _write_bytes(path: str, data: bytes):
+    with open(path, "wb") as f:
+        f.write(data)

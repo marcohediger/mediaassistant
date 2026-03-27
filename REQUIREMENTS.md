@@ -536,8 +536,8 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: KI-Prompt für Typ + Inhalt + Qualität + Beschreibung (IA-03)
 - [x] FEAT: EXIF-Tags schreiben via ExifTool (IA-07)
 - [x] FEAT: Zielstruktur-Logik (Ordner bestimmen, Datei verschieben, IA-08)
-- [ ] FEAT: Duplikat-Erkennung SHA256 (exakt) + pHash (ähnlich) via imagehash
-- [ ] FEAT: Duplikate → /inbox/error/duplicates/ + .log mit Verweis auf Original
+- [x] FEAT: Duplikat-Erkennung SHA256 (exakt) + pHash (ähnlich) via imagehash
+- [x] FEAT: Duplikate → /inbox/error/duplicates/ + .log mit Verweis auf Original
 - [ ] FEAT: Duplikat-Review Webinterface (Original + alle Duplikate gruppiert, Side-by-Side, Batch-Löschen)
 - [x] FEAT: Fehlerbehandlung → /inbox/error/ + .log Datei + Retry-Button
 - [x] FEAT: Sichere Dateiverschiebung (safe_move: Copy → SHA256-Verify → Delete, kein Datenverlust)
