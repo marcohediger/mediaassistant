@@ -146,11 +146,16 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
     - Keywords: Typ, Inhalt-Tags, Qualität, Ort
     - ImageDescription: KI-Freitext + Ort
         ↓
- 8. Sortieren — Zielordner bestimmen + Datei verschieben
+ 7b. Datei-Hash aktualisieren
+    - SHA256 neu berechnen (Datei hat sich durch neue EXIF-Tags verändert)
+    - Neuer Hash + Dateigrösse in DB speichern
+        ↓
+ 8. Sortieren — Zielordner bestimmen + Datei sicher verschieben
     - photos/YYYY/YYYY-MM/    (personal_photo, Datum aus EXIF)
     - whatsapp/YYYY/          (whatsapp)
     - screenshots/YYYY/       (screenshot)
     - unknown/review/         (KI-Konfidenz < Schwellwert oder unklar)
+    - Sichere Verschiebung: Kopie → SHA256-Verifikation → Original löschen
         ↓
  9. Benachrichtigung
     - E-Mail bei Fehlern (SMTP, zusammengefasst)
@@ -191,10 +196,10 @@ completed_at    DATETIME
   "IA-04": {"has_text": false, "text": "", "text_type": "keiner"},
   "IA-05": {"status": "skipped", "reason": "not yet implemented"},
   "IA-06": {"country": "Schweiz", "city": "Zürich", "suburb": "Altstadt", "provider": "nominatim"},
-  "IA-07": {"keywords_written": ["Zürich", "outdoor", "personal_photo"], "tags_count": 3},
+  "IA-07": {"keywords_written": ["Zürich", "outdoor", "personal_photo"], "tags_count": 3, "file_size": 2458901, "file_hash": "a1b2c3..."},
   "IA-08": {"category": "photo", "target_path": "/bibliothek/photos/2024/2024-06/IMG_1234.jpg", "moved": true},
-  "IA-09": {"status": "skipped", "reason": "not yet implemented"},
-  "IA-10": {"status": "skipped", "reason": "not yet implemented"},
+  "IA-09": {"sent": true, "recipient": "user@example.com", "errors_reported": 0},
+  "IA-10": {"removed": ["/tmp/IA-2025-0342.tmp.jpg"], "count": 1},
   "IA-11": {"logged": true, "summary": "personal_photo, 3 Tags, Zürich/Schweiz"}
 }
 ```
@@ -301,9 +306,33 @@ Log-Format pro Datei:
 - Log-Level konfigurierbar in config.yml (DEBUG / INFO / ERROR)
 
 
-- Bei Fehler → Datei nach /inbox/error/ verschieben
+### Sichere Dateiverschiebung (safe_move)
+Dateien dürfen **niemals** verloren gehen. Jede Verschiebung im System (Sortierung, Error-Ordner, Retry) ist ein dreistufiger Prozess:
+
+1. **Kopieren** — `shutil.copy2` (mit Metadaten)
+2. **Verifizieren** — Dateigrösse + SHA256-Hash der Kopie mit Original vergleichen
+3. **Löschen** — Original wird erst nach erfolgreicher Verifikation gelöscht
+
+Bei fehlgeschlagener Verifikation:
+- Defekte Kopie wird entfernt
+- Original bleibt unangetastet
+- Fehler wird im System-Log dokumentiert
+- Pipeline bricht mit Fehler ab
+
+Jede Dateiverschiebung wird im System-Log dokumentiert mit:
+- Dateiname, Dateigrösse, SHA256-Hash (gekürzt)
+- Quell- und Zielpfad
+
+Anwendungsorte:
+- IA-08: Sortierung (Inbox → Bibliothek)
+- Error-Handling: fehlgeschlagene Dateien → /error/
+- Retry: Dateien aus /error/ zurück in Inbox
+
+### Fehlerbehandlung
+- Bei Fehler → Datei sofort nach /inbox/error/ verschieben (vor Finalizern)
 - Logfile (gleiches Verzeichnis, gleicher Name + .log) mit Fehlerdetails
 - SMTP Mail mit Fehlerübersicht (max. 1 Mail pro Stunde zusammengefasst)
+- Retry-Button im Webinterface (Job-Detail Seite)
 
 ## Migration (Einmalig)
 - Gleiche Pipeline wie oben, aber Quelle: /volume1/photo/ (Synology Photos)
@@ -510,7 +539,8 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: Duplikat-Erkennung SHA256 (exakt) + pHash (ähnlich) via imagehash
 - [ ] FEAT: Duplikate → /inbox/error/duplicates/ + .log mit Verweis auf Original
 - [ ] FEAT: Duplikat-Review Webinterface (Original + alle Duplikate gruppiert, Side-by-Side, Batch-Löschen)
-- [ ] FEAT: Fehlerbehandlung → /inbox/error/ + .log Datei
+- [x] FEAT: Fehlerbehandlung → /inbox/error/ + .log Datei + Retry-Button
+- [x] FEAT: Sichere Dateiverschiebung (safe_move: Copy → SHA256-Verify → Delete, kein Datenverlust)
 - [x] FEAT: SMTP Fehlerbenachrichtigung (IA-09, STARTTLS/Office 365 Support)
 - [x] FEAT: Debugschlüssel (MA-YYYY-NNNN) + Step-Codes (IA-01 bis IA-11) pro Verarbeitung
 - [x] FEAT: Job-System (SQLite, Eintrag bei Erkennung, Status + current_step + step_result JSON)
@@ -544,6 +574,7 @@ Flach:               photos/{YYYY}/
 
 LM Studio Vision erwartet JPEG/PNG — andere Formate werden vor der KI-Analyse
 temporär konvertiert. Original bleibt immer erhalten.
+Alle Dateiverschiebungen nutzen safe_move (Copy → SHA256-Verify → Delete) — kein Datenverlust möglich.
 
 | Format | Quelle | Handling |
 |---|---|---|
