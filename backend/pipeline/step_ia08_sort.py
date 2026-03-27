@@ -161,12 +161,14 @@ async def execute(job, session) -> dict:
 
     # Route: Immich upload or target directory
     if job.use_immich:
-        # Extract folder tags as album names
+        # Extract folder tags as single combined album name
         album_names = None
         if job.source_inbox_path:
             rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
             if rel and rel != ".":
-                album_names = [p for p in rel.split(os.sep) if p and p != "."]
+                parts = [p for p in rel.split(os.sep) if p and p != "."]
+                if parts:
+                    album_names = [" ".join(parts)]
 
         immich_result = await upload_asset(job.original_path, album_names=album_names)
 
