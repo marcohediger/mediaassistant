@@ -346,7 +346,7 @@ async def keep_file(request: Request):
 
             if job.status == "duplicate":
                 job.status = "done"
-            job.error_message = f"Duplikat-Review: gelöscht (behalten: {keep_key})"
+            job.error_message = f"Duplicate review: deleted (kept: {keep_key})"
             job.target_path = None
 
         # Move the kept file into the library if it's not already there
@@ -386,11 +386,11 @@ async def keep_file(request: Request):
                 kept_job.target_path = target_path
 
             kept_job.status = "done"
-            kept_job.error_message = "Duplikat-Review: als beste Version behalten"
+            kept_job.error_message = "Duplicate review: kept as best version"
 
         await session.commit()
 
-    await log_info("duplicates", f"Review: Gruppe {group_key}, behalten: {keep_key}")
+    await log_info("duplicates", f"Review: Group {group_key}, kept: {keep_key}")
     return RedirectResponse(url="/duplicates", status_code=303)
 
 
@@ -417,10 +417,10 @@ async def delete_duplicate(request: Request):
                     await asyncio.to_thread(os.remove, log_path)
 
             job.status = "done"
-            job.error_message = "Duplikat gelöscht (manuell)"
+            job.error_message = "Duplicate deleted (manually)"
             await session.commit()
 
-    await log_info("duplicates", f"Duplikat gelöscht: {debug_key}")
+    await log_info("duplicates", f"Duplicate deleted: {debug_key}")
     return RedirectResponse(url="/duplicates", status_code=303)
 
 
@@ -447,10 +447,10 @@ async def batch_clean():
                     await asyncio.to_thread(os.remove, log_path)
 
             dup.status = "done"
-            dup.error_message = "Duplikat gelöscht (Batch-Clean, SHA256 exakt)"
+            dup.error_message = "Duplicate deleted (Batch-Clean, SHA256 exact)"
             deleted += 1
 
         await session.commit()
 
-    await log_info("duplicates", f"Batch-Clean: {deleted} exakte Duplikate gelöscht")
+    await log_info("duplicates", f"Batch-Clean: {deleted} exact duplicates deleted")
     return RedirectResponse(url="/duplicates", status_code=303)

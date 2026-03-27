@@ -68,7 +68,7 @@ async def run_pipeline(job_id: int):
             except Exception as e:
                 non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}
                 if step_code in non_critical:
-                    await log_warning("pipeline", f"{job.debug_key} {step_code} übersprungen", str(e))
+                    await log_warning("pipeline", f"{job.debug_key} {step_code} skipped", str(e))
                     existing_results[step_code] = {"status": "error", "reason": str(e)}
                     if step_code == "IA-04":
                         existing_results[step_code].update({
@@ -91,7 +91,7 @@ async def run_pipeline(job_id: int):
                 job.step_result = existing_results
                 flag_modified(job, "step_result")
                 await session.commit()
-                await log_error("pipeline", f"{job.debug_key} Fehler bei {step_code}", str(e))
+                await log_error("pipeline", f"{job.debug_key} Error at {step_code}", str(e))
                 pipeline_failed = True
                 break
 

@@ -109,7 +109,7 @@ async def _scan_and_process():
                 await session.commit()
                 job_id = job.id
 
-            await log_info("filewatcher", f"Neue Datei erkannt: {filename}", f"Inbox: {inbox.label}, Key: {debug_key}")
+            await log_info("filewatcher", f"New file detected: {filename}", f"Inbox: {inbox.label}, Key: {debug_key}")
             await run_pipeline(job_id)
 
 
@@ -122,7 +122,7 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
         )
         interrupted = result.scalars().all()
         for job_id in interrupted:
-            await log_info("filewatcher", f"Job wird fortgesetzt", f"Job-ID: {job_id}")
+            await log_info("filewatcher", f"Job resumed", f"Job-ID: {job_id}")
             await run_pipeline(job_id)
 
     while not shutdown_event.is_set():
@@ -130,7 +130,7 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
             if await config_manager.is_module_enabled("filewatcher"):
                 await _scan_and_process()
         except Exception as e:
-            await log_error("filewatcher", f"Scan-Fehler: {e}")
+            await log_error("filewatcher", f"Scan error: {e}")
 
         interval = await config_manager.get("filewatcher.interval", 5)
         try:

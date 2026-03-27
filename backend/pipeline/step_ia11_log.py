@@ -2,16 +2,16 @@ from system_logger import log_info
 
 
 async def execute(job, session) -> dict:
-    """IA-11: SQLite Log-Eintrag — Zusammenfassung der Verarbeitung loggen."""
+    """IA-11: SQLite log entry — log processing summary."""
     step_results = job.step_result or {}
     parts = []
 
-    # Kategorie aus KI-Analyse
+    # Category from AI analysis
     ai_result = step_results.get("IA-04", {})
     if ai_result.get("type"):
         parts.append(ai_result["type"])
 
-    # Anzahl geschriebene Tags
+    # Number of written tags
     tags_result = step_results.get("IA-07", {})
     if tags_result.get("tags_count"):
         parts.append(f"{tags_result['tags_count']} Tags")
@@ -26,16 +26,16 @@ async def execute(job, session) -> dict:
     if geo_result.get("city") and geo_result.get("country"):
         parts.append(f"{geo_result['city']}/{geo_result['country']}")
 
-    # Duplikat
+    # Duplicate
     dup_result = step_results.get("IA-03", {})
     if dup_result.get("duplicate"):
-        parts.append("Duplikat")
+        parts.append("Duplicate")
 
-    # Zielordner
+    # Target folder
     sort_result = step_results.get("IA-08", {})
     target = sort_result.get("target_path", "")
 
-    summary = ", ".join(parts) if parts else "verarbeitet"
+    summary = ", ".join(parts) if parts else "processed"
     if target:
         summary += f" -> {target}"
 
