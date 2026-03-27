@@ -1,8 +1,8 @@
 import asyncio
 import os
-import shutil
 from datetime import datetime
 from config import config_manager
+from safe_file import safe_move
 
 
 def _parse_date(date_str: str) -> datetime | None:
@@ -115,9 +115,9 @@ async def execute(job, session) -> dict:
             target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
             counter += 1
 
-    # Create directory and move file
+    # Create directory and move file (safe: copy → verify → delete)
     await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
-    await asyncio.to_thread(shutil.move, job.original_path, target_path)
+    await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
 
     # Update job with target path
     job.target_path = target_path
