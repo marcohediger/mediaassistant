@@ -41,20 +41,24 @@ async def execute(job, session) -> dict:
 
     # Send
     port = int(await config_manager.get("smtp.port", 587))
-    use_ssl = await config_manager.get("smtp.ssl", True)
+    use_ssl = await config_manager.get("smtp.ssl", False)
     user = await config_manager.get("smtp.user", "")
     password = await config_manager.get("smtp.password", "")
 
     context = ssl.create_default_context()
 
     if use_ssl:
+        # Direct SSL (port 465)
         with smtplib.SMTP_SSL(server, port, timeout=10, context=context) as smtp:
             if user and password:
                 smtp.login(user, password)
             smtp.send_message(msg)
     else:
+        # STARTTLS (port 587) — Office 365, Gmail etc.
         with smtplib.SMTP(server, port, timeout=10) as smtp:
+            smtp.ehlo()
             smtp.starttls(context=context)
+            smtp.ehlo()
             if user and password:
                 smtp.login(user, password)
             smtp.send_message(msg)

@@ -89,19 +89,32 @@ async def _check_smtp() -> tuple[bool, str]:
     server = await config_manager.get("smtp.server")
     if not server:
         return False, "Kein Server konfiguriert"
-    port = await config_manager.get("smtp.port", 587)
-    use_ssl = await config_manager.get("smtp.ssl", True)
+    port = int(await config_manager.get("smtp.port", 587))
+    use_ssl = await config_manager.get("smtp.ssl", False)
+    user = await config_manager.get("smtp.user", "")
+    password = await config_manager.get("smtp.password", "")
+    context = ssl.create_default_context()
     try:
         if use_ssl:
-            context = ssl.create_default_context()
+            # Direct SSL (port 465)
             with smtplib.SMTP_SSL(server, port, timeout=5, context=context) as smtp:
-                smtp.noop()
+                if user and password:
+                    smtp.login(user, password)
+                else:
+                    smtp.noop()
         else:
+            # STARTTLS (port 587) — Office 365, Gmail etc.
             with smtplib.SMTP(server, port, timeout=5) as smtp:
-                smtp.noop()
+                smtp.ehlo()
+                smtp.starttls(context=context)
+                smtp.ehlo()
+                if user and password:
+                    smtp.login(user, password)
+                else:
+                    smtp.noop()
         return True, "Verbunden"
-    except smtplib.SMTPAuthenticationError:
-        return True, "Verbunden (Auth erforderlich)"
+    except smtplib.SMTPAuthenticationError as e:
+        return False, f"Auth fehlgeschlagen: {e.smtp_error.decode() if isinstance(e.smtp_error, bytes) else e.smtp_error}"
     except Exception as e:
         return False, f"Verbindung zu {server}:{port} fehlgeschlagen: {e}"
 
