@@ -29,7 +29,6 @@ MODULE_LABELS = {
     "geocoding": "Geocoding",
     "duplikat_erkennung": "Duplikat-Erkennung",
     "ocr": "OCR",
-    "ordner_tags": "Ordner-Tags",
     "smtp": "SMTP Benachrichtigung",
     "filewatcher": "Filewatcher",
 }
@@ -39,7 +38,6 @@ MODULE_REQUIREMENTS = {
     "geocoding": ["geo.provider", "geo.url"],
     "duplikat_erkennung": [],
     "ocr": ["ai.backend_url", "ai.model"],
-    "ordner_tags": [],
     "smtp": ["smtp.server", "smtp.recipient"],
     "filewatcher": [],
 }
