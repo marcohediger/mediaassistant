@@ -7,8 +7,8 @@ import subprocess
 async def execute(job, session) -> dict:
     """IA-07: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben."""
     step_results = job.step_result or {}
-    ai_result = step_results.get("IA-03", {})
-    ocr_result = step_results.get("IA-04", {})
+    ai_result = step_results.get("IA-04", {})
+    ocr_result = step_results.get("IA-05", {})
     geo_result = step_results.get("IA-06", {})
 
     # Collect keywords
@@ -82,7 +82,7 @@ async def execute(job, session) -> dict:
         raise RuntimeError(f"ExifTool Write Fehler: {result.stderr.strip()}")
 
     # Compute new hash for result (don't overwrite job.file_hash — it must
-    # stay as the original hash so IA-05 duplicate detection works correctly)
+    # stay as the original hash so IA-03 duplicate detection works correctly)
     new_hash = await asyncio.to_thread(_sha256, job.original_path)
     new_size = os.path.getsize(job.original_path)
 

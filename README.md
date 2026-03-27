@@ -14,9 +14,9 @@ Neue Dateien im Eingangsverzeichnis werden automatisch erkannt und durchlaufen e
 |------|------|-------------|
 | IA-01 | EXIF auslesen | Metadaten via ExifTool extrahieren |
 | IA-02 | Formatkonvertierung | HEIC/DNG/RAW/GIF → temp JPEG für KI-Analyse |
-| IA-03 | KI-Analyse | Bild analysieren (Typ, Tags, Beschreibung, Stimmung) |
-| IA-04 | OCR | Texterkennung (Screenshots, Dokumente) |
-| IA-05 | Duplikaterkennung | Perceptual Hash Vergleich |
+| IA-03 | Duplikaterkennung | SHA256 (exakt) + pHash (ähnlich) |
+| IA-04 | KI-Analyse | Bild analysieren (Typ, Tags, Beschreibung, Stimmung) |
+| IA-05 | OCR | Texterkennung (Screenshots, Dokumente) |
 | IA-06 | Geocoding | GPS-Koordinaten → Ort, Land, Stadt |
 | IA-07 | EXIF Tags schreiben | Tags und Beschreibung in Datei zurückschreiben |
 | IA-08 | Sortieren | Datei in Bibliothek nach Typ/Datum einsortieren |

@@ -28,7 +28,7 @@ def _compute_phash(filepath: str) -> str | None:
 
 
 async def execute(job, session) -> dict:
-    """IA-05: Duplikat-Erkennung — SHA256 (exakt) + pHash (ähnlich)."""
+    """IA-03: Duplikat-Erkennung — SHA256 (exakt) + pHash (ähnlich)."""
     if not await config_manager.is_module_enabled("duplikat_erkennung"):
         return {"status": "skipped", "reason": "module disabled"}
 
@@ -137,7 +137,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     job.status = "duplicate"
     job.target_path = dup_path
 
-    await log_info("IA-05", f"{job.debug_key} {desc}")
+    await log_info("IA-03", f"{job.debug_key} {desc}")
 
 
 def _write_log(path: str, content: str):

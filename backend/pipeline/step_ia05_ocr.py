@@ -21,7 +21,7 @@ Regeln:
 
 
 async def execute(job, session) -> dict:
-    """IA-04: OCR — Texterkennung via KI."""
+    """IA-05: OCR — Texterkennung via KI."""
     if not await config_manager.is_module_enabled("ocr"):
         return {"status": "skipped", "reason": "module disabled"}
 
@@ -37,7 +37,7 @@ async def execute(job, session) -> dict:
     # Check OCR mode: "smart" = only screenshots/documents, "always" = all images
     ocr_mode = await config_manager.get("ocr.mode", "smart")
     if ocr_mode == "smart":
-        ai_result = (job.step_result or {}).get("IA-03", {})
+        ai_result = (job.step_result or {}).get("IA-04", {})
         ai_type = ai_result.get("type", "")
         if ai_type not in ("screenshot", "document", "") and not ai_result.get("parse_error"):
             return {"status": "skipped", "reason": f"type={ai_type}, OCR nicht nötig (Modus: smart)"}

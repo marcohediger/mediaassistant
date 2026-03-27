@@ -56,7 +56,7 @@ async def execute(job, session) -> dict:
     """IA-08: Datei in Zielordner verschieben."""
     step_results = job.step_result or {}
     exif = step_results.get("IA-01", {})
-    ai_result = step_results.get("IA-03", {})
+    ai_result = step_results.get("IA-04", {})
     geo_result = step_results.get("IA-06", {})
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")

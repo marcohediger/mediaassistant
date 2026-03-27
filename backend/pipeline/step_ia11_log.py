@@ -7,7 +7,7 @@ async def execute(job, session) -> dict:
     parts = []
 
     # Kategorie aus KI-Analyse
-    ai_result = step_results.get("IA-03", {})
+    ai_result = step_results.get("IA-04", {})
     if ai_result.get("type"):
         parts.append(ai_result["type"])
 
@@ -17,7 +17,7 @@ async def execute(job, session) -> dict:
         parts.append(f"{tags_result['tags_count']} Tags")
 
     # OCR
-    ocr_result = step_results.get("IA-04", {})
+    ocr_result = step_results.get("IA-05", {})
     if ocr_result.get("has_text"):
         parts.append("OCR")
 
@@ -27,7 +27,7 @@ async def execute(job, session) -> dict:
         parts.append(f"{geo_result['city']}/{geo_result['country']}")
 
     # Duplikat
-    dup_result = step_results.get("IA-05", {})
+    dup_result = step_results.get("IA-03", {})
     if dup_result.get("duplicate"):
         parts.append("Duplikat")
 
