@@ -139,8 +139,29 @@ async def _build_member(job, session) -> dict:
     shutter = exif.get("shutter_speed", "")
     focal = exif.get("focal_length", "")
 
-    # Tags/Keywords from AI
-    tags = ai_result.get("tags", [])
+    # All tags: prefer IA-07 keywords_written (complete list), fallback to collecting
+    ia07_result = (job.step_result or {}).get("IA-07", {})
+    tags = ia07_result.get("keywords_written", [])
+    if not tags:
+        # Collect from all sources like IA-07 does
+        geo_result = (job.step_result or {}).get("IA-06", {})
+        ocr_result = (job.step_result or {}).get("IA-05", {})
+        if ai_result.get("tags"):
+            tags.extend(ai_result["tags"])
+        if ai_result.get("type") and ai_result["type"] != "unknown":
+            tags.append(ai_result["type"])
+        if ai_result.get("mood"):
+            tags.append(ai_result["mood"])
+        if ai_result.get("quality"):
+            tags.append(f"quality:{ai_result['quality']}")
+        if geo_result.get("country"):
+            tags.append(geo_result["country"])
+        if geo_result.get("city"):
+            tags.append(geo_result["city"])
+        if geo_result.get("suburb"):
+            tags.append(geo_result["suburb"])
+        if ocr_result.get("has_text") and ocr_result.get("text_type"):
+            tags.append(f"text:{ocr_result['text_type']}")
     ai_type = ai_result.get("type", "")
     description = ai_result.get("description", "")
 
