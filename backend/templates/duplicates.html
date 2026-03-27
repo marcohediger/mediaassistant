@@ -65,6 +65,26 @@
                         <span>{% if member.megapixel %}{{ member.megapixel }} MP{% else %}—{% endif %}</span>
                     </div>
                     <div class="dup-prop">
+                        <span class="dup-prop-label">Datum</span>
+                        <span>{{ member.date or '—' }}</span>
+                    </div>
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">Kamera</span>
+                        <span>{{ member.camera or '—' }}</span>
+                    </div>
+                    {% if member.iso or member.aperture or member.shutter %}
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">Einstellungen</span>
+                        <span>{% if member.iso %}ISO {{ member.iso }}{% endif %}{% if member.aperture %} f/{{ member.aperture }}{% endif %}{% if member.shutter %} {{ member.shutter }}s{% endif %}</span>
+                    </div>
+                    {% endif %}
+                    {% if member.focal_length %}
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">Brennweite</span>
+                        <span>{{ member.focal_length }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="dup-prop">
                         <span class="dup-prop-label">EXIF</span>
                         <span>{% if member.has_exif %}Ja{% else %}Nein{% endif %}</span>
                     </div>
@@ -76,7 +96,25 @@
                         <span class="dup-prop-label">Qualität</span>
                         <span>{{ member.quality }}</span>
                     </div>
+                    {% if member.ai_type %}
+                    <div class="dup-prop">
+                        <span class="dup-prop-label">Typ</span>
+                        <span>{{ member.ai_type }}</span>
+                    </div>
+                    {% endif %}
                 </div>
+
+                {% if member.tags %}
+                <div class="dup-tags">
+                    {% for tag in member.tags %}
+                    <span class="dup-tag">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if member.description %}
+                <div class="dup-description">{{ member.description }}</div>
+                {% endif %}
 
                 <div class="dup-path" title="{{ member.filepath }}">{{ member.filepath }}</div>
                 <div class="dup-key"><code>{{ member.debug_key }}</code></div>

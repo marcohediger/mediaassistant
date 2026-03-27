@@ -129,6 +129,21 @@ async def _build_member(job, session) -> dict:
     exists = os.path.exists(filepath)
     img_info = await asyncio.to_thread(_get_image_info, filepath) if exists else {}
 
+    # EXIF details
+    date = exif.get("date", "")
+    camera_make = exif.get("make", "")
+    camera_model = exif.get("model", "")
+    camera = f"{camera_make} {camera_model}".strip() if (camera_make or camera_model) else ""
+    iso = exif.get("iso", "")
+    aperture = exif.get("aperture", "")
+    shutter = exif.get("shutter_speed", "")
+    focal = exif.get("focal_length", "")
+
+    # Tags/Keywords from AI
+    tags = ai_result.get("tags", [])
+    ai_type = ai_result.get("type", "")
+    description = ai_result.get("description", "")
+
     return {
         "job_id": job.id,
         "debug_key": job.debug_key,
@@ -142,6 +157,15 @@ async def _build_member(job, session) -> dict:
         "confidence": ai_result.get("confidence", 0),
         "has_exif": exif.get("has_exif", False),
         "has_gps": bool(exif.get("gps")),
+        "date": date,
+        "camera": camera,
+        "iso": iso,
+        "aperture": aperture,
+        "shutter": shutter,
+        "focal_length": focal,
+        "tags": tags,
+        "ai_type": ai_type,
+        "description": description,
         **img_info,
     }
 
