@@ -27,11 +27,13 @@ def _compute_phash(filepath: str) -> str | None:
         return None
 
 
-def _file_exists(job_entry) -> bool:
+async def _file_exists(job_entry) -> bool:
     """Check if the file referenced by a job still exists (on disk or in Immich)."""
     path = job_entry.target_path or job_entry.original_path
     if path and path.startswith("immich:"):
-        return True
+        from immich_client import asset_exists
+        asset_id = path[7:]
+        return await asset_exists(asset_id)
     return path and os.path.exists(path)
 
 
@@ -56,7 +58,7 @@ async def execute(job, session) -> dict:
         )
         candidates = result.scalars().all()
         for existing in candidates:
-            if await asyncio.to_thread(_file_exists, existing):
+            if await _file_exists(existing):
                 await _handle_duplicate(job, session, existing, "exact", 0)
                 return {
                     "status": "duplicate",
@@ -94,7 +96,7 @@ async def execute(job, session) -> dict:
                 continue
 
             if distance <= threshold:
-                if await asyncio.to_thread(_file_exists, candidate):
+                if await _file_exists(candidate):
                     await _handle_duplicate(job, session, candidate, "similar", distance)
                     return {
                         "status": "duplicate",

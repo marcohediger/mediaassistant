@@ -76,6 +76,22 @@ async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dic
 
 
 
+async def asset_exists(asset_id: str) -> bool:
+    """Check if an asset still exists in Immich."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key or not asset_id:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{url}/api/assets/{asset_id}",
+                headers={"x-api-key": api_key},
+            )
+            return resp.status_code == 200
+    except Exception:
+        return False
+
+
 async def get_asset_thumbnail(asset_id: str) -> bytes | None:
     """Fetch thumbnail for an asset from Immich."""
     url, api_key = await get_immich_config()
