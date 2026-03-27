@@ -57,12 +57,6 @@
                     {% endif %}
                 </div>
 
-                {% if member.immich_link %}
-                <div class="dup-immich-link">
-                    <a href="{{ member.immich_link }}" target="_blank" class="btn btn-small btn-secondary">{{ t.duplicates.view_in_immich }}</a>
-                </div>
-                {% endif %}
-
                 <div class="dup-props">
                     <div class="dup-prop">
                         <span class="dup-prop-label">{{ t.duplicates.size }}</span>
