@@ -64,6 +64,12 @@ async def execute(job, session) -> dict:
         cmd.append(f"-ImageDescription={description}")
         cmd.append(f"-XPComment={description}")
 
+    # Write OCR text
+    ocr_text = ""
+    if ocr_result.get("has_text") and ocr_result.get("text"):
+        ocr_text = ocr_result["text"].strip()
+        cmd.append(f"-UserComment=OCR: {ocr_text}")
+
     cmd.append(job.original_path)
 
     result = await asyncio.to_thread(
@@ -83,6 +89,7 @@ async def execute(job, session) -> dict:
     return {
         "keywords_written": keywords,
         "description_written": description,
+        "ocr_text_written": ocr_text,
         "tags_count": len(keywords),
         "file_size": new_size,
         "file_hash": new_hash,
