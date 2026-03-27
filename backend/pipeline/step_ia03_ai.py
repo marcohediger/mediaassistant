@@ -1,8 +1,6 @@
-import asyncio
 import base64
 import json
 import os
-import subprocess
 import httpx
 from config import config_manager
 
@@ -29,43 +27,8 @@ Regeln:
 - confidence: Wie sicher bist du bei der Typ-Klassifizierung (0.0-1.0)"""
 
 
-async def _convert_to_jpeg(filepath: str) -> str | None:
-    """Convert HEIC/DNG to temp JPEG for AI analysis."""
-    ext = os.path.splitext(filepath)[1].lower()
-    if ext in (".jpg", ".jpeg", ".png", ".webp"):
-        return None  # No conversion needed
-
-    temp_path = filepath + ".tmp.jpg"
-    try:
-        if ext in (".heic", ".heif"):
-            await asyncio.to_thread(
-                subprocess.run,
-                ["heif-convert", filepath, temp_path],
-                capture_output=True, timeout=30, check=True
-            )
-        elif ext in (".dng", ".cr2", ".nef", ".arw", ".tiff", ".tif"):
-            await asyncio.to_thread(
-                subprocess.run,
-                ["exiftool", "-b", "-PreviewImage", "-w", ".tmp.jpg", filepath],
-                capture_output=True, timeout=30
-            )
-            # exiftool writes to filename.tmp.jpg
-            expected = os.path.splitext(filepath)[0] + ".tmp.jpg"
-            if os.path.exists(expected) and expected != temp_path:
-                os.rename(expected, temp_path)
-        else:
-            return None
-
-        if os.path.exists(temp_path):
-            return temp_path
-    except Exception:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-    return None
-
-
 async def execute(job, session) -> dict:
-    """IA-02: KI-Analyse via OpenAI-kompatiblem Endpunkt."""
+    """IA-03: KI-Analyse via OpenAI-kompatiblem Endpunkt."""
     if not await config_manager.is_module_enabled("ki_analyse"):
         return {"status": "skipped", "reason": "module disabled"}
 
@@ -76,17 +39,13 @@ async def execute(job, session) -> dict:
 
     api_key = await config_manager.get("ai.api_key", "not-needed")
 
-    # Read and encode image
+    # Use pre-converted temp file from IA-02 if available
     filepath = job.original_path
-    temp_file = await _convert_to_jpeg(filepath)
-    image_path = temp_file or filepath
+    convert_result = (job.step_result or {}).get("IA-02", {})
+    image_path = convert_result.get("temp_path") or filepath
 
-    try:
-        with open(image_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode("utf-8")
-    finally:
-        if temp_file and os.path.exists(temp_file):
-            os.remove(temp_file)
+    with open(image_path, "rb") as f:
+        image_data = base64.b64encode(f.read()).decode("utf-8")
 
     ext = os.path.splitext(image_path)[1].lower()
     mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}

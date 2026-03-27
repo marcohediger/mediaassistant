@@ -3,11 +3,11 @@ import subprocess
 
 
 async def execute(job, session) -> dict:
-    """IA-06: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben."""
+    """IA-07: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben."""
     step_results = job.step_result or {}
-    ai_result = step_results.get("IA-02", {})
+    ai_result = step_results.get("IA-03", {})
     ocr_result = step_results.get("IA-04", {})
-    geo_result = step_results.get("IA-05", {})
+    geo_result = step_results.get("IA-06", {})
 
     # Collect keywords
     keywords = []

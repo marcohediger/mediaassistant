@@ -16,7 +16,7 @@ class Job(Base):
     target_path = Column(Text)
     debug_key = Column(Text, unique=True)
     status = Column(Text, default="queued")  # queued/processing/done/error/duplicate/review
-    current_step = Column(Text)  # IA-01 bis IA-10
+    current_step = Column(Text)  # IA-01 bis IA-11
     step_result = Column(JSON, default=dict)
     error_message = Column(Text)
     source_label = Column(Text)  # which inbox this came from

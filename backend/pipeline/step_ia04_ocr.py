@@ -1,8 +1,6 @@
-import asyncio
 import base64
 import json
 import os
-import subprocess
 import httpx
 from config import config_manager
 
@@ -33,7 +31,7 @@ async def execute(job, session) -> dict:
         return {"status": "skipped", "reason": "not configured"}
 
     # Skip if AI analysis already found no text-relevant content
-    ai_result = (job.step_result or {}).get("IA-02", {})
+    ai_result = (job.step_result or {}).get("IA-03", {})
     ai_type = ai_result.get("type", "")
     # Only run OCR for screenshots, documents, or if AI detected text-like content
     if ai_type not in ("screenshot", "document", "") and not ai_result.get("parse_error"):
@@ -41,31 +39,13 @@ async def execute(job, session) -> dict:
 
     api_key = await config_manager.get("ai.api_key", "not-needed")
 
-    # Read image (use temp JPEG if needed)
+    # Use pre-converted temp file from IA-02 if available
     filepath = job.original_path
-    ext = os.path.splitext(filepath)[1].lower()
+    convert_result = (job.step_result or {}).get("IA-02", {})
+    image_path = convert_result.get("temp_path") or filepath
 
-    if ext in (".heic", ".heif"):
-        temp_path = filepath + ".ocr.jpg"
-        try:
-            await asyncio.to_thread(
-                subprocess.run,
-                ["heif-convert", filepath, temp_path],
-                capture_output=True, timeout=30, check=True
-            )
-            image_path = temp_path
-        except Exception:
-            return {"status": "skipped", "reason": "HEIC conversion failed"}
-    else:
-        temp_path = None
-        image_path = filepath
-
-    try:
-        with open(image_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode("utf-8")
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+    with open(image_path, "rb") as f:
+        image_data = base64.b64encode(f.read()).decode("utf-8")
 
     mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
     mime_type = mime_map.get(os.path.splitext(image_path)[1].lower(), "image/jpeg")

@@ -5,22 +5,24 @@ Automatisierte Medienverarbeitung: Fotos und Videos werden erkannt, analysiert, 
 ## Funktionsweise
 
 ```
-Inbox  →  EXIF lesen  →  KI-Analyse  →  Geocoding  →  Tags schreiben  →  Sortieren  →  Bibliothek
+Inbox  →  EXIF lesen  →  Konvertierung  →  KI-Analyse  →  Geocoding  →  Tags schreiben  →  Sortieren  →  Log  →  Bibliothek
 ```
 
-Neue Dateien im Eingangsverzeichnis werden automatisch erkannt und durchlaufen eine 9-stufige Pipeline:
+Neue Dateien im Eingangsverzeichnis werden automatisch erkannt und durchlaufen eine 11-stufige Pipeline:
 
 | Step | Name | Beschreibung |
 |------|------|-------------|
-| IA-01 | EXIF lesen | Metadaten via ExifTool extrahieren |
-| IA-02 | KI-Analyse | Bild analysieren (Typ, Tags, Beschreibung, Stimmung) |
-| IA-03 | Duplikaterkennung | Perceptual Hash Vergleich |
+| IA-01 | EXIF auslesen | Metadaten via ExifTool extrahieren |
+| IA-02 | Formatkonvertierung | HEIC/DNG/RAW/GIF → temp JPEG für KI-Analyse |
+| IA-03 | KI-Analyse | Bild analysieren (Typ, Tags, Beschreibung, Stimmung) |
 | IA-04 | OCR | Texterkennung (Screenshots, Dokumente) |
-| IA-05 | Geocoding | GPS-Koordinaten → Ort, Land, Stadt |
-| IA-06 | EXIF schreiben | Tags und Beschreibung in Datei zurückschreiben |
-| IA-07 | Sortieren | Datei in Bibliothek nach Typ/Datum einsortieren |
-| IA-08 | Benachrichtigung | E-Mail-Benachrichtigung bei Fehlern |
-| IA-09 | Aufräumen | Temporäre Dateien entfernen |
+| IA-05 | Duplikaterkennung | Perceptual Hash Vergleich |
+| IA-06 | Geocoding | GPS-Koordinaten → Ort, Land, Stadt |
+| IA-07 | EXIF Tags schreiben | Tags und Beschreibung in Datei zurückschreiben |
+| IA-08 | Sortieren | Datei in Bibliothek nach Typ/Datum einsortieren |
+| IA-09 | Benachrichtigung | E-Mail-Benachrichtigung bei Fehlern |
+| IA-10 | Cleanup | Temporäre Dateien entfernen |
+| IA-11 | SQLite Log-Eintrag | Verarbeitungszusammenfassung loggen |
 
 ## Schnellstart
 

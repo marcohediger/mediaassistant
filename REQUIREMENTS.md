@@ -118,37 +118,48 @@ Verfügbare Trigger-Tags in Immich:
 ```
 Neue Datei in /inbox/mobile/ oder /inbox/manual/
         ↓
-1. EXIF auslesen (ExifTool)
-   - Make, Model, DateTimeOriginal, GPS, Software
+ 1. EXIF auslesen (ExifTool)
+    - Make, Model, DateTimeOriginal, GPS, Software
         ↓
-2. Klassifizierung (Regel-basiert, schnell)
-   - Hat Make/Model + DateTimeOriginal → "photo" Kandidat
-   - Dateiname enthält "-WA" → "whatsapp"
-   - Dateiname enthält "Screenshot" → "screenshot"
-   - EXIF komplett leer → weiter zu KI
+ 2. Formatkonvertierung
+    - HEIC/DNG/RAW/GIF → temp JPEG für KI-Analyse
+    - JPG/PNG/WebP → direkt, keine Konvertierung
         ↓
-3. KI-Analyse (LM Studio Vision, nur wenn nötig oder für Anreicherung)
-   - Typ: personal_photo / whatsapp / screenshot / internet_image
-   - Inhalt: Personen, Landschaft, Essen, Dokument, Tier, etc.
-   - Stimmung: indoor / outdoor / nacht / gegenlicht
-   - Personenanzahl (keine Namen)
-   - Qualität: unscharf / gut / sehr gut
-   - Beschreibung: Freitext (1-2 Sätze)
-   - OCR: sichtbarer Text im Bild (Schilder, Dokumente, Screenshots, Whiteboards)
+ 3. KI-Analyse (LM Studio Vision)
+    - Typ: personal_photo / whatsapp / screenshot / internet_image
+    - Inhalt: Personen, Landschaft, Essen, Dokument, Tier, etc.
+    - Stimmung: indoor / outdoor / nacht / gegenlicht
+    - Personenanzahl (keine Namen)
+    - Qualität: unscharf / gut / sehr gut
+    - Beschreibung: Freitext (1-2 Sätze)
         ↓
-4. Tags in EXIF schreiben (ExifTool, overwrite_original)
-   - Keywords: Typ, Inhalt-Tags, Qualität
-   - ImageDescription: KI-Freitext
+ 4. OCR — Texterkennung
+    - Screenshots, Dokumente, Schilder, Whiteboards
         ↓
-5. Zielordner bestimmen
-   - photos/YYYY/YYYY-MM/    (personal_photo, Datum aus EXIF)
-   - whatsapp/YYYY/          (whatsapp)
-   - screenshots/YYYY/       (screenshot)
-   - unknown/review/         (KI-Konfidenz < Schwellwert oder unklar)
+ 5. Duplikaterkennung
+    - SHA256 Hash (exakt) + pHash (ähnlich)
         ↓
-6. Datei verschieben (Original wird gelöscht nach erfolgreichem Move)
+ 6. Geocoding
+    - GPS-Koordinaten → Ort, Land, Stadt
         ↓
-7. SQLite Log-Eintrag schreiben
+ 7. EXIF Tags schreiben (ExifTool, overwrite_original)
+    - Keywords: Typ, Inhalt-Tags, Qualität, Ort
+    - ImageDescription: KI-Freitext + Ort
+        ↓
+ 8. Sortieren — Zielordner bestimmen + Datei verschieben
+    - photos/YYYY/YYYY-MM/    (personal_photo, Datum aus EXIF)
+    - whatsapp/YYYY/          (whatsapp)
+    - screenshots/YYYY/       (screenshot)
+    - unknown/review/         (KI-Konfidenz < Schwellwert oder unklar)
+        ↓
+ 9. Benachrichtigung
+    - E-Mail bei Fehlern (SMTP, zusammengefasst)
+        ↓
+10. Cleanup
+    - Temporäre Dateien (temp JPEG etc.) entfernen
+        ↓
+11. SQLite Log-Eintrag
+    - Verarbeitungszusammenfassung loggen
 ```
 
 ## Job-System (SQLite)
@@ -163,7 +174,7 @@ original_path   TEXT
 target_path     TEXT        -- wird gesetzt wenn bekannt
 debug_key       TEXT        -- IA-YYYY-NNNN
 status          TEXT        -- queued / processing / done / error / duplicate / review
-current_step    TEXT        -- IA-01 bis IA-10, null wenn queued
+current_step    TEXT        -- IA-01 bis IA-11, null wenn queued
 step_result     JSON        -- Ergebnisse pro Step
 error_message   TEXT        -- Fehlermeldung wenn status=error
 created_at      DATETIME
@@ -174,16 +185,17 @@ completed_at    DATETIME
 ### step_result JSON
 ```json
 {
-  "IA-01": {"make": "Apple", "model": "iPhone15", "date": "2024-06-12", "gps": true},
-  "IA-02": {"regel": "photo", "konfidenz": "hoch"},
-  "IA-03": {"converted": true, "temp_path": "/tmp/IA-2025-0342.jpg"},
-  "IA-04": {"typ": "personal_photo", "tags": ["Zürich", "outdoor"], "qualitaet": "gut"},
-  "IA-05": {"duplikat": false, "phash_score": null},
-  "IA-06": {"geocoding": "Altstadt, Zürich, Schweiz"},
-  "IA-07": {"target_path": "/bibliothek/photos/2024/2024-06/IMG_1234.jpg"},
-  "IA-08": {"moved": true},
-  "IA-09": {"cleanup": true},
-  "IA-10": {"logged": true}
+  "IA-01": {"make": "Apple", "model": "iPhone15", "date": "2024-06-12", "gps": true, "has_exif": true},
+  "IA-02": {"converted": true, "temp_path": "/tmp/IA-2025-0342.tmp.jpg"},
+  "IA-03": {"type": "personal_photo", "tags": ["Zürich", "outdoor"], "quality": "gut", "confidence": 0.95},
+  "IA-04": {"has_text": false, "text": "", "text_type": "keiner"},
+  "IA-05": {"status": "skipped", "reason": "not yet implemented"},
+  "IA-06": {"country": "Schweiz", "city": "Zürich", "suburb": "Altstadt", "provider": "nominatim"},
+  "IA-07": {"keywords_written": ["Zürich", "outdoor", "personal_photo"], "tags_count": 3},
+  "IA-08": {"category": "photo", "target_path": "/bibliothek/photos/2024/2024-06/IMG_1234.jpg", "moved": true},
+  "IA-09": {"status": "skipped", "reason": "not yet implemented"},
+  "IA-10": {"status": "skipped", "reason": "not yet implemented"},
+  "IA-11": {"logged": true, "summary": "personal_photo, 3 Tags, Zürich/Schweiz"}
 }
 ```
 
@@ -206,7 +218,7 @@ completed_at    DATETIME
 ```
 
 - Bei Migration: Fortschritt bleibt erhalten auch nach Neustart
-- Bei LM Studio Timeout: nur IA-04 wiederholen, nicht von vorne
+- Bei LM Studio Timeout: nur IA-03 wiederholen, nicht von vorne
 - Im Webinterface: "Ab diesem Step wiederholen" Button pro Job
 - Live-Ansicht: aktueller Step aller laufenden Jobs
 
@@ -261,26 +273,26 @@ Jeder Verarbeitungsschritt wird mit einem Step-Code geloggt:
 | Code | Schritt |
 |---|---|
 | IA-01 | EXIF auslesen |
-| IA-02 | Regelprüfung |
-| IA-03 | Formatkonvertierung (HEIC/DNG/GIF → JPEG) |
-| IA-04 | KI-Analyse |
-| IA-05 | Duplikat-Prüfung (SHA256 + pHash) |
-| IA-06 | EXIF Tags schreiben |
-| IA-07 | Zielordner bestimmen |
-| IA-08 | Datei verschieben |
-| IA-09 | Cleanup (temp Dateien) |
-| IA-10 | SQLite Log-Eintrag |
+| IA-02 | Formatkonvertierung (HEIC/DNG/RAW/GIF → JPEG) |
+| IA-03 | KI-Analyse |
+| IA-04 | OCR (Texterkennung) |
+| IA-05 | Duplikaterkennung (SHA256 + pHash) |
+| IA-06 | Geocoding |
+| IA-07 | EXIF Tags schreiben |
+| IA-08 | Sortieren (Zielordner + verschieben) |
+| IA-09 | Benachrichtigung |
+| IA-10 | Cleanup (temp Dateien) |
+| IA-11 | SQLite Log-Eintrag |
 
 Log-Format pro Datei:
 ```
 2025-03-20 14:32:01 | IA-2025-0342 | IMG_1234.heic
   [IA-01] EXIF auslesen        ✓ Make=Apple, DateTimeOriginal=2024-06-12
-  [IA-02] Regelprüfung         ✓ Keine Regel matcht → weiter zu KI
-  [IA-03] Formatkonvertierung  ✓ temp JPEG erstellt
-  [IA-04] KI-Analyse           ✗ FEHLER: LM Studio Timeout nach 30s
-  [IA-09] Cleanup temp JPEG    ✓
+  [IA-02] Formatkonvertierung  ✓ temp JPEG erstellt
+  [IA-03] KI-Analyse           ✗ FEHLER: LM Studio Timeout nach 30s
+  [IA-10] Cleanup temp JPEG    ✓
   → Datei nach /inbox/error/ verschoben
-  → Fehlermail: "IA-2025-0342 Fehler bei [IA-04] KI-Analyse: Timeout"
+  → Fehlermail: "IA-2025-0342 Fehler bei [IA-03] KI-Analyse: Timeout"
 ```
 
 - Debugschlüssel wird in SQLite gespeichert → im Webinterface suchbar
@@ -479,7 +491,7 @@ Flach:               photos/{YYYY}/
 
 ## Offene Tasks
 - [x] SETUP: Projektstruktur anlegen (backend, docker-compose, volumes)
-- [ ] FEAT: Dateiformat-Handling (HEIC/DNG/GIF → temp JPEG vor KI-Analyse)
+- [x] FEAT: Dateiformat-Handling (HEIC/DNG/GIF → temp JPEG vor KI-Analyse, IA-02)
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
 - [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
 - [ ] FEAT: Geocoding Provider-Schnittstelle (Nominatim / Photon / Google Maps, einheitlicher Output)
@@ -500,7 +512,7 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: Duplikat-Review Webinterface (Original + alle Duplikate gruppiert, Side-by-Side, Batch-Löschen)
 - [ ] FEAT: Fehlerbehandlung → /inbox/error/ + .log Datei
 - [ ] FEAT: SMTP Fehlerbenachrichtigung (zusammengefasst, max 1x/Stunde)
-- [x] FEAT: Debugschlüssel (MA-YYYY-NNNN) + Step-Codes (IA-01 bis IA-09) pro Verarbeitung
+- [x] FEAT: Debugschlüssel (MA-YYYY-NNNN) + Step-Codes (IA-01 bis IA-11) pro Verarbeitung
 - [x] FEAT: Job-System (SQLite, Eintrag bei Erkennung, Status + current_step + step_result JSON)
 - [x] FEAT: Resume-Logik (nach Absturz ab fehlendem Step weitermachen)
 - [x] FEAT: SQLite Logging (System-Log + Verarbeitungs-Log)
