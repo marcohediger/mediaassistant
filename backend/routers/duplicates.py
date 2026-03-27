@@ -15,6 +15,7 @@ from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
 from models import Job
+from safe_file import safe_move
 from system_logger import log_info
 
 router = APIRouter()
@@ -105,21 +106,35 @@ def _union_find_groups(links: list[tuple[str, str]]) -> dict[str, set[str]]:
     return groups
 
 
+def _resolve_filepath(job) -> str:
+    """Find the actual file path, checking target, original, and temp paths."""
+    for path in [job.target_path, job.original_path]:
+        if path and os.path.exists(path):
+            return path
+    # Fallback: IA-02 converted temp file
+    convert_result = (job.step_result or {}).get("IA-02", {})
+    temp_path = convert_result.get("temp_path")
+    if temp_path and os.path.exists(temp_path):
+        return temp_path
+    return job.target_path or job.original_path
+
+
 async def _build_member(job, session) -> dict:
     """Build a member dict for a single job."""
-    filepath = job.target_path or job.original_path
+    filepath = _resolve_filepath(job)
     dup_info = (job.step_result or {}).get("IA-03", {})
     ai_result = (job.step_result or {}).get("IA-04", {})
     exif = (job.step_result or {}).get("IA-01", {})
     is_dup = dup_info.get("status") == "duplicate"
-    img_info = await asyncio.to_thread(_get_image_info, filepath) if os.path.exists(filepath) else {}
+    exists = os.path.exists(filepath)
+    img_info = await asyncio.to_thread(_get_image_info, filepath) if exists else {}
 
     return {
         "job_id": job.id,
         "debug_key": job.debug_key,
         "filename": job.filename,
         "filepath": filepath,
-        "exists": os.path.exists(filepath),
+        "exists": exists,
         "is_original": not is_dup,
         "match_type": dup_info.get("match_type", "original") if is_dup else "original",
         "phash_distance": dup_info.get("phash_distance", 0),
@@ -222,15 +237,7 @@ async def thumbnail(job_id: int):
     if not job:
         return Response(status_code=404)
 
-    filepath = job.target_path or job.original_path
-
-    # For HEIC/RAW, check if there's a converted temp file
-    ext = os.path.splitext(filepath)[1].lower()
-    if ext in (".heic", ".heif", ".dng", ".cr2", ".nef", ".arw"):
-        convert_result = (job.step_result or {}).get("IA-02", {})
-        temp_path = convert_result.get("temp_path")
-        if temp_path and os.path.exists(temp_path):
-            filepath = temp_path
+    filepath = _resolve_filepath(job)
 
     if not os.path.exists(filepath):
         return Response(status_code=404)

@@ -625,6 +625,18 @@ select:focus {
     font-size: 1.5rem;
 }
 
+.detail-preview {
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
+
+.detail-preview img {
+    max-width: 100%;
+    max-height: 400px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
 .detail-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
