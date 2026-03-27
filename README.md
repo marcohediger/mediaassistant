@@ -20,9 +20,11 @@ Neue Dateien im Eingangsverzeichnis werden automatisch erkannt und durchlaufen e
 | IA-06 | Geocoding | GPS-Koordinaten → Ort, Land, Stadt |
 | IA-07 | EXIF Tags schreiben | Tags und Beschreibung in Datei zurückschreiben |
 | IA-08 | Sortieren | Datei in Bibliothek nach Typ/Datum einsortieren |
-| IA-09 | Benachrichtigung | E-Mail-Benachrichtigung bei Fehlern |
+| IA-09 | Benachrichtigung | E-Mail bei Fehlern (SMTP, Office 365 / Gmail) |
 | IA-10 | Cleanup | Temporäre Dateien entfernen |
 | IA-11 | SQLite Log-Eintrag | Verarbeitungszusammenfassung loggen |
+
+IA-09 bis IA-11 sind **Finalizer** — sie laufen immer, auch wenn ein kritischer Schritt fehlschlägt.
 
 ## Schnellstart
 
@@ -50,9 +52,19 @@ AI_MODEL=qwen/qwen3-vl-4b
 INBOX_PATH=/volume1/inbox
 LIBRARY_PATH=/volume1/bibliothek
 
+# SMTP (z.B. Office 365)
+SMTP_SERVER=smtp.office365.com
+SMTP_PORT=587
+SMTP_SSL=false
+SMTP_USER=user@example.com
+SMTP_PASSWORD=
+SMTP_RECIPIENT=user@example.com
+
 # Zeitzone
 TZ=Europe/Zurich
 ```
+
+ENV-Variablen werden beim ersten Start automatisch in die Datenbank übernommen. Danach können alle Einstellungen über das Web-Interface geändert werden.
 
 ### Starten (Produktion)
 
