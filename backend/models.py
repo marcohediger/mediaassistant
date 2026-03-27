@@ -23,6 +23,7 @@ class Job(Base):
     source_inbox_path = Column(Text)  # inbox base path (for folder_tags)
     dry_run = Column(Boolean, default=False)  # dry-run mode (don't move/write)
     use_immich = Column(Boolean, default=False)  # upload to Immich instead of target directory
+    immich_asset_id = Column(Text)  # source asset ID when processing via Immich webhook
     file_hash = Column(Text)  # SHA256
     phash = Column(Text)  # perceptual hash
     created_at = Column(DateTime, default=lambda: datetime.now())

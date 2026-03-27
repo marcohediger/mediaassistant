@@ -1,8 +1,9 @@
 import asyncio
 import hashlib
 import os
+import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
@@ -120,6 +121,94 @@ async def _scan_and_process():
             await run_pipeline(job_id)
 
 
+async def _poll_immich():
+    """Poll Immich for new assets and process them through the pipeline."""
+    from immich_client import get_recent_assets, download_asset
+
+    # Get last poll timestamp
+    last_poll = await config_manager.get("immich.last_poll", None)
+
+    # First activation: set timestamp to now, skip existing assets
+    now = datetime.now(timezone.utc).isoformat()
+    if not last_poll:
+        await config_manager.set("immich.last_poll", now)
+        await log_info("immich_poll", "First activation — skipping existing assets, polling starts from now")
+        return
+
+    try:
+        assets = await get_recent_assets(since=last_poll)
+    except Exception as e:
+        await log_error("immich_poll", f"Failed to fetch assets from Immich", str(e))
+        return
+
+    if not assets:
+        await config_manager.set("immich.last_poll", now)
+        return
+
+    # Filter out assets already processed (by immich_asset_id in jobs table)
+    asset_ids = [a["id"] for a in assets]
+    async with async_session() as session:
+        existing = await session.execute(
+            select(Job.immich_asset_id).where(
+                Job.immich_asset_id.in_(asset_ids)
+            )
+        )
+        already_processed = {row[0] for row in existing.all()}
+
+    new_assets = [a for a in assets if a["id"] not in already_processed]
+    if not new_assets:
+        await config_manager.set("immich.last_poll", now)
+        return
+
+    await log_info("immich_poll", f"{len(new_assets)} new assets found in Immich")
+
+    # Process each new asset
+    for asset in new_assets:
+        asset_id = asset["id"]
+        filename = asset.get("originalFileName", f"{asset_id}.jpg")
+
+        # Check file extension
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            continue
+
+        # Download to temp directory
+        tmp_dir = tempfile.mkdtemp(prefix="ma_immich_")
+        try:
+            file_path = await download_asset(asset_id, tmp_dir)
+        except Exception as e:
+            await log_error("immich_poll", f"Download failed: {filename}", str(e))
+            # Clean up temp dir
+            try:
+                os.rmdir(tmp_dir)
+            except OSError:
+                pass
+            continue
+
+        file_hash = await asyncio.to_thread(_sha256, file_path)
+
+        async with async_session() as session:
+            debug_key = await _generate_debug_key(session)
+            job = Job(
+                filename=filename,
+                original_path=file_path,
+                debug_key=debug_key,
+                status="queued",
+                source_label="Immich",
+                use_immich=True,
+                immich_asset_id=asset_id,
+                file_hash=file_hash,
+            )
+            session.add(job)
+            await session.commit()
+            job_id = job.id
+
+        await log_info("immich_poll", f"Processing: {filename}", f"Asset: {asset_id}, Key: {debug_key}")
+        await run_pipeline(job_id)
+
+    await config_manager.set("immich.last_poll", now)
+
+
 async def start_filewatcher(shutdown_event: asyncio.Event):
     """Main filewatcher loop, runs as background task."""
     # Resume interrupted jobs on startup
@@ -138,6 +227,14 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
                 await _scan_and_process()
         except Exception as e:
             await log_error("filewatcher", f"Scan error: {e}")
+
+        try:
+            if await config_manager.is_module_enabled("immich"):
+                poll_enabled = await config_manager.get("immich.poll_enabled", False)
+                if poll_enabled:
+                    await _poll_immich()
+        except Exception as e:
+            await log_error("immich_poll", f"Poll error: {e}")
 
         interval = await config_manager.get("filewatcher.interval", 5)
         try:
