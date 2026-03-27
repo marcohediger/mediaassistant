@@ -1,15 +1,14 @@
 import os
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from config import config_manager
 from database import async_session
 from models import Module, InboxDirectory
 from system_logger import log_warning, log_info
+from template_engine import render
 
 router = APIRouter(prefix="/settings")
-templates = Jinja2Templates(directory="templates")
 
 MODULE_NAMES = ["ki_analyse", "geocoding", "duplikat_erkennung", "ocr", "smtp", "filewatcher"]
 
@@ -26,6 +25,8 @@ from pipeline.step_ia04_ai import DEFAULT_SYSTEM_PROMPT as _DEFAULT_AI_PROMPT
 
 async def _get_cfg() -> dict:
     return {
+        "ui_language": await config_manager.get("ui.language", "de"),
+        "ui_theme": await config_manager.get("ui.theme", "dark"),
         "ai_url": await config_manager.get("ai.backend_url", ""),
         "ai_model": await config_manager.get("ai.model", ""),
         "ai_prompt": await config_manager.get("ai.prompt", "") or _DEFAULT_AI_PROMPT,
@@ -63,7 +64,7 @@ async def settings_page(request: Request):
         result = await session.execute(select(InboxDirectory).order_by(InboxDirectory.id))
         inboxes = result.scalars().all()
 
-    return templates.TemplateResponse(request, "settings.html", {
+    return await render(request, "settings.html", {
         "modules": type("M", (), modules)(),
         "cfg": type("C", (), cfg)(),
         "inboxes": inboxes,
@@ -75,6 +76,10 @@ async def settings_page(request: Request):
 @router.post("/save")
 async def save_settings(request: Request):
     form = await request.form()
+
+    # Appearance
+    await config_manager.set("ui.language", form.get("ui_language", "de"))
+    await config_manager.set("ui.theme", form.get("ui_theme", "dark"))
 
     # Module toggles
     for name in MODULE_NAMES:

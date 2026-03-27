@@ -1,22 +1,29 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="{{ lang | default('de') }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}MediaAssistant{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=8">
+    <link rel="stylesheet" href="/static/css/style.css?v=9">
+    {% if theme | default('dark') == 'light' %}
+    <link rel="stylesheet" href="/static/css/light.css?v=1">
+    {% endif %}
 </head>
-<body>
+<body data-theme="{{ theme | default('dark') }}">
     <nav class="navbar">
         <a href="/" class="nav-brand">
+            {% if theme | default('dark') == 'light' %}
+            <img src="/static/img/logo_light.svg" alt="MediaAssistant" class="nav-logo">
+            {% else %}
             <img src="/static/img/logo_dark.svg" alt="MediaAssistant" class="nav-logo">
+            {% endif %}
         </a>
         <div class="nav-links">
-            <a href="/">Dashboard</a>
-            <a href="/duplicates">Duplikate</a>
-            <a href="/logs">Logs</a>
-            <a href="/settings">Einstellungen</a>
+            <a href="/">{{ t.nav.dashboard | default('Dashboard') }}</a>
+            <a href="/duplicates">{{ t.nav.duplicates | default('Duplikate') }}</a>
+            <a href="/logs">{{ t.nav.logs | default('Logs') }}</a>
+            <a href="/settings">{{ t.nav.settings | default('Einstellungen') }}</a>
         </div>
     </nav>
     <main class="container">

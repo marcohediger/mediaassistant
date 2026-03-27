@@ -8,7 +8,6 @@ from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from PIL import Image
 from sqlalchemy import select, func
 
@@ -18,8 +17,9 @@ from models import Job
 from safe_file import safe_move
 from system_logger import log_info
 
+from template_engine import render
+
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
 
 THUMB_SIZE = (400, 400)
 HEIC_EXTENSIONS = {".heic", ".heif"}
@@ -253,7 +253,7 @@ async def duplicates_page(request: Request):
         return RedirectResponse(url="/setup", status_code=302)
 
     groups = await _build_duplicate_groups()
-    return templates.TemplateResponse(request, "duplicates.html", {
+    return await render(request, "duplicates.html", {
         "groups": groups,
         "total_groups": len(groups),
         "exact_groups": sum(1 for g in groups if g["all_exact"]),

@@ -1,16 +1,10 @@
 import httpx
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
 from config import config_manager
+from template_engine import render
 
 router = APIRouter(prefix="/setup")
-templates = Jinja2Templates(directory="templates")
-
-
-def render(request: Request, template: str, context: dict):
-    context["request"] = request
-    return templates.TemplateResponse(request, template, context)
 
 
 @router.get("")
@@ -31,20 +25,20 @@ async def setup_step(request: Request, step: int):
         context["ai_url"] = await config_manager.get("ai.backend_url", config_manager.get_env("AI_BACKEND_URL", "http://localhost:1234/v1"))
         context["ai_api_key"] = await config_manager.get("ai.api_key", config_manager.get_env("AI_API_KEY", ""))
         context["ai_model"] = await config_manager.get("ai.model", config_manager.get_env("AI_MODEL", ""))
-        return render(request, "setup/step1_ai.html", context)
+        return await render(request, "setup/step1_ai.html", context)
     elif step == 2:
         context["smtp_server"] = await config_manager.get("smtp.server", "")
         context["smtp_port"] = await config_manager.get("smtp.port", 587)
         context["smtp_ssl"] = await config_manager.get("smtp.ssl", True)
         context["smtp_user"] = await config_manager.get("smtp.user", "")
         context["smtp_recipient"] = await config_manager.get("smtp.recipient", "")
-        return render(request, "setup/step2_smtp.html", context)
+        return await render(request, "setup/step2_smtp.html", context)
     elif step == 3:
         context["inbox_path"] = config_manager.get_env("INBOX_PATH", "/inbox")
         context["library_path"] = config_manager.get_env("LIBRARY_PATH", "/bibliothek")
-        return render(request, "setup/step3_paths.html", context)
+        return await render(request, "setup/step3_paths.html", context)
     elif step == 4:
-        return render(request, "setup/step4_done.html", context)
+        return await render(request, "setup/step4_done.html", context)
 
     return RedirectResponse(url="/setup/step/1", status_code=302)
 
@@ -88,7 +82,7 @@ async def setup_step1_test(
         context["success"] = "Verbindung erfolgreich!"
     except Exception as e:
         context["error"] = f"Verbindung fehlgeschlagen: {e}"
-    return render(request, "setup/step1_ai.html", context)
+    return await render(request, "setup/step1_ai.html", context)
 
 
 @router.post("/step/2")

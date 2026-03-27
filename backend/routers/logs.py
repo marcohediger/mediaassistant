@@ -1,15 +1,14 @@
 import json
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
 from models import Job, SystemLog
+from template_engine import render, templates
 
 router = APIRouter(prefix="/logs")
-templates = Jinja2Templates(directory="templates")
 
 
 def _tojson_unicode(value, indent=None):
@@ -69,7 +68,7 @@ async def logs_page(request: Request):
 
     total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
 
-    return templates.TemplateResponse(request, "logs.html", {
+    return await render(request, "logs.html", {
         "tab": tab,
         "jobs": jobs,
         "system_logs": system_logs,
@@ -94,7 +93,7 @@ async def log_detail(request: Request, debug_key: str):
     if not job:
         return RedirectResponse(url="/logs?tab=jobs", status_code=302)
 
-    return templates.TemplateResponse(request, "log_detail.html", {"job": job})
+    return await render(request, "log_detail.html", {"job": job})
 
 
 @router.get("/job/{debug_key}/json")

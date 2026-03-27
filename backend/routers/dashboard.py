@@ -5,7 +5,6 @@ import time
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
@@ -21,8 +20,9 @@ _module_cache: list[dict] = []
 _module_cache_time: float = 0
 MODULE_CACHE_TTL = 30  # seconds
 
+from template_engine import render
+
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
 
 MODULE_LABELS = {
     "ki_analyse": "KI-Analyse",
@@ -240,7 +240,7 @@ async def dashboard(request: Request):
 
     modules = await _get_module_status()
 
-    return templates.TemplateResponse(request, "dashboard.html", {
+    return await render(request, "dashboard.html", {
         "stats": {
             "total": total,
             "done": done,

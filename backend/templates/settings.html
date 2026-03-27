@@ -351,8 +351,37 @@
     </div>
 </div>
 
+<!-- Darstellung -->
+<div class="settings-section">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.appearance }}</h2>
+            <span class="section-desc">{{ t.settings.appearance_desc }}</span>
+        </div>
+    </div>
+    <div class="section-body">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="ui_language">{{ t.settings.language }}</label>
+                <select id="ui_language" name="ui_language">
+                    {% for code, name in supported_languages.items() %}
+                    <option value="{{ code }}" {{ 'selected' if cfg.ui_language == code else '' }}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="ui_theme">{{ t.settings.theme }}</label>
+                <select id="ui_theme" name="ui_theme">
+                    <option value="dark" {{ 'selected' if cfg.ui_theme == 'dark' else '' }}>{{ t.settings.theme_dark }}</option>
+                    <option value="light" {{ 'selected' if cfg.ui_theme == 'light' else '' }}>{{ t.settings.theme_light }}</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="form-actions">
-    <button type="submit" class="btn btn-primary">Alle Einstellungen speichern</button>
+    <button type="submit" class="btn btn-primary">{{ t.settings.save_all }}</button>
 </div>
 
 </form>

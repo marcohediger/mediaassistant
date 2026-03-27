@@ -1,38 +1,38 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — MediaAssistant{% endblock %}
+{% block title %}{{ t.dashboard.title }} — MediaAssistant{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
+<h1>{{ t.dashboard.title }}</h1>
 
 <div class="stats-grid" id="stats-grid">
     <div class="stat-card">
         <div class="stat-value" data-stat="total">{{ stats.total }}</div>
-        <div class="stat-label">Total</div>
+        <div class="stat-label">{{ t.dashboard.total }}</div>
     </div>
     <div class="stat-card stat-success">
         <div class="stat-value" data-stat="done">{{ stats.done }}</div>
-        <div class="stat-label">Fertig</div>
+        <div class="stat-label">{{ t.dashboard.done }}</div>
     </div>
     <div class="stat-card stat-warning">
         <div class="stat-value" data-stat="queued">{{ stats.queued }}</div>
-        <div class="stat-label">Wartend</div>
+        <div class="stat-label">{{ t.dashboard.queued }}</div>
     </div>
     <div class="stat-card stat-info">
         <div class="stat-value" data-stat="processing">{{ stats.processing }}</div>
-        <div class="stat-label">In Arbeit</div>
+        <div class="stat-label">{{ t.dashboard.processing }}</div>
     </div>
     <div class="stat-card stat-error">
         <div class="stat-value" data-stat="errors">{{ stats.errors }}</div>
-        <div class="stat-label">Fehler</div>
+        <div class="stat-label">{{ t.dashboard.errors }}</div>
     </div>
     {% if stats.duplicates > 0 %}
     <a href="/duplicates" class="stat-card stat-duplicate" style="text-decoration:none">
         <div class="stat-value" data-stat="duplicates">{{ stats.duplicates }}</div>
-        <div class="stat-label">Duplikate</div>
+        <div class="stat-label">{{ t.dashboard.duplicates }}</div>
     </a>
     {% endif %}
 </div>
 
-<h2>Module</h2>
+<h2>{{ t.dashboard.modules }}</h2>
 <div class="modules-grid" id="modules-grid">
     {% for module in modules %}
     <div class="module-card module-{{ module.status }}">
@@ -51,24 +51,24 @@
     {% endfor %}
 </div>
 <div class="module-legend">
-    <span><span class="legend-dot legend-ready">●</span> Aktiv</span>
-    <span><span class="legend-dot legend-error">●</span> Fehler</span>
-    <span><span class="legend-dot legend-misconfig">●</span> Nicht konfiguriert</span>
-    <span><span class="legend-dot legend-disabled">○</span> Deaktiviert</span>
+    <span><span class="legend-dot legend-ready">●</span> {{ t.dashboard.active }}</span>
+    <span><span class="legend-dot legend-error">●</span> {{ t.dashboard.error }}</span>
+    <span><span class="legend-dot legend-misconfig">●</span> {{ t.dashboard.misconfigured }}</span>
+    <span><span class="legend-dot legend-disabled">○</span> {{ t.dashboard.disabled }}</span>
 </div>
 
-<h2>Letzte Verarbeitungen</h2>
+<h2>{{ t.dashboard.recent }}</h2>
 {% if recent_jobs %}
 <div class="log-table-wrap">
     <table class="log-table">
         <thead>
             <tr>
-                <th>Debug-Key</th>
-                <th>Datei</th>
-                <th>Status</th>
-                <th>Schritt</th>
-                <th>Fehler</th>
-                <th>Zeit</th>
+                <th>{{ t.dashboard.debug_key }}</th>
+                <th>{{ t.dashboard.file }}</th>
+                <th>{{ t.dashboard.status }}</th>
+                <th>{{ t.dashboard.step }}</th>
+                <th>{{ t.dashboard.errors }}</th>
+                <th>{{ t.dashboard.time }}</th>
             </tr>
         </thead>
         <tbody id="recent-jobs">
@@ -86,9 +86,9 @@
     </table>
 </div>
 <div class="log-link">
-    <a href="/logs" class="btn btn-small btn-secondary">Alle Logs anzeigen</a>
+    <a href="/logs" class="btn btn-small btn-secondary">{{ t.dashboard.show_all_logs }}</a>
 </div>
 {% else %}
-<p class="section-note">Noch keine Verarbeitungen.</p>
+<p class="section-note">{{ t.dashboard.no_jobs }}</p>
 {% endif %}
 {% endblock %}
