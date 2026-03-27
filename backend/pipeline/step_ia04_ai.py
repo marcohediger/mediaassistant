@@ -6,7 +6,7 @@ import httpx
 from config import config_manager
 
 
-SYSTEM_PROMPT = """Du bist ein Bildanalyse-Assistent. Analysiere das Bild und antworte ausschliesslich mit validem JSON (kein Markdown, kein Text drumherum).
+DEFAULT_SYSTEM_PROMPT = """Du bist ein Bildanalyse-Assistent. Analysiere das Bild und antworte ausschliesslich mit validem JSON (kein Markdown, kein Text drumherum).
 
 Analysiere folgende Aspekte:
 {
@@ -39,6 +39,7 @@ async def execute(job, session) -> dict:
         return {"status": "skipped", "reason": "not configured"}
 
     api_key = await config_manager.get("ai.api_key", "not-needed")
+    system_prompt = await config_manager.get("ai.prompt", DEFAULT_SYSTEM_PROMPT)
 
     # Use pre-converted temp file from IA-02 if available
     filepath = job.original_path
@@ -70,7 +71,7 @@ async def execute(job, session) -> dict:
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": [
                 {"type": "text", "text": f"Analysiere dieses Bild.{exif_context}"},
                 {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}

@@ -126,6 +126,12 @@
             <input type="password" id="ai_api_key" name="ai_api_key" placeholder="••••••••">
             <small>Leer lassen um bestehenden Key zu behalten</small>
         </div>
+        <div class="form-group">
+            <label for="ai_prompt">System-Prompt</label>
+            <textarea id="ai_prompt" name="ai_prompt" rows="16" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4;">{{ cfg.ai_prompt }}</textarea>
+            <small>Der Prompt steuert wie die KI Bilder analysiert. Die Antwort muss valides JSON sein.
+            <br>Leer lassen = Standard-Prompt verwenden.</small>
+        </div>
     </div>
 </div>
 

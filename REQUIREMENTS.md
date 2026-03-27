@@ -551,6 +551,7 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Alle Module einzeln ein/ausschaltbar im Webinterface (KI, Geocoding, Duplikat, OCR, Ordner-Tags, SMTP, Filewatcher)
 - [x] FEAT: Webinterface — KI Backend konfigurierbar (URL, API-Key, Modell, Test-Button)
 - [x] FEAT: Webinterface — SMTP Konfiguration (Server, Port, SSL, User, Passwort, Test-Button)
+- [x] FEAT: Webinterface — KI Prompt editierbar (gespeichert in SQLite, Standard-Prompt als Fallback)
 
 ### Offen
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
@@ -561,7 +562,6 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
 - [ ] FEAT: Webinterface — Verarbeitungszeiten konfigurierbar (kontinuierlich / Zeitfenster / geplant / manuell)
 - [ ] FEAT: Webinterface — Ablage-Ordnerstruktur konfigurierbar (Schema pro Kategorie, Platzhalter, Live-Vorschau)
-- [ ] FEAT: Webinterface — KI Prompts editierbar (gespeichert in SQLite, mit Reset + Test)
 - [ ] FEAT: Webinterface — Sortier-Regeln editierbar (Drag-and-Drop Reihenfolge, CRUD)
 - [ ] FEAT: Dry-Run Modus pro Eingangsverzeichnis (nur Report, keine Dateien verschieben)
 - [ ] FEAT: HTML-Report nach Dry-Run (Anzahl Dateien, Kategorien, Duplikate, Fehler)
