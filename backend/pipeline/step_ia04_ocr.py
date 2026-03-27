@@ -25,6 +25,10 @@ async def execute(job, session) -> dict:
     if not await config_manager.is_module_enabled("ocr"):
         return {"status": "skipped", "reason": "module disabled"}
 
+    # OCR benötigt das KI-Backend
+    if not await config_manager.is_module_enabled("ki_analyse"):
+        return {"status": "skipped", "reason": "KI-Analyse deaktiviert (OCR benötigt KI-Backend)"}
+
     url = await config_manager.get("ai.backend_url")
     model = await config_manager.get("ai.model")
     if not url or not model:
