@@ -30,12 +30,13 @@ async def execute(job, session) -> dict:
     if not url or not model:
         return {"status": "skipped", "reason": "not configured"}
 
-    # Skip if AI analysis already found no text-relevant content
-    ai_result = (job.step_result or {}).get("IA-03", {})
-    ai_type = ai_result.get("type", "")
-    # Only run OCR for screenshots, documents, or if AI detected text-like content
-    if ai_type not in ("screenshot", "document", "") and not ai_result.get("parse_error"):
-        return {"status": "skipped", "reason": f"type={ai_type}, OCR nicht nötig"}
+    # Check OCR mode: "smart" = only screenshots/documents, "always" = all images
+    ocr_mode = await config_manager.get("ocr.mode", "smart")
+    if ocr_mode == "smart":
+        ai_result = (job.step_result or {}).get("IA-03", {})
+        ai_type = ai_result.get("type", "")
+        if ai_type not in ("screenshot", "document", "") and not ai_result.get("parse_error"):
+            return {"status": "skipped", "reason": f"type={ai_type}, OCR nicht nötig (Modus: smart)"}
 
     api_key = await config_manager.get("ai.api_key", "not-needed")
 
