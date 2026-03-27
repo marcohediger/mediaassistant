@@ -192,9 +192,9 @@ completed_at    DATETIME
 {
   "IA-01": {"make": "Apple", "model": "iPhone15", "date": "2024-06-12", "gps": true, "has_exif": true},
   "IA-02": {"converted": true, "temp_path": "/tmp/IA-2025-0342.tmp.jpg"},
-  "IA-03": {"type": "personal_photo", "tags": ["Zürich", "outdoor"], "quality": "gut", "confidence": 0.95},
-  "IA-04": {"has_text": false, "text": "", "text_type": "keiner"},
-  "IA-05": {"status": "skipped", "reason": "not yet implemented"},
+  "IA-03": {"status": "ok", "phash": "b38e33e05c686733"},
+  "IA-04": {"type": "personal_photo", "tags": ["Zürich", "outdoor"], "quality": "gut", "confidence": 0.95},
+  "IA-05": {"has_text": false, "text": "", "text_type": "keiner"},
   "IA-06": {"country": "Schweiz", "city": "Zürich", "suburb": "Altstadt", "provider": "nominatim"},
   "IA-07": {"keywords_written": ["Zürich", "outdoor", "personal_photo"], "tags_count": 3, "file_size": 2458901, "file_hash": "a1b2c3..."},
   "IA-08": {"category": "photo", "target_path": "/bibliothek/photos/2024/2024-06/IMG_1234.jpg", "moved": true},
@@ -223,7 +223,7 @@ completed_at    DATETIME
 ```
 
 - Bei Migration: Fortschritt bleibt erhalten auch nach Neustart
-- Bei LM Studio Timeout: nur IA-03 wiederholen, nicht von vorne
+- Bei LM Studio Timeout: nur IA-04 wiederholen, nicht von vorne
 - Im Webinterface: "Ab diesem Step wiederholen" Button pro Job
 - Live-Ansicht: aktueller Step aller laufenden Jobs
 
@@ -279,9 +279,9 @@ Jeder Verarbeitungsschritt wird mit einem Step-Code geloggt:
 |---|---|
 | IA-01 | EXIF auslesen |
 | IA-02 | Formatkonvertierung (HEIC/DNG/RAW/GIF → JPEG) |
-| IA-03 | KI-Analyse |
-| IA-04 | OCR (Texterkennung) |
-| IA-05 | Duplikaterkennung (SHA256 + pHash) |
+| IA-03 | Duplikaterkennung (SHA256 + pHash) |
+| IA-04 | KI-Analyse |
+| IA-05 | OCR (Texterkennung) |
 | IA-06 | Geocoding |
 | IA-07 | EXIF Tags schreiben |
 | IA-08 | Sortieren (Zielordner + verschieben) |
@@ -294,10 +294,10 @@ Log-Format pro Datei:
 2025-03-20 14:32:01 | IA-2025-0342 | IMG_1234.heic
   [IA-01] EXIF auslesen        ✓ Make=Apple, DateTimeOriginal=2024-06-12
   [IA-02] Formatkonvertierung  ✓ temp JPEG erstellt
-  [IA-03] KI-Analyse           ✗ FEHLER: LM Studio Timeout nach 30s
+  [IA-04] KI-Analyse           ✗ FEHLER: LM Studio Timeout nach 30s
   [IA-10] Cleanup temp JPEG    ✓
   → Datei nach /inbox/error/ verschoben
-  → Fehlermail: "IA-2025-0342 Fehler bei [IA-03] KI-Analyse: Timeout"
+  → Fehlermail: "IA-2025-0342 Fehler bei [IA-04] KI-Analyse: Timeout"
 ```
 
 - Debugschlüssel wird in SQLite gespeichert → im Webinterface suchbar
@@ -532,8 +532,8 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: Manuelle Imports — Ordnerstruktur als Tags (jede Ebene = ein EXIF-Keyword, pro Verzeichnis konfigurierbar)
 - [x] FEAT: EXIF-Auslesen via ExifTool subprocess (IA-01)
 - [ ] FEAT: Regel-basierte Klassifizierung (WA, Screenshot, EXIF-leer)
-- [x] FEAT: LM Studio Vision API Integration (IA-03)
-- [x] FEAT: KI-Prompt für Typ + Inhalt + Qualität + Beschreibung (IA-03)
+- [x] FEAT: LM Studio Vision API Integration (IA-04)
+- [x] FEAT: KI-Prompt für Typ + Inhalt + Qualität + Beschreibung (IA-04)
 - [x] FEAT: EXIF-Tags schreiben via ExifTool (IA-07)
 - [x] FEAT: Zielstruktur-Logik (Ordner bestimmen, Datei verschieben, IA-08)
 - [x] FEAT: Duplikat-Erkennung SHA256 (exakt) + pHash (ähnlich) via imagehash

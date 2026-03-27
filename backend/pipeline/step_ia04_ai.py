@@ -29,7 +29,7 @@ Regeln:
 
 
 async def execute(job, session) -> dict:
-    """IA-03: KI-Analyse via OpenAI-kompatiblem Endpunkt."""
+    """IA-04: KI-Analyse via OpenAI-kompatiblem Endpunkt."""
     if not await config_manager.is_module_enabled("ki_analyse"):
         return {"status": "skipped", "reason": "module disabled"}
 
