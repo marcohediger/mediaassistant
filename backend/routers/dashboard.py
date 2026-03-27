@@ -191,7 +191,7 @@ async def _get_module_status(i18n: dict) -> list[dict]:
                 status = "misconfigured"
                 detail = f"{_t('status_missing', i18n)}: {', '.join(missing)}"
                 if _last_module_status.get(m.name) != "misconfigured":
-                    await log_warning(m.name, _t("status_not_configured", i18n), f"Missing keys: {', '.join(missing)}")
+                    await log_warning(m.name, "Module not configured", f"Missing keys: {', '.join(missing)}")
             else:
                 health_check = MODULE_HEALTH_CHECKS.get(m.name)
                 if health_check:
@@ -199,7 +199,7 @@ async def _get_module_status(i18n: dict) -> list[dict]:
                     if healthy:
                         status = "ready"
                         if _last_module_status.get(m.name) == "error":
-                            await log_info(m.name, _t("status_connection_restored", i18n), detail)
+                            await log_info(m.name, "Connection restored", detail)
                     else:
                         status = "error"
                         if _last_module_status.get(m.name) != "error":

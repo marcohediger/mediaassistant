@@ -47,7 +47,7 @@ def safe_move(src: str, dst: str, context: str = "") -> str:
     if src_size != dst_size:
         # Remove broken copy, keep original safe
         os.remove(dst)
-        msg = f"Kopie fehlgeschlagen: Grösse {src_size} ≠ {dst_size}"
+        msg = f"Copy failed: Size {src_size} ≠ {dst_size}"
         _log_error_sync(context, msg, f"{src} → {dst}")
         raise RuntimeError(msg)
 
@@ -56,7 +56,7 @@ def safe_move(src: str, dst: str, context: str = "") -> str:
     dst_hash = _sha256(dst)
     if src_hash != dst_hash:
         os.remove(dst)
-        msg = f"Kopie fehlgeschlagen: Hash {src_hash[:16]}… ≠ {dst_hash[:16]}…"
+        msg = f"Copy failed: Hash {src_hash[:16]}… ≠ {dst_hash[:16]}…"
         _log_error_sync(context, msg, f"{src} → {dst}")
         raise RuntimeError(msg)
 
@@ -65,7 +65,7 @@ def safe_move(src: str, dst: str, context: str = "") -> str:
 
     _log_info_sync(
         context,
-        f"Datei verschoben: {os.path.basename(src)} ({src_size} Bytes, SHA256 {src_hash[:16]}…)",
+        f"File moved: {os.path.basename(src)} ({src_size} Bytes, SHA256 {src_hash[:16]}…)",
         f"{src} → {dst}",
     )
     return dst

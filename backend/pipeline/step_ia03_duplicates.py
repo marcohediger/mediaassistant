@@ -118,17 +118,17 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     # Write .log file
     original_path = original.target_path or original.original_path
     if match_type == "exact":
-        desc = f"Exaktes Duplikat von: {original_path} ({original.debug_key})"
+        desc = f"Exact duplicate of: {original_path} ({original.debug_key})"
     else:
-        desc = f"Ähnlich zu: {original_path} ({original.debug_key}, pHash-Distanz: {distance})"
+        desc = f"Similar to: {original_path} ({original.debug_key}, pHash distance: {distance})"
 
     log_lines = [
         f"Debug-Key: {job.debug_key}",
-        f"Datei: {job.filename}",
+        f"File: {job.filename}",
         f"Original: {job.original_path}",
-        f"Duplikat-Typ: {match_type}",
-        f"Verweis: {desc}",
-        f"Zeitpunkt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Duplicate type: {match_type}",
+        f"Reference: {desc}",
+        f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
     ]
     log_path = dup_path + ".log"
     await asyncio.to_thread(_write_log, log_path, "\n".join(log_lines))

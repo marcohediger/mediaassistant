@@ -189,10 +189,10 @@ async def add_inbox(
         await session.commit()
 
     if not os.path.isdir(path):
-        await log_warning("filewatcher", f"Verzeichnis nicht gefunden: {path}", f"Inbox '{label}' hinzugefügt, aber Pfad existiert nicht")
+        await log_warning("filewatcher", f"Directory not found: {path}", f"Inbox '{label}' added, but path does not exist")
         return RedirectResponse(url="/settings?msg=inbox_added_path_missing", status_code=302)
 
-    await log_info("filewatcher", f"Verzeichnis hinzugefügt: {path}", f"Label: {label}")
+    await log_info("filewatcher", f"Directory added: {path}", f"Label: {label}")
     return RedirectResponse(url="/settings?msg=inbox_added", status_code=302)
 
 
@@ -215,7 +215,7 @@ async def update_inbox(request: Request, inbox_id: int):
         await session.commit()
 
     if not os.path.isdir(path):
-        await log_warning("filewatcher", f"Verzeichnis nicht gefunden: {path}", f"Inbox '{label}' aktualisiert, aber Pfad existiert nicht")
+        await log_warning("filewatcher", f"Directory not found: {path}", f"Inbox '{label}' updated, but path does not exist")
         return RedirectResponse(url="/settings?msg=inbox_updated_path_missing", status_code=302)
 
     return RedirectResponse(url="/settings?msg=inbox_updated", status_code=302)
@@ -230,6 +230,6 @@ async def delete_inbox(request: Request, inbox_id: int):
             path = inbox.path
             await session.delete(inbox)
             await session.commit()
-            await log_info("filewatcher", f"Verzeichnis entfernt: {path}", f"Label: {label}")
+            await log_info("filewatcher", f"Directory removed: {path}", f"Label: {label}")
 
     return RedirectResponse(url="/settings?msg=inbox_deleted", status_code=302)

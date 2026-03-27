@@ -58,5 +58,5 @@ async def delete_job_endpoint(debug_key: str):
         await session.delete(job)
         await session.commit()
 
-    await log_info("api", f"Job gelöscht: {debug_key}")
+    await log_info("api", f"Job deleted: {debug_key}")
     return RedirectResponse(url="/logs?tab=jobs", status_code=303)
