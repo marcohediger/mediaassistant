@@ -8,7 +8,7 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-      - ${INBOX_PATH:-/volume1/inbox}:/inbox
+      - ${INBOX_PATH:-./test_inbox}:/inbox
       - ${LIBRARY_PATH:-/home/marcohediger/claude/Bilder}:/bibliothek
     environment:
       - DATABASE_PATH=/app/data/mediaassistant.db

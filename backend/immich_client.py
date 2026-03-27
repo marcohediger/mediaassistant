@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 import httpx
 from config import config_manager
 
@@ -28,8 +29,8 @@ async def upload_asset(file_path: str) -> dict:
                 headers=headers,
                 data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
                       "deviceId": "MediaAssistant",
-                      "fileCreatedAt": "",
-                      "fileModifiedAt": ""},
+                      "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                      "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
                 files={"assetData": (filename, f)},
             )
 
