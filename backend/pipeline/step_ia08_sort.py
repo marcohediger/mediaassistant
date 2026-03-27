@@ -83,7 +83,7 @@ async def execute(job, session) -> dict:
     has_no_exif = not exif.get("has_exif", False)
     has_uuid_name = bool(_WHATSAPP_UUID_RE.match(filename))
     # Keine EXIF + UUID-Name oder -WA = Messenger-Bild (WhatsApp, Telegram, Signal etc.)
-    is_sourceless = has_uuid_name or "-WA" in filename.upper() or (has_no_exif and ai_type in ("internet_image", "meme", "whatsapp", ""))
+    is_sourceless = has_uuid_name or "-WA" in filename.upper() or (has_no_exif and ai_type in ("internet_image", "meme", ""))
 
     if is_video and is_sourceless:
         category = "sourceless"
@@ -91,9 +91,9 @@ async def execute(job, session) -> dict:
         category = "video"
     elif ai_type == "screenshot" or "screenshot" in filename.lower():
         category = "screenshot"
-    elif is_sourceless and ai_type != "personal_photo":
+    elif is_sourceless and ai_type not in ("personal", "personal_photo"):
         category = "sourceless"
-    elif ai_type in ("personal_photo", ""):
+    elif ai_type in ("personal", "personal_photo", ""):
         category = "photo"
     elif ai_result.get("confidence", 1.0) < 0.5:
         category = "unknown"

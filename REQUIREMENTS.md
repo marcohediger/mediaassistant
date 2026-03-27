@@ -130,7 +130,7 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
     - Duplikat → Pipeline stoppt, Datei → /error/duplicates/
         ↓
  4. KI-Analyse (LM Studio Vision)
-    - Typ: personal_photo / whatsapp / screenshot / internet_image
+    - Typ: personal / screenshot / internet_image / document / meme
     - Inhalt: Personen, Landschaft, Essen, Dokument, Tier, etc.
     - Stimmung: indoor / outdoor / nacht / gegenlicht
     - Personenanzahl (keine Namen)
