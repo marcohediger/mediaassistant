@@ -13,4 +13,14 @@ async def execute(job, session) -> dict:
         os.remove(temp_path)
         removed.append(temp_path)
 
+    # Remove downloaded file and temp dir from Immich webhook
+    if job.immich_asset_id and job.original_path and os.path.exists(job.original_path):
+        os.remove(job.original_path)
+        removed.append(job.original_path)
+        # Remove temp directory if empty
+        parent = os.path.dirname(job.original_path)
+        if parent and os.path.isdir(parent) and not os.listdir(parent):
+            os.rmdir(parent)
+            removed.append(parent)
+
     return {"removed": removed, "count": len(removed)}

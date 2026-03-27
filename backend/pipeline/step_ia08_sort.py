@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from config import config_manager
 from safe_file import safe_move
-from immich_client import upload_asset
+from immich_client import upload_asset, replace_asset
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -159,6 +159,20 @@ async def execute(job, session) -> dict:
 
     source_dir = os.path.dirname(job.original_path)
 
+    # Route: Immich webhook (replace existing asset with tagged file)
+    if job.immich_asset_id:
+        immich_result = await replace_asset(job.immich_asset_id, job.original_path)
+        job.target_path = f"immich:{job.immich_asset_id}"
+
+        return {
+            "category": category,
+            "target_path": job.target_path,
+            "moved": False,
+            "immich_upload": False,
+            "immich_replace": True,
+            "immich_asset_id": job.immich_asset_id,
+        }
+
     # Route: Immich upload or target directory
     if job.use_immich:
         # Extract folder tags as single combined album name
@@ -179,14 +193,17 @@ async def execute(job, session) -> dict:
         if job.source_inbox_path:
             await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
 
-        job.target_path = f"immich:{immich_result.get('id', '')}"
+        asset_id = immich_result.get("id", "")
+        job.target_path = f"immich:{asset_id}"
+        # Mark asset ID so Immich polling skips this asset
+        job.immich_asset_id = asset_id
 
         return {
             "category": category,
             "target_path": job.target_path,
             "moved": False,
             "immich_upload": True,
-            "immich_id": immich_result.get("id", ""),
+            "immich_id": asset_id,
         }
 
     # Move file to library (safe: copy → verify → delete)

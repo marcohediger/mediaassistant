@@ -50,6 +50,7 @@ async def _get_cfg() -> dict:
         "path_error": await config_manager.get("library.path_error", "error/"),
         "path_duplicate": await config_manager.get("library.path_duplicate", "error/duplicates/"),
         "immich_url": await config_manager.get("immich.url", ""),
+        "immich_poll_enabled": await config_manager.get("immich.poll_enabled", False),
     }
 
 
@@ -157,6 +158,7 @@ async def save_settings(request: Request):
     await config_manager.set("immich.url", form.get("immich_url", ""))
     if form.get("immich_api_key"):
         await config_manager.set("immich.api_key", form["immich_api_key"], encrypted=True)
+    await config_manager.set("immich.poll_enabled", "immich_poll_enabled" in form)
 
     # Filewatcher
     try:

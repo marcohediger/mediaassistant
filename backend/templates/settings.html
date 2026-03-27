@@ -300,6 +300,14 @@
             <input type="password" id="immich_api_key" name="immich_api_key" placeholder="••••••••">
             <small>{{ t.settings.immich_api_key_hint }}</small>
         </div>
+        <hr style="border-color: var(--border); margin: 1.5rem 0;">
+        <h3>{{ t.settings.immich_poll }}</h3>
+        <p class="section-note" style="margin-bottom: 1rem;">{{ t.settings.immich_poll_desc }}</p>
+        <label class="switch-inline" style="margin-bottom: 1rem;">
+            <input type="checkbox" name="immich_poll_enabled" value="1" {{ 'checked' if cfg.immich_poll_enabled else '' }}>
+            <span class="switch-slider-sm"></span>
+            <span>{{ t.settings.immich_poll_active }}</span>
+        </label>
     </div>
 </div>
 

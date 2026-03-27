@@ -110,6 +110,131 @@ async def get_asset_thumbnail(asset_id: str) -> bytes | None:
     return None
 
 
+async def download_asset(asset_id: str, target_path: str) -> str:
+    """Download the original file of an Immich asset to target_path. Returns the file path."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    headers = {"x-api-key": api_key}
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        # Get asset info for filename
+        info_resp = await client.get(f"{url}/api/assets/{asset_id}", headers=headers)
+        if info_resp.status_code != 200:
+            raise RuntimeError(f"Immich asset not found: HTTP {info_resp.status_code}")
+        asset_info = info_resp.json()
+        filename = asset_info.get("originalFileName", f"{asset_id}.jpg")
+
+        # Download original file
+        resp = await client.get(
+            f"{url}/api/assets/{asset_id}/original",
+            headers=headers,
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Immich download failed: HTTP {resp.status_code}")
+
+    file_path = os.path.join(target_path, filename)
+    with open(file_path, "wb") as f:
+        f.write(resp.content)
+
+    return file_path
+
+
+async def replace_asset(asset_id: str, file_path: str) -> dict:
+    """Replace the original file of an Immich asset with the tagged version."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    filename = os.path.basename(file_path)
+    stat = os.stat(file_path)
+    headers = {"x-api-key": api_key}
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        with open(file_path, "rb") as f:
+            resp = await client.put(
+                f"{url}/api/assets/{asset_id}/original",
+                headers=headers,
+                data={
+                    "deviceAssetId": f"mediaassistant-{asset_id}",
+                    "deviceId": "MediaAssistant",
+                    "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                },
+                files={"assetData": (filename, f)},
+            )
+
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Immich replace failed: HTTP {resp.status_code} — {resp.text[:200]}")
+
+    return resp.json()
+
+
+async def get_recent_assets(since: str | None = None) -> list[dict]:
+    """Fetch assets uploaded after `since` (ISO timestamp). Returns list of asset dicts."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key:
+        return []
+
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+
+    body = {
+        "order": "asc",
+        "type": "IMAGE",
+        "withExif": True,
+    }
+    if since:
+        body["createdAfter"] = since
+
+    assets = []
+    page = 1
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            body["page"] = page
+            resp = await client.post(
+                f"{url}/api/search/metadata",
+                headers=headers,
+                json=body,
+            )
+            if resp.status_code != 200:
+                break
+            data = resp.json()
+            items = data.get("assets", {}).get("items", [])
+            if not items:
+                break
+            assets.extend(items)
+            # Stop if no more pages
+            if not data.get("assets", {}).get("nextPage"):
+                break
+            page += 1
+
+    # Also fetch videos
+    body["type"] = "VIDEO"
+    page = 1
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            body["page"] = page
+            resp = await client.post(
+                f"{url}/api/search/metadata",
+                headers=headers,
+                json=body,
+            )
+            if resp.status_code != 200:
+                break
+            data = resp.json()
+            items = data.get("assets", {}).get("items", [])
+            if not items:
+                break
+            assets.extend(items)
+            if not data.get("assets", {}).get("nextPage"):
+                break
+            page += 1
+
+    return assets
+
+
 async def check_connection() -> tuple[bool, str]:
     """Test the Immich connection. Returns (ok, detail)."""
     url, api_key = await get_immich_config()

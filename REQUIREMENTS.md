@@ -624,15 +624,21 @@ Alle Dateiverschiebungen nutzen safe_move (Copy → SHA256-Verify → Delete) �
 - Keine Cloud-Anbindung
 - Keine Video-Analyse (nur Thumbnails/Metadaten)
 - Kein n8n-Workflow
-- Keine Immich Integration (siehe Optional v2)
+- ~~Keine Immich Integration~~ → **umgesetzt in v1.1.0–v1.5.0**
 
 ## Optional (v2)
-### Immich Integration (Modus 2)
-Bidirektionale Verbindung mit Immich via REST API — erst nach stabilem v1 umsetzen.
-- Modus 2a: Trigger-Tags in Immich (ia-process, ia-location, ia-ocr, ia-sync) → ImageAssistant pollt API und verarbeitet Assets
-- Modus 2b: Immich DB Metadaten → Originaldateien via ExifTool zurückschreiben (Datei-Souveränität)
-- Immich API Rescan nach ExifTool-Write automatisch triggern
-- Immich API URL + API-Key + Poll-Intervall konfigurierbar im Webinterface
+### ~~Immich Integration (Modus 2)~~ ✅ Umgesetzt
+Bidirektionale Verbindung mit Immich via REST API.
+- ✅ Upload: Inbox-Dateien nach Immich (pro Inbox konfigurierbar)
+- ✅ Polling: Neue Immich-Uploads (z.B. Mobile App) automatisch verarbeiten
+- ✅ Tags/Beschreibung/Geodaten via EXIF in Datei schreiben, Asset in Immich ersetzen
+- ✅ Album-Erstellung aus Ordner-Tags
+- ✅ Duplikaterkennung mit Immich (Side-by-Side Review, Thumbnail aus Immich API)
+- ✅ Orphaned Asset Handling (gelöschte Immich-Assets werden übersprungen)
+- ✅ API-Key + URL im Webinterface konfigurierbar
+- ✅ Poll-Toggle im Webinterface, Intervall = Filewatcher-Intervall
+- ❌ Trigger-Tags (ia-process, ia-location, ia-ocr, ia-sync) — nicht umgesetzt
+- ❌ Immich DB Metadaten → Originaldateien zurückschreiben — nicht umgesetzt
 
 ### SSO Login (OIDC)
 - Provider: sso.marcohediger.ch (Synology SSO Server)

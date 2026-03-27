@@ -101,7 +101,7 @@ All system log messages are always written in English, regardless of the UI lang
 - AI backend, geocoding, SMTP configuration
 - Editable AI system prompt (stored in database, default fallback)
 - Manage inbox directories (with dry-run, folder-tags, Immich toggle, active toggle per inbox)
-- Immich integration (URL, API key)
+- Immich integration (URL, API key, polling toggle)
 - Library target structure with placeholders
 - Duplicate detection threshold (pHash)
 - OCR mode (smart / all images)
@@ -195,6 +195,9 @@ Every file move is a three-step process to prevent data loss:
 3. **Delete** — original is only deleted after successful verification
 
 ### Immich Integration
+MediaAssistant integrates with Immich in two directions:
+
+**Inbox → Immich (Upload)**
 Each inbox directory can optionally upload files to Immich instead of moving them to the local library. Configurable per inbox directory via the "Immich" toggle.
 
 When enabled for an inbox:
@@ -202,7 +205,19 @@ When enabled for an inbox:
 - **IA-08**: File is uploaded to Immich via API, then deleted from inbox
 - The file is **not** copied to the local target directory
 - **Albums**: If folder tags are active, an Immich album is created from the subfolder names (e.g. `Ferien/Nänikon 2026/` → album "Ferien Nänikon 2026")
+
+**Immich → Pipeline (Polling)**
+New uploads in Immich (e.g. from the mobile app) can be automatically processed through the full pipeline. Enable "Immich Polling" in **Settings → Immich**.
+
+When enabled:
+- MediaAssistant polls for new assets on the same interval as the file watcher
+- On first activation, the timestamp is set to "now" — existing assets are not processed
+- New assets are downloaded, processed (AI, OCR, Geocoding), tags are written to the file via EXIF, and the asset is replaced in Immich with the tagged version
+- Assets uploaded from an inbox are automatically skipped (no double processing)
+
+**Shared features:**
 - **Duplicate detection**: Previously uploaded files are tracked in the local database — re-uploading the same file triggers duplicate review with side-by-side comparison (Immich thumbnail vs. local file)
+- **Orphaned assets**: If a referenced Immich asset is deleted, the duplicate match is skipped and the new file is treated as a fresh original
 - Requires Immich URL and API key configured in **Settings → Immich**
 - Dashboard shows Immich connection status in module health checks
 
@@ -221,7 +236,7 @@ After moving a file from an inbox, empty parent directories are automatically cl
 - **Database:** SQLite
 - **Container:** Docker with ExifTool, FFmpeg, libheif
 - **AI:** Any OpenAI-compatible Vision API server (e.g. LM Studio, Ollama)
-- **Immich:** Optional upload via REST API (per inbox directory)
+- **Immich:** Bidirectional — upload from inbox + polling for new mobile uploads (REST API)
 - **Geocoding:** Nominatim, Photon, or Google Maps API
 - **i18n:** JSON language files (DE/EN), centralized template rendering
 - **Theme:** Dark (default) / Light, conditional CSS loading
