@@ -64,12 +64,27 @@ async def settings_page(request: Request):
         result = await session.execute(select(InboxDirectory).order_by(InboxDirectory.id))
         inboxes = result.scalars().all()
 
+    # Translate message key from query params
+    msg_key = request.query_params.get("msg")
+    msg_type = request.query_params.get("msg_type", "success")
+    success = None
+    error = None
+    if msg_key:
+        from i18n import load_lang, DEFAULT_LANGUAGE
+        lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+        i18n = load_lang(lang)
+        translated = i18n.get("settings", {}).get(msg_key, msg_key)
+        if msg_type == "error":
+            error = translated
+        else:
+            success = translated
+
     return await render(request, "settings.html", {
         "modules": type("M", (), modules)(),
         "cfg": type("C", (), cfg)(),
         "inboxes": inboxes,
-        "success": request.query_params.get("success"),
-        "error": request.query_params.get("error"),
+        "success": success,
+        "error": error,
     })
 
 
@@ -145,7 +160,7 @@ async def save_settings(request: Request):
     await config_manager.set("filewatcher.interval", interval)
     await config_manager.set("filewatcher.schedule_mode", form.get("schedule_mode", "continuous"))
 
-    return RedirectResponse(url="/settings?success=Einstellungen+gespeichert", status_code=302)
+    return RedirectResponse(url="/settings?msg=saved", status_code=302)
 
 
 @router.post("/inbox/add")
@@ -157,12 +172,12 @@ async def add_inbox(
     label = form.get("inbox_label", "").strip()
 
     if not path or not label:
-        return RedirectResponse(url="/settings?error=Pfad+und+Label+sind+erforderlich", status_code=302)
+        return RedirectResponse(url="/settings?msg=path_label_required&msg_type=error", status_code=302)
 
     async with async_session() as session:
         existing = await session.execute(select(InboxDirectory).where(InboxDirectory.path == path))
         if existing.scalar():
-            return RedirectResponse(url="/settings?error=Verzeichnis+existiert+bereits", status_code=302)
+            return RedirectResponse(url="/settings?msg=inbox_exists&msg_type=error", status_code=302)
 
         session.add(InboxDirectory(
             path=path,
@@ -175,10 +190,10 @@ async def add_inbox(
 
     if not os.path.isdir(path):
         await log_warning("filewatcher", f"Verzeichnis nicht gefunden: {path}", f"Inbox '{label}' hinzugefügt, aber Pfad existiert nicht")
-        return RedirectResponse(url="/settings?success=Verzeichnis+hinzugefügt+(Pfad+nicht+gefunden)", status_code=302)
+        return RedirectResponse(url="/settings?msg=inbox_added_path_missing", status_code=302)
 
     await log_info("filewatcher", f"Verzeichnis hinzugefügt: {path}", f"Label: {label}")
-    return RedirectResponse(url="/settings?success=Verzeichnis+hinzugefügt", status_code=302)
+    return RedirectResponse(url="/settings?msg=inbox_added", status_code=302)
 
 
 @router.post("/inbox/{inbox_id}/update")
@@ -188,7 +203,7 @@ async def update_inbox(request: Request, inbox_id: int):
     async with async_session() as session:
         inbox = await session.get(InboxDirectory, inbox_id)
         if not inbox:
-            return RedirectResponse(url="/settings?error=Verzeichnis+nicht+gefunden", status_code=302)
+            return RedirectResponse(url="/settings?msg=inbox_not_found&msg_type=error", status_code=302)
 
         inbox.path = form.get("inbox_path", inbox.path).strip()
         inbox.label = form.get("inbox_label", inbox.label).strip()
@@ -201,9 +216,9 @@ async def update_inbox(request: Request, inbox_id: int):
 
     if not os.path.isdir(path):
         await log_warning("filewatcher", f"Verzeichnis nicht gefunden: {path}", f"Inbox '{label}' aktualisiert, aber Pfad existiert nicht")
-        return RedirectResponse(url="/settings?success=Verzeichnis+aktualisiert+(Pfad+nicht+gefunden)", status_code=302)
+        return RedirectResponse(url="/settings?msg=inbox_updated_path_missing", status_code=302)
 
-    return RedirectResponse(url="/settings?success=Verzeichnis+aktualisiert", status_code=302)
+    return RedirectResponse(url="/settings?msg=inbox_updated", status_code=302)
 
 
 @router.post("/inbox/{inbox_id}/delete")
@@ -217,4 +232,4 @@ async def delete_inbox(request: Request, inbox_id: int):
             await session.commit()
             await log_info("filewatcher", f"Verzeichnis entfernt: {path}", f"Label: {label}")
 
-    return RedirectResponse(url="/settings?success=Verzeichnis+gelöscht", status_code=302)
+    return RedirectResponse(url="/settings?msg=inbox_deleted", status_code=302)
