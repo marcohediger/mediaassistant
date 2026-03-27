@@ -573,10 +573,8 @@ Flach:               photos/{YYYY}/
 ### Offen
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
 - [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
-- [ ] FEAT: Geocoding-Cache in SQLite (keine doppelten Requests)
+- [ ] FEAT: Dry-Run Modus auswerten (Toggle existiert pro Inbox, Pipeline soll nicht verschieben)
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
-- [ ] FEAT: Dry-Run Modus pro Eingangsverzeichnis (nur Report, keine Dateien verschieben)
-- [ ] FEAT: HTML-Report nach Dry-Run (Anzahl Dateien, Kategorien, Duplikate, Fehler)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 
 ### Optional (v2)
@@ -585,7 +583,8 @@ Flach:               photos/{YYYY}/
 - [ ] KI-basierte Ortschätzung für Bilder ohne GPS (Vision → "estimated_location" Tag)
 - [ ] GeoCLIP für präzise GPS-Schätzung ohne GPS-EXIF
 - [ ] Google Vision API Landmark Detection (für alte Fotos ohne GPS)
-- [ ] README.md (Projektbeschreibung, Features, Quick Start, Screenshots)
+- [ ] Geocoding-Cache in SQLite (Koordinaten-Lookup cachen, relevant bei Migration/Google API)
+- [ ] HTML-Report nach Dry-Run (Anzahl Dateien, Kategorien, Duplikate, Fehler)
 - [ ] config.example.yml (alle Optionen mit Kommentaren)
 - [ ] docs/ (installation.md, configuration.md, migration.md)
 - [ ] GitHub Actions Workflow → automatischer Docker Hub Build
