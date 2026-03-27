@@ -104,6 +104,21 @@ async def execute(job, session) -> dict:
                 else:
                     await log_warning("IA-03", f"Orphaned job {candidate.debug_key}: file missing, skipping duplicate match")
 
+    # --- Stage 3: Immich duplicate check ---
+    if job.use_immich:
+        try:
+            from immich_client import check_duplicate
+            is_dup = await check_duplicate(job.original_path)
+            if is_dup:
+                await _handle_duplicate_immich(job, session)
+                return {
+                    "status": "duplicate",
+                    "match_type": "immich",
+                    "original_path": "immich (already uploaded)",
+                }
+        except Exception:
+            pass
+
     return {"status": "ok", "phash": phash_str}
 
 
@@ -154,6 +169,25 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     # Update job status
     job.status = "duplicate"
     job.target_path = dup_path
+
+    await log_info("IA-03", f"{job.debug_key} {desc}")
+
+
+async def _handle_duplicate_immich(job, session):
+    """Handle a file that already exists in Immich."""
+    desc = f"Already exists in Immich"
+
+    if job.dry_run:
+        job.status = "duplicate"
+        await log_info("IA-03", f"{job.debug_key} [dry-run] {desc}")
+        return
+
+    # Delete source file (no need to move to duplicates dir for Immich uploads)
+    if os.path.exists(job.original_path):
+        os.remove(job.original_path)
+
+    job.status = "duplicate"
+    job.target_path = "immich:duplicate"
 
     await log_info("IA-03", f"{job.debug_key} {desc}")
 

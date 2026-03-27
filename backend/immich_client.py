@@ -1,3 +1,4 @@
+import hashlib
 import os
 from datetime import datetime, timezone
 import httpx
@@ -73,6 +74,36 @@ async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dic
     if resp.status_code in (200, 201):
         return resp.json().get("id")
     return None
+
+
+async def check_duplicate(file_path: str) -> bool:
+    """Check if a file already exists in Immich by SHA1 checksum."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key:
+        return False
+
+    # Compute SHA1 (Immich uses SHA1 for duplicate detection)
+    sha1 = hashlib.sha1()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            sha1.update(chunk)
+    checksum = sha1.hexdigest()
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{url}/api/assets/bulk-upload-check",
+                headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                json={"assets": [{"id": file_path, "checksum": checksum}]},
+            )
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])
+            for r in results:
+                if r.get("action") == "reject":
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 async def check_connection() -> tuple[bool, str]:
