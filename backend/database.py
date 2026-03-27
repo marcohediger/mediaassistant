@@ -17,11 +17,26 @@ DEFAULT_MODULES = [
 ]
 
 
+async def _migrate_columns(conn):
+    """Add missing columns to existing tables (lightweight migration)."""
+    import sqlalchemy
+    migrations = [
+        ("jobs", "source_inbox_path", "ALTER TABLE jobs ADD COLUMN source_inbox_path TEXT"),
+        ("jobs", "dry_run", "ALTER TABLE jobs ADD COLUMN dry_run BOOLEAN DEFAULT 0"),
+    ]
+    for table, column, sql in migrations:
+        try:
+            await conn.execute(sqlalchemy.text(f"SELECT {column} FROM {table} LIMIT 1"))
+        except Exception:
+            await conn.execute(sqlalchemy.text(sql))
+
+
 async def init_db():
     os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _migrate_columns(conn)
 
     # Seed default modules
     async with async_session() as session:

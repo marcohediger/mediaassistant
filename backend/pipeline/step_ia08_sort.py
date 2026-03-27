@@ -144,6 +144,17 @@ async def execute(job, session) -> dict:
             target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
             counter += 1
 
+    # Dry-run: report where file would go, but don't move
+    if job.dry_run:
+        job.target_path = target_path
+        return {
+            "status": "dry_run",
+            "category": category,
+            "target_dir": target_dir,
+            "target_path": target_path,
+            "moved": False,
+        }
+
     # Create directory and move file (safe: copy → verify → delete)
     await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
     source_dir = os.path.dirname(job.original_path)

@@ -21,6 +21,7 @@ class Job(Base):
     error_message = Column(Text)
     source_label = Column(Text)  # which inbox this came from
     source_inbox_path = Column(Text)  # inbox base path (for folder_tags)
+    dry_run = Column(Boolean, default=False)  # dry-run mode (don't move/write)
     file_hash = Column(Text)  # SHA256
     phash = Column(Text)  # perceptual hash
     created_at = Column(DateTime, default=lambda: datetime.now())

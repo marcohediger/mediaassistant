@@ -569,11 +569,11 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Alle System-Log-Meldungen immer auf Englisch (unabhängig von UI-Sprache)
 - [x] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
 - [x] FEAT: Leere Quellordner nach Import automatisch aufräumen (bis Inbox-Root)
+- [x] FEAT: Dry-Run Modus pro Inbox (Pipeline analysiert aber verschiebt/schreibt nicht, zeigt geplanten Zielpfad)
 
 ### Offen
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
 - [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
-- [ ] FEAT: Dry-Run Modus auswerten (Toggle existiert pro Inbox, Pipeline soll nicht verschieben)
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 
