@@ -208,7 +208,7 @@ async def thumbnail(job_id: int):
 
 @router.post("/api/duplicates/keep")
 async def keep_file(request: Request):
-    """Keep one file from a group, delete the rest."""
+    """Keep one file from a group, delete all others (including original if needed)."""
     form = await request.form()
     keep_key = form.get("keep_key")
     group_key = form.get("group_key")
@@ -217,49 +217,54 @@ async def keep_file(request: Request):
         return RedirectResponse(url="/duplicates", status_code=303)
 
     async with async_session() as session:
+        # Collect all jobs in this group: the original + all duplicates referencing it
+        group_jobs = []
+
+        # Get the original job
+        result = await session.execute(
+            select(Job).where(Job.debug_key == group_key)
+        )
+        original_job = result.scalars().first()
+        if original_job:
+            group_jobs.append(original_job)
+
         # Get all duplicates in this group
         result = await session.execute(
             select(Job).where(Job.status == "duplicate")
         )
-        all_dups = result.scalars().all()
-
-        for dup in all_dups:
+        for dup in result.scalars().all():
             dup_info = (dup.step_result or {}).get("IA-03", {})
-            if dup_info.get("original_debug_key") != group_key:
-                continue
-            if dup.debug_key == keep_key:
+            if dup_info.get("original_debug_key") == group_key:
+                group_jobs.append(dup)
+
+        # Delete all except the kept one
+        for job in group_jobs:
+            if job.debug_key == keep_key:
                 continue
 
-            # Delete the duplicate file
-            filepath = dup.target_path or dup.original_path
+            filepath = job.target_path or job.original_path
             if os.path.exists(filepath):
                 await asyncio.to_thread(os.remove, filepath)
-                # Remove .log file
                 log_path = filepath + ".log"
                 if os.path.exists(log_path):
                     await asyncio.to_thread(os.remove, log_path)
 
-            dup.status = "done"
-            dup.error_message = f"Duplikat gelöscht (behalten: {keep_key})"
+            if job.status == "duplicate":
+                job.status = "done"
+            job.error_message = f"Duplikat-Review: gelöscht (behalten: {keep_key})"
 
-        # If the kept file is a duplicate (not the original), update its status
+        # Mark the kept job as resolved
         result = await session.execute(
             select(Job).where(Job.debug_key == keep_key)
         )
         kept_job = result.scalars().first()
         if kept_job and kept_job.status == "duplicate":
-            # Move the kept duplicate to the original's location
-            original_result = await session.execute(
-                select(Job).where(Job.debug_key == group_key)
-            )
-            original_job = original_result.scalars().first()
-            if original_job:
-                kept_job.status = "done"
-                kept_job.error_message = f"Duplikat-Review: als beste Version behalten"
+            kept_job.status = "done"
+            kept_job.error_message = "Duplikat-Review: als beste Version behalten"
 
         await session.commit()
 
-    await log_info("duplicates", f"Review abgeschlossen für Gruppe {group_key}, behalten: {keep_key}")
+    await log_info("duplicates", f"Review: Gruppe {group_key}, behalten: {keep_key}")
     return RedirectResponse(url="/duplicates", status_code=303)
 
 

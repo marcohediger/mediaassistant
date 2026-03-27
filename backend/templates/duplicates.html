@@ -82,14 +82,13 @@
             </div>
 
             <div class="dup-card-actions">
-                {% if not member.is_original and member.exists %}
-                <form method="post" action="/api/duplicates/delete-all" class="inline-form"
-                      onsubmit="return confirm('{{ member.filename }} löschen?')">
-                    <input type="hidden" name="debug_key" value="{{ member.debug_key }}">
-                    <button type="submit" class="btn btn-small btn-danger">Löschen</button>
+                {% if member.exists %}
+                <form method="post" action="/api/duplicates/keep" class="inline-form"
+                      onsubmit="return confirm('{{ member.filename }} behalten, alle anderen in dieser Gruppe löschen?')">
+                    <input type="hidden" name="keep_key" value="{{ member.debug_key }}">
+                    <input type="hidden" name="group_key" value="{{ group.original_key }}">
+                    <button type="submit" class="btn btn-small btn-primary">Diese behalten</button>
                 </form>
-                {% elif member.is_original %}
-                <span class="dup-kept-label">Wird behalten</span>
                 {% endif %}
             </div>
         </div>
@@ -97,11 +96,6 @@
     </div>
 
     <div class="dup-group-actions">
-        <form method="post" action="/api/duplicates/keep" class="inline-form">
-            <input type="hidden" name="keep_key" value="{{ group.original_key }}">
-            <input type="hidden" name="group_key" value="{{ group.original_key }}">
-            <button type="submit" class="btn btn-small btn-primary">Original behalten, Rest löschen</button>
-        </form>
         <form method="post" action="/api/duplicates/skip" class="inline-form">
             <button type="submit" class="btn btn-small btn-secondary">Überspringen</button>
         </form>
