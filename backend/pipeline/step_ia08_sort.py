@@ -1,8 +1,15 @@
 import asyncio
 import os
+import re
 from datetime import datetime
 from config import config_manager
 from safe_file import safe_move
+
+# WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
+_WHATSAPP_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\w+$",
+    re.IGNORECASE,
+)
 
 
 def _parse_date(date_str: str) -> datetime | None:
@@ -54,15 +61,19 @@ async def execute(job, session) -> dict:
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
 
-    # Determine category from AI analysis, fallback to EXIF
+    # Determine category: filename rules first, then AI analysis
     ai_type = ai_result.get("type", "")
+    filename = os.path.basename(job.original_path)
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
+    is_whatsapp_name = bool(_WHATSAPP_UUID_RE.match(filename)) or "-WA" in filename.upper()
 
-    if is_video:
-        category = "video"
-    elif ai_type == "whatsapp":
+    if is_video and is_whatsapp_name:
         category = "whatsapp"
-    elif ai_type == "screenshot":
+    elif is_video:
+        category = "video"
+    elif is_whatsapp_name or ai_type == "whatsapp":
+        category = "whatsapp"
+    elif ai_type == "screenshot" or "screenshot" in filename.lower():
         category = "screenshot"
     elif ai_type in ("personal_photo", ""):
         category = "photo"
