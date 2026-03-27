@@ -4,6 +4,7 @@ import os
 import subprocess
 import tempfile
 from collections import defaultdict
+from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
@@ -283,6 +284,16 @@ async def keep_file(request: Request):
         )
         group_jobs = result.scalars().all()
 
+        # Find the kept job and a target path in the library
+        kept_job = None
+        library_path = None
+        for job in group_jobs:
+            if job.debug_key == keep_key:
+                kept_job = job
+            # Find a target_path from an original (non-duplicate) in the library
+            if job.status != "duplicate" and job.target_path:
+                library_path = job.target_path
+
         # Delete all except the kept one
         for job in group_jobs:
             if job.debug_key == keep_key:
@@ -298,13 +309,44 @@ async def keep_file(request: Request):
             if job.status == "duplicate":
                 job.status = "done"
             job.error_message = f"Duplikat-Review: gelöscht (behalten: {keep_key})"
+            job.target_path = None
 
-        # Mark the kept job as resolved
-        result = await session.execute(
-            select(Job).where(Job.debug_key == keep_key)
-        )
-        kept_job = result.scalars().first()
-        if kept_job and kept_job.status == "duplicate":
+        # Move the kept file into the library if it's not already there
+        if kept_job:
+            kept_filepath = kept_job.target_path or kept_job.original_path
+
+            if kept_job.status == "duplicate" and os.path.exists(kept_filepath):
+                # Determine target: use the original's library path directory
+                if library_path:
+                    target_dir = os.path.dirname(library_path)
+                else:
+                    # Fallback: sort into library based on date
+                    base_path = await config_manager.get("library.base_path", "/bibliothek")
+                    exif = (kept_job.step_result or {}).get("IA-01", {})
+                    date_str = exif.get("date", "")
+                    if date_str:
+                        try:
+                            dt = datetime.strptime(date_str.split(" ")[0], "%Y:%m:%d")
+                        except ValueError:
+                            dt = datetime.now()
+                    else:
+                        dt = datetime.now()
+                    target_dir = os.path.join(base_path, "photos", dt.strftime("%Y"), dt.strftime("%Y-%m"))
+
+                await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
+                target_path = os.path.join(target_dir, kept_job.filename)
+
+                # Handle name conflicts
+                if os.path.exists(target_path):
+                    name, ext = os.path.splitext(kept_job.filename)
+                    counter = 1
+                    while os.path.exists(target_path):
+                        target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
+                        counter += 1
+
+                await asyncio.to_thread(safe_move, kept_filepath, target_path, kept_job.debug_key)
+                kept_job.target_path = target_path
+
             kept_job.status = "done"
             kept_job.error_message = "Duplikat-Review: als beste Version behalten"
 
