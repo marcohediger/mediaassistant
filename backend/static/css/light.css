@@ -1,0 +1,108 @@
+/* Light theme override — loaded after style.css */
+:root {
+    --bg: #f5f6fa;
+    --bg-card: #ffffff;
+    --bg-input: #f0f1f5;
+    --border: #d1d5db;
+    --text: #1f2937;
+    --text-muted: #6b7280;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --success: #059669;
+    --warning: #d97706;
+    --error: #dc2626;
+    --info: #2563eb;
+}
+
+.navbar {
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+}
+
+.nav-links a {
+    color: var(--text-muted);
+}
+
+.nav-links a:hover {
+    color: var(--primary);
+}
+
+.stat-card,
+.module-card,
+.detail-card,
+.settings-section,
+.dup-group,
+.dup-card {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.log-table thead {
+    background: #e5e7eb;
+}
+
+.log-table tbody tr:hover {
+    background: #f0f1f5;
+}
+
+.status-badge {
+    font-weight: 600;
+}
+
+.btn-secondary {
+    background: #e5e7eb;
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+    background: #d1d5db;
+}
+
+.alert-error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.alert-success {
+    background: #f0fdf4;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+.step-data {
+    background: #f0f1f5;
+    color: var(--text);
+}
+
+.tab {
+    color: var(--text-muted);
+}
+
+.tab-active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+.match-badge {
+    font-weight: 600;
+}
+
+.dup-tag {
+    background: #e0e7ff;
+    color: #3730a3;
+    border-color: #c7d2fe;
+}
+
+code {
+    background: #f0f1f5;
+    color: #1f2937;
+}
+
+.switch-slider {
+    background: #d1d5db;
+}
+
+.section-header {
+    border-bottom-color: var(--border);
+}

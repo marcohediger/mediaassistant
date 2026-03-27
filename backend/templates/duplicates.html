@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Duplikat-Review — MediaAssistant{% endblock %}
+{% block title %}{{ t.duplicates.title }} — MediaAssistant{% endblock %}
 {% block content %}
 <div class="dup-header">
-    <h1>Duplikat-Review</h1>
+    <h1>{{ t.duplicates.title }}</h1>
     <div class="dup-header-actions">
-        <span class="dup-count">{{ total_groups }} Gruppe{{ 'n' if total_groups != 1 else '' }}</span>
+        <span class="dup-count">{{ total_groups }} {{ t.duplicates.groups if total_groups != 1 else t.duplicates.group }}</span>
         {% if exact_groups > 0 %}
         <form method="post" action="/api/duplicates/batch-clean" class="inline-form"
-              onsubmit="return confirm('{{ exact_groups }} exakte Duplikat-Gruppe(n) automatisch bereinigen? Originale bleiben erhalten.')">
-            <button type="submit" class="btn btn-small btn-secondary">Batch-Clean ({{ exact_groups }} exakt)</button>
+              onsubmit="return confirm('{{ t.duplicates.batch_confirm | replace('{n}', exact_groups|string) }}')">
+            <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.batch_clean }} ({{ exact_groups }} {{ t.duplicates.exact }})</button>
         </form>
         {% endif %}
     </div>
@@ -20,11 +20,11 @@
     <div class="dup-group-header">
         <span class="dup-group-title">{{ group.original_key }}</span>
         {% if group.all_exact %}
-            <span class="match-badge match-exact">SHA256 exakt</span>
+            <span class="match-badge match-exact">{{ t.duplicates.sha256_exact }}</span>
         {% else %}
             <span class="match-badge match-similar">pHash</span>
         {% endif %}
-        <span class="dup-group-count">{{ group.count }} Dateien</span>
+        <span class="dup-group-count">{{ group.count }} {{ t.duplicates.files }}</span>
     </div>
 
     <div class="dup-compare">
@@ -34,7 +34,7 @@
                 {% if member.exists %}
                 <img src="/api/thumbnail/{{ member.job_id }}" alt="{{ member.filename }}" loading="lazy">
                 {% else %}
-                <div class="dup-thumb-missing">Nicht gefunden</div>
+                <div class="dup-thumb-missing">{{ t.duplicates.not_found }}</div>
                 {% endif %}
             </div>
 
@@ -43,9 +43,9 @@
 
                 <div class="dup-badges">
                     {% if member.is_original %}
-                        <span class="match-badge match-original">Original</span>
+                        <span class="match-badge match-original">{{ t.duplicates.original }}</span>
                     {% elif member.match_type == 'exact' %}
-                        <span class="match-badge match-exact">Exakt</span>
+                        <span class="match-badge match-exact">{{ t.duplicates.exact | title }}</span>
                     {% else %}
                         <span class="match-badge match-similar">{{ ((64 - member.phash_distance) / 64 * 100) | round(0) | int }}%</span>
                     {% endif %}
@@ -53,44 +53,44 @@
 
                 <div class="dup-props">
                     <div class="dup-prop">
-                        <span class="dup-prop-label">Grösse</span>
+                        <span class="dup-prop-label">{{ t.duplicates.size }}</span>
                         <span>{% if member.file_size %}{{ (member.file_size / 1024 / 1024) | round(1) }} MB{% else %}—{% endif %}</span>
                     </div>
                     <div class="dup-prop">
-                        <span class="dup-prop-label">Auflösung</span>
+                        <span class="dup-prop-label">{{ t.duplicates.resolution }}</span>
                         <span>{% if member.width %}{{ member.width }}x{{ member.height }}{% else %}—{% endif %}</span>
                     </div>
                     <div class="dup-prop">
-                        <span class="dup-prop-label">Megapixel</span>
+                        <span class="dup-prop-label">{{ t.duplicates.megapixel }}</span>
                         <span>{% if member.megapixel %}{{ member.megapixel }} MP{% else %}—{% endif %}</span>
                     </div>
                     <div class="dup-prop">
-                        <span class="dup-prop-label">Datum</span>
+                        <span class="dup-prop-label">{{ t.duplicates.date }}</span>
                         <span>{{ member.exif_date or '—' }}</span>
                     </div>
                     <div class="dup-prop">
-                        <span class="dup-prop-label">Kamera</span>
+                        <span class="dup-prop-label">{{ t.duplicates.camera }}</span>
                         <span>{{ member.exif_camera or '—' }}</span>
                     </div>
                     {% if member.exif_iso or member.exif_aperture or member.exif_shutter %}
                     <div class="dup-prop">
-                        <span class="dup-prop-label">Einstellungen</span>
+                        <span class="dup-prop-label">{{ t.duplicates.settings_label }}</span>
                         <span>{% if member.exif_iso %}ISO {{ member.exif_iso }}{% endif %}{% if member.exif_aperture %} f/{{ member.exif_aperture }}{% endif %}{% if member.exif_shutter %} {{ member.exif_shutter }}s{% endif %}</span>
                     </div>
                     {% endif %}
                     {% if member.exif_focal %}
                     <div class="dup-prop">
-                        <span class="dup-prop-label">Brennweite</span>
+                        <span class="dup-prop-label">{{ t.duplicates.focal_length }}</span>
                         <span>{{ member.exif_focal }}</span>
                     </div>
                     {% endif %}
                     <div class="dup-prop">
-                        <span class="dup-prop-label">EXIF</span>
-                        <span>{% if member.exif_has_exif %}Ja{% else %}Nein{% endif %}</span>
+                        <span class="dup-prop-label">{{ t.duplicates.exif }}</span>
+                        <span>{% if member.exif_has_exif %}{{ t.duplicates.yes }}{% else %}{{ t.duplicates.no }}{% endif %}</span>
                     </div>
                     <div class="dup-prop">
-                        <span class="dup-prop-label">GPS</span>
-                        <span>{% if member.exif_has_gps %}Ja{% else %}Nein{% endif %}</span>
+                        <span class="dup-prop-label">{{ t.duplicates.gps }}</span>
+                        <span>{% if member.exif_has_gps %}{{ t.duplicates.yes }}{% else %}{{ t.duplicates.no }}{% endif %}</span>
                     </div>
                 </div>
 
@@ -113,10 +113,10 @@
             <div class="dup-card-actions">
                 {% if member.exists %}
                 <form method="post" action="/api/duplicates/keep" class="inline-form"
-                      onsubmit="return confirm('{{ member.filename }} behalten, alle anderen in dieser Gruppe löschen?')">
+                      onsubmit="return confirm('{{ t.duplicates.keep_confirm | replace('{name}', member.filename) }}')">
                     <input type="hidden" name="keep_key" value="{{ member.debug_key }}">
                     <input type="hidden" name="group_key" value="{{ group.original_key }}">
-                    <button type="submit" class="btn btn-small btn-primary">Dieses behalten</button>
+                    <button type="submit" class="btn btn-small btn-primary">{{ t.duplicates.keep_this }}</button>
                 </form>
                 {% endif %}
             </div>
@@ -126,6 +126,6 @@
 </div>
 {% endfor %}
 {% else %}
-<p class="section-note">Keine offenen Duplikate.</p>
+<p class="section-note">{{ t.duplicates.no_duplicates }}</p>
 {% endif %}
 {% endblock %}
