@@ -235,3 +235,52 @@ async def dashboard(request: Request):
         "modules": modules,
         "recent_jobs": recent_jobs,
     })
+
+
+@router.get("/api/dashboard")
+async def dashboard_json():
+    """JSON endpoint for live-updating the dashboard."""
+    async with async_session() as session:
+        total = (await session.execute(select(func.count(Job.id)))).scalar() or 0
+        done = (await session.execute(select(func.count(Job.id)).where(Job.status == "done"))).scalar() or 0
+        errors = (await session.execute(select(func.count(Job.id)).where(Job.status == "error"))).scalar() or 0
+        queued = (await session.execute(select(func.count(Job.id)).where(Job.status == "queued"))).scalar() or 0
+        processing = (await session.execute(select(func.count(Job.id)).where(Job.status == "processing"))).scalar() or 0
+
+    async with async_session() as session:
+        recent_result = await session.execute(
+            select(Job).order_by(Job.updated_at.desc()).limit(20)
+        )
+        recent_jobs = recent_result.scalars().all()
+
+    modules = await _get_module_status()
+
+    return {
+        "stats": {
+            "total": total,
+            "done": done,
+            "errors": errors,
+            "queued": queued,
+            "processing": processing,
+        },
+        "modules": [
+            {
+                "name": m["name"],
+                "label": m["label"],
+                "status": m["status"],
+                "detail": m["detail"],
+            }
+            for m in modules
+        ],
+        "recent_jobs": [
+            {
+                "debug_key": j.debug_key,
+                "filename": j.filename,
+                "status": j.status,
+                "current_step": j.current_step,
+                "error_message": j.error_message,
+                "updated_at": j.updated_at.strftime("%d.%m. %H:%M") if j.updated_at else "—",
+            }
+            for j in recent_jobs
+        ],
+    }

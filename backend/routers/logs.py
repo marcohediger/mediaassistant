@@ -95,3 +95,31 @@ async def log_detail(request: Request, debug_key: str):
         return RedirectResponse(url="/logs?tab=jobs", status_code=302)
 
     return templates.TemplateResponse(request, "log_detail.html", {"job": job})
+
+
+@router.get("/job/{debug_key}/json")
+async def log_detail_json(debug_key: str):
+    """JSON endpoint for live-updating the job detail page."""
+    async with async_session() as session:
+        result = await session.execute(select(Job).where(Job.debug_key == debug_key))
+        job = result.scalar()
+
+    if not job:
+        return {"error": "not_found"}
+
+    return {
+        "debug_key": job.debug_key,
+        "filename": job.filename,
+        "status": job.status,
+        "current_step": job.current_step,
+        "source_label": job.source_label,
+        "original_path": job.original_path,
+        "target_path": job.target_path,
+        "error_message": job.error_message,
+        "step_result": job.step_result,
+        "file_hash": job.file_hash,
+        "phash": job.phash,
+        "created_at": job.created_at.strftime("%d.%m.%Y %H:%M:%S") if job.created_at else None,
+        "updated_at": job.updated_at.strftime("%d.%m.%Y %H:%M:%S") if job.updated_at else None,
+        "completed_at": job.completed_at.strftime("%d.%m.%Y %H:%M:%S") if job.completed_at else None,
+    }
