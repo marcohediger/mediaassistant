@@ -160,13 +160,20 @@ async def _build_member(job, session) -> dict:
     """Build a member dict for a single job — all info read directly from the file."""
     filepath = _resolve_filepath(job)
     dup_info = (job.step_result or {}).get("IA-03", {})
-    ia08_info = (job.step_result or {}).get("IA-08", {})
-    # Immich duplicates are detected in IA-08 (after EXIF write)
-    if ia08_info.get("match_type") == "immich":
-        dup_info = ia08_info
-    is_dup = dup_info.get("status") == "duplicate" or dup_info.get("match_type") == "immich"
+    is_dup = dup_info.get("status") == "duplicate"
     exists = os.path.exists(filepath)
     img_info = await asyncio.to_thread(_get_image_info, filepath) if exists else {}
+
+    # Check if this job's target is in Immich
+    immich_asset_id = ""
+    immich_link = ""
+    target = job.target_path or ""
+    if target.startswith("immich:"):
+        immich_asset_id = target[7:]
+        from immich_client import get_immich_config
+        immich_url, _ = await get_immich_config()
+        if immich_url and immich_asset_id:
+            immich_link = f"{immich_url}/photos/{immich_asset_id}"
 
     return {
         "job_id": job.id,
@@ -177,8 +184,8 @@ async def _build_member(job, session) -> dict:
         "is_original": not is_dup,
         "match_type": dup_info.get("match_type", "original") if is_dup else "original",
         "phash_distance": dup_info.get("phash_distance", 0),
-        "immich_link": dup_info.get("immich_link", ""),
-        "immich_asset_id": dup_info.get("immich_asset_id", ""),
+        "immich_link": immich_link,
+        "immich_asset_id": immich_asset_id,
         **img_info,
     }
 
@@ -194,24 +201,15 @@ async def _build_duplicate_groups() -> list[dict]:
         if not dup_jobs:
             return []
 
-        # Separate Immich duplicates (no original_debug_key) from local duplicates
-        immich_dups = []
+        # Build links: each duplicate is linked to its original
         links = []
         for job in dup_jobs:
             dup_info = (job.step_result or {}).get("IA-03", {})
-            ia08_info = (job.step_result or {}).get("IA-08", {})
-            # Immich duplicates detected in IA-08
-            if ia08_info.get("match_type") == "immich":
-                immich_dups.append(job)
-                continue
-            if dup_info.get("match_type") == "immich":
-                immich_dups.append(job)
-                continue
             original_key = dup_info.get("original_debug_key")
             if original_key:
                 links.append((job.debug_key, original_key))
 
-        # Transitively merge local duplicates into groups
+        # Transitively merge into groups
         merged = _union_find_groups(links)
 
         # Collect all debug_keys we need
@@ -225,7 +223,7 @@ async def _build_duplicate_groups() -> list[dict]:
         )
         jobs_by_key = {j.debug_key: j for j in result.scalars().all()}
 
-        # Build groups for local duplicates
+        # Build groups
         groups = []
         for root_key, member_keys in merged.items():
             members = []
@@ -243,6 +241,9 @@ async def _build_duplicate_groups() -> list[dict]:
             if len(members) < 2:
                 continue
 
+            # Check if original is in Immich
+            has_immich = any(m.get("immich_asset_id") for m in members)
+
             group_key = next(
                 (m["debug_key"] for m in members if m["is_original"]),
                 members[0]["debug_key"],
@@ -255,17 +256,7 @@ async def _build_duplicate_groups() -> list[dict]:
                 "all_exact": all(
                     m["match_type"] in ("exact", "original") for m in members
                 ),
-            })
-
-        # Build groups for Immich duplicates (each as its own group)
-        for job in immich_dups:
-            member = await _build_member(job, session)
-            groups.append({
-                "original_key": job.debug_key,
-                "members": [member],
-                "count": 1,
-                "all_exact": False,
-                "is_immich_duplicate": True,
+                "is_immich_duplicate": has_immich,
             })
 
     return groups

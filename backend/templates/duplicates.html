@@ -30,26 +30,12 @@
     </div>
 
     <div class="dup-compare">
-        {% if group.is_immich_duplicate and group.members[0].immich_asset_id %}
-        <div class="dup-card dup-card-original">
-            <div class="dup-thumb">
-                <img src="/api/thumbnail/immich/{{ group.members[0].immich_asset_id }}" alt="Immich" loading="lazy">
-            </div>
-            <div class="dup-card-body">
-                <div class="dup-filename">Immich</div>
-                <div class="dup-badges">
-                    <span class="match-badge match-original">Immich Original</span>
-                </div>
-                <div class="dup-immich-link">
-                    <a href="{{ group.members[0].immich_link }}" target="_blank" class="btn btn-small btn-secondary">{{ t.duplicates.view_in_immich }}</a>
-                </div>
-            </div>
-        </div>
-        {% endif %}
         {% for member in group.members %}
-        <div class="dup-card {{ 'dup-card-original' if member.is_original and not group.is_immich_duplicate }}">
+        <div class="dup-card {{ 'dup-card-original' if member.is_original }}">
             <div class="dup-thumb">
-                {% if member.exists %}
+                {% if member.immich_asset_id %}
+                <img src="/api/thumbnail/immich/{{ member.immich_asset_id }}" alt="{{ member.filename }}" loading="lazy">
+                {% elif member.exists %}
                 <img src="/api/thumbnail/{{ member.job_id }}" alt="{{ member.filename }}" loading="lazy">
                 {% else %}
                 <div class="dup-thumb-missing">{{ t.duplicates.not_found }}</div>

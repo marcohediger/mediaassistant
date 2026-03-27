@@ -28,8 +28,10 @@ def _compute_phash(filepath: str) -> str | None:
 
 
 def _file_exists(job_entry) -> bool:
-    """Check if the file referenced by a job still exists on disk."""
+    """Check if the file referenced by a job still exists (on disk or in Immich)."""
     path = job_entry.target_path or job_entry.original_path
+    if path and path.startswith("immich:"):
+        return True
     return path and os.path.exists(path)
 
 
