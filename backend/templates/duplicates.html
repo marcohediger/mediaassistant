@@ -123,13 +123,13 @@
             </div>
 
             <div class="dup-card-actions">
-                {% if group.is_immich_duplicate %}
+                {% if group.is_immich_duplicate and not member.immich_asset_id and member.exists %}
                 <form method="post" action="/api/duplicates/delete-all" class="inline-form"
                       onsubmit="return confirm('{{ t.duplicates.delete_local }}?')">
                     <input type="hidden" name="debug_key" value="{{ member.debug_key }}">
                     <button type="submit" class="btn btn-small btn-danger">{{ t.duplicates.delete_local }}</button>
                 </form>
-                {% elif member.exists %}
+                {% elif not group.is_immich_duplicate and member.exists %}
                 <form method="post" action="/api/duplicates/keep" class="inline-form"
                       onsubmit="return confirm('{{ t.duplicates.keep_confirm | replace('{name}', member.filename) }}')">
                     <input type="hidden" name="keep_key" value="{{ member.debug_key }}">
