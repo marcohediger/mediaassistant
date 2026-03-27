@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from config import config_manager
 from safe_file import safe_move
-from immich_client import upload_asset
+from immich_client import upload_asset, check_duplicate, get_immich_config
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -161,6 +161,46 @@ async def execute(job, session) -> dict:
 
     # Route: Immich upload or target directory
     if job.use_immich:
+        # Check for duplicates in Immich (after IA-07 EXIF write, so hash matches)
+        dup_result = await check_duplicate(job.original_path)
+        if dup_result:
+            immich_url, _ = await get_immich_config()
+            asset_id = dup_result.get("assetId", "")
+            immich_link = f"{immich_url}/photos/{asset_id}" if asset_id else ""
+
+            # Move to duplicates directory for review
+            from config import config_manager as _cm
+            base_path = await _cm.get("library.base_path", "/bibliothek")
+            dup_rel = await _cm.get("library.path_duplicate", "error/duplicates/")
+            dup_dir = os.path.join(base_path, dup_rel)
+            await asyncio.to_thread(os.makedirs, dup_dir, exist_ok=True)
+
+            filename = os.path.basename(job.original_path)
+            dup_path = os.path.join(dup_dir, filename)
+            if os.path.exists(dup_path):
+                name, ext = os.path.splitext(filename)
+                counter = 1
+                while os.path.exists(dup_path):
+                    dup_path = os.path.join(dup_dir, f"{name}_{counter}{ext}")
+                    counter += 1
+
+            from safe_file import safe_move as _safe_move
+            await asyncio.to_thread(_safe_move, job.original_path, dup_path, job.debug_key)
+
+            job.status = "duplicate"
+            job.target_path = dup_path
+
+            # Store Immich info in step_result for the review UI
+            return {
+                "category": category,
+                "status": "duplicate",
+                "match_type": "immich",
+                "immich_asset_id": asset_id,
+                "immich_link": immich_link,
+                "target_path": dup_path,
+                "original_path": f"immich:{asset_id}",
+            }
+
         # Extract folder tags as single combined album name
         album_names = None
         if job.source_inbox_path:

@@ -104,25 +104,6 @@ async def execute(job, session) -> dict:
                 else:
                     await log_warning("IA-03", f"Orphaned job {candidate.debug_key}: file missing, skipping duplicate match")
 
-    # --- Stage 3: Immich duplicate check ---
-    if job.use_immich:
-        try:
-            from immich_client import check_duplicate, get_immich_config
-            dup_result = await check_duplicate(job.original_path)
-            if dup_result:
-                immich_url, _ = await get_immich_config()
-                asset_id = dup_result.get("assetId", "")
-                immich_link = f"{immich_url}/photos/{asset_id}" if asset_id else ""
-                await _handle_duplicate_immich(job, session, asset_id, immich_link)
-                return {
-                    "status": "duplicate",
-                    "match_type": "immich",
-                    "immich_asset_id": asset_id,
-                    "immich_link": immich_link,
-                    "original_path": f"immich:{asset_id}",
-                }
-        except Exception:
-            pass
 
     return {"status": "ok", "phash": phash_str}
 
@@ -177,50 +158,6 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
 
     await log_info("IA-03", f"{job.debug_key} {desc}")
 
-
-async def _handle_duplicate_immich(job, session, asset_id: str, immich_link: str):
-    """Move duplicate file to duplicates/ directory for review against Immich."""
-    desc = f"Already exists in Immich (Asset: {asset_id})"
-
-    if job.dry_run:
-        job.status = "duplicate"
-        await log_info("IA-03", f"{job.debug_key} [dry-run] {desc}")
-        return
-
-    base_path = await config_manager.get("library.base_path", "/bibliothek")
-    dup_rel = await config_manager.get("library.path_duplicate", "error/duplicates/")
-    dup_dir = os.path.join(base_path, dup_rel)
-    await asyncio.to_thread(os.makedirs, dup_dir, exist_ok=True)
-
-    filename = os.path.basename(job.original_path)
-    dup_path = os.path.join(dup_dir, filename)
-
-    if os.path.exists(dup_path):
-        name, ext = os.path.splitext(filename)
-        counter = 1
-        while os.path.exists(dup_path):
-            dup_path = os.path.join(dup_dir, f"{name}_{counter}{ext}")
-            counter += 1
-
-    await asyncio.to_thread(safe_move, job.original_path, dup_path, job.debug_key)
-
-    # Write .log file with Immich reference
-    log_lines = [
-        f"Debug-Key: {job.debug_key}",
-        f"File: {job.filename}",
-        f"Original: {job.original_path}",
-        f"Duplicate type: immich",
-        f"Reference: {desc}",
-        f"Immich Link: {immich_link}",
-        f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-    ]
-    log_path = dup_path + ".log"
-    await asyncio.to_thread(_write_log, log_path, "\n".join(log_lines))
-
-    job.status = "duplicate"
-    job.target_path = dup_path
-
-    await log_info("IA-03", f"{job.debug_key} {desc}")
 
 
 def _write_log(path: str, content: str):
