@@ -74,7 +74,7 @@
         <div class="step-item">
             <span class="step-code">{{ step }}</span>
             <span class="step-label">{{ step_labels.get(step, step) }}</span>
-            <pre class="step-data">{{ result | tojson(indent=2) }}</pre>
+            <pre class="step-data">{{ result | tojson_unicode(indent=2) }}</pre>
         </div>
         {% endfor %}
     </div>
