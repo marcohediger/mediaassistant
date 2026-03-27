@@ -20,6 +20,7 @@ class Job(Base):
     step_result = Column(JSON, default=dict)
     error_message = Column(Text)
     source_label = Column(Text)  # which inbox this came from
+    source_inbox_path = Column(Text)  # inbox base path (for folder_tags)
     file_hash = Column(Text)  # SHA256
     phash = Column(Text)  # perceptual hash
     created_at = Column(DateTime, default=lambda: datetime.now())

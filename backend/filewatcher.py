@@ -102,6 +102,7 @@ async def _scan_and_process():
                     debug_key=debug_key,
                     status="queued",
                     source_label=inbox.label,
+                    source_inbox_path=inbox.path if inbox.folder_tags else None,
                     file_hash=file_hash,
                 )
                 session.add(job)

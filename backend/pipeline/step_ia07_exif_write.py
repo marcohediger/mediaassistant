@@ -14,6 +14,13 @@ async def execute(job, session) -> dict:
     # Collect keywords
     keywords = []
 
+    # From folder structure (if inbox has folder_tags enabled)
+    if job.source_inbox_path:
+        rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
+        if rel and rel != ".":
+            folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
+            keywords.extend(folder_parts)
+
     # From AI analysis
     if ai_result.get("tags"):
         keywords.extend(ai_result["tags"])

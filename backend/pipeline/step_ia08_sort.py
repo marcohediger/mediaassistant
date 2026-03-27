@@ -52,6 +52,21 @@ def _resolve_path(template: str, exif: dict, date: datetime | None) -> str:
     return result
 
 
+def _cleanup_empty_dirs(start_dir: str, stop_at: str):
+    """Remove empty directories from start_dir up to (but not including) stop_at."""
+    stop_at = os.path.realpath(stop_at)
+    current = os.path.realpath(start_dir)
+    while current != stop_at and len(current) > len(stop_at):
+        try:
+            if not os.listdir(current):
+                os.rmdir(current)
+            else:
+                break  # directory not empty, stop
+        except OSError:
+            break
+        current = os.path.dirname(current)
+
+
 async def execute(job, session) -> dict:
     """IA-08: Datei in Zielordner verschieben."""
     step_results = job.step_result or {}
@@ -131,7 +146,12 @@ async def execute(job, session) -> dict:
 
     # Create directory and move file (safe: copy → verify → delete)
     await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
+    source_dir = os.path.dirname(job.original_path)
     await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
+
+    # Clean up empty parent directories in inbox (up to inbox root)
+    if job.source_inbox_path:
+        await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
 
     # Update job with target path
     job.target_path = target_path
