@@ -58,7 +58,7 @@ body {
 .nav-links a:hover { color: var(--text); }
 
 .container {
-    max-width: 960px;
+    max-width: 1100px;
     margin: 2rem auto;
     padding: 0 1.5rem;
 }
@@ -746,3 +746,175 @@ select:focus {
 .level-error { background: rgba(248, 113, 113, 0.15); color: var(--error); }
 
 .cell-nowrap { white-space: nowrap; }
+
+/* Duplicate Review */
+.stat-duplicate .stat-value { color: var(--warning); }
+
+.dup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.dup-header h1 { margin: 0; }
+
+.dup-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.dup-count {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.dup-group {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+}
+
+.dup-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.dup-group-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    font-family: monospace;
+}
+
+.dup-group-count {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-left: auto;
+}
+
+.dup-compare {
+    display: flex;
+    gap: 0;
+}
+
+.dup-card {
+    flex: 1;
+    min-width: 0;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    border-right: 1px solid var(--border);
+}
+
+.dup-card:last-child { border-right: none; }
+
+.dup-card-original {
+    background: rgba(52, 211, 153, 0.04);
+}
+
+.dup-thumb {
+    width: 100%;
+    aspect-ratio: 4/3;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dup-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.dup-thumb-missing {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.dup-card-body { flex: 1; }
+
+.dup-filename {
+    font-size: 0.85rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 0.375rem;
+}
+
+.dup-badges { margin-bottom: 0.5rem; }
+
+.match-badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.match-original { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+.match-exact { background: rgba(96, 165, 250, 0.15); color: var(--info); }
+.match-similar { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+
+.dup-props {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    margin-bottom: 0.5rem;
+}
+
+.dup-prop {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+}
+
+.dup-prop-label {
+    color: var(--text-muted);
+}
+
+.dup-key {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.dup-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.dup-kept-label {
+    font-size: 0.8rem;
+    color: var(--success);
+    font-weight: 500;
+}
+
+.dup-group-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.inline-form { display: inline; }
+
+@media (max-width: 700px) {
+    .dup-compare { flex-direction: column; }
+    .dup-card { border-right: none; border-bottom: 1px solid var(--border); }
+    .dup-card:last-child { border-bottom: none; }
+}

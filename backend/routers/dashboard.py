@@ -231,6 +231,7 @@ async def dashboard(request: Request):
         errors = (await session.execute(select(func.count(Job.id)).where(Job.status == "error"))).scalar() or 0
         queued = (await session.execute(select(func.count(Job.id)).where(Job.status == "queued"))).scalar() or 0
         processing = (await session.execute(select(func.count(Job.id)).where(Job.status == "processing"))).scalar() or 0
+        duplicates = (await session.execute(select(func.count(Job.id)).where(Job.status == "duplicate"))).scalar() or 0
 
     # Recent jobs
     async with async_session() as session:
@@ -248,6 +249,7 @@ async def dashboard(request: Request):
             "errors": errors,
             "queued": queued,
             "processing": processing,
+            "duplicates": duplicates,
         },
         "modules": modules,
         "recent_jobs": recent_jobs,
@@ -263,6 +265,7 @@ async def dashboard_json():
         errors = (await session.execute(select(func.count(Job.id)).where(Job.status == "error"))).scalar() or 0
         queued = (await session.execute(select(func.count(Job.id)).where(Job.status == "queued"))).scalar() or 0
         processing = (await session.execute(select(func.count(Job.id)).where(Job.status == "processing"))).scalar() or 0
+        duplicates = (await session.execute(select(func.count(Job.id)).where(Job.status == "duplicate"))).scalar() or 0
 
     async with async_session() as session:
         recent_result = await session.execute(
@@ -279,6 +282,7 @@ async def dashboard_json():
             "errors": errors,
             "queued": queued,
             "processing": processing,
+            "duplicates": duplicates,
         },
         "modules": [
             {

@@ -24,6 +24,12 @@
         <div class="stat-value" data-stat="errors">{{ stats.errors }}</div>
         <div class="stat-label">Fehler</div>
     </div>
+    {% if stats.duplicates > 0 %}
+    <a href="/duplicates" class="stat-card stat-duplicate" style="text-decoration:none">
+        <div class="stat-value" data-stat="duplicates">{{ stats.duplicates }}</div>
+        <div class="stat-label">Duplikate</div>
+    </a>
+    {% endif %}
 </div>
 
 <h2>Module</h2>
