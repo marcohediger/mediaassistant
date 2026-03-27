@@ -125,7 +125,11 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
     - HEIC/DNG/RAW/GIF → temp JPEG für KI-Analyse
     - JPG/PNG/WebP → direkt, keine Konvertierung
         ↓
- 3. KI-Analyse (LM Studio Vision)
+ 3. Duplikaterkennung (vor KI — spart teure Analyse)
+    - SHA256 Hash (exakt) + pHash (ähnlich)
+    - Duplikat → Pipeline stoppt, Datei → /error/duplicates/
+        ↓
+ 4. KI-Analyse (LM Studio Vision)
     - Typ: personal_photo / whatsapp / screenshot / internet_image
     - Inhalt: Personen, Landschaft, Essen, Dokument, Tier, etc.
     - Stimmung: indoor / outdoor / nacht / gegenlicht
@@ -133,29 +137,23 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
     - Qualität: unscharf / gut / sehr gut
     - Beschreibung: Freitext (1-2 Sätze)
         ↓
- 4. OCR — Texterkennung
+ 5. OCR — Texterkennung
     - Screenshots, Dokumente, Schilder, Whiteboards
-        ↓
- 5. Duplikaterkennung
-    - SHA256 Hash (exakt) + pHash (ähnlich)
         ↓
  6. Geocoding
     - GPS-Koordinaten → Ort, Land, Stadt
         ↓
  7. EXIF Tags schreiben (ExifTool, overwrite_original)
-    - Keywords: Typ, Inhalt-Tags, Qualität, Ort
+    - Keywords: Typ, Inhalt-Tags, Qualität, Ort, Ordner-Tags
     - ImageDescription: KI-Freitext + Ort
-        ↓
- 7b. Datei-Hash aktualisieren
-    - SHA256 neu berechnen (Datei hat sich durch neue EXIF-Tags verändert)
-    - Neuer Hash + Dateigrösse in DB speichern
         ↓
  8. Sortieren — Zielordner bestimmen + Datei sicher verschieben
     - photos/YYYY/YYYY-MM/    (personal_photo, Datum aus EXIF)
-    - whatsapp/YYYY/          (whatsapp)
+    - sourceless/YYYY/        (WhatsApp, Messenger-Bilder)
     - screenshots/YYYY/       (screenshot)
     - unknown/review/         (KI-Konfidenz < Schwellwert oder unklar)
     - Sichere Verschiebung: Kopie → SHA256-Verifikation → Original löschen
+    - Leere Quellordner nach Verschiebung automatisch aufräumen
         ↓
  9. Benachrichtigung
     - E-Mail bei Fehlern (SMTP, zusammengefasst)
@@ -182,6 +180,10 @@ status          TEXT        -- queued / processing / done / error / duplicate / 
 current_step    TEXT        -- IA-01 bis IA-11, null wenn queued
 step_result     JSON        -- Ergebnisse pro Step
 error_message   TEXT        -- Fehlermeldung wenn status=error
+source_label    TEXT        -- Label des Eingangsverzeichnisses
+source_inbox_path TEXT      -- Inbox-Basispfad (für Ordner-Tags)
+file_hash       TEXT        -- SHA256 Hash (Original, wird nie überschrieben)
+phash           TEXT        -- Perceptual Hash (für Ähnlichkeitserkennung)
 created_at      DATETIME
 updated_at      DATETIME
 completed_at    DATETIME
@@ -192,7 +194,7 @@ completed_at    DATETIME
 {
   "IA-01": {"make": "Apple", "model": "iPhone15", "date": "2024-06-12", "gps": true, "has_exif": true},
   "IA-02": {"converted": true, "temp_path": "/tmp/IA-2025-0342.tmp.jpg"},
-  "IA-03": {"status": "ok", "phash": "b38e33e05c686733"},
+  "IA-03": {"status": "ok", "phash": "b38e33e05c686733"},  // oder {"status": "duplicate", "match_type": "exact|similar", "original_debug_key": "MA-2026-0001"}
   "IA-04": {"type": "personal_photo", "tags": ["Zürich", "outdoor"], "quality": "gut", "confidence": 0.95},
   "IA-05": {"has_text": false, "text": "", "text_type": "keiner"},
   "IA-06": {"country": "Schweiz", "city": "Zürich", "suburb": "Altstadt", "provider": "nominatim"},
@@ -258,16 +260,16 @@ Duplikate landen in:
 ### Duplikat-Review Webinterface
 Eigene Seite im Webinterface zum Reviewen und Löschen von Duplikaten:
 
-- Alle Dateien einer Gruppe gleichwertig nebeneinander (kein fixes "Original")
-- Pro Datei: Vorschaubild, Dateigrösse, Auflösung, Megapixel, EXIF vorhanden, GPS vorhanden, KI-Qualitäts-Score
-- Beste Datei wird automatisch vorgeschlagen (⭐) anhand: höchste Auflösung + EXIF vorhanden + GPS vorhanden
-- Nutzer kann manuell eine andere als "beste" markieren
-- Aktionen pro Datei: Behalten / Löschen
-- "Beste behalten, Rest löschen" — ein Klick für die ganze Gruppe
-- "Überspringen" — Gruppe später reviewen
+- Alle Dateien einer Gruppe gleichwertig nebeneinander (transitive Gruppierung via Union-Find)
+- Pro Datei: Vorschaubild (HEIC via heif-convert), Dateigrösse, Auflösung, Megapixel
+- Pro Datei: Alle EXIF-Daten direkt aus Datei gelesen (Datum, Kamera, ISO, Blende, Verschlusszeit, Brennweite, GPS)
+- Pro Datei: Alle Keywords/Tags aus Datei angezeigt (AI-Tags, Geo, OCR, Folder-Tags)
+- Pro Datei: Beschreibung aus Datei angezeigt
+- Aktionen pro Datei: "Dieses behalten" (verschiebt in Bibliothek, löscht alle anderen)
 - Ähnlichkeits-Score pro Datei anzeigen (SHA256 exakt / pHash %)
-- Batch-Modus: alle exakten SHA256 Duplikate ohne Review automatisch löschen (schlechteste Qualität wird gelöscht)
+- Batch-Clean: alle exakten SHA256 Duplikate ohne Review automatisch löschen
 - Anzahl offener Duplikat-Gruppen im Dashboard anzeigen
+- Dateinamen-Kollision: automatischer Index (_1, _2, ...) bei gleichem Namen im Zielordner
 
 ## Logging & Debug
 
@@ -333,6 +335,7 @@ Anwendungsorte:
 - Logfile (gleiches Verzeichnis, gleicher Name + .log) mit Fehlerdetails
 - SMTP Mail mit Fehlerübersicht (max. 1 Mail pro Stunde zusammengefasst)
 - Retry-Button im Webinterface (Job-Detail Seite)
+- Löschen-Button im Webinterface (Job + Datei endgültig entfernen)
 
 ## Migration (Einmalig)
 - Gleiche Pipeline wie oben, aber Quelle: /volume1/photo/ (Synology Photos)
@@ -529,7 +532,7 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
 - [x] FEAT: Eingangsverzeichnisse konfigurierbar im Webinterface (Pfad, Label, Ordner-Tags, Aktiv/inaktiv, Verarbeitungszeiten)
 - [x] FEAT: Filewatcher (Polling) auf allen konfigurierten Eingangsverzeichnissen
-- [ ] FEAT: Manuelle Imports — Ordnerstruktur als Tags (jede Ebene = ein EXIF-Keyword, pro Verzeichnis konfigurierbar)
+- [x] FEAT: Manuelle Imports — Ordnerstruktur als Tags (jede Ebene = ein EXIF-Keyword, pro Verzeichnis konfigurierbar)
 - [x] FEAT: EXIF-Auslesen via ExifTool subprocess (IA-01)
 - [ ] FEAT: Regel-basierte Klassifizierung (WA, Screenshot, EXIF-leer)
 - [x] FEAT: LM Studio Vision API Integration (IA-04)
@@ -538,7 +541,7 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Zielstruktur-Logik (Ordner bestimmen, Datei verschieben, IA-08)
 - [x] FEAT: Duplikat-Erkennung SHA256 (exakt) + pHash (ähnlich) via imagehash
 - [x] FEAT: Duplikate → /inbox/error/duplicates/ + .log mit Verweis auf Original
-- [ ] FEAT: Duplikat-Review Webinterface (Original + alle Duplikate gruppiert, Side-by-Side, Batch-Löschen)
+- [x] FEAT: Duplikat-Review Webinterface (Original + alle Duplikate gruppiert, Side-by-Side, Batch-Löschen, EXIF/Tags direkt aus Datei)
 - [x] FEAT: Fehlerbehandlung → /inbox/error/ + .log Datei + Retry-Button
 - [x] FEAT: Sichere Dateiverschiebung (safe_move: Copy → SHA256-Verify → Delete, kein Datenverlust)
 - [x] FEAT: SMTP Fehlerbenachrichtigung (IA-09, STARTTLS/Office 365 Support)
