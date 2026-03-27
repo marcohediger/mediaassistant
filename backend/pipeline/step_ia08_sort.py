@@ -66,18 +66,18 @@ async def execute(job, session) -> dict:
     filename = os.path.basename(job.original_path)
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
     has_no_exif = not exif.get("has_exif", False)
-    is_whatsapp_name = bool(_WHATSAPP_UUID_RE.match(filename)) or "-WA" in filename.upper()
-    # WhatsApp entfernt EXIF — UUID-Name oder fehlende EXIF + KI-Hinweis = WhatsApp
-    is_whatsapp = is_whatsapp_name or ai_type == "whatsapp" or (has_no_exif and ai_type in ("internet_image", "meme", ""))
+    has_uuid_name = bool(_WHATSAPP_UUID_RE.match(filename))
+    # Keine EXIF + UUID-Name oder -WA = Messenger-Bild (WhatsApp, Telegram, Signal etc.)
+    is_no_source = has_uuid_name or "-WA" in filename.upper() or (has_no_exif and ai_type in ("internet_image", "meme", "whatsapp", ""))
 
-    if is_video and is_whatsapp:
-        category = "whatsapp"
+    if is_video and is_no_source:
+        category = "no_source"
     elif is_video:
         category = "video"
-    elif is_whatsapp:
-        category = "whatsapp"
     elif ai_type == "screenshot" or "screenshot" in filename.lower():
         category = "screenshot"
+    elif is_no_source and ai_type != "personal_photo":
+        category = "no_source"
     elif ai_type in ("personal_photo", ""):
         category = "photo"
     elif ai_result.get("confidence", 1.0) < 0.5:
@@ -92,14 +92,14 @@ async def execute(job, session) -> dict:
     # Get path template from config
     category_key_map = {
         "photo": "library.path_photo",
-        "whatsapp": "library.path_whatsapp",
+        "no_source": "library.path_no_source",
         "screenshot": "library.path_screenshot",
         "video": "library.path_video",
         "unknown": "library.path_unknown",
     }
     defaults = {
         "photo": "photos/{YYYY}/{YYYY-MM}/",
-        "whatsapp": "whatsapp/{YYYY}/",
+        "no_source": "unbekannte_quelle/{YYYY}/",
         "screenshot": "screenshots/{YYYY}/",
         "video": "videos/{YYYY}/{YYYY-MM}/",
         "unknown": "unknown/review/",
