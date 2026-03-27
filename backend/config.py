@@ -67,5 +67,36 @@ class ConfigManager:
     def get_env(self, key: str, default: str = "") -> str:
         return os.environ.get(key, default)
 
+    async def seed_from_env(self):
+        """Write ENV variables into DB if set. Existing DB values are not overwritten."""
+        env_map = {
+            "AI_BACKEND_URL": ("ai.backend_url", False),
+            "AI_MODEL": ("ai.model", False),
+            "AI_API_KEY": ("ai.api_key", True),
+            "SMTP_SERVER": ("smtp.server", False),
+            "SMTP_PORT": ("smtp.port", False),
+            "SMTP_SSL": ("smtp.ssl", False),
+            "SMTP_USER": ("smtp.user", False),
+            "SMTP_PASSWORD": ("smtp.password", True),
+            "SMTP_RECIPIENT": ("smtp.recipient", False),
+            "GEO_PROVIDER": ("geo.provider", False),
+            "GEO_URL": ("geo.url", False),
+            "GEO_API_KEY": ("geo.api_key", True),
+            "LIBRARY_BASE_PATH": ("library.base_path", False),
+        }
+        for env_key, (config_key, encrypted) in env_map.items():
+            env_value = os.environ.get(env_key)
+            if env_value is None or env_value == "":
+                continue
+            # Convert types
+            if config_key == "smtp.port":
+                env_value = int(env_value)
+            elif config_key == "smtp.ssl":
+                env_value = env_value.lower() in ("true", "1", "yes")
+            # Only seed if not already in DB
+            existing = await self.get(config_key)
+            if existing is None:
+                await self.set(config_key, env_value, encrypted=encrypted)
+
 
 config_manager = ConfigManager()

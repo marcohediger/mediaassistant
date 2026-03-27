@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from config import config_manager
 from database import init_db
 from filewatcher import start_filewatcher
 from routers import dashboard, setup, settings, logs, api
@@ -10,6 +11,7 @@ from routers import dashboard, setup, settings, logs, api
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await config_manager.seed_from_env()
     shutdown_event = asyncio.Event()
     watcher_task = asyncio.create_task(start_filewatcher(shutdown_event))
     yield
