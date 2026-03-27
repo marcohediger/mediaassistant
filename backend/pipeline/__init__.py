@@ -1,11 +1,11 @@
 import asyncio
 import os
-import shutil
 from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
 from config import config_manager
 from database import async_session
 from models import Job
+from safe_file import safe_move
 from system_logger import log_error, log_warning
 from pipeline import step_ia01_exif, step_ia02_convert, step_ia03_ai, step_ia04_ocr, step_ia05_duplicates, step_ia06_geocoding, step_ia07_exif_write, step_ia08_sort, step_ia09_notify, step_ia10_cleanup, step_ia11_log
 
@@ -137,7 +137,7 @@ async def _move_to_error(job, session):
             error_path = os.path.join(error_dir, f"{name}_{counter}{ext}")
             counter += 1
 
-    await asyncio.to_thread(shutil.move, job.original_path, error_path)
+    await asyncio.to_thread(safe_move, job.original_path, error_path, job.debug_key)
 
     # Write .log file
     log_path = error_path + ".log"
@@ -175,7 +175,7 @@ async def retry_job(job_id: int):
         if job.target_path and os.path.exists(job.target_path):
             original_dir = os.path.dirname(job.original_path)
             if os.path.exists(original_dir):
-                await asyncio.to_thread(shutil.move, job.target_path, job.original_path)
+                await asyncio.to_thread(safe_move, job.target_path, job.original_path, job.debug_key)
                 # Remove .log file
                 log_path = job.target_path + ".log"
                 if os.path.exists(log_path):
