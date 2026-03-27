@@ -148,8 +148,8 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
     - ImageDescription: KI-Freitext + Ort
         ↓
  8. Sortieren — Zielordner bestimmen + Datei sicher verschieben
-    - photos/YYYY/YYYY-MM/    (personal_photo, Datum aus EXIF)
-    - sourceless/YYYY/        (WhatsApp, Messenger-Bilder)
+    - photos/YYYY/YYYY-MM/    (personal, Datum aus EXIF)
+    - sourceless/YYYY/        (Bilder ohne EXIF / Messenger)
     - screenshots/YYYY/       (screenshot)
     - unknown/review/         (KI-Konfidenz < Schwellwert oder unklar)
     - Sichere Verschiebung: Kopie → SHA256-Verifikation → Original löschen
@@ -420,9 +420,10 @@ Alle Module einzeln aktivierbar/deaktivierbar im Webinterface:
 | Geocoding | ✅ an | Kein Orts-Tag, GPS bleibt als Koordinate |
 | Duplikat-Erkennung | ✅ an | Alle Dateien durchlassen |
 | OCR | ✅ an | Kein Text-Tag |
-| Ordner-Tags (manual) | ✅ an | Keine Ordnernamen als EXIF-Keywords |
 | SMTP Benachrichtigung | ✅ an | Nur Logfile, keine Mail |
 | Filewatcher | ✅ an | Nur manueller Trigger |
+
+Ordner-Tags werden pro Eingangsverzeichnis konfiguriert (nicht als globales Modul).
 
 - Toggle pro Modul im Webinterface (Einstellungen → Module)
 - Status aller Module im Dashboard sichtbar
@@ -449,9 +450,10 @@ Zielordner-Schema konfigurierbar im Webinterface pro Kategorie:
 
 | Kategorie | Standard-Schema | Beispiel |
 |---|---|---|
-| personal_photo | `photos/{YYYY}/{YYYY-MM}/` | `photos/2024/2024-06/` |
-| whatsapp | `whatsapp/{YYYY}/` | `whatsapp/2024/` |
+| personal | `photos/{YYYY}/{YYYY-MM}/` | `photos/2024/2024-06/` |
+| sourceless | `sourceless/{YYYY}/` | `sourceless/2024/` |
 | screenshot | `screenshots/{YYYY}/` | `screenshots/2024/` |
+| video | `videos/{YYYY}/{YYYY-MM}/` | `videos/2024/2024-06/` |
 | unknown | `unknown/review/` | `unknown/review/` |
 | error | `error/` | `error/` |
 | duplicate | `error/duplicates/` | `error/duplicates/` |
@@ -461,7 +463,9 @@ Verfügbare Platzhalter:
 - `{MM}` — Monat (zweistellig)
 - `{DD}` — Tag (zweistellig)
 - `{CAMERA}` — Kamera/Gerät (aus EXIF Make+Model, z.B. "Apple-iPhone15")
-- `{TYPE}` — KI-Klassifizierung (personal_photo, whatsapp, etc.)
+- `{TYPE}` — KI-Klassifizierung (personal, screenshot, internet_image, document, meme)
+- `{COUNTRY}` — Land (z.B. "Schweiz")
+- `{CITY}` — Stadt (z.B. "Zuerich")
 - `{YEAR-MONTH}` — kombiniert, z.B. "2024-06"
 
 Beispiel-Schemas:
@@ -501,11 +505,11 @@ Flach:               photos/{YYYY}/
 - Gespeichert in SQLite (API-Key verschlüsselt)
 
 ### Einstellungen — KI Prompts
-- Klassifizierungs-Prompt editierbar (Typ: personal_photo / whatsapp / screenshot / internet)
-- Inhalts-Prompt editierbar (Tags, Beschreibung, Qualität)
-- Prompts werden in SQLite gespeichert (nicht in config.yml — damit im Webinterface änderbar)
-- Reset-Button auf Standard-Prompt
-- Test-Button: Prompt auf einem Beispielbild ausprobieren
+- System-Prompt editierbar im Webinterface (Settings → AI Analysis)
+- Prompt in Englisch, KI-Antwort (Tags/Description) auf Deutsch
+- Typen: personal / screenshot / internet_image / document / meme
+- Prompt wird in SQLite gespeichert, Default-Prompt als Fallback wenn leer
+- Striktere Screenshot-Erkennung (muss OS-UI-Elemente wie Statusbar haben)
 
 ### Einstellungen — Sortier-Regeln
 - Regel-Liste editierbar im Webinterface
@@ -537,6 +541,7 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Manuelle Imports — Ordnerstruktur als Tags (jede Ebene = ein EXIF-Keyword, pro Verzeichnis konfigurierbar)
 - [x] FEAT: Zielstruktur-Logik (Ordner bestimmen, Datei verschieben, leere Ordner aufräumen, IA-08)
 - [x] FEAT: Geocoding Provider-Schnittstelle (Nominatim / Photon / Google Maps, einheitlicher Output, IA-06)
+- [x] FEAT: Alle Geocoding-Felder als EXIF-Keywords (country, state, city, suburb)
 - [x] FEAT: SMTP Fehlerbenachrichtigung (IA-09, STARTTLS/Office 365 Support)
 - [x] FEAT: Fehlerbehandlung → /error/ + .log Datei + Retry-Button + Löschen-Button
 - [x] FEAT: Sichere Dateiverschiebung (safe_move: Copy → SHA256-Verify → Delete, kein Datenverlust)
@@ -544,28 +549,34 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Job-System (SQLite, Eintrag bei Erkennung, Status + current_step + step_result JSON)
 - [x] FEAT: Resume-Logik (nach Absturz ab fehlendem Step weitermachen)
 - [x] FEAT: SQLite Logging (System-Log + Verarbeitungs-Log)
-- [x] FEAT: Eingangsverzeichnisse konfigurierbar im Webinterface (Pfad, Label, Ordner-Tags, Aktiv/inaktiv, Verarbeitungszeiten)
+- [x] FEAT: Eingangsverzeichnisse konfigurierbar im Webinterface (Pfad, Label, Ordner-Tags, Dry-Run, Aktiv)
 - [x] FEAT: Filewatcher (Polling) auf allen konfigurierten Eingangsverzeichnissen
 - [x] FEAT: Setup-Wizard beim ersten Start (/setup, 4 Schritte, danach gesperrt)
-- [x] FEAT: FastAPI Webinterface (Dashboard, Live-Log, Queue)
-- [x] FEAT: Alle Module einzeln ein/ausschaltbar im Webinterface (KI, Geocoding, Duplikat, OCR, Ordner-Tags, SMTP, Filewatcher)
-- [x] FEAT: Webinterface — KI Backend konfigurierbar (URL, API-Key, Modell, Test-Button)
-- [x] FEAT: Webinterface — SMTP Konfiguration (Server, Port, SSL, User, Passwort, Test-Button)
+- [x] FEAT: FastAPI Webinterface (Dashboard, Live-Log, Queue, Job-Detail mit Auto-Refresh)
+- [x] FEAT: Alle Module einzeln ein/ausschaltbar im Webinterface (KI, Geocoding, Duplikat, OCR, SMTP, Filewatcher)
+- [x] FEAT: Webinterface — KI Backend konfigurierbar (URL, API-Key, Modell)
+- [x] FEAT: Webinterface — SMTP Konfiguration (Server, Port, SSL, User, Passwort)
 - [x] FEAT: Webinterface — KI Prompt editierbar (gespeichert in SQLite, Standard-Prompt als Fallback)
+- [x] FEAT: Webinterface — Ablage-Ordnerstruktur konfigurierbar (Schema pro Kategorie, Platzhalter)
+- [x] FEAT: Webinterface — OCR-Modus konfigurierbar (smart / always)
+- [x] FEAT: Webinterface — Filewatcher-Modus konfigurierbar (continuous / window / scheduled / manual)
+- [x] FEAT: Webinterface — pHash Schwellwert konfigurierbar
+- [x] FEAT: KI-Prompt auf Englisch (bessere LLM-Verarbeitung), Tags/Description auf Deutsch
+- [x] FEAT: KI-Typen überarbeitet (personal statt personal_photo, kein whatsapp, striktere Screenshot-Erkennung)
+- [x] FEAT: i18n — Vollständige Mehrsprachigkeit (DE/EN) via JSON-Sprachdateien
+- [x] FEAT: Theme — Dark/Light-Modus umschaltbar (CSS-Variablen, conditional CSS)
+- [x] FEAT: Sprache und Theme konfigurierbar in Einstellungen → Darstellung
+- [x] FEAT: Alle System-Log-Meldungen immer auf Englisch (unabhängig von UI-Sprache)
+- [x] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
+- [x] FEAT: Leere Quellordner nach Import automatisch aufräumen (bis Inbox-Root)
 
 ### Offen
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
 - [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
 - [ ] FEAT: Geocoding-Cache in SQLite (keine doppelten Requests)
-- [ ] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
-- [ ] FEAT: Regel-basierte Klassifizierung (WA, Screenshot, EXIF-leer)
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
-- [ ] FEAT: Webinterface — Verarbeitungszeiten konfigurierbar (kontinuierlich / Zeitfenster / geplant / manuell)
-- [ ] FEAT: Webinterface — Ablage-Ordnerstruktur konfigurierbar (Schema pro Kategorie, Platzhalter, Live-Vorschau)
-- [ ] FEAT: Webinterface — Sortier-Regeln editierbar (Drag-and-Drop Reihenfolge, CRUD)
 - [ ] FEAT: Dry-Run Modus pro Eingangsverzeichnis (nur Report, keine Dateien verschieben)
 - [ ] FEAT: HTML-Report nach Dry-Run (Anzahl Dateien, Kategorien, Duplikate, Fehler)
-- [ ] CONFIG: config.yml (LM Studio URL, SMTP, Pfade, Schwellwerte)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 
 ### Optional (v2)
@@ -664,13 +675,15 @@ Docker Hub:
 - Automatischer Build via GitHub Actions bei neuem Release
 
 ## Technologie
-- Python 3.11 (Alpine Docker Image)
+- Python 3.12 (Docker Image)
 - FastAPI + Uvicorn
-- Watchdog (Filesystem Events)
+- SQLAlchemy (async) + aiosqlite
 - ExifTool (perl, via apk)
-- SQLite (via Python stdlib)
-- SMTP (via Python smtplib)
+- SQLite (Datenbank + Config + Logging)
+- SMTP (via Python smtplib, STARTTLS Support)
 - imagehash (Perceptual Hashing für Duplikat-Erkennung)
 - ImageMagick + libheif (HEIC/DNG → JPEG Konvertierung)
 - ffmpeg (Video-Thumbnail Extraktion)
 - OpenAI-kompatibler Endpunkt (konfigurierbar: LM Studio, Ollama, OpenAI, etc.)
+- Fernet (AES-128-CBC) für verschlüsselte API-Keys/Passwörter
+- i18n via JSON-Sprachdateien (DE/EN), Jinja2 Templates

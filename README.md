@@ -1,37 +1,37 @@
 # MediaAssistant
 
-Automatisierte Medienverarbeitung: Fotos und Videos werden erkannt, analysiert, getaggt und in eine Bibliothek einsortiert.
+Automated media processing: Photos and videos are detected, analyzed, tagged, and sorted into a library.
 
-## Funktionsweise
+## How it works
 
 ```
-Inbox  →  EXIF lesen  →  Konvertierung  →  KI-Analyse  →  Geocoding  →  Tags schreiben  →  Sortieren  →  Log  →  Bibliothek
+Inbox  →  EXIF  →  Convert  →  Duplicates  →  AI  →  OCR  →  Geocoding  →  Tags  →  Sort  →  Notify  →  Library
 ```
 
-Neue Dateien im Eingangsverzeichnis werden automatisch erkannt und durchlaufen eine 11-stufige Pipeline:
+New files in inbox directories are automatically detected and processed through an 11-step pipeline:
 
-| Step | Name | Beschreibung |
+| Step | Name | Description |
 |------|------|-------------|
-| IA-01 | EXIF auslesen | Metadaten via ExifTool extrahieren |
-| IA-02 | Formatkonvertierung | HEIC/DNG/RAW/GIF → temp JPEG für KI-Analyse |
-| IA-03 | Duplikaterkennung | SHA256 (exakt) + pHash (ähnlich) |
-| IA-04 | KI-Analyse | Bild analysieren (Typ, Tags, Beschreibung, Stimmung) |
-| IA-05 | OCR | Texterkennung (Screenshots, Dokumente) |
-| IA-06 | Geocoding | GPS-Koordinaten → Ort, Land, Stadt |
-| IA-07 | EXIF Tags schreiben | Tags und Beschreibung in Datei zurückschreiben |
-| IA-08 | Sortieren | Datei in Bibliothek nach Typ/Datum einsortieren |
-| IA-09 | Benachrichtigung | E-Mail bei Fehlern (SMTP, Office 365 / Gmail) |
-| IA-10 | Cleanup | Temporäre Dateien entfernen |
-| IA-11 | SQLite Log-Eintrag | Verarbeitungszusammenfassung loggen |
+| IA-01 | Read EXIF | Extract metadata via ExifTool |
+| IA-02 | Format Conversion | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis |
+| IA-03 | Duplicate Detection | SHA256 (exact) + pHash (similar) |
+| IA-04 | AI Analysis | Analyze image (type, tags, description, mood) |
+| IA-05 | OCR | Text recognition (screenshots, documents) |
+| IA-06 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
+| IA-07 | Write EXIF Tags | Write tags, description, geocoding and folder-tags back to file |
+| IA-08 | Sort | Move file to library by type/date, clean up empty source folders |
+| IA-09 | Notification | Email on errors (SMTP, Office 365 / Gmail) |
+| IA-10 | Cleanup | Remove temporary files |
+| IA-11 | SQLite Log | Log processing summary |
 
-IA-09 bis IA-11 sind **Finalizer** — sie laufen immer, auch wenn ein kritischer Schritt fehlschlägt.
+IA-09 to IA-11 are **finalizers** — they always run, even if a critical step fails.
 
-## Schnellstart
+## Quick Start
 
-### Voraussetzungen
+### Prerequisites
 
 - Docker & Docker Compose
-- (Optional) LM Studio oder kompatibler OpenAI-API-Server für KI-Analyse
+- (Optional) LM Studio or compatible OpenAI API server for AI analysis
 
 ### Installation
 
@@ -41,18 +41,18 @@ cd ma-core
 cp .env.example .env
 ```
 
-`.env` anpassen:
+Edit `.env`:
 
 ```env
-# KI-Backend (LM Studio o.ä.)
+# AI Backend (LM Studio etc.)
 AI_BACKEND_URL=http://192.168.0.100:1234/v1
 AI_MODEL=qwen/qwen3-vl-4b
 
-# Pfade (Produktion / NAS)
+# Paths
 INBOX_PATH=/volume1/inbox
 LIBRARY_PATH=/volume1/bibliothek
 
-# SMTP (z.B. Office 365)
+# SMTP (e.g. Office 365)
 SMTP_SERVER=smtp.office365.com
 SMTP_PORT=587
 SMTP_SSL=false
@@ -60,94 +60,148 @@ SMTP_USER=user@example.com
 SMTP_PASSWORD=
 SMTP_RECIPIENT=user@example.com
 
-# Zeitzone
+# Timezone
 TZ=Europe/Zurich
 ```
 
-ENV-Variablen werden beim ersten Start automatisch in die Datenbank übernommen. Danach können alle Einstellungen über das Web-Interface geändert werden.
+Environment variables are imported into the database on first start. After that, all settings can be changed via the web interface.
 
-### Starten (Produktion)
+### Start (Production)
 
 ```bash
 docker compose up -d
 ```
 
-Web-Interface: **http://localhost:8000**
+Web interface: **http://localhost:8000**
 
-Beim ersten Start wird der Setup-Wizard angezeigt.
+On first start, the setup wizard is displayed.
 
-### Starten (Entwicklung)
+### Start (Development)
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-Hot-Reload aktiv — Code-Änderungen werden sofort übernommen.
+Hot-reload active — code changes are applied immediately.
 
-## Web-Interface
+## Web Interface
+
+### Internationalization (i18n)
+The web interface supports multiple languages (currently German and English). Language and theme (dark/light) can be configured in **Settings → Appearance**.
+
+All system log messages are always written in English, regardless of the UI language.
 
 ### Dashboard
-- Verarbeitungsstatistiken (Total, Erledigt, Fehler, Warteschlange)
-- Modul-Status mit Health-Checks (KI-Backend, Geocoding, SMTP, Filewatcher)
-- Letzte verarbeitete Dateien
+- Processing statistics (total, done, errors, queue, duplicates)
+- Module status with health checks (AI backend, geocoding, SMTP, file watcher)
+- Recently processed files with live auto-refresh
 
-### Einstellungen
-- Module aktivieren/deaktivieren
-- KI-Backend, Geocoding, SMTP konfigurieren
-- Eingangsverzeichnisse verwalten (mit Dry-Run und Ordner-Tags)
-- Bibliothek-Zielstruktur definieren
+### Settings
+- Enable/disable modules individually
+- AI backend, geocoding, SMTP configuration
+- Editable AI system prompt (stored in database, default fallback)
+- Manage inbox directories (with dry-run, folder-tags, active toggle per inbox)
+- Library target structure with placeholders
+- Duplicate detection threshold (pHash)
+- OCR mode (smart / all images)
+- File watcher schedule mode (continuous / time window / scheduled / manual)
+- Appearance: Language (DE/EN) and Theme (dark/light)
 
-### Log-Viewer
-- System-Log (Fehler, Warnungen, Info)
-- Verarbeitungs-Log (Jobs mit Status und Schritt-Details)
-- Filter und Suche
+### Duplicate Review
+- All files of a group side-by-side (transitive grouping via Union-Find)
+- Per file: thumbnail, file size, resolution, megapixels
+- Per file: all EXIF data read directly from file (date, camera, ISO, aperture, shutter speed, focal length, GPS)
+- Per file: all keywords/tags and description from file
+- Per file: similarity score (SHA256 exact / pHash %)
+- Actions: "Keep this" (moves to library, deletes all others)
+- Batch-Clean: auto-delete all exact SHA256 duplicates
 
-## Bibliothek-Struktur
+### Log Viewer
+- System log (errors, warnings, info)
+- Processing log (jobs with status and step details)
+- Filter, search, pagination
+- Job detail page with step results, paths, timestamps, hashes
+- Live auto-refresh on job detail page
 
-Die Zielstruktur ist pro Kategorie konfigurierbar mit Platzhaltern:
+## AI Analysis
 
-| Platzhalter | Beispiel |
-|-------------|----------|
+The AI prompt is fully editable in **Settings → AI Analysis**. The prompt is written in English and instructs the AI to classify images into types:
+
+| Type | Description |
+|------|-------------|
+| `personal` | Personal photos (people, selfies, pets, food, travel, events) |
+| `screenshot` | Device screenshots (must have OS UI elements like status bar, navigation) |
+| `internet_image` | Downloaded images, memes, ads, stock photos |
+| `document` | Scanned documents, receipts, forms, handwritten notes |
+| `meme` | Memes with text overlay on images |
+
+The AI returns JSON with: type, tags (German), description (German), mood, people_count, quality, confidence.
+
+## Library Structure
+
+Target structure is configurable per category with placeholders:
+
+| Placeholder | Example |
+|-------------|---------|
 | `{YYYY}` | 2026 |
 | `{MM}` | 03 |
-| `{DD}` | 26 |
+| `{DD}` | 27 |
 | `{YYYY-MM}` | 2026-03 |
 | `{CAMERA}` | iPhone_15_Pro |
-| `{TYPE}` | personal_photo |
+| `{TYPE}` | personal |
 | `{COUNTRY}` | Schweiz |
 | `{CITY}` | Ehrendingen |
 
-Standard-Struktur:
+Default structure:
 
 ```
 /bibliothek/
-├── photos/{YYYY}/{YYYY-MM}/
-├── screenshots/{YYYY}/
-├── whatsapp/{YYYY}/{YYYY-MM}/
-├── videos/{YYYY}/{YYYY-MM}/
-├── unknown/{YYYY}/
-├── error/
-└── duplicates/
+├── photos/{YYYY}/{YYYY-MM}/       ← personal photos, chronological
+├── sourceless/{YYYY}/             ← images without EXIF (messenger, apps)
+├── screenshots/{YYYY}/            ← screenshots
+├── videos/{YYYY}/{YYYY-MM}/       ← videos
+├── unknown/review/                ← AI uncertain, manual review
+├── error/                         ← failed files
+└── error/duplicates/              ← detected duplicates
 ```
 
-## Unterstützte Formate
+## Features
 
-**Bilder:** JPG, JPEG, PNG, HEIC, HEIF, TIFF, WebP, GIF, BMP, DNG, CR2, NEF, ARW
+### Folder Tags
+Inbox subdirectory names can be automatically added as EXIF keywords. Configurable per inbox directory. Example: a file in `/inbox/manual/vacation/italy/` gets keywords `["vacation", "italy"]`.
+
+### Geocoding Keywords
+All geocoding fields (country, state, city, suburb) are written as EXIF keywords, with deduplication.
+
+### Safe File Move
+Every file move is a three-step process to prevent data loss:
+1. **Copy** — `shutil.copy2` (preserves metadata)
+2. **Verify** — compare file size + SHA256 hash
+3. **Delete** — original is only deleted after successful verification
+
+### Empty Folder Cleanup
+After moving a file from an inbox, empty parent directories are automatically cleaned up (up to the inbox root).
+
+## Supported Formats
+
+**Images:** JPG, JPEG, PNG, HEIC, HEIF, TIFF, WebP, GIF, BMP, DNG, CR2, NEF, ARW
 
 **Videos:** MP4, MOV, AVI, MKV, M4V, 3GP
 
-## Architektur
+## Architecture
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy (async), aiosqlite
-- **Datenbank:** SQLite
-- **Container:** Docker mit ExifTool, FFmpeg, libheif
-- **KI:** Beliebiger OpenAI-kompatibler Vision-API-Server (z.B. LM Studio)
-- **Geocoding:** Nominatim, Photon oder Google Maps API
+- **Database:** SQLite
+- **Container:** Docker with ExifTool, FFmpeg, libheif
+- **AI:** Any OpenAI-compatible Vision API server (e.g. LM Studio, Ollama)
+- **Geocoding:** Nominatim, Photon, or Google Maps API
+- **i18n:** JSON language files (DE/EN), centralized template rendering
+- **Theme:** Dark (default) / Light, conditional CSS loading
 
-## Konfiguration verschlüsselt
+## Encrypted Configuration
 
-API-Keys und Passwörter werden mit Fernet (AES-128-CBC) verschlüsselt in der Datenbank gespeichert. Der Schlüssel liegt in `/app/data/.secret_key`.
+API keys and passwords are encrypted with Fernet (AES-128-CBC) in the database. The key is stored in `/app/data/.secret_key`.
 
-## Lizenz
+## License
 
-Privates Projekt von Marco Hediger.
+Private project by Marco Hediger.
