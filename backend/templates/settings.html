@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Einstellungen — MediaAssistant{% endblock %}
+{% block title %}{{ t.settings.title }} — MediaAssistant{% endblock %}
 {% block content %}
-<h1>Einstellungen</h1>
+<h1>{{ t.settings.title }}</h1>
 
 {% if success %}
 <div class="alert alert-success">{{ success }}</div>
@@ -10,12 +10,12 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<!-- Eingangsverzeichnisse -->
+<!-- Inboxes -->
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">
-            <h2>Eingangsverzeichnisse</h2>
-            <span class="section-desc">Überwachte Ordner für die automatische Verarbeitung</span>
+            <h2>{{ t.settings.inboxes }}</h2>
+            <span class="section-desc">{{ t.settings.inboxes_desc }}</span>
         </div>
     </div>
     <div class="section-body">
@@ -25,11 +25,11 @@
             <form method="post" action="/settings/inbox/{{ inbox.id }}/update" class="inbox-item">
                 <div class="inbox-row">
                     <div class="form-group">
-                        <label>Pfad</label>
+                        <label>{{ t.settings.path }}</label>
                         <input type="text" name="inbox_path" value="{{ inbox.path }}">
                     </div>
                     <div class="form-group">
-                        <label>Label</label>
+                        <label>{{ t.settings.label }}</label>
                         <input type="text" name="inbox_label" value="{{ inbox.label }}">
                     </div>
                 </div>
@@ -37,42 +37,42 @@
                     <label class="switch-inline">
                         <input type="checkbox" name="inbox_folder_tags_{{ inbox.id }}" value="1" {{ 'checked' if inbox.folder_tags else '' }}>
                         <span class="switch-slider-sm"></span>
-                        <span>Ordner-Tags</span>
+                        <span>{{ t.settings.folder_tags }}</span>
                     </label>
                     <label class="switch-inline">
                         <input type="checkbox" name="inbox_dry_run_{{ inbox.id }}" value="1" {{ 'checked' if inbox.dry_run else '' }}>
                         <span class="switch-slider-sm"></span>
-                        <span>Dry-Run</span>
+                        <span>{{ t.settings.dry_run }}</span>
                     </label>
                     <label class="switch-inline">
                         <input type="checkbox" name="inbox_active_{{ inbox.id }}" value="1" {{ 'checked' if inbox.active else '' }}>
                         <span class="switch-slider-sm"></span>
-                        <span>Aktiv</span>
+                        <span>{{ t.settings.active }}</span>
                     </label>
                     <div class="inbox-actions">
-                        <button type="submit" class="btn btn-small btn-secondary">Speichern</button>
+                        <button type="submit" class="btn btn-small btn-secondary">{{ t.settings.save }}</button>
                     </div>
                 </div>
             </form>
             <form method="post" action="/settings/inbox/{{ inbox.id }}/delete" class="inbox-delete-form">
-                <button type="submit" class="btn btn-small btn-danger" onclick="return confirm('Verzeichnis wirklich löschen?')">Löschen</button>
+                <button type="submit" class="btn btn-small btn-danger" onclick="return confirm('{{ t.settings.delete_confirm }}')">{{ t.settings.delete }}</button>
             </form>
             {% endfor %}
         </div>
         {% else %}
-        <p class="section-note">Noch keine Eingangsverzeichnisse konfiguriert.</p>
+        <p class="section-note">{{ t.settings.no_inboxes }}</p>
         {% endif %}
 
         <div class="inbox-add">
-            <h3>Neues Verzeichnis hinzufügen</h3>
+            <h3>{{ t.settings.add_inbox }}</h3>
             <form method="post" action="/settings/inbox/add">
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="new_inbox_path">Pfad</label>
+                        <label for="new_inbox_path">{{ t.settings.path }}</label>
                         <input type="text" id="new_inbox_path" name="inbox_path" placeholder="/inbox/mobile">
                     </div>
                     <div class="form-group">
-                        <label for="new_inbox_label">Label</label>
+                        <label for="new_inbox_label">{{ t.settings.label }}</label>
                         <input type="text" id="new_inbox_label" name="inbox_label" placeholder="Handy">
                     </div>
                 </div>
@@ -80,15 +80,15 @@
                     <label class="switch-inline">
                         <input type="checkbox" name="inbox_folder_tags" value="1">
                         <span class="switch-slider-sm"></span>
-                        <span>Ordner-Tags</span>
+                        <span>{{ t.settings.folder_tags }}</span>
                     </label>
                     <label class="switch-inline">
                         <input type="checkbox" name="inbox_dry_run" value="1">
                         <span class="switch-slider-sm"></span>
-                        <span>Dry-Run</span>
+                        <span>{{ t.settings.dry_run }}</span>
                     </label>
                     <div class="inbox-actions">
-                        <button type="submit" class="btn btn-small btn-primary">Hinzufügen</button>
+                        <button type="submit" class="btn btn-small btn-primary">{{ t.settings.add }}</button>
                     </div>
                 </div>
             </form>
@@ -98,12 +98,12 @@
 
 <form method="post" action="/settings/save">
 
-<!-- KI-Analyse -->
+<!-- AI Analysis -->
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">
-            <h2>KI-Analyse</h2>
-            <span class="section-desc">Bildanalyse via LM Studio / OpenAI-kompatiblem Endpunkt</span>
+            <h2>{{ t.settings.ai_analysis }}</h2>
+            <span class="section-desc">{{ t.settings.ai_desc }}</span>
         </div>
         <label class="switch">
             <input type="checkbox" name="mod_ki_analyse" value="1" {{ 'checked' if modules.ki_analyse else '' }}>
@@ -113,24 +113,24 @@
     <div class="section-body">
         <div class="form-row">
             <div class="form-group">
-                <label for="ai_url">Backend URL</label>
+                <label for="ai_url">{{ t.settings.backend_url }}</label>
                 <input type="url" id="ai_url" name="ai_url" value="{{ cfg.ai_url }}">
             </div>
             <div class="form-group">
-                <label for="ai_model">Modell</label>
+                <label for="ai_model">{{ t.settings.model }}</label>
                 <input type="text" id="ai_model" name="ai_model" value="{{ cfg.ai_model }}">
             </div>
         </div>
         <div class="form-group">
-            <label for="ai_api_key">API Key</label>
+            <label for="ai_api_key">{{ t.settings.api_key }}</label>
             <input type="password" id="ai_api_key" name="ai_api_key" placeholder="••••••••">
-            <small>Leer lassen um bestehenden Key zu behalten</small>
+            <small>{{ t.settings.api_key_hint }}</small>
         </div>
         <div class="form-group">
-            <label for="ai_prompt">System-Prompt</label>
+            <label for="ai_prompt">{{ t.settings.system_prompt }}</label>
             <textarea id="ai_prompt" name="ai_prompt" rows="16" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4;">{{ cfg.ai_prompt }}</textarea>
-            <small>Der Prompt steuert wie die KI Bilder analysiert. Die Antwort muss valides JSON sein.
-            <br>Leer lassen = Standard-Prompt verwenden.</small>
+            <small>{{ t.settings.prompt_hint }}
+            <br>{{ t.settings.prompt_hint2 }}</small>
         </div>
     </div>
 </div>
@@ -139,8 +139,8 @@
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">
-            <h2>Geocoding</h2>
-            <span class="section-desc">GPS-Koordinaten in Ortsnamen umwandeln</span>
+            <h2>{{ t.settings.geocoding }}</h2>
+            <span class="section-desc">{{ t.settings.geo_desc }}</span>
         </div>
         <label class="switch">
             <input type="checkbox" name="mod_geocoding" value="1" {{ 'checked' if modules.geocoding else '' }}>
@@ -150,7 +150,7 @@
     <div class="section-body">
         <div class="form-row">
             <div class="form-group">
-                <label for="geo_provider">Provider</label>
+                <label for="geo_provider">{{ t.settings.provider }}</label>
                 <select id="geo_provider" name="geo_provider">
                     <option value="nominatim" {{ 'selected' if cfg.geo_provider == 'nominatim' else '' }}>Nominatim (OpenStreetMap)</option>
                     <option value="photon" {{ 'selected' if cfg.geo_provider == 'photon' else '' }}>Photon (OpenStreetMap)</option>
@@ -158,24 +158,24 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="geo_url">URL</label>
+                <label for="geo_url">{{ t.settings.url }}</label>
                 <input type="url" id="geo_url" name="geo_url" value="{{ cfg.geo_url }}">
-                <small>Für eigene Nominatim/Photon-Instanzen</small>
+                <small>{{ t.settings.url_hint }}</small>
             </div>
         </div>
         <div class="form-group">
-            <label for="geo_api_key">API Key (nur Google)</label>
+            <label for="geo_api_key">{{ t.settings.geo_api_key }}</label>
             <input type="password" id="geo_api_key" name="geo_api_key" placeholder="••••••••">
         </div>
     </div>
 </div>
 
-<!-- Duplikat-Erkennung -->
+<!-- Duplicate Detection -->
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">
-            <h2>Duplikat-Erkennung</h2>
-            <span class="section-desc">SHA256 + Perceptual Hash Vergleich</span>
+            <h2>{{ t.settings.duplicate_detection }}</h2>
+            <span class="section-desc">{{ t.settings.dup_desc }}</span>
         </div>
         <label class="switch">
             <input type="checkbox" name="mod_duplikat_erkennung" value="1" {{ 'checked' if modules.duplikat_erkennung else '' }}>
@@ -185,9 +185,9 @@
     <div class="section-body">
         <div class="form-row">
             <div class="form-group">
-                <label for="phash_threshold">pHash Schwellwert</label>
+                <label for="phash_threshold">{{ t.settings.phash_threshold }}</label>
                 <input type="number" id="phash_threshold" name="phash_threshold" value="{{ cfg.phash_threshold }}" min="0" max="20" step="1">
-                <small>0 = exakt identisch, höher = toleranter (Standard: 5)</small>
+                <small>{{ t.settings.phash_hint }}</small>
             </div>
         </div>
     </div>
@@ -197,8 +197,8 @@
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">
-            <h2>OCR</h2>
-            <span class="section-desc">Texterkennung in Bildern (Screenshots, Dokumente, Schilder)</span>
+            <h2>{{ t.settings.ocr }}</h2>
+            <span class="section-desc">{{ t.settings.ocr_desc }}</span>
         </div>
         <label class="switch">
             <input type="checkbox" name="mod_ocr" value="1" {{ 'checked' if modules.ocr else '' }}>
@@ -207,13 +207,13 @@
     </div>
     <div class="section-body">
         <div class="form-group">
-            <label for="ocr_mode">Modus</label>
+            <label for="ocr_mode">{{ t.settings.ocr_mode }}</label>
             <select id="ocr_mode" name="ocr_mode">
-                <option value="smart" {{ 'selected' if cfg.ocr_mode == 'smart' else '' }}>Nur Screenshots & Dokumente (KI-gesteuert)</option>
-                <option value="always" {{ 'selected' if cfg.ocr_mode == 'always' else '' }}>Alle Bilder (auch Fotos mit Schildern, Speisekarten etc.)</option>
+                <option value="smart" {{ 'selected' if cfg.ocr_mode == 'smart' else '' }}>{{ t.settings.ocr_smart }}</option>
+                <option value="always" {{ 'selected' if cfg.ocr_mode == 'always' else '' }}>{{ t.settings.ocr_always }}</option>
             </select>
-            <small>«Smart» überspringt OCR bei normalen Fotos, «Alle Bilder» erkennt auch Text auf Schildern, Plakaten etc.<br>
-            Hinweis: OCR benötigt ein aktives KI-Backend (KI-Analyse muss aktiviert sein).</small>
+            <small>{{ t.settings.ocr_hint }}<br>
+            {{ t.settings.ocr_hint2 }}</small>
         </div>
     </div>
 </div>
@@ -222,8 +222,8 @@
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">
-            <h2>SMTP Benachrichtigung</h2>
-            <span class="section-desc">Fehlerbenachrichtigung per E-Mail</span>
+            <h2>{{ t.settings.smtp }}</h2>
+            <span class="section-desc">{{ t.settings.smtp_desc }}</span>
         </div>
         <label class="switch">
             <input type="checkbox" name="mod_smtp" value="1" {{ 'checked' if modules.smtp else '' }}>
@@ -233,99 +233,99 @@
     <div class="section-body">
         <div class="form-row">
             <div class="form-group">
-                <label for="smtp_server">Server</label>
+                <label for="smtp_server">{{ t.settings.server }}</label>
                 <input type="text" id="smtp_server" name="smtp_server" value="{{ cfg.smtp_server }}">
             </div>
             <div class="form-group">
-                <label for="smtp_port">Port</label>
+                <label for="smtp_port">{{ t.settings.port }}</label>
                 <input type="number" id="smtp_port" name="smtp_port" value="{{ cfg.smtp_port }}">
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label for="smtp_user">Benutzername</label>
+                <label for="smtp_user">{{ t.settings.username }}</label>
                 <input type="text" id="smtp_user" name="smtp_user" value="{{ cfg.smtp_user }}">
             </div>
             <div class="form-group">
-                <label for="smtp_password">Passwort</label>
+                <label for="smtp_password">{{ t.settings.password }}</label>
                 <input type="password" id="smtp_password" name="smtp_password" placeholder="••••••••">
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label for="smtp_recipient">Empfänger</label>
+                <label for="smtp_recipient">{{ t.settings.recipient }}</label>
                 <input type="email" id="smtp_recipient" name="smtp_recipient" value="{{ cfg.smtp_recipient }}">
             </div>
             <div class="form-group">
-                <label>SSL/TLS</label>
+                <label>{{ t.settings.ssl }}</label>
                 <label class="switch-inline" style="height: 2.5rem; display: flex; align-items: center;">
                     <input type="checkbox" name="smtp_ssl" value="1" {{ 'checked' if cfg.smtp_ssl else '' }}>
                     <span class="switch-slider-sm"></span>
-                    <span>Aktiviert</span>
+                    <span>{{ t.settings.enabled }}</span>
                 </label>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Ziel-Ablage -->
+<!-- Target Storage -->
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">
-            <h2>Ziel-Ablage</h2>
-            <span class="section-desc">Ordnerstruktur in der Bibliothek — Platzhalter: {YYYY}, {MM}, {DD}, {YYYY-MM}, {CAMERA}, {TYPE}, {COUNTRY}, {CITY}</span>
+            <h2>{{ t.settings.target_storage }}</h2>
+            <span class="section-desc">{{ t.settings.storage_desc }} — {{ t.settings.storage_placeholders }}</span>
         </div>
     </div>
     <div class="section-body">
         <div class="form-group">
-            <label for="library_path">Bibliothek-Basispfad</label>
+            <label for="library_path">{{ t.settings.library_path }}</label>
             <input type="text" id="library_path" name="library_path" value="{{ cfg.library_path }}">
-            <small>Basis-Verzeichnis für die sortierte Ablage (z.B. /bibliothek)</small>
+            <small>{{ t.settings.library_hint }}</small>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label for="path_photo">Fotos</label>
+                <label for="path_photo">{{ t.settings.photos }}</label>
                 <input type="text" id="path_photo" name="path_photo" value="{{ cfg.path_photo }}" placeholder="photos/{YYYY}/{YYYY-MM}/">
             </div>
             <div class="form-group">
-                <label for="path_sourceless">Sourceless</label>
+                <label for="path_sourceless">{{ t.settings.sourceless }}</label>
                 <input type="text" id="path_sourceless" name="path_sourceless" value="{{ cfg.path_sourceless }}" placeholder="unbekannte_quelle/{YYYY}/">
-                <small>Bilder ohne EXIF (Messenger, Apps etc.)</small>
+                <small>{{ t.settings.sourceless_hint }}</small>
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label for="path_screenshot">Screenshots</label>
+                <label for="path_screenshot">{{ t.settings.screenshots }}</label>
                 <input type="text" id="path_screenshot" name="path_screenshot" value="{{ cfg.path_screenshot }}" placeholder="screenshots/{YYYY}/">
             </div>
             <div class="form-group">
-                <label for="path_video">Videos</label>
+                <label for="path_video">{{ t.settings.videos }}</label>
                 <input type="text" id="path_video" name="path_video" value="{{ cfg.path_video }}" placeholder="videos/{YYYY}/{YYYY-MM}/">
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label for="path_unknown">Unbekannt / Review</label>
+                <label for="path_unknown">{{ t.settings.unknown }}</label>
                 <input type="text" id="path_unknown" name="path_unknown" value="{{ cfg.path_unknown }}" placeholder="unknown/review/">
             </div>
             <div class="form-group">
-                <label for="path_error">Fehler</label>
+                <label for="path_error">{{ t.settings.error_path }}</label>
                 <input type="text" id="path_error" name="path_error" value="{{ cfg.path_error }}" placeholder="error/">
             </div>
         </div>
         <div class="form-group">
-            <label for="path_duplicate">Duplikate</label>
+            <label for="path_duplicate">{{ t.settings.duplicates_path }}</label>
             <input type="text" id="path_duplicate" name="path_duplicate" value="{{ cfg.path_duplicate }}" placeholder="error/duplicates/">
         </div>
     </div>
 </div>
 
-<!-- Filewatcher -->
+<!-- File Watcher -->
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">
-            <h2>Filewatcher</h2>
-            <span class="section-desc">Automatische Verarbeitung neuer Dateien</span>
+            <h2>{{ t.settings.filewatcher }}</h2>
+            <span class="section-desc">{{ t.settings.filewatcher_desc }}</span>
         </div>
         <label class="switch">
             <input type="checkbox" name="mod_filewatcher" value="1" {{ 'checked' if modules.filewatcher else '' }}>
@@ -335,23 +335,23 @@
     <div class="section-body">
         <div class="form-row">
             <div class="form-group">
-                <label for="watch_interval">Prüfintervall (Sekunden)</label>
+                <label for="watch_interval">{{ t.settings.interval }}</label>
                 <input type="number" id="watch_interval" name="watch_interval" value="{{ cfg.watch_interval }}" min="1">
             </div>
             <div class="form-group">
-                <label for="schedule_mode">Modus</label>
+                <label for="schedule_mode">{{ t.settings.schedule_mode }}</label>
                 <select id="schedule_mode" name="schedule_mode">
-                    <option value="continuous" {{ 'selected' if cfg.schedule_mode == 'continuous' else '' }}>Kontinuierlich (24/7)</option>
-                    <option value="window" {{ 'selected' if cfg.schedule_mode == 'window' else '' }}>Zeitfenster</option>
-                    <option value="scheduled" {{ 'selected' if cfg.schedule_mode == 'scheduled' else '' }}>Geplant</option>
-                    <option value="manual" {{ 'selected' if cfg.schedule_mode == 'manual' else '' }}>Nur manuell</option>
+                    <option value="continuous" {{ 'selected' if cfg.schedule_mode == 'continuous' else '' }}>{{ t.settings.continuous }}</option>
+                    <option value="window" {{ 'selected' if cfg.schedule_mode == 'window' else '' }}>{{ t.settings.window }}</option>
+                    <option value="scheduled" {{ 'selected' if cfg.schedule_mode == 'scheduled' else '' }}>{{ t.settings.scheduled }}</option>
+                    <option value="manual" {{ 'selected' if cfg.schedule_mode == 'manual' else '' }}>{{ t.settings.manual }}</option>
                 </select>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Darstellung -->
+<!-- Appearance -->
 <div class="settings-section">
     <div class="section-header">
         <div class="section-title">

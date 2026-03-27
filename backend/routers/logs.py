@@ -7,6 +7,7 @@ from config import config_manager
 from database import async_session
 from models import Job, SystemLog
 from template_engine import render, templates
+from i18n import load_lang, DEFAULT_LANGUAGE
 
 router = APIRouter(prefix="/logs")
 
@@ -106,16 +107,22 @@ async def log_detail_json(debug_key: str):
     if not job:
         return {"error": "not_found"}
 
+    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+    i18n = load_lang(lang)
+    steps = i18n.get("steps", {})
+
     return {
         "debug_key": job.debug_key,
         "filename": job.filename,
         "status": job.status,
         "current_step": job.current_step,
+        "current_step_label": steps.get(job.current_step, "") if job.current_step else "",
         "source_label": job.source_label,
         "original_path": job.original_path,
         "target_path": job.target_path,
         "error_message": job.error_message,
         "step_result": job.step_result,
+        "step_labels": steps,
         "file_hash": job.file_hash,
         "phash": job.phash,
         "created_at": job.created_at.strftime("%d.%m.%Y %H:%M:%S") if job.created_at else None,

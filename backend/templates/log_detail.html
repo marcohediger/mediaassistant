@@ -27,7 +27,7 @@
     </div>
     <div class="detail-card">
         <h3>{{ t.job_detail.current_step }}</h3>
-        <p>{{ job.current_step or '—' }}{% if job.current_step %} — {{ t.steps[job.current_step] | default(job.current_step) }}{% endif %}</p>
+        <p data-field="current_step">{{ job.current_step or '—' }}{% if job.current_step %} — {{ t.steps[job.current_step] | default(job.current_step) }}{% endif %}</p>
     </div>
     <div class="detail-card">
         <h3>{{ t.job_detail.source }}</h3>
@@ -39,7 +39,7 @@
     <h2>{{ t.job_detail.paths }}</h2>
     <table class="detail-table">
         <tr><td>{{ t.job_detail.original }}</td><td><code>{{ job.original_path }}</code></td></tr>
-        <tr><td>{{ t.job_detail.target }}</td><td><code>{{ job.target_path or '—' }}</code></td></tr>
+        <tr><td>{{ t.job_detail.target }}</td><td><code data-field="target_path">{{ job.target_path or '—' }}</code></td></tr>
     </table>
 </div>
 
@@ -80,8 +80,8 @@
     <h2>{{ t.job_detail.timestamps }}</h2>
     <table class="detail-table">
         <tr><td>{{ t.job_detail.created }}</td><td>{{ job.created_at.strftime('%d.%m.%Y %H:%M:%S') if job.created_at else '—' }}</td></tr>
-        <tr><td>{{ t.job_detail.updated }}</td><td>{{ job.updated_at.strftime('%d.%m.%Y %H:%M:%S') if job.updated_at else '—' }}</td></tr>
-        <tr><td>{{ t.job_detail.completed }}</td><td>{{ job.completed_at.strftime('%d.%m.%Y %H:%M:%S') if job.completed_at else '—' }}</td></tr>
+        <tr><td>{{ t.job_detail.updated }}</td><td data-field="updated_at">{{ job.updated_at.strftime('%d.%m.%Y %H:%M:%S') if job.updated_at else '—' }}</td></tr>
+        <tr><td>{{ t.job_detail.completed }}</td><td data-field="completed_at">{{ job.completed_at.strftime('%d.%m.%Y %H:%M:%S') if job.completed_at else '—' }}</td></tr>
     </table>
 </div>
 

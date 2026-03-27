@@ -11,6 +11,7 @@ from database import async_session
 from models import Job, Module, InboxDirectory
 from system_logger import log_error, log_info, log_warning
 from models import SystemLog
+from i18n import load_lang, DEFAULT_LANGUAGE
 
 # Track last known status per module to avoid duplicate log entries
 _last_module_status: dict[str, str] = {}
@@ -24,14 +25,15 @@ from template_engine import render
 
 router = APIRouter()
 
-MODULE_LABELS = {
-    "ki_analyse": "KI-Analyse",
-    "geocoding": "Geocoding",
-    "duplikat_erkennung": "Duplikat-Erkennung",
-    "ocr": "OCR",
-    "smtp": "SMTP Benachrichtigung",
-    "filewatcher": "Filewatcher",
-}
+
+def _get_module_label(name: str, i18n: dict) -> str:
+    """Get translated module label from i18n, fallback to name."""
+    return i18n.get("modules", {}).get(name, name)
+
+
+def _t(key: str, i18n: dict) -> str:
+    """Get a translated module status string."""
+    return i18n.get("modules", {}).get(key, key)
 
 MODULE_REQUIREMENTS = {
     "ki_analyse": ["ai.backend_url", "ai.model"],
@@ -43,29 +45,29 @@ MODULE_REQUIREMENTS = {
 }
 
 
-async def _check_ai_backend() -> tuple[bool, str]:
+async def _check_ai_backend(i18n: dict) -> tuple[bool, str]:
     url = await config_manager.get("ai.backend_url")
     if not url:
-        return False, "Keine URL konfiguriert"
+        return False, _t("status_no_url", i18n)
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{url.rstrip('/')}/models")
             if resp.status_code == 200:
-                return True, "Verbunden"
+                return True, _t("status_connected", i18n)
             return False, f"HTTP {resp.status_code}"
     except httpx.ConnectError:
-        return False, f"Verbindung zu {url} fehlgeschlagen"
+        return False, f"{_t('status_connection_failed', i18n)}: {url}"
     except httpx.TimeoutException:
-        return False, f"Timeout bei {url}"
+        return False, f"{_t('status_timeout', i18n)}: {url}"
     except Exception as e:
         return False, str(e)
 
 
-async def _check_geocoding() -> tuple[bool, str]:
+async def _check_geocoding(i18n: dict) -> tuple[bool, str]:
     url = await config_manager.get("geo.url")
     provider = await config_manager.get("geo.provider", "nominatim")
     if not url:
-        return False, "Keine URL konfiguriert"
+        return False, _t("status_no_url", i18n)
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             if provider == "nominatim":
@@ -80,17 +82,17 @@ async def _check_geocoding() -> tuple[bool, str]:
 
             resp = await client.get(test_url)
             if resp.status_code == 200:
-                return True, "Verbunden"
+                return True, _t("status_connected", i18n)
             return False, f"HTTP {resp.status_code}"
     except httpx.ConnectError:
-        return False, f"Verbindung zu {url} fehlgeschlagen"
+        return False, f"{_t('status_connection_failed', i18n)}: {url}"
     except httpx.TimeoutException:
-        return False, f"Timeout bei {url}"
+        return False, f"{_t('status_timeout', i18n)}: {url}"
     except Exception as e:
         return False, str(e)
 
 
-def _check_smtp_sync(server, port, use_ssl, user, password) -> tuple[bool, str]:
+def _check_smtp_sync(server, port, use_ssl, user, password, i18n: dict) -> tuple[bool, str]:
     """Blocking SMTP check — runs in a thread to avoid blocking the event loop."""
     context = ssl.create_default_context()
     try:
@@ -109,25 +111,25 @@ def _check_smtp_sync(server, port, use_ssl, user, password) -> tuple[bool, str]:
                     smtp.login(user, password)
                 else:
                     smtp.noop()
-        return True, "Verbunden"
+        return True, _t("status_connected", i18n)
     except smtplib.SMTPAuthenticationError as e:
-        return False, f"Auth fehlgeschlagen: {e.smtp_error.decode() if isinstance(e.smtp_error, bytes) else e.smtp_error}"
+        return False, f"{_t('status_auth_failed', i18n)}: {e.smtp_error.decode() if isinstance(e.smtp_error, bytes) else e.smtp_error}"
     except Exception as e:
-        return False, f"Verbindung zu {server}:{port} fehlgeschlagen: {e}"
+        return False, f"{_t('status_connection_failed', i18n)}: {server}:{port} — {e}"
 
 
-async def _check_smtp() -> tuple[bool, str]:
+async def _check_smtp(i18n: dict) -> tuple[bool, str]:
     server = await config_manager.get("smtp.server")
     if not server:
-        return False, "Kein Server konfiguriert"
+        return False, _t("status_no_server", i18n)
     port = int(await config_manager.get("smtp.port", 587))
     use_ssl = await config_manager.get("smtp.ssl", False)
     user = await config_manager.get("smtp.user", "")
     password = await config_manager.get("smtp.password", "")
-    return await asyncio.to_thread(_check_smtp_sync, server, port, use_ssl, user, password)
+    return await asyncio.to_thread(_check_smtp_sync, server, port, use_ssl, user, password, i18n)
 
 
-async def _check_filewatcher() -> tuple[bool, str]:
+async def _check_filewatcher(i18n: dict) -> tuple[bool, str]:
     async with async_session() as session:
         result = await session.execute(
             select(InboxDirectory).where(InboxDirectory.active == True)
@@ -135,17 +137,17 @@ async def _check_filewatcher() -> tuple[bool, str]:
         inboxes = result.scalars().all()
 
     if not inboxes:
-        return False, "Keine aktiven Eingangsverzeichnisse"
+        return False, _t("status_no_inboxes", i18n)
 
     import os
     errors = []
     for inbox in inboxes:
         if not os.path.isdir(inbox.path):
-            errors.append(f"{inbox.label}: {inbox.path} nicht gefunden")
+            errors.append(f"{inbox.label}: {inbox.path} {_t('status_not_found', i18n)}")
 
     if errors:
         return False, "; ".join(errors)
-    return True, f"{len(inboxes)} Verzeichnis(se) aktiv"
+    return True, _t("status_inboxes_active", i18n).replace("{n}", str(len(inboxes)))
 
 
 MODULE_HEALTH_CHECKS = {
@@ -157,9 +159,12 @@ MODULE_HEALTH_CHECKS = {
 }
 
 
-async def _get_module_status() -> list[dict]:
+async def _get_module_status(i18n: dict) -> list[dict]:
     global _module_cache, _module_cache_time
     if _module_cache and (time.monotonic() - _module_cache_time) < MODULE_CACHE_TTL:
+        # Re-translate labels from cache (detail strings are re-fetched on full refresh)
+        for s in _module_cache:
+            s["label"] = _get_module_label(s["name"], i18n)
         return _module_cache
 
     async with async_session() as session:
@@ -171,7 +176,7 @@ async def _get_module_status() -> list[dict]:
         detail = ""
         if not m.enabled:
             status = "disabled"
-            detail = "Deaktiviert"
+            detail = _t("status_disabled", i18n)
         else:
             required_keys = MODULE_REQUIREMENTS.get(m.name, [])
             configured = True
@@ -184,30 +189,30 @@ async def _get_module_status() -> list[dict]:
 
             if not configured:
                 status = "misconfigured"
-                detail = f"Fehlend: {', '.join(missing)}"
+                detail = f"{_t('status_missing', i18n)}: {', '.join(missing)}"
                 if _last_module_status.get(m.name) != "misconfigured":
-                    await log_warning(m.name, "Modul nicht konfiguriert", f"Fehlende Keys: {', '.join(missing)}")
+                    await log_warning(m.name, _t("status_not_configured", i18n), f"Missing keys: {', '.join(missing)}")
             else:
                 health_check = MODULE_HEALTH_CHECKS.get(m.name)
                 if health_check:
-                    healthy, detail = await health_check()
+                    healthy, detail = await health_check(i18n)
                     if healthy:
                         status = "ready"
                         if _last_module_status.get(m.name) == "error":
-                            await log_info(m.name, "Verbindung wiederhergestellt", detail)
+                            await log_info(m.name, _t("status_connection_restored", i18n), detail)
                     else:
                         status = "error"
                         if _last_module_status.get(m.name) != "error":
                             await log_error(m.name, detail)
                 else:
                     status = "ready"
-                    detail = "OK"
+                    detail = _t("status_ok", i18n)
 
             _last_module_status[m.name] = status
 
         statuses.append({
             "name": m.name,
-            "label": MODULE_LABELS.get(m.name, m.name),
+            "label": _get_module_label(m.name, i18n),
             "enabled": m.enabled,
             "status": status,
             "detail": detail,
@@ -238,7 +243,9 @@ async def dashboard(request: Request):
         )
         recent_jobs = recent_result.scalars().all()
 
-    modules = await _get_module_status()
+    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+    i18n = load_lang(lang)
+    modules = await _get_module_status(i18n)
 
     return await render(request, "dashboard.html", {
         "stats": {
@@ -271,7 +278,9 @@ async def dashboard_json():
         )
         recent_jobs = recent_result.scalars().all()
 
-    modules = await _get_module_status()
+    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+    i18n = load_lang(lang)
+    modules = await _get_module_status(i18n)
 
     return {
         "stats": {
