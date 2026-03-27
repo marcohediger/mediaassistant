@@ -27,6 +27,12 @@ def _compute_phash(filepath: str) -> str | None:
         return None
 
 
+def _file_exists(job_entry) -> bool:
+    """Check if the file referenced by a job still exists on disk."""
+    path = job_entry.target_path or job_entry.original_path
+    return path and os.path.exists(path)
+
+
 async def execute(job, session) -> dict:
     """IA-03: Duplikat-Erkennung — SHA256 (exakt) + pHash (ähnlich)."""
     if not await config_manager.is_module_enabled("duplikat_erkennung"):
@@ -46,15 +52,18 @@ async def execute(job, session) -> dict:
                 Job.status.in_(("done", "duplicate", "review", "processing")),
             )
         )
-        existing = result.scalars().first()
-        if existing:
-            await _handle_duplicate(job, session, existing, "exact", 0)
-            return {
-                "status": "duplicate",
-                "match_type": "exact",
-                "original_debug_key": existing.debug_key,
-                "original_path": existing.target_path or existing.original_path,
-            }
+        candidates = result.scalars().all()
+        for existing in candidates:
+            if await asyncio.to_thread(_file_exists, existing):
+                await _handle_duplicate(job, session, existing, "exact", 0)
+                return {
+                    "status": "duplicate",
+                    "match_type": "exact",
+                    "original_debug_key": existing.debug_key,
+                    "original_path": existing.target_path or existing.original_path,
+                }
+            else:
+                await log_warning("IA-03", f"Orphaned job {existing.debug_key}: file missing, skipping duplicate match")
 
     # --- Stage 2: Perceptual hash (pHash) similarity ---
     phash_str = await asyncio.to_thread(_compute_phash, image_path)
@@ -83,14 +92,17 @@ async def execute(job, session) -> dict:
                 continue
 
             if distance <= threshold:
-                await _handle_duplicate(job, session, candidate, "similar", distance)
-                return {
-                    "status": "duplicate",
-                    "match_type": "similar",
-                    "phash_distance": distance,
-                    "original_debug_key": candidate.debug_key,
-                    "original_path": candidate.target_path or candidate.original_path,
-                }
+                if await asyncio.to_thread(_file_exists, candidate):
+                    await _handle_duplicate(job, session, candidate, "similar", distance)
+                    return {
+                        "status": "duplicate",
+                        "match_type": "similar",
+                        "phash_distance": distance,
+                        "original_debug_key": candidate.debug_key,
+                        "original_path": candidate.target_path or candidate.original_path,
+                    }
+                else:
+                    await log_warning("IA-03", f"Orphaned job {candidate.debug_key}: file missing, skipping duplicate match")
 
     return {"status": "ok", "phash": phash_str}
 
