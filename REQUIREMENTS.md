@@ -494,7 +494,7 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Dateiformat-Handling (HEIC/DNG/GIF → temp JPEG vor KI-Analyse, IA-02)
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
 - [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
-- [ ] FEAT: Geocoding Provider-Schnittstelle (Nominatim / Photon / Google Maps, einheitlicher Output)
+- [x] FEAT: Geocoding Provider-Schnittstelle (Nominatim / Photon / Google Maps, einheitlicher Output, IA-06)
 - [ ] FEAT: Geocoding-Cache in SQLite (keine doppelten Requests)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 - [ ] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
@@ -503,15 +503,15 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: Manuelle Imports — Ordnerstruktur als Tags (jede Ebene = ein EXIF-Keyword, pro Verzeichnis konfigurierbar)
 - [x] FEAT: EXIF-Auslesen via ExifTool subprocess (IA-01)
 - [ ] FEAT: Regel-basierte Klassifizierung (WA, Screenshot, EXIF-leer)
-- [ ] FEAT: LM Studio Vision API Integration
-- [ ] FEAT: KI-Prompt für Typ + Inhalt + Qualität + Beschreibung
-- [ ] FEAT: EXIF-Tags schreiben via ExifTool
-- [ ] FEAT: Zielstruktur-Logik (Ordner bestimmen, Datei verschieben)
+- [x] FEAT: LM Studio Vision API Integration (IA-03)
+- [x] FEAT: KI-Prompt für Typ + Inhalt + Qualität + Beschreibung (IA-03)
+- [x] FEAT: EXIF-Tags schreiben via ExifTool (IA-07)
+- [x] FEAT: Zielstruktur-Logik (Ordner bestimmen, Datei verschieben, IA-08)
 - [ ] FEAT: Duplikat-Erkennung SHA256 (exakt) + pHash (ähnlich) via imagehash
 - [ ] FEAT: Duplikate → /inbox/error/duplicates/ + .log mit Verweis auf Original
 - [ ] FEAT: Duplikat-Review Webinterface (Original + alle Duplikate gruppiert, Side-by-Side, Batch-Löschen)
 - [ ] FEAT: Fehlerbehandlung → /inbox/error/ + .log Datei
-- [ ] FEAT: SMTP Fehlerbenachrichtigung (zusammengefasst, max 1x/Stunde)
+- [x] FEAT: SMTP Fehlerbenachrichtigung (IA-09, STARTTLS/Office 365 Support)
 - [x] FEAT: Debugschlüssel (MA-YYYY-NNNN) + Step-Codes (IA-01 bis IA-11) pro Verarbeitung
 - [x] FEAT: Job-System (SQLite, Eintrag bei Erkennung, Status + current_step + step_result JSON)
 - [x] FEAT: Resume-Logik (nach Absturz ab fehlendem Step weitermachen)
