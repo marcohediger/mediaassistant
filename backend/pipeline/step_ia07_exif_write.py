@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import os
 import subprocess
 
 
@@ -73,8 +75,23 @@ async def execute(job, session) -> dict:
     if result.returncode != 0:
         raise RuntimeError(f"ExifTool Write Fehler: {result.stderr.strip()}")
 
+    # Update file hash in DB (file changed due to new EXIF tags)
+    new_hash = await asyncio.to_thread(_sha256, job.original_path)
+    new_size = os.path.getsize(job.original_path)
+    job.file_hash = new_hash
+
     return {
         "keywords_written": keywords,
         "description_written": description,
         "tags_count": len(keywords),
+        "file_size": new_size,
+        "file_hash": new_hash,
     }
+
+
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
