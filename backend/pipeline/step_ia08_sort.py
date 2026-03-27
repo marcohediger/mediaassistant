@@ -65,13 +65,16 @@ async def execute(job, session) -> dict:
     ai_type = ai_result.get("type", "")
     filename = os.path.basename(job.original_path)
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
+    has_no_exif = not exif.get("has_exif", False)
     is_whatsapp_name = bool(_WHATSAPP_UUID_RE.match(filename)) or "-WA" in filename.upper()
+    # WhatsApp entfernt EXIF — UUID-Name oder fehlende EXIF + KI-Hinweis = WhatsApp
+    is_whatsapp = is_whatsapp_name or ai_type == "whatsapp" or (has_no_exif and ai_type in ("internet_image", "meme", ""))
 
-    if is_video and is_whatsapp_name:
+    if is_video and is_whatsapp:
         category = "whatsapp"
     elif is_video:
         category = "video"
-    elif is_whatsapp_name or ai_type == "whatsapp":
+    elif is_whatsapp:
         category = "whatsapp"
     elif ai_type == "screenshot" or "screenshot" in filename.lower():
         category = "screenshot"
