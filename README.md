@@ -14,7 +14,7 @@ New files in inbox directories are automatically detected and processed through 
 |------|------|-------------|
 | IA-01 | Read EXIF | Extract metadata via ExifTool |
 | IA-02 | Format Conversion | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis |
-| IA-03 | Duplicate Detection | SHA256 (exact) + pHash (similar) |
+| IA-03 | Duplicate Detection | SHA256 (exact) + pHash (similar), incl. Immich-uploaded files |
 | IA-04 | AI Analysis | Analyze image (type, tags, description, mood) |
 | IA-05 | OCR | Text recognition (screenshots, documents) |
 | IA-06 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
@@ -114,6 +114,7 @@ All system log messages are always written in English, regardless of the UI lang
 - Per file: all EXIF data read directly from file (date, camera, ISO, aperture, shutter speed, focal length, GPS)
 - Per file: all keywords/tags and description from file
 - Per file: similarity score (SHA256 exact / pHash %)
+- **Immich duplicates**: Thumbnail fetched from Immich, "View in Immich" button, "Delete local copy" for the local file
 - Actions: "Keep this" (moves to library, deletes all others)
 - Batch-Clean: auto-delete all exact SHA256 duplicates
 - Orphaned entries: if a referenced original file no longer exists on disk, the match is skipped and the new file is treated as a fresh original
@@ -180,7 +181,9 @@ Each inbox directory has a dry-run toggle. When enabled:
 Useful for testing the pipeline on an existing photo library before committing changes.
 
 ### Folder Tags
-Inbox subdirectory names can be automatically added as EXIF keywords. Configurable per inbox directory. Example: a file in `/inbox/manual/vacation/italy/` gets keywords `["vacation", "italy"]`.
+Inbox subdirectory names can be automatically added as EXIF keywords. Configurable per inbox directory. Example: a file in `/inbox/manual/vacation/italy/` gets keywords `["vacation", "italy"]` and an `album:vacation italy` tag.
+
+When combined with Immich upload, folder tags also create an **Immich album** with the combined name (e.g. "vacation italy").
 
 ### Geocoding Keywords
 All geocoding fields (country, state, city, suburb) are written as EXIF keywords, with deduplication.
@@ -195,8 +198,11 @@ Every file move is a three-step process to prevent data loss:
 Each inbox directory can optionally upload files to Immich instead of moving them to the local library. Configurable per inbox directory via the "Immich" toggle.
 
 When enabled for an inbox:
+- **IA-07**: All EXIF tags (AI, geocoding, folder tags, `album:` tag) are written before upload
 - **IA-08**: File is uploaded to Immich via API, then deleted from inbox
 - The file is **not** copied to the local target directory
+- **Albums**: If folder tags are active, an Immich album is created from the subfolder names (e.g. `Ferien/Nänikon 2026/` → album "Ferien Nänikon 2026")
+- **Duplicate detection**: Previously uploaded files are tracked in the local database — re-uploading the same file triggers duplicate review with side-by-side comparison (Immich thumbnail vs. local file)
 - Requires Immich URL and API key configured in **Settings → Immich**
 - Dashboard shows Immich connection status in module health checks
 
