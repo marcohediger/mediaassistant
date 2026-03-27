@@ -570,6 +570,8 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Geocoding-Platzhalter in Ordnerstruktur ({COUNTRY}, {CITY})
 - [x] FEAT: Leere Quellordner nach Import automatisch aufräumen (bis Inbox-Root)
 - [x] FEAT: Dry-Run Modus pro Inbox (Pipeline analysiert aber verschiebt/schreibt nicht, zeigt geplanten Zielpfad)
+- [x] FEAT: Filewatcher queued korrekt alle Dateien vor Verarbeitung (Phase 1: create, Phase 2: process)
+- [x] FEAT: Verwaiste DB-Einträge bei Duplikaterkennung — wenn Original-Datei gelöscht wurde, wird Match übersprungen und neue Datei als Original behandelt
 
 ### Offen
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)

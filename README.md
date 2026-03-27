@@ -115,6 +115,7 @@ All system log messages are always written in English, regardless of the UI lang
 - Per file: similarity score (SHA256 exact / pHash %)
 - Actions: "Keep this" (moves to library, deletes all others)
 - Batch-Clean: auto-delete all exact SHA256 duplicates
+- Orphaned entries: if a referenced original file no longer exists on disk, the match is skipped and the new file is treated as a fresh original
 
 ### Log Viewer
 - System log (errors, warnings, info)
@@ -166,6 +167,16 @@ Default structure:
 ```
 
 ## Features
+
+### Dry-Run Mode
+Each inbox directory has a dry-run toggle. When enabled:
+- All analysis steps run normally (EXIF, AI, OCR, Geocoding, Duplicates)
+- **IA-07**: Tags/description are calculated but **not written** to the file
+- **IA-08**: Target path is calculated but the file is **not moved**
+- Step results show `status: "dry_run"` with the planned values
+- The file stays untouched in the inbox
+
+Useful for testing the pipeline on an existing photo library before committing changes.
 
 ### Folder Tags
 Inbox subdirectory names can be automatically added as EXIF keywords. Configurable per inbox directory. Example: a file in `/inbox/manual/vacation/italy/` gets keywords `["vacation", "italy"]`.
