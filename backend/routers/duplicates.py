@@ -79,82 +79,117 @@ def _get_image_info(filepath: str) -> dict:
     return info
 
 
+def _union_find_groups(links: list[tuple[str, str]]) -> dict[str, set[str]]:
+    """Transitively merge linked keys into groups using union-find."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for a, b in links:
+        union(a, b)
+
+    groups = defaultdict(set)
+    for key in parent:
+        groups[find(key)].add(key)
+    return groups
+
+
+async def _build_member(job, session) -> dict:
+    """Build a member dict for a single job."""
+    filepath = job.target_path or job.original_path
+    dup_info = (job.step_result or {}).get("IA-03", {})
+    ai_result = (job.step_result or {}).get("IA-04", {})
+    exif = (job.step_result or {}).get("IA-01", {})
+    is_dup = dup_info.get("status") == "duplicate"
+    img_info = await asyncio.to_thread(_get_image_info, filepath) if os.path.exists(filepath) else {}
+
+    return {
+        "job_id": job.id,
+        "debug_key": job.debug_key,
+        "filename": job.filename,
+        "filepath": filepath,
+        "exists": os.path.exists(filepath),
+        "is_original": not is_dup,
+        "match_type": dup_info.get("match_type", "original") if is_dup else "original",
+        "phash_distance": dup_info.get("phash_distance", 0),
+        "quality": ai_result.get("quality", "—"),
+        "confidence": ai_result.get("confidence", 0),
+        "has_exif": exif.get("has_exif", False),
+        "has_gps": bool(exif.get("gps")),
+        **img_info,
+    }
+
+
 async def _build_duplicate_groups() -> list[dict]:
-    """Build groups of duplicate files linked to their originals."""
+    """Build transitively merged groups of duplicate files."""
     async with async_session() as session:
-        # Get all duplicate jobs
         result = await session.execute(
-            select(Job).where(Job.status == "duplicate").order_by(Job.created_at.desc())
+            select(Job).where(Job.status == "duplicate")
         )
         dup_jobs = result.scalars().all()
 
         if not dup_jobs:
             return []
 
-        # Group by original_debug_key
-        groups_map = defaultdict(list)
+        # Build links: each duplicate is linked to its original
+        links = []
         for job in dup_jobs:
             dup_info = (job.step_result or {}).get("IA-03", {})
-            original_key = dup_info.get("original_debug_key", "unknown")
-            groups_map[original_key].append(job)
+            original_key = dup_info.get("original_debug_key")
+            if original_key:
+                links.append((job.debug_key, original_key))
 
-        # Build groups with original job info
+        # Transitively merge into groups
+        merged = _union_find_groups(links)
+
+        # Collect all debug_keys we need
+        all_keys = set()
+        for members in merged.values():
+            all_keys.update(members)
+
+        # Fetch all relevant jobs
+        result = await session.execute(
+            select(Job).where(Job.debug_key.in_(all_keys))
+        )
+        jobs_by_key = {j.debug_key: j for j in result.scalars().all()}
+
+        # Build groups
         groups = []
-        for original_key, duplicates in groups_map.items():
-            result = await session.execute(
-                select(Job).where(Job.debug_key == original_key)
-            )
-            original = result.scalars().first()
-
+        for root_key, member_keys in merged.items():
             members = []
+            # Sort: originals first, then by debug_key
+            sorted_keys = sorted(member_keys, key=lambda k: (
+                1 if jobs_by_key.get(k) and jobs_by_key[k].status == "duplicate" else 0,
+                k,
+            ))
 
-            # Add original as first member
-            if original:
-                filepath = original.target_path or original.original_path
-                ai_result = (original.step_result or {}).get("IA-04", {})
-                exif = (original.step_result or {}).get("IA-01", {})
-                img_info = await asyncio.to_thread(_get_image_info, filepath) if os.path.exists(filepath) else {}
-                members.append({
-                    "job_id": original.id,
-                    "debug_key": original.debug_key,
-                    "filename": original.filename,
-                    "filepath": filepath,
-                    "exists": os.path.exists(filepath),
-                    "is_original": True,
-                    "match_type": "original",
-                    "phash_distance": 0,
-                    "quality": ai_result.get("quality", "—"),
-                    "confidence": ai_result.get("confidence", 0),
-                    "has_exif": exif.get("has_exif", False),
-                    "has_gps": bool(exif.get("gps")),
-                    **img_info,
-                })
+            for key in sorted_keys:
+                job = jobs_by_key.get(key)
+                if not job:
+                    continue
+                members.append(await _build_member(job, session))
 
-            # Add duplicates
-            for dup in duplicates:
-                filepath = dup.target_path or dup.original_path
-                dup_info = (dup.step_result or {}).get("IA-03", {})
-                ai_result = (dup.step_result or {}).get("IA-04", {}) or ((original.step_result or {}).get("IA-04", {}) if original else {})
-                exif = (dup.step_result or {}).get("IA-01", {})
-                img_info = await asyncio.to_thread(_get_image_info, filepath) if os.path.exists(filepath) else {}
-                members.append({
-                    "job_id": dup.id,
-                    "debug_key": dup.debug_key,
-                    "filename": dup.filename,
-                    "filepath": filepath,
-                    "exists": os.path.exists(filepath),
-                    "is_original": False,
-                    "match_type": dup_info.get("match_type", "unknown"),
-                    "phash_distance": dup_info.get("phash_distance", 0),
-                    "quality": ai_result.get("quality", "—"),
-                    "confidence": ai_result.get("confidence", 0),
-                    "has_exif": exif.get("has_exif", False),
-                    "has_gps": bool(exif.get("gps")),
-                    **img_info,
-                })
+            if len(members) < 2:
+                continue
+
+            # Use the first original's key as group key
+            group_key = next(
+                (m["debug_key"] for m in members if m["is_original"]),
+                members[0]["debug_key"],
+            )
 
             groups.append({
-                "original_key": original_key,
+                "original_key": group_key,
                 "members": members,
                 "count": len(members),
                 "all_exact": all(
@@ -217,25 +252,36 @@ async def keep_file(request: Request):
         return RedirectResponse(url="/duplicates", status_code=303)
 
     async with async_session() as session:
-        # Collect all jobs in this group: the original + all duplicates referencing it
-        group_jobs = []
-
-        # Get the original job
-        result = await session.execute(
-            select(Job).where(Job.debug_key == group_key)
-        )
-        original_job = result.scalars().first()
-        if original_job:
-            group_jobs.append(original_job)
-
-        # Get all duplicates in this group
+        # Find all members of this group using transitive merging
         result = await session.execute(
             select(Job).where(Job.status == "duplicate")
         )
-        for dup in result.scalars().all():
+        all_dups = result.scalars().all()
+
+        links = []
+        for dup in all_dups:
             dup_info = (dup.step_result or {}).get("IA-03", {})
-            if dup_info.get("original_debug_key") == group_key:
-                group_jobs.append(dup)
+            orig_key = dup_info.get("original_debug_key")
+            if orig_key:
+                links.append((dup.debug_key, orig_key))
+
+        merged = _union_find_groups(links)
+
+        # Find which group contains group_key
+        group_keys = set()
+        for members in merged.values():
+            if group_key in members:
+                group_keys = members
+                break
+
+        if not group_keys:
+            group_keys = {group_key}
+
+        # Fetch all jobs in the group
+        result = await session.execute(
+            select(Job).where(Job.debug_key.in_(group_keys))
+        )
+        group_jobs = result.scalars().all()
 
         # Delete all except the kept one
         for job in group_jobs:
