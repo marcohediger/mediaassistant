@@ -87,6 +87,8 @@ async def _scan_and_process():
         # Scan for new files
         found_files = await asyncio.to_thread(_scan_directory, inbox.path, min_age)
 
+        # Phase 1: Create all jobs as "queued" first
+        new_job_ids = []
         for filepath in found_files:
             if filepath in known_paths:
                 continue
@@ -107,9 +109,12 @@ async def _scan_and_process():
                 )
                 session.add(job)
                 await session.commit()
-                job_id = job.id
+                new_job_ids.append((job.id, filename, debug_key))
 
             await log_info("filewatcher", f"New file detected: {filename}", f"Inbox: {inbox.label}, Key: {debug_key}")
+
+        # Phase 2: Process queued jobs one by one
+        for job_id, filename, debug_key in new_job_ids:
             await run_pipeline(job_id)
 
 
