@@ -915,6 +915,30 @@ select:focus {
     color: var(--text-muted);
 }
 
+.dup-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.dup-tag {
+    font-size: 0.65rem;
+    background: var(--bg-input);
+    color: var(--primary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.1rem 0.4rem;
+}
+
+.dup-description {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 0.35rem;
+    font-style: italic;
+    line-height: 1.3;
+}
+
 .dup-card-actions {
     display: flex;
     gap: 0.5rem;
