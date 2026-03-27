@@ -206,7 +206,8 @@
                 <option value="smart" {{ 'selected' if cfg.ocr_mode == 'smart' else '' }}>Nur Screenshots & Dokumente (KI-gesteuert)</option>
                 <option value="always" {{ 'selected' if cfg.ocr_mode == 'always' else '' }}>Alle Bilder (auch Fotos mit Schildern, Speisekarten etc.)</option>
             </select>
-            <small>«Smart» überspringt OCR bei normalen Fotos, «Alle Bilder» erkennt auch Text auf Schildern, Plakaten etc.</small>
+            <small>«Smart» überspringt OCR bei normalen Fotos, «Alle Bilder» erkennt auch Text auf Schildern, Plakaten etc.<br>
+            Hinweis: OCR benötigt ein aktives KI-Backend (KI-Analyse muss aktiviert sein).</small>
         </div>
     </div>
 </div>
