@@ -1,6 +1,8 @@
+import json
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
@@ -8,6 +10,14 @@ from models import Job, SystemLog
 
 router = APIRouter(prefix="/logs")
 templates = Jinja2Templates(directory="templates")
+
+
+def _tojson_unicode(value, indent=None):
+    """tojson filter that preserves Unicode characters (ä, ö, ü etc.)."""
+    return Markup(json.dumps(value, ensure_ascii=False, indent=indent))
+
+
+templates.env.filters["tojson_unicode"] = _tojson_unicode
 
 ITEMS_PER_PAGE = 50
 
