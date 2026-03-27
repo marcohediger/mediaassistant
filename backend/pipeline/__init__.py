@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
 from database import async_session
 from models import Job
-from system_logger import log_error, log_warning, log_info
+from system_logger import log_error, log_warning
 from pipeline import step_ia01_exif, step_ia02_convert, step_ia03_ai, step_ia04_ocr, step_ia05_duplicates, step_ia06_geocoding, step_ia07_exif_write, step_ia08_sort, step_ia09_notify, step_ia10_cleanup, step_ia11_log
 
 STEPS = [
@@ -75,4 +75,3 @@ async def run_pipeline(job_id: int):
         job.status = "done"
         job.completed_at = datetime.now()
         await session.commit()
-        await log_info("pipeline", f"{job.debug_key} erfolgreich verarbeitet", job.filename)
