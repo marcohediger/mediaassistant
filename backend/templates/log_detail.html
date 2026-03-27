@@ -6,6 +6,16 @@
     <h1><code>{{ job.debug_key }}</code></h1>
 </div>
 
+{% set filepath = job.target_path or job.original_path %}
+{% set ext = filepath.rsplit('.', 1)[-1].lower() if filepath and '.' in filepath else '' %}
+{% if ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif') %}
+<div class="detail-section">
+    <div class="detail-preview">
+        <img src="/api/thumbnail/{{ job.id }}" alt="{{ job.filename }}">
+    </div>
+</div>
+{% endif %}
+
 <div class="detail-grid">
     <div class="detail-card">
         <h3>Datei</h3>
@@ -51,9 +61,15 @@
     <h2>Fehler</h2>
     <div class="alert alert-error">{{ job.error_message }}</div>
     {% if job.status == 'error' %}
-    <form method="post" action="/api/job/{{ job.debug_key }}/retry" style="margin-top: 0.75rem;">
-        <button type="submit" class="btn btn-primary">Erneut verarbeiten</button>
-    </form>
+    <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
+        <form method="post" action="/api/job/{{ job.debug_key }}/retry">
+            <button type="submit" class="btn btn-primary">Erneut verarbeiten</button>
+        </form>
+        <form method="post" action="/api/job/{{ job.debug_key }}/delete"
+              onsubmit="return confirm('Job {{ job.debug_key }} und zugehörige Datei endgültig löschen?')">
+            <button type="submit" class="btn btn-danger">Löschen</button>
+        </form>
+    </div>
     {% endif %}
 </div>
 {% endif %}
