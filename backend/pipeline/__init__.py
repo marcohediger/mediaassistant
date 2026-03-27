@@ -60,8 +60,8 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
 
-                # IA-03: If duplicate detected, skip remaining main steps
-                if step_code == "IA-03" and isinstance(result, dict) and result.get("status") == "duplicate":
+                # If duplicate detected (IA-03 or IA-08 Immich), skip remaining main steps
+                if isinstance(result, dict) and result.get("status") == "duplicate":
                     duplicate_detected = True
                     break
 

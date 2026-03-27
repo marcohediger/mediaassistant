@@ -160,7 +160,11 @@ async def _build_member(job, session) -> dict:
     """Build a member dict for a single job — all info read directly from the file."""
     filepath = _resolve_filepath(job)
     dup_info = (job.step_result or {}).get("IA-03", {})
-    is_dup = dup_info.get("status") == "duplicate"
+    ia08_info = (job.step_result or {}).get("IA-08", {})
+    # Immich duplicates are detected in IA-08 (after EXIF write)
+    if ia08_info.get("match_type") == "immich":
+        dup_info = ia08_info
+    is_dup = dup_info.get("status") == "duplicate" or dup_info.get("match_type") == "immich"
     exists = os.path.exists(filepath)
     img_info = await asyncio.to_thread(_get_image_info, filepath) if exists else {}
 
@@ -195,10 +199,16 @@ async def _build_duplicate_groups() -> list[dict]:
         links = []
         for job in dup_jobs:
             dup_info = (job.step_result or {}).get("IA-03", {})
-            original_key = dup_info.get("original_debug_key")
+            ia08_info = (job.step_result or {}).get("IA-08", {})
+            # Immich duplicates detected in IA-08
+            if ia08_info.get("match_type") == "immich":
+                immich_dups.append(job)
+                continue
             if dup_info.get("match_type") == "immich":
                 immich_dups.append(job)
-            elif original_key:
+                continue
+            original_key = dup_info.get("original_debug_key")
+            if original_key:
                 links.append((job.debug_key, original_key))
 
         # Transitively merge local duplicates into groups
