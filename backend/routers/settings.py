@@ -11,7 +11,7 @@ from system_logger import log_warning, log_info
 router = APIRouter(prefix="/settings")
 templates = Jinja2Templates(directory="templates")
 
-MODULE_NAMES = ["ki_analyse", "geocoding", "duplikat_erkennung", "ocr", "ordner_tags", "smtp", "filewatcher"]
+MODULE_NAMES = ["ki_analyse", "geocoding", "duplikat_erkennung", "ocr", "smtp", "filewatcher"]
 
 
 async def _get_modules_dict() -> dict:
