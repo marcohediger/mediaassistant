@@ -1,3 +1,3 @@
 async def execute(job, session) -> dict:
-    """IA-03: Duplikat-Erkennung (noch nicht implementiert)."""
+    """IA-10: Aufräumen — temporäre Dateien entfernen."""
     return {"status": "skipped", "reason": "not yet implemented"}

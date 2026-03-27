@@ -4,18 +4,20 @@ from sqlalchemy.orm.attributes import flag_modified
 from database import async_session
 from models import Job
 from system_logger import log_error, log_warning, log_info
-from pipeline import step_ia01_exif, step_ia02_ai, step_ia03_duplicates, step_ia04_ocr, step_ia05_geocoding, step_ia06_exif_write, step_ia07_sort, step_ia08_notify, step_ia09_cleanup
+from pipeline import step_ia01_exif, step_ia02_convert, step_ia03_ai, step_ia04_ocr, step_ia05_duplicates, step_ia06_geocoding, step_ia07_exif_write, step_ia08_sort, step_ia09_notify, step_ia10_cleanup, step_ia11_log
 
 STEPS = [
     ("IA-01", step_ia01_exif.execute),
-    ("IA-02", step_ia02_ai.execute),
-    ("IA-03", step_ia03_duplicates.execute),
+    ("IA-02", step_ia02_convert.execute),
+    ("IA-03", step_ia03_ai.execute),
     ("IA-04", step_ia04_ocr.execute),
-    ("IA-05", step_ia05_geocoding.execute),
-    ("IA-06", step_ia06_exif_write.execute),
-    ("IA-07", step_ia07_sort.execute),
-    ("IA-08", step_ia08_notify.execute),
-    ("IA-09", step_ia09_cleanup.execute),
+    ("IA-05", step_ia05_duplicates.execute),
+    ("IA-06", step_ia06_geocoding.execute),
+    ("IA-07", step_ia07_exif_write.execute),
+    ("IA-08", step_ia08_sort.execute),
+    ("IA-09", step_ia09_notify.execute),
+    ("IA-10", step_ia10_cleanup.execute),
+    ("IA-11", step_ia11_log.execute),
 ]
 
 
@@ -44,12 +46,12 @@ async def run_pipeline(job_id: int):
                 await session.commit()
             except Exception as e:
                 # Non-critical steps: log warning and continue with fallback
-                non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-08"}
+                non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06", "IA-09", "IA-11"}
                 if step_code in non_critical:
                     await log_warning("pipeline", f"{job.debug_key} {step_code} übersprungen", str(e))
                     existing_results[step_code] = {"status": "error", "reason": str(e)}
-                    # Provide fallback for IA-02 so sorting still works
-                    if step_code == "IA-02":
+                    # Provide fallback for IA-03 so sorting still works
+                    if step_code == "IA-03":
                         existing_results[step_code].update({
                             "type": "unknown",
                             "tags": [],
