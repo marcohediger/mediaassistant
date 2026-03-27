@@ -31,13 +31,11 @@ async def execute(job, session) -> dict:
     if ai_result.get("quality"):
         keywords.append(f"quality:{ai_result['quality']}")
 
-    # From geocoding
-    if geo_result.get("country"):
-        keywords.append(geo_result["country"])
-    if geo_result.get("city"):
-        keywords.append(geo_result["city"])
-    if geo_result.get("suburb"):
-        keywords.append(geo_result["suburb"])
+    # From geocoding (all available fields)
+    for geo_field in ("country", "state", "city", "suburb"):
+        val = geo_result.get(geo_field)
+        if val and val not in keywords:
+            keywords.append(val)
 
     # From OCR
     if ocr_result.get("has_text") and ocr_result.get("text_type"):
