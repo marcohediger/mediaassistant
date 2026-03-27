@@ -173,6 +173,8 @@ async def _build_member(job, session) -> dict:
         "is_original": not is_dup,
         "match_type": dup_info.get("match_type", "original") if is_dup else "original",
         "phash_distance": dup_info.get("phash_distance", 0),
+        "immich_link": dup_info.get("immich_link", ""),
+        "immich_asset_id": dup_info.get("immich_asset_id", ""),
         **img_info,
     }
 
@@ -188,15 +190,18 @@ async def _build_duplicate_groups() -> list[dict]:
         if not dup_jobs:
             return []
 
-        # Build links: each duplicate is linked to its original
+        # Separate Immich duplicates (no original_debug_key) from local duplicates
+        immich_dups = []
         links = []
         for job in dup_jobs:
             dup_info = (job.step_result or {}).get("IA-03", {})
             original_key = dup_info.get("original_debug_key")
-            if original_key:
+            if dup_info.get("match_type") == "immich":
+                immich_dups.append(job)
+            elif original_key:
                 links.append((job.debug_key, original_key))
 
-        # Transitively merge into groups
+        # Transitively merge local duplicates into groups
         merged = _union_find_groups(links)
 
         # Collect all debug_keys we need
@@ -210,11 +215,10 @@ async def _build_duplicate_groups() -> list[dict]:
         )
         jobs_by_key = {j.debug_key: j for j in result.scalars().all()}
 
-        # Build groups
+        # Build groups for local duplicates
         groups = []
         for root_key, member_keys in merged.items():
             members = []
-            # Sort: originals first, then by debug_key
             sorted_keys = sorted(member_keys, key=lambda k: (
                 1 if jobs_by_key.get(k) and jobs_by_key[k].status == "duplicate" else 0,
                 k,
@@ -229,7 +233,6 @@ async def _build_duplicate_groups() -> list[dict]:
             if len(members) < 2:
                 continue
 
-            # Use the first original's key as group key
             group_key = next(
                 (m["debug_key"] for m in members if m["is_original"]),
                 members[0]["debug_key"],
@@ -242,6 +245,17 @@ async def _build_duplicate_groups() -> list[dict]:
                 "all_exact": all(
                     m["match_type"] in ("exact", "original") for m in members
                 ),
+            })
+
+        # Build groups for Immich duplicates (each as its own group)
+        for job in immich_dups:
+            member = await _build_member(job, session)
+            groups.append({
+                "original_key": job.debug_key,
+                "members": [member],
+                "count": 1,
+                "all_exact": False,
+                "is_immich_duplicate": True,
             })
 
     return groups
@@ -277,6 +291,16 @@ async def thumbnail(job_id: int):
     if not data:
         return Response(status_code=404)
 
+    return Response(content=data, media_type="image/jpeg")
+
+
+@router.get("/api/thumbnail/immich/{asset_id}")
+async def immich_thumbnail(asset_id: str):
+    """Serve a thumbnail fetched from Immich."""
+    from immich_client import get_asset_thumbnail
+    data = await get_asset_thumbnail(asset_id)
+    if not data:
+        return Response(status_code=404)
     return Response(content=data, media_type="image/jpeg")
 
 

@@ -895,6 +895,9 @@ select:focus {
 .match-original { background: rgba(52, 211, 153, 0.15); color: var(--success); }
 .match-exact { background: rgba(96, 165, 250, 0.15); color: var(--info); }
 .match-similar { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+.match-immich { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+
+.dup-immich-link { margin: 0.5rem 0; }
 
 .dup-props {
     display: flex;

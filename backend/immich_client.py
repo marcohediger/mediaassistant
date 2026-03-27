@@ -76,11 +76,12 @@ async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dic
     return None
 
 
-async def check_duplicate(file_path: str) -> bool:
-    """Check if a file already exists in Immich by SHA1 checksum."""
+async def check_duplicate(file_path: str) -> dict | None:
+    """Check if a file already exists in Immich by SHA1 checksum.
+    Returns {"assetId": ..., "reason": ...} if duplicate, None otherwise."""
     url, api_key = await get_immich_config()
     if not url or not api_key:
-        return False
+        return None
 
     # Compute SHA1 (Immich uses SHA1 for duplicate detection)
     sha1 = hashlib.sha1()
@@ -100,10 +101,31 @@ async def check_duplicate(file_path: str) -> bool:
             results = resp.json().get("results", [])
             for r in results:
                 if r.get("action") == "reject":
-                    return True
+                    return {
+                        "assetId": r.get("assetId", ""),
+                        "reason": r.get("reason", "duplicate"),
+                    }
     except Exception:
         pass
-    return False
+    return None
+
+
+async def get_asset_thumbnail(asset_id: str) -> bytes | None:
+    """Fetch thumbnail for an asset from Immich."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key or not asset_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{url}/api/assets/{asset_id}/thumbnail",
+                headers={"x-api-key": api_key},
+            )
+            if resp.status_code == 200:
+                return resp.content
+    except Exception:
+        pass
+    return None
 
 
 async def check_connection() -> tuple[bool, str]:
