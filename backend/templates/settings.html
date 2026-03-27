@@ -45,6 +45,11 @@
                         <span>{{ t.settings.dry_run }}</span>
                     </label>
                     <label class="switch-inline">
+                        <input type="checkbox" name="inbox_use_immich_{{ inbox.id }}" value="1" {{ 'checked' if inbox.use_immich else '' }}>
+                        <span class="switch-slider-sm"></span>
+                        <span>{{ t.settings.use_immich }}</span>
+                    </label>
+                    <label class="switch-inline">
                         <input type="checkbox" name="inbox_active_{{ inbox.id }}" value="1" {{ 'checked' if inbox.active else '' }}>
                         <span class="switch-slider-sm"></span>
                         <span>{{ t.settings.active }}</span>
@@ -86,6 +91,11 @@
                         <input type="checkbox" name="inbox_dry_run" value="1">
                         <span class="switch-slider-sm"></span>
                         <span>{{ t.settings.dry_run }}</span>
+                    </label>
+                    <label class="switch-inline">
+                        <input type="checkbox" name="inbox_use_immich" value="1">
+                        <span class="switch-slider-sm"></span>
+                        <span>{{ t.settings.use_immich }}</span>
                     </label>
                     <div class="inbox-actions">
                         <button type="submit" class="btn btn-small btn-primary">{{ t.settings.add }}</button>
@@ -264,6 +274,31 @@
                     <span>{{ t.settings.enabled }}</span>
                 </label>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Immich -->
+<div class="settings-section">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.immich }}</h2>
+            <span class="section-desc">{{ t.settings.immich_desc }}</span>
+        </div>
+        <label class="switch">
+            <input type="checkbox" name="mod_immich" value="1" {{ 'checked' if modules.immich else '' }}>
+            <span class="switch-slider"></span>
+        </label>
+    </div>
+    <div class="section-body">
+        <div class="form-group">
+            <label for="immich_url">{{ t.settings.immich_url }}</label>
+            <input type="url" id="immich_url" name="immich_url" value="{{ cfg.immich_url }}" placeholder="http://localhost:2283">
+        </div>
+        <div class="form-group">
+            <label for="immich_api_key">{{ t.settings.immich_api_key }}</label>
+            <input type="password" id="immich_api_key" name="immich_api_key" placeholder="••••••••">
+            <small>{{ t.settings.immich_api_key_hint }}</small>
         </div>
     </div>
 </div>

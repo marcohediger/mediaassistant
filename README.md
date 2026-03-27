@@ -19,7 +19,7 @@ New files in inbox directories are automatically detected and processed through 
 | IA-05 | OCR | Text recognition (screenshots, documents) |
 | IA-06 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
 | IA-07 | Write EXIF Tags | Write tags, description, geocoding and folder-tags back to file |
-| IA-08 | Sort | Move file to library by type/date, clean up empty source folders |
+| IA-08 | Sort | Move file to library or upload to Immich, clean up empty source folders |
 | IA-09 | Notification | Email on errors (SMTP, Office 365 / Gmail) |
 | IA-10 | Cleanup | Remove temporary files |
 | IA-11 | SQLite Log | Log processing summary |
@@ -100,7 +100,8 @@ All system log messages are always written in English, regardless of the UI lang
 - Enable/disable modules individually
 - AI backend, geocoding, SMTP configuration
 - Editable AI system prompt (stored in database, default fallback)
-- Manage inbox directories (with dry-run, folder-tags, active toggle per inbox)
+- Manage inbox directories (with dry-run, folder-tags, Immich toggle, active toggle per inbox)
+- Immich integration (URL, API key)
 - Library target structure with placeholders
 - Duplicate detection threshold (pHash)
 - OCR mode (smart / all images)
@@ -190,6 +191,15 @@ Every file move is a three-step process to prevent data loss:
 2. **Verify** — compare file size + SHA256 hash
 3. **Delete** — original is only deleted after successful verification
 
+### Immich Integration
+Each inbox directory can optionally upload files to Immich instead of moving them to the local library. Configurable per inbox directory via the "Immich" toggle.
+
+When enabled for an inbox:
+- **IA-08**: File is uploaded to Immich via API, then deleted from inbox
+- The file is **not** copied to the local target directory
+- Requires Immich URL and API key configured in **Settings → Immich**
+- Dashboard shows Immich connection status in module health checks
+
 ### Empty Folder Cleanup
 After moving a file from an inbox, empty parent directories are automatically cleaned up (up to the inbox root).
 
@@ -205,6 +215,7 @@ After moving a file from an inbox, empty parent directories are automatically cl
 - **Database:** SQLite
 - **Container:** Docker with ExifTool, FFmpeg, libheif
 - **AI:** Any OpenAI-compatible Vision API server (e.g. LM Studio, Ollama)
+- **Immich:** Optional upload via REST API (per inbox directory)
 - **Geocoding:** Nominatim, Photon, or Google Maps API
 - **i18n:** JSON language files (DE/EN), centralized template rendering
 - **Theme:** Dark (default) / Light, conditional CSS loading

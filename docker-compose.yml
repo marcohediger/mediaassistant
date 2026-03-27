@@ -9,7 +9,7 @@ services:
     volumes:
       - ./data:/app/data
       - ${INBOX_PATH:-/volume1/inbox}:/inbox
-      - ${LIBRARY_PATH:-/volume1/bibliothek}:/bibliothek
+      - ${LIBRARY_PATH:-/home/marcohediger/claude/Bilder}:/bibliothek
     environment:
       - DATABASE_PATH=/app/data/mediaassistant.db
       - INBOX_PATH=/inbox

@@ -22,6 +22,7 @@ class Job(Base):
     source_label = Column(Text)  # which inbox this came from
     source_inbox_path = Column(Text)  # inbox base path (for folder_tags)
     dry_run = Column(Boolean, default=False)  # dry-run mode (don't move/write)
+    use_immich = Column(Boolean, default=False)  # upload to Immich instead of target directory
     file_hash = Column(Text)  # SHA256
     phash = Column(Text)  # perceptual hash
     created_at = Column(DateTime, default=lambda: datetime.now())
@@ -65,6 +66,7 @@ class InboxDirectory(Base):
     label = Column(Text, nullable=False)
     folder_tags = Column(Boolean, default=False)
     dry_run = Column(Boolean, default=False)
+    use_immich = Column(Boolean, default=False)
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

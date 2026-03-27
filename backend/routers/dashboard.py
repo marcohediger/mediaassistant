@@ -42,6 +42,7 @@ MODULE_REQUIREMENTS = {
     "ocr": ["ai.backend_url", "ai.model"],
     "smtp": ["smtp.server", "smtp.recipient"],
     "filewatcher": [],
+    "immich": ["immich.url", "immich.api_key"],
 }
 
 
@@ -150,12 +151,31 @@ async def _check_filewatcher(i18n: dict) -> tuple[bool, str]:
     return True, _t("status_inboxes_active", i18n).replace("{n}", str(len(inboxes)))
 
 
+async def _check_immich(i18n: dict) -> tuple[bool, str]:
+    from immich_client import check_connection
+    ok, detail = await check_connection()
+    if ok:
+        return True, _t("status_connected", i18n)
+    status_map = {
+        "no_url": "status_no_url",
+        "no_api_key": "status_missing",
+        "auth_failed": "status_auth_failed",
+        "connection_failed": "status_connection_failed",
+        "timeout": "status_timeout",
+    }
+    i18n_key = status_map.get(detail)
+    if i18n_key:
+        return False, _t(i18n_key, i18n)
+    return False, detail
+
+
 MODULE_HEALTH_CHECKS = {
     "ki_analyse": _check_ai_backend,
     "geocoding": _check_geocoding,
     "ocr": _check_ai_backend,
     "smtp": _check_smtp,
     "filewatcher": _check_filewatcher,
+    "immich": _check_immich,
 }
 
 
