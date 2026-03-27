@@ -78,7 +78,7 @@ async def execute(job, session) -> dict:
         for candidate in candidates:
             try:
                 candidate_hash = imagehash.hex_to_hash(candidate.phash)
-                distance = current_hash - candidate_hash
+                distance = int(current_hash - candidate_hash)
             except Exception:
                 continue
 
