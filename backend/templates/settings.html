@@ -200,7 +200,14 @@
         </label>
     </div>
     <div class="section-body">
-        <p class="section-note">OCR wird über die KI-Analyse durchgeführt. Keine zusätzliche Konfiguration nötig.</p>
+        <div class="form-group">
+            <label for="ocr_mode">Modus</label>
+            <select id="ocr_mode" name="ocr_mode">
+                <option value="smart" {{ 'selected' if cfg.ocr_mode == 'smart' else '' }}>Nur Screenshots & Dokumente (KI-gesteuert)</option>
+                <option value="always" {{ 'selected' if cfg.ocr_mode == 'always' else '' }}>Alle Bilder (auch Fotos mit Schildern, Speisekarten etc.)</option>
+            </select>
+            <small>«Smart» überspringt OCR bei normalen Fotos, «Alle Bilder» erkennt auch Text auf Schildern, Plakaten etc.</small>
+        </div>
     </div>
 </div>
 
