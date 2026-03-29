@@ -113,6 +113,14 @@ async def _build_review_items() -> list[dict]:
             file_type = (exif.get("file_type") or "").upper()
             is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
 
+            # Immich asset info
+            immich_asset_id = ""
+            target = job.target_path or ""
+            if target.startswith("immich:"):
+                immich_asset_id = target[7:]
+            elif job.immich_asset_id:
+                immich_asset_id = job.immich_asset_id
+
             items.append({
                 "job_id": job.id,
                 "debug_key": job.debug_key,
@@ -120,6 +128,7 @@ async def _build_review_items() -> list[dict]:
                 "filepath": filepath,
                 "exists": exists,
                 "is_video": is_video,
+                "immich_asset_id": immich_asset_id,
                 "file_size_kb": round(file_size_kb),
                 "ai_type": ai.get("type", ""),
                 "ai_confidence": ai.get("confidence", 0.0),
@@ -171,7 +180,10 @@ async def review_thumbnail(job_id: int):
 
 @router.post("/api/review/classify")
 async def classify_file(request: Request):
-    """Move a review file to the selected category."""
+    """Classify a review file: move locally or handle in Immich."""
+    from sqlalchemy.orm.attributes import flag_modified
+    from immich_client import archive_asset
+
     form = await request.form()
     debug_key = form.get("debug_key")
     category = form.get("category")
@@ -187,16 +199,45 @@ async def classify_file(request: Request):
         if not job:
             return RedirectResponse(url="/review", status_code=303)
 
+        step_results = job.step_result or {}
+        exif = step_results.get("IA-01", {})
+        geo = step_results.get("IA-06", {})
+        immich_asset_id = job.immich_asset_id or ""
+        target = job.target_path or ""
+        is_immich = target.startswith("immich:") or bool(immich_asset_id)
+
+        # ── Immich-Modus ──────────────────────────────────────────
+        if is_immich:
+            asset_id = immich_asset_id or target.replace("immich:", "")
+
+            if category == "sourceless" and asset_id:
+                # Sourceless → in Immich archivieren
+                await archive_asset(asset_id)
+
+            # Foto/Video/Screenshot → bleibt in Timeline (nichts zu tun)
+
+            job.status = "done"
+            job.completed_at = datetime.now()
+
+            sort_result = dict(step_results.get("IA-08", {}))
+            sort_result["category"] = category
+            sort_result["manual_review"] = True
+            sort_result["immich_archived"] = category == "sourceless"
+            step_results["IA-08"] = sort_result
+            job.step_result = step_results
+            flag_modified(job, "step_result")
+
+            await session.commit()
+            await log_info("review", f"Manuell klassifiziert (Immich): {debug_key} → {category}")
+            return RedirectResponse(url="/review", status_code=303)
+
+        # ── Lokale Ablage ─────────────────────────────────────────
         filepath = _resolve_filepath(job)
         if not os.path.exists(filepath):
             job.status = "error"
             job.error_message = "Review: Datei nicht gefunden"
             await session.commit()
             return RedirectResponse(url="/review", status_code=303)
-
-        step_results = job.step_result or {}
-        exif = step_results.get("IA-01", {})
-        geo = step_results.get("IA-06", {})
 
         # Merge geo into exif for path resolution
         if geo.get("country"):
@@ -267,7 +308,6 @@ async def classify_file(request: Request):
         job.status = "done"
         job.completed_at = datetime.now()
 
-        # Update sort result in step_result
         sort_result = dict(step_results.get("IA-08", {}))
         sort_result["category"] = category
         sort_result["target_path"] = target_path
@@ -276,7 +316,6 @@ async def classify_file(request: Request):
         sort_result["manual_review"] = True
         step_results["IA-08"] = sort_result
         job.step_result = step_results
-        from sqlalchemy.orm.attributes import flag_modified
         flag_modified(job, "step_result")
 
         await session.commit()
@@ -287,7 +326,9 @@ async def classify_file(request: Request):
 
 @router.post("/api/review/classify-all")
 async def classify_all(request: Request):
-    """Classify all review items to a single category (batch action)."""
+    """Classify all review items as sourceless (batch action)."""
+    from immich_client import archive_asset
+
     form = await request.form()
     category = form.get("category")
 
@@ -302,6 +343,23 @@ async def classify_all(request: Request):
         jobs = result.scalars().all()
 
         for job in jobs:
+            target = job.target_path or ""
+            is_immich = target.startswith("immich:") or bool(job.immich_asset_id)
+
+            # ── Immich: Archivieren ───────────────────────────
+            if is_immich:
+                asset_id = job.immich_asset_id or target.replace("immich:", "")
+                if asset_id:
+                    try:
+                        await archive_asset(asset_id)
+                    except Exception:
+                        continue
+                job.status = "done"
+                job.completed_at = datetime.now()
+                count += 1
+                continue
+
+            # ── Lokal: Verschieben ────────────────────────────
             filepath = _resolve_filepath(job)
             if not os.path.exists(filepath):
                 continue
