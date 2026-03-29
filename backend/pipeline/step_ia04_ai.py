@@ -6,35 +6,78 @@ import httpx
 from config import config_manager
 
 
-DEFAULT_SYSTEM_PROMPT = """You are an image analysis assistant. Analyze the image and respond with valid JSON only (no markdown, no surrounding text).
+DEFAULT_SYSTEM_PROMPT = """Du bist ein Bildanalyse-Assistent für eine Foto-Mediathek. Deine Hauptaufgabe ist es, persönliche Fotos von Chat-App-Schrott (Memes, Internet-Bilder) zu unterscheiden.
 
-Analyze the following aspects:
+Antworte NUR mit validem JSON (kein Markdown, kein umgebender Text):
 {
   "type": "personal|screenshot|internet_image|document|meme",
   "tags": ["tag1", "tag2", ...],
-  "description": "Short description in 1-2 sentences",
+  "description": "Kurze Beschreibung in 1-2 Sätzen",
   "mood": "indoor|outdoor|night|backlit|studio",
   "people_count": 0,
   "quality": "blurry|average|good|excellent",
   "confidence": 0.0-1.0
 }
 
-Rules:
-- type: Choose the most fitting type. Focus on WHETHER the image was personally captured vs. forwarded/downloaded.
-  - "personal": Real photos/selfies of people, landscapes, animals, food, events, travel — anything originally captured with a camera or phone. A personal photo is STILL personal even if it was sent via WhatsApp/Telegram/Signal (lower quality, no EXIF). Look for natural imperfections, candid moments, personal context.
-  - "screenshot": ONLY real screen captures (status bar, app UI, browser visible). Do NOT confuse with: photographed screens, photos containing text/signs, graphics, or memes
-  - "internet_image": Downloaded images, stock photos, graphics, social media reposts, infographics, promotional content — anything clearly NOT captured by the sender. Look for: watermarks, perfect composition, corporate branding, viral content.
-  - "document": Scanned documents, receipts, letters, forms
-  - "meme": Internet memes, jokes, images with text overlay, reaction images, comic panels
-- tags: 3-8 relevant tags in GERMAN (e.g. Landschaft, Essen, Tier, Selfie, Gruppe, Stadt, Natur, Sport, Feier)
-- description: In GERMAN, factual, 1-2 sentences
-- people_count: Number of visible people (0 if none)
-- quality: Rate the technical image quality
-- confidence: How confident are you in the type classification (0.0-1.0)"""
+## Klassifikationsregeln:
+
+### "personal" — Persönliche Fotos/Videos
+Echte Aufnahmen mit Kamera oder Handy: Selfies, Familienfotos, Landschaften, Essen, Tiere, Events, Reisen, Alltag.
+WICHTIG: Ein persönliches Foto bleibt persönlich, auch wenn es per WhatsApp/Telegram/Signal gesendet wurde (niedrigere Qualität, kein EXIF).
+Erkennungsmerkmale:
+- Natürliche Imperfektionen (Verwacklung, ungünstige Belichtung, spontaner Moment)
+- Persönlicher Kontext (Wohnung, Garten, Arbeitsplatz, Reiseziel)
+- Echte Menschen in natürlichen Situationen
+- Typische Handykamera-Perspektive
+- GPS-Daten oder Kamera-Informationen in den Metadaten
+- Dateigrösse meist >200 KB (auch nach Messenger-Kompression)
+
+### "screenshot" — Bildschirmfotos
+NUR echte Screenshots mit sichtbarer Statusleiste, App-UI oder Browser.
+NICHT: Abfotografierte Bildschirme, Fotos mit Text, Grafiken.
+
+### "internet_image" — Aus dem Internet heruntergeladen
+Stock-Fotos, Social-Media-Reposts, Infografiken, Werbung, virale Bilder.
+Erkennungsmerkmale:
+- Wasserzeichen, perfekte Komposition, professionelle Bearbeitung
+- Corporate Branding, Logos
+- Viraler Content, motivierende Sprüche auf Landschaftsbildern
+- Sehr kleine Dateigrösse (<100 KB) ohne EXIF → stark komprimiert, typisch für weitergeleitete Internet-Bilder
+
+### "meme" — Internet-Memes und Witze
+Bilder mit Text-Overlay, Reaction-Bilder, Comic-Panels, Witz-Bilder.
+Erkennungsmerkmale:
+- Impact-Font oder ähnliche Schrift oben/unten
+- Bekannte Meme-Templates
+- Billig zusammengeschnittene Collagen
+- Sehr kleine Dateigrösse (<100 KB)
+
+### "document" — Dokumente
+Gescannte Dokumente, Quittungen, Briefe, Formulare.
+
+## Entscheidungshilfe für schwierige Fälle:
+1. Hat das Bild EXIF-Daten mit Kamera-Info? → Stark Richtung "personal"
+2. Hat das Bild GPS-Koordinaten / Ortsdaten? → Stark Richtung "personal"
+3. Dateigrösse >500 KB ohne EXIF? → Wahrscheinlich persönliches Foto via Messenger
+4. Dateigrösse <100 KB ohne EXIF? → Wahrscheinlich Meme/Internet-Bild
+5. Zeigt das Bild Text-Overlay/Meme-Format? → "meme"
+6. Sieht das Bild professionell/perfekt aus? → "internet_image"
+7. Sieht das Bild natürlich/spontan aus? → "personal"
+
+## Zusatzregeln:
+- tags: 3-8 relevante Tags auf DEUTSCH (z.B. Landschaft, Essen, Tier, Selfie, Gruppe, Stadt, Natur, Sport, Feier)
+- description: Auf DEUTSCH, sachlich, 1-2 Sätze
+- people_count: Anzahl sichtbarer Personen (0 wenn keine)
+- quality: Technische Bildqualität bewerten
+- confidence: Wie sicher bist du bei der Typ-Klassifikation (0.0-1.0). Bei Unsicherheit lieber 0.5 und "personal" statt falsch aussortieren."""
 
 
 async def execute(job, session) -> dict:
-    """IA-04: KI-Analyse via OpenAI-kompatiblem Endpunkt."""
+    """IA-04: KI-Analyse via OpenAI-kompatiblem Endpunkt.
+
+    Nutzt alle bisher gesammelten Metadaten (EXIF, Geocoding, Dateigrösse)
+    für eine bestmögliche Klassifikation.
+    """
     if not await config_manager.is_module_enabled("ki_analyse"):
         return {"status": "skipped", "reason": "module disabled"}
 
@@ -58,35 +101,77 @@ async def execute(job, session) -> dict:
     mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
     mime_type = mime_map.get(ext, "image/jpeg")
 
-    # Build EXIF context
-    exif = (job.step_result or {}).get("IA-01", {})
+    # ── Alle Metadaten sammeln ──────────────────────────────────────
+    step_results = job.step_result or {}
+    exif = step_results.get("IA-01", {})
+    geo = step_results.get("IA-06", {})
     filename = os.path.basename(job.original_path)
-    exif_context = ""
-    if exif.get("has_exif"):
-        parts = []
-        if exif.get("make"):
-            parts.append(f"Kamera: {exif['make']} {exif.get('model', '')}")
-        if exif.get("date"):
-            parts.append(f"Datum: {exif['date']}")
-        if exif.get("gps"):
-            parts.append(f"GPS: {exif['gps_lat']}, {exif['gps_lon']}")
-        if parts:
-            exif_context = "\n\nEXIF-Daten: " + ", ".join(parts)
-    else:
-        file_size_kb = os.path.getsize(image_path) / 1024
-        exif_context = (
-            f"\n\nKeine EXIF-Daten vorhanden (typisch für Messenger-Bilder). "
-            f"Dateiname: {filename}, Dateigrösse: {file_size_kb:.0f} KB. "
-            f"Hinweis: Persönliche Fotos sind meist >500 KB, Memes/Internet-Bilder meist <100 KB."
-        )
+    file_size_kb = os.path.getsize(filepath) / 1024
 
-    # Call AI API
+    context_parts = []
+
+    # Dateiinfo (immer)
+    context_parts.append(f"Dateiname: {filename}")
+    context_parts.append(f"Dateigrösse: {file_size_kb:.0f} KB")
+
+    # EXIF-Daten
+    if exif.get("has_exif"):
+        if exif.get("make"):
+            context_parts.append(f"Kamera: {exif['make']} {exif.get('model', '')}")
+        if exif.get("date"):
+            context_parts.append(f"Aufnahmedatum: {exif['date']}")
+        if exif.get("gps"):
+            context_parts.append(f"GPS: {exif['gps_lat']}, {exif['gps_lon']}")
+        if exif.get("width") and exif.get("height"):
+            context_parts.append(f"Auflösung: {exif['width']}x{exif['height']}")
+        if exif.get("software"):
+            context_parts.append(f"Software: {exif['software']}")
+    else:
+        context_parts.append("Keine EXIF-Daten vorhanden (typisch für Messenger-Bilder)")
+
+    # Geocoding-Daten (wenn IA-06 vor uns lief)
+    if geo.get("country"):
+        location_parts = []
+        if geo.get("suburb"):
+            location_parts.append(geo["suburb"])
+        if geo.get("city"):
+            location_parts.append(geo["city"])
+        if geo.get("state"):
+            location_parts.append(geo["state"])
+        if geo.get("country"):
+            location_parts.append(geo["country"])
+        context_parts.append(f"Aufnahmeort: {', '.join(location_parts)}")
+
+    # Messenger-Hinweise aus Dateiname
+    if "-WA" in filename.upper():
+        context_parts.append("Herkunft: WhatsApp (Dateiname enthält -WA)")
+    elif filename.startswith("signal-"):
+        context_parts.append("Herkunft: Signal")
+    elif filename.startswith("telegram-"):
+        context_parts.append("Herkunft: Telegram")
+
+    # UUID-Dateiname erkennen
+    import re
+    uuid_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\w+$", re.IGNORECASE)
+    if uuid_re.match(filename):
+        context_parts.append("Dateiname ist eine UUID (typisch für Messenger-Weiterleitungen)")
+
+    metadata_context = "\n".join(context_parts)
+
+    # ── API-Aufruf ──────────────────────────────────────────────────
+    user_message = f"""Analysiere dieses Bild.
+
+Gesammelte Metadaten:
+{metadata_context}
+
+Nutze diese Informationen zusammen mit dem Bildinhalt für deine Klassifikation."""
+
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": [
-                {"type": "text", "text": f"Analysiere dieses Bild.{exif_context}"},
+                {"type": "text", "text": user_message},
                 {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
             ]}
         ],
