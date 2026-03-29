@@ -20,7 +20,7 @@ async def _get_modules_dict() -> dict:
     return {m.name: m.enabled for m in modules}
 
 
-from pipeline.step_ia04_ai import DEFAULT_SYSTEM_PROMPT as _DEFAULT_AI_PROMPT
+from pipeline.step_ia05_ai import DEFAULT_SYSTEM_PROMPT as _DEFAULT_AI_PROMPT
 
 
 async def _get_cfg() -> dict:
