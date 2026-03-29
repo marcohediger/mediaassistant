@@ -576,6 +576,13 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Verwaiste DB-Einträge bei Duplikaterkennung — wenn Original-Datei gelöscht wurde, wird Match übersprungen und neue Datei als Original behandelt
 
 ### Offen
+- [x] FEAT: Lightbox — Klick auf Thumbnail öffnet Originalbild als Fullscreen-Overlay (Review, Duplikate, Log-Detail); RAW/DNG via ExifTool PreviewImage oder Immich Preview, HEIC → JPEG
+- [x] FEAT: Review-Seite — Löschen-Button, Dateigrösse (Immich API Fallback), Datum-Fallback (FileModifyDate/created_at), Dimensionen, bedingte Metadatenfelder
+- [x] FEAT: Duplikat-Review — EXIF via Immich API, "Dieses behalten" auf allen Mitgliedern, Badge als klickbarer Link, Keep → Immich Upload, httpx DELETE Fix
+- [x] FEAT: Filewatcher Stabilitätscheck — Dateigrösse nach 2s Wartezeit prüfen (halbkopierte Dateien)
+- [x] FEAT: IA-07 ExifTool `-m` Flag für Minor Warnings (DJI DNG "Maker notes")
+- [x] FEAT: IA-01 speichert file_size, Fallback auf FileModifyDate
+- [x] FIX: httpx DELETE — `client.request` mit `content=` statt `json=`
 - [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
 - [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)

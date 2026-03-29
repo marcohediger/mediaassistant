@@ -21,6 +21,7 @@ from template_engine import render
 router = APIRouter()
 
 THUMB_SIZE = (400, 400)
+PREVIEW_SIZE = (1600, 1600)
 HEIC_EXTENSIONS = {".heic", ".heif"}
 
 
@@ -37,7 +38,7 @@ def _heic_to_jpeg(filepath: str) -> bytes | None:
         return None
 
 
-def _generate_thumbnail(filepath: str) -> bytes | None:
+def _generate_thumbnail(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
     ext = os.path.splitext(filepath)[1].lower()
     if ext in HEIC_EXTENSIONS:
         jpeg_data = _heic_to_jpeg(filepath)
@@ -50,7 +51,7 @@ def _generate_thumbnail(filepath: str) -> bytes | None:
         except Exception:
             return None
 
-    img.thumbnail(THUMB_SIZE, Image.LANCZOS)
+    img.thumbnail(max_size, Image.LANCZOS)
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
     buf = io.BytesIO()
@@ -98,9 +99,31 @@ async def _build_review_items() -> list[dict]:
             geo = step_results.get("IA-03", {})
             sort = step_results.get("IA-08", {})
 
+            # Immich asset info
+            immich_asset_id = ""
+            target = job.target_path or ""
+            if target.startswith("immich:"):
+                immich_asset_id = target[7:]
+            elif job.immich_asset_id:
+                immich_asset_id = job.immich_asset_id
+
+            # File size: local file → IA-01 → Immich API
             file_size_kb = 0
             if exists:
                 file_size_kb = os.path.getsize(filepath) / 1024
+            elif exif.get("file_size"):
+                file_size_kb = exif["file_size"] / 1024
+            elif job.original_path and os.path.exists(job.original_path):
+                file_size_kb = os.path.getsize(job.original_path) / 1024
+            elif immich_asset_id:
+                try:
+                    from immich_client import get_asset_info
+                    info = await get_asset_info(immich_asset_id)
+                    if info:
+                        exif_info = info.get("exifInfo", {})
+                        file_size_kb = (exif_info.get("fileSizeInByte", 0) or 0) / 1024
+                except Exception:
+                    pass
 
             # Location string
             location = ""
@@ -112,14 +135,6 @@ async def _build_review_items() -> list[dict]:
             mime = exif.get("mime_type", "")
             file_type = (exif.get("file_type") or "").upper()
             is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
-
-            # Immich asset info
-            immich_asset_id = ""
-            target = job.target_path or ""
-            if target.startswith("immich:"):
-                immich_asset_id = target[7:]
-            elif job.immich_asset_id:
-                immich_asset_id = job.immich_asset_id
 
             items.append({
                 "job_id": job.id,
@@ -136,8 +151,9 @@ async def _build_review_items() -> list[dict]:
                 "ai_tags": ai.get("tags", []),
                 "ai_quality": ai.get("quality", ""),
                 "ai_people": ai.get("people_count", 0),
-                "exif_date": exif.get("date", ""),
-                "exif_camera": f"{exif.get('make', '')} {exif.get('model', '')}".strip(),
+                "exif_date": exif.get("date") or (job.created_at.strftime("%Y-%m-%d %H:%M") if job.created_at else ""),
+                "exif_camera": " ".join(p for p in [exif.get("make"), exif.get("model")] if p and p != "None").strip(),
+                "dimensions": f"{exif['width']} × {exif['height']}" if exif.get("width") and exif.get("height") else "",
                 "has_exif": exif.get("has_exif", False),
                 "has_gps": exif.get("gps", False),
                 "location": location,
@@ -160,8 +176,8 @@ async def review_page(request: Request):
 
 
 @router.get("/api/review/thumbnail/{job_id}")
-async def review_thumbnail(job_id: int):
-    """Serve a JPEG thumbnail for a review item."""
+async def review_thumbnail(job_id: int, size: str = "thumbnail"):
+    """Serve a JPEG thumbnail for a review item. size=thumbnail|preview"""
     async with async_session() as session:
         job = await session.get(Job, job_id)
     if not job:
@@ -171,7 +187,8 @@ async def review_thumbnail(job_id: int):
     if not os.path.exists(filepath):
         return Response(status_code=404)
 
-    data = await asyncio.to_thread(_generate_thumbnail, filepath)
+    max_size = PREVIEW_SIZE if size == "preview" else THUMB_SIZE
+    data = await asyncio.to_thread(_generate_thumbnail, filepath, max_size)
     if not data:
         return Response(status_code=404)
 
@@ -321,6 +338,71 @@ async def classify_file(request: Request):
         await session.commit()
 
     await log_info("review", f"Manuell klassifiziert: {debug_key} → {category}")
+    return RedirectResponse(url="/review", status_code=303)
+
+
+@router.post("/api/review/delete")
+async def delete_file(request: Request):
+    """Delete a review file — removes from Immich and/or local filesystem."""
+    from immich_client import get_immich_config
+
+    form = await request.form()
+    debug_key = form.get("debug_key")
+    if not debug_key:
+        return RedirectResponse(url="/review", status_code=303)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.debug_key == debug_key, Job.status == "review")
+        )
+        job = result.scalars().first()
+        if not job:
+            return RedirectResponse(url="/review", status_code=303)
+
+        # Delete from Immich if applicable
+        immich_asset_id = job.immich_asset_id or ""
+        target = job.target_path or ""
+        if target.startswith("immich:"):
+            immich_asset_id = target.replace("immich:", "")
+
+        if immich_asset_id:
+            try:
+                url, api_key = await get_immich_config()
+                if url and api_key:
+                    import httpx, json as _json
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        await client.request(
+                            "DELETE",
+                            f"{url}/api/assets",
+                            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                            content=_json.dumps({"ids": [immich_asset_id]}),
+                        )
+            except Exception:
+                pass
+
+        # Delete local files if they exist
+        for path in [job.original_path, job.target_path]:
+            if path and not path.startswith("immich:") and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+
+        # Delete temp converted file
+        convert_result = (job.step_result or {}).get("IA-04", {})
+        temp_path = convert_result.get("temp_path")
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+        # Mark job as deleted
+        job.status = "deleted"
+        job.completed_at = datetime.now()
+        await session.commit()
+
+    await log_info("review", f"Gelöscht: {debug_key}")
     return RedirectResponse(url="/review", status_code=303)
 
 

@@ -1,5 +1,33 @@
 # Changelog
 
+## v2.3.0 — 2026-03-29
+
+### Lightbox
+- **Bild-Vollansicht**: Klick auf Thumbnail öffnet Originalbild als Fullscreen-Overlay (Review, Duplikate, Log-Detail)
+- RAW/DNG: PreviewImage wird via ExifTool oder Immich-Preview extrahiert
+- HEIC: wird zu JPEG konvertiert für Anzeige
+- Schliessen mit ESC oder Klick auf Overlay
+
+### Review-Seite
+- **Löschen-Button** zum direkten Entfernen von Review-Dateien
+- Dateigrösse wird via Immich API abgefragt (Fallback)
+- Datum-Fallback auf FileModifyDate bzw. job.created_at
+- Bildabmessungen (Auflösung) angezeigt
+- Metadatenfelder bedingt angezeigt (Datum/Kamera nur wenn vorhanden)
+
+### Duplikat-Review
+- EXIF-Daten werden via Immich API geholt für Immich-Assets
+- "Dieses behalten" Button auf allen Gruppenmitgliedern (nicht nur lokale Dateien)
+- Badge (ORIGINAL/EXAKT) ist jetzt klickbarer Link (Immich → öffnet Immich, lokal → lädt Datei herunter)
+- Keep-Aktion lädt Datei zu Immich hoch wenn Gruppe im Immich-Modus ist
+- Immich-Delete repariert (httpx DELETE mit Request Body)
+
+### Pipeline-Stabilität
+- **Filewatcher**: Dateigrössen-Check nach 2s Wartezeit verhindert Verarbeitung halbkopierter Dateien
+- **IA-07**: ExifTool `-m` Flag ignoriert kleinere Warnungen (z.B. DJI DNG "Maker notes")
+- **IA-01**: Speichert file_size, Fallback auf FileModifyDate für Datum
+- **httpx DELETE**: Korrektur — `json=` nicht unterstützt, stattdessen `client.request` mit `content=`
+
 ## v2.1.0 — 2026-03-29
 
 ### Pipeline-Optimierung

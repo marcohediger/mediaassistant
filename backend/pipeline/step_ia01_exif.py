@@ -23,7 +23,7 @@ async def execute(job, session) -> dict:
     exif = {
         "make": meta.get("Make"),
         "model": meta.get("Model"),
-        "date": meta.get("DateTimeOriginal") or meta.get("CreateDate"),
+        "date": meta.get("DateTimeOriginal") or meta.get("CreateDate") or meta.get("FileModifyDate"),
         "gps_lat": meta.get("GPSLatitude"),
         "gps_lon": meta.get("GPSLongitude"),
         "gps": bool(meta.get("GPSLatitude")),
@@ -34,6 +34,7 @@ async def execute(job, session) -> dict:
         "mime_type": meta.get("MIMEType"),
         "orientation": meta.get("Orientation"),
         "has_exif": bool(meta.get("Make") or meta.get("DateTimeOriginal")),
+        "file_size": meta.get("FileSize"),
     }
 
     # Video-spezifische Felder

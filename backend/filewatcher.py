@@ -49,13 +49,24 @@ def _scan_directory(path: str, min_age: float) -> list[str]:
                     continue
                 ext = os.path.splitext(entry.name)[1].lower()
                 if ext in SUPPORTED_EXTENSIONS:
-                    if now - entry.stat().st_mtime > min_age:
-                        files.append(entry.path)
+                    stat = entry.stat()
+                    if now - stat.st_mtime > min_age:
+                        files.append((entry.path, stat.st_size))
             elif entry.is_dir():
                 files.extend(_scan_directory(entry.path, min_age))
     except PermissionError:
         pass
     return files
+
+
+def _is_file_stable(filepath: str, expected_size: int, wait: float = 2.0) -> bool:
+    """Check if file size is stable (not still being copied)."""
+    try:
+        time.sleep(wait)
+        current_size = os.path.getsize(filepath)
+        return current_size == expected_size and current_size > 0
+    except OSError:
+        return False
 
 
 async def _scan_and_process():
@@ -85,13 +96,19 @@ async def _scan_and_process():
             )
             known_paths = {row[0] for row in existing.all()}
 
-        # Scan for new files
+        # Scan for new files (returns list of (path, size) tuples)
         found_files = await asyncio.to_thread(_scan_directory, inbox.path, min_age)
 
         # Phase 1: Create all jobs as "queued" first
         new_job_ids = []
-        for filepath in found_files:
+        for filepath, file_size in found_files:
             if filepath in known_paths:
+                continue
+
+            # Stability check: wait and verify file size hasn't changed
+            stable = await asyncio.to_thread(_is_file_stable, filepath, file_size)
+            if not stable:
+                await log_info("filewatcher", f"Skipped (still copying): {os.path.basename(filepath)}")
                 continue
 
             filename = os.path.basename(filepath)

@@ -8,6 +8,8 @@
 - [ ] Datei ohne EXIF (z.B. Messenger-Bild) → `has_exif: false`
 - [ ] Video (MP4/MOV) → Mime-Type und Dateityp korrekt erkannt
 - [ ] Beschädigte Datei → Fehler wird gefangen, Pipeline bricht nicht ab
+- [ ] file_size wird korrekt gespeichert
+- [ ] Datum-Fallback auf FileModifyDate wenn DateTimeOriginal fehlt
 
 ### IA-02: Duplikat-Erkennung
 - [ ] Exaktes Duplikat (gleiche Datei nochmal) → SHA256-Match, Status "duplicate"
@@ -65,6 +67,7 @@
 - [ ] OCR-Text in UserComment geschrieben
 - [ ] Dry-Run → Tags berechnet aber nicht geschrieben
 - [ ] Datei-Hash nach Schreiben neu berechnet
+- [ ] `-m` Flag: DJI DNG "Maker notes" Warning wird ignoriert, Tags trotzdem geschrieben
 
 ### IA-08: Sortierung
 - [ ] `personal` → photos/{YYYY}/{YYYY-MM}/
@@ -127,15 +130,30 @@
 ### Duplikat-Review
 - [ ] Gruppen transitive zusammengeführt (Union-Find)
 - [ ] Dateien nebeneinander mit Thumbnail, EXIF, Keywords
-- [ ] "Dieses behalten" → verschiebt in Bibliothek, löscht andere
+- [ ] Lightbox: Klick auf Thumbnail öffnet Originalbild als Overlay
+- [ ] Lightbox: RAW/DNG zeigt PreviewImage (ExifTool oder Immich Preview)
+- [ ] Lightbox: HEIC wird zu JPEG konvertiert für Anzeige
+- [ ] Lightbox: ESC oder Klick schliesst Overlay
+- [ ] EXIF-Daten für Immich-Assets via Immich API geholt
+- [ ] "Dieses behalten" Button auf allen Gruppenmitgliedern (nicht nur lokale)
+- [ ] "Dieses behalten" bei Immich-Gruppe → Upload zu Immich
+- [ ] Badge (ORIGINAL/EXAKT) ist klickbarer Link (Immich → öffnet Immich, lokal → Download)
 - [ ] Batch-Clean → alle exakten SHA256-Duplikate gelöscht
 - [ ] Immich-Duplikate: Thumbnail aus Immich, "In Immich ansehen"
+- [ ] Immich-Delete funktioniert korrekt (httpx DELETE mit request body)
 
 ### Review (Manuelle Klassifikation)
 - [ ] Alle Jobs mit Status "review" angezeigt
 - [ ] Thumbnail (lokal oder Immich)
+- [ ] Lightbox: Klick auf Thumbnail öffnet Originalbild als Overlay
+- [ ] Lightbox: RAW/DNG zeigt PreviewImage, HEIC → JPEG
 - [ ] AI-Beschreibung, Tags, Metadaten angezeigt
+- [ ] Dateigrösse angezeigt (Immich API Fallback wenn lokal nicht verfügbar)
+- [ ] Datum angezeigt mit Fallback auf FileModifyDate bzw. job.created_at
+- [ ] Bildabmessungen (Auflösung) angezeigt
+- [ ] Metadatenfelder bedingt (Datum/Kamera nur wenn vorhanden)
 - [ ] Kategorie-Buttons: Foto, Video, Screenshot, Sourceless
+- [ ] Löschen-Button entfernt Review-Datei
 - [ ] Lokal: Datei in richtigen Zielordner verschoben
 - [ ] Immich: Sourceless → archiviert
 - [ ] Batch: "Alle → Sourceless" funktioniert
@@ -150,10 +168,18 @@
 - [ ] Job-Detail: alle Step-Results, Pfade, Timestamps, Hashes
 - [ ] Job-Detail: voller Traceback bei Fehlern
 - [ ] Job-Detail: Immich-Thumbnail bei Immich-Assets
+- [ ] Job-Detail: Lightbox — Klick auf Thumbnail öffnet Originalbild
 - [ ] Job-Detail: Zurück-Button geht zu Verarbeitungs-Log
 - [ ] Job löschen und Retry funktioniert
 
-## 4. Immich-Integration
+## 4. Filewatcher-Stabilität
+
+- [ ] Halbkopierte Datei (Kopiervorgang läuft) → wird nicht sofort verarbeitet
+- [ ] Nach 2s Wartezeit: Dateigrösse wird erneut geprüft
+- [ ] Dateigrösse stabil → Verarbeitung startet
+- [ ] Dateigrösse geändert → erneute Wartezeit
+
+## 5. Immich-Integration
 
 - [ ] Upload: Datei wird hochgeladen, Asset-ID gespeichert
 - [ ] Upload: Album aus Ordner-Tags erstellt
@@ -164,7 +190,7 @@
 - [ ] Duplikat-Erkennung über Immich-Assets hinweg
 - [ ] Immich nicht erreichbar → Fehler geloggt
 
-## 5. Dateiformate
+## 6. Dateiformate
 
 - [ ] JPG/JPEG — Verarbeitung + KI + Tags schreiben
 - [ ] PNG — Verarbeitung + KI + Tags schreiben
@@ -176,7 +202,7 @@
 - [ ] MP4/MOV — Video erkannt, korrekt sortiert
 - [ ] Nicht unterstütztes Format → sauber übersprungen
 
-## 6. Edge Cases
+## 7. Edge Cases
 
 - [ ] Leere Datei → Fehler gefangen
 - [ ] Sehr grosse Datei (>100 MB) → Verarbeitung funktioniert

@@ -22,7 +22,30 @@ from template_engine import render
 router = APIRouter()
 
 THUMB_SIZE = (400, 400)
+PREVIEW_SIZE = (1600, 1600)
 HEIC_EXTENSIONS = {".heic", ".heif"}
+RAW_EXTENSIONS = {".dng", ".cr2", ".nef", ".arw"}
+
+
+def _raw_to_jpeg(filepath: str) -> bytes | None:
+    """Extract embedded PreviewImage from RAW file via ExifTool."""
+    try:
+        result = subprocess.run(
+            ["exiftool", "-b", "-PreviewImage", filepath],
+            capture_output=True, timeout=15,
+        )
+        if result.stdout and len(result.stdout) > 1000:
+            return result.stdout
+        # Fallback: try JpgFromRaw
+        result = subprocess.run(
+            ["exiftool", "-b", "-JpgFromRaw", filepath],
+            capture_output=True, timeout=15,
+        )
+        if result.stdout and len(result.stdout) > 1000:
+            return result.stdout
+    except Exception:
+        pass
+    return None
 
 
 def _heic_to_jpeg(filepath: str) -> bytes | None:
@@ -39,7 +62,7 @@ def _heic_to_jpeg(filepath: str) -> bytes | None:
         return None
 
 
-def _generate_thumbnail(filepath: str) -> bytes | None:
+def _generate_thumbnail(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
     """Generate a JPEG thumbnail from an image file."""
     ext = os.path.splitext(filepath)[1].lower()
 
@@ -54,7 +77,7 @@ def _generate_thumbnail(filepath: str) -> bytes | None:
         except Exception:
             return None
 
-    img.thumbnail(THUMB_SIZE, Image.LANCZOS)
+    img.thumbnail(max_size, Image.LANCZOS)
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
     buf = io.BytesIO()
@@ -162,18 +185,25 @@ async def _build_member(job, session) -> dict:
     dup_info = (job.step_result or {}).get("IA-02", {})
     is_dup = dup_info.get("status") == "duplicate"
     exists = os.path.exists(filepath)
-    img_info = await asyncio.to_thread(_get_image_info, filepath) if exists else {}
 
     # Check if this job's target is in Immich
-    immich_asset_id = ""
+    immich_asset_id = job.immich_asset_id or ""
     immich_link = ""
     target = job.target_path or ""
     if target.startswith("immich:"):
-        immich_asset_id = target[7:]
+        immich_asset_id = immich_asset_id or target[7:]
+    if immich_asset_id:
         from immich_client import get_immich_config
         immich_url, _ = await get_immich_config()
-        if immich_url and immich_asset_id:
+        if immich_url:
             immich_link = f"{immich_url}/photos/{immich_asset_id}"
+
+    if exists:
+        img_info = await asyncio.to_thread(_get_image_info, filepath)
+    elif immich_asset_id:
+        img_info = await _img_info_from_immich(immich_asset_id)
+    else:
+        img_info = _empty_img_info()
 
     return {
         "job_id": job.id,
@@ -188,6 +218,56 @@ async def _build_member(job, session) -> dict:
         "immich_asset_id": immich_asset_id,
         **img_info,
     }
+
+
+def _empty_img_info() -> dict:
+    return {
+        "file_size": 0, "width": 0, "height": 0, "megapixel": 0.0,
+        "exif_date": "", "exif_camera": "", "exif_iso": "", "exif_aperture": "",
+        "exif_shutter": "", "exif_focal": "", "exif_keywords": [], "exif_description": "",
+        "exif_has_gps": False, "exif_has_exif": False,
+    }
+
+
+async def _img_info_from_immich(asset_id: str) -> dict:
+    """Fetch EXIF data from Immich API for an asset."""
+    info = _empty_img_info()
+    try:
+        from immich_client import get_asset_info
+        data = await get_asset_info(asset_id)
+        if not data:
+            return info
+
+        exif = data.get("exifInfo", {})
+        info["file_size"] = exif.get("fileSizeInByte", 0) or 0
+        w = exif.get("exifImageWidth", 0) or 0
+        h = exif.get("exifImageHeight", 0) or 0
+        if w and h:
+            info["width"] = int(w)
+            info["height"] = int(h)
+            info["megapixel"] = round(int(w) * int(h) / 1_000_000, 1)
+
+        info["exif_date"] = exif.get("dateTimeOriginal", "")
+        make = exif.get("make") or ""
+        model = exif.get("model") or ""
+        info["exif_camera"] = f"{make} {model}".strip() if (make or model) else ""
+        info["exif_iso"] = str(exif.get("iso", "")) if exif.get("iso") else ""
+        info["exif_aperture"] = str(exif.get("fNumber", "")) if exif.get("fNumber") else ""
+        shutter = exif.get("exposureTime")
+        info["exif_shutter"] = str(shutter) if shutter else ""
+        focal = exif.get("focalLength")
+        info["exif_focal"] = f"{focal} mm" if focal else ""
+        info["exif_has_gps"] = bool(exif.get("latitude"))
+        info["exif_has_exif"] = bool(info["exif_date"] or make or model)
+
+        # Tags from Immich
+        tags = data.get("tags", [])
+        info["exif_keywords"] = [t.get("value") or t.get("name", "") for t in tags if t.get("value") or t.get("name")]
+
+        info["exif_description"] = exif.get("description", "")
+    except Exception:
+        pass
+    return info
 
 
 async def _build_duplicate_groups() -> list[dict]:
@@ -276,8 +356,8 @@ async def duplicates_page(request: Request):
 
 
 @router.get("/api/thumbnail/{job_id}")
-async def thumbnail(job_id: int):
-    """Serve a JPEG thumbnail for a job's image."""
+async def thumbnail(job_id: int, size: str = "thumbnail"):
+    """Serve a JPEG thumbnail for a job's image. size=thumbnail|preview"""
     async with async_session() as session:
         job = await session.get(Job, job_id)
     if not job:
@@ -288,7 +368,8 @@ async def thumbnail(job_id: int):
     if not os.path.exists(filepath):
         return Response(status_code=404)
 
-    data = await asyncio.to_thread(_generate_thumbnail, filepath)
+    max_size = PREVIEW_SIZE if size == "preview" else THUMB_SIZE
+    data = await asyncio.to_thread(_generate_thumbnail, filepath, max_size)
     if not data:
         return Response(status_code=404)
 
@@ -296,13 +377,84 @@ async def thumbnail(job_id: int):
 
 
 @router.get("/api/thumbnail/immich/{asset_id}")
-async def immich_thumbnail(asset_id: str):
-    """Serve a thumbnail fetched from Immich."""
+async def immich_thumbnail(asset_id: str, size: str = "thumbnail"):
+    """Serve a thumbnail fetched from Immich. size=thumbnail|preview"""
     from immich_client import get_asset_thumbnail
-    data = await get_asset_thumbnail(asset_id)
+    data = await get_asset_thumbnail(asset_id, size=size)
     if not data:
         return Response(status_code=404)
     return Response(content=data, media_type="image/jpeg")
+
+
+@router.get("/api/original/immich/{asset_id}")
+async def immich_original(asset_id: str):
+    """Proxy the original image from Immich. For RAW formats, returns the preview JPEG."""
+    from immich_client import get_immich_config, get_asset_info, get_asset_thumbnail
+    url, api_key = await get_immich_config()
+    if not url or not api_key:
+        return Response(status_code=404)
+
+    # Check if the asset is a RAW format — use preview instead of original
+    info = await get_asset_info(asset_id)
+    if info:
+        filename = info.get("originalFileName", "")
+        ext = os.path.splitext(filename)[1].lower()
+        if ext in RAW_EXTENSIONS:
+            data = await get_asset_thumbnail(asset_id, size="preview")
+            if data:
+                return Response(content=data, media_type="image/jpeg")
+            return Response(status_code=404)
+
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{url}/api/assets/{asset_id}/original",
+                headers={"x-api-key": api_key},
+                follow_redirects=True,
+            )
+            if resp.status_code != 200:
+                return Response(status_code=404)
+            content_type = resp.headers.get("content-type", "image/jpeg")
+            return Response(content=resp.content, media_type=content_type)
+    except Exception:
+        return Response(status_code=404)
+
+
+@router.get("/api/original/local/{job_id}")
+async def local_original(job_id: int):
+    """Serve the original image file for a job."""
+    async with async_session() as session:
+        job = await session.get(Job, job_id)
+    if not job:
+        return Response(status_code=404)
+
+    filepath = _resolve_filepath(job)
+    if not os.path.exists(filepath):
+        return Response(status_code=404)
+
+    import mimetypes
+    content_type = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
+
+    ext = os.path.splitext(filepath)[1].lower()
+
+    # For HEIC, convert to JPEG for browser compatibility
+    if ext in HEIC_EXTENSIONS:
+        data = await asyncio.to_thread(_heic_to_jpeg, filepath)
+        if data:
+            return Response(content=data, media_type="image/jpeg")
+        return Response(status_code=404)
+
+    # For RAW, extract PreviewImage via ExifTool
+    if ext in RAW_EXTENSIONS:
+        data = await asyncio.to_thread(_raw_to_jpeg, filepath)
+        if data:
+            return Response(content=data, media_type="image/jpeg")
+        return Response(status_code=404)
+
+    with open(filepath, "rb") as f:
+        data = f.read()
+    return Response(content=data, media_type=content_type)
 
 
 @router.post("/api/duplicates/keep")
@@ -350,11 +502,15 @@ async def keep_file(request: Request):
         # Find the kept job and a target path in the library
         kept_job = None
         library_path = None
+        group_is_immich = False
         for job in group_jobs:
             if job.debug_key == keep_key:
                 kept_job = job
+            # Check if any job in the group uses Immich
+            if job.use_immich or (job.target_path or "").startswith("immich:") or job.immich_asset_id:
+                group_is_immich = True
             # Find a target_path from an original (non-duplicate) in the library
-            if job.status != "duplicate" and job.target_path:
+            if job.status != "duplicate" and job.target_path and not job.target_path.startswith("immich:"):
                 library_path = job.target_path
 
         # Delete all except the kept one
@@ -362,28 +518,68 @@ async def keep_file(request: Request):
             if job.debug_key == keep_key:
                 continue
 
+            # Delete local file if exists
             filepath = job.target_path or job.original_path
-            if os.path.exists(filepath):
+            if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
                 await asyncio.to_thread(os.remove, filepath)
                 log_path = filepath + ".log"
                 if os.path.exists(log_path):
                     await asyncio.to_thread(os.remove, log_path)
+
+            # Delete from Immich if applicable
+            asset_id = job.immich_asset_id or ""
+            target = job.target_path or ""
+            if target.startswith("immich:"):
+                asset_id = asset_id or target[7:]
+            if asset_id:
+                try:
+                    from immich_client import get_immich_config
+                    import httpx
+                    i_url, i_key = await get_immich_config()
+                    if i_url and i_key:
+                        import json as _json
+                        async with httpx.AsyncClient(timeout=10) as client:
+                            await client.request(
+                                "DELETE",
+                                f"{i_url}/api/assets",
+                                headers={"x-api-key": i_key, "Content-Type": "application/json"},
+                                content=_json.dumps({"ids": [asset_id]}),
+                            )
+                except Exception:
+                    pass
 
             if job.status == "duplicate":
                 job.status = "done"
             job.error_message = f"Duplicate review: deleted (kept: {keep_key})"
             job.target_path = None
 
-        # Move the kept file into the library if it's not already there
+        # Move the kept file to its destination
         if kept_job:
             kept_filepath = kept_job.target_path or kept_job.original_path
+            is_already_in_immich = (kept_job.target_path or "").startswith("immich:") or bool(kept_job.immich_asset_id)
 
-            if kept_job.status == "duplicate" and os.path.exists(kept_filepath):
-                # Determine target: use the original's library path directory
+            if is_already_in_immich:
+                # Already in Immich — nothing to move
+                pass
+            elif group_is_immich and kept_job.status == "duplicate" and os.path.exists(kept_filepath):
+                # Immich mode: upload the kept local file to Immich
+                try:
+                    from immich_client import upload_asset
+                    result = await upload_asset(kept_filepath)
+                    new_asset_id = result.get("id", "")
+                    if new_asset_id:
+                        kept_job.target_path = f"immich:{new_asset_id}"
+                        kept_job.immich_asset_id = new_asset_id
+                        # Delete local file after successful upload
+                        if os.path.exists(kept_filepath):
+                            await asyncio.to_thread(os.remove, kept_filepath)
+                except Exception as e:
+                    await log_info("duplicates", f"Immich upload failed for {kept_job.debug_key}: {e}")
+            elif kept_job.status == "duplicate" and os.path.exists(kept_filepath):
+                # Local mode: move to library
                 if library_path:
                     target_dir = os.path.dirname(library_path)
                 else:
-                    # Fallback: sort into library based on date
                     base_path = await config_manager.get("library.base_path", "/bibliothek")
                     exif = (kept_job.step_result or {}).get("IA-01", {})
                     date_str = exif.get("date", "")
@@ -399,7 +595,6 @@ async def keep_file(request: Request):
                 await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
                 target_path = os.path.join(target_dir, kept_job.filename)
 
-                # Handle name conflicts
                 if os.path.exists(target_path):
                     name, ext = os.path.splitext(kept_job.filename)
                     counter = 1
