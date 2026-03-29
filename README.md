@@ -12,10 +12,10 @@ New files in inbox directories are automatically detected and processed through 
 
 | Step | Name | Description |
 |------|------|-------------|
-| IA-01 | Read EXIF | Extract metadata via ExifTool |
+| IA-01 | Read EXIF | Extract metadata via ExifTool; videos additionally via ffprobe (date, GPS with ISO 6709 parser, duration + formatted, resolution, megapixels, codec, framerate, bitrate, rotation) |
 | IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar), incl. Immich-uploaded files |
 | IA-03 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
-| IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis |
+| IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis; video thumbnail extraction via ffmpeg at 10% duration (prepared, `VIDEO_THUMBNAIL_ENABLED = False`) |
 | IA-05 | AI Analysis | Analyze image (type, tags, description, mood) with all collected metadata |
 | IA-06 | OCR | Text recognition (screenshots, documents) |
 | IA-07 | Write EXIF Tags | Write tags, description, geocoding and folder-tags back to file |
@@ -269,7 +269,7 @@ After moving a file from an inbox, empty parent directories are automatically cl
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy (async), aiosqlite
 - **Database:** SQLite
-- **Container:** Docker with ExifTool, FFmpeg, libheif
+- **Container:** Docker with ExifTool, FFmpeg/ffprobe, libheif
 - **AI:** Any OpenAI-compatible Vision API server (e.g. LM Studio, Ollama)
 - **Immich:** Bidirectional — upload from inbox + polling for new mobile uploads (REST API)
 - **Geocoding:** Nominatim, Photon, or Google Maps API

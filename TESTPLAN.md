@@ -10,6 +10,19 @@
 - [ ] Beschädigte Datei → Fehler wird gefangen, Pipeline bricht nicht ab
 - [ ] file_size wird korrekt gespeichert
 - [ ] Datum-Fallback auf FileModifyDate wenn DateTimeOriginal fehlt
+- [ ] Video: ffprobe extrahiert Datum (creation_time) korrekt
+- [ ] Video: ffprobe extrahiert GPS-Koordinaten aus ISO 6709 String (z.B. `+47.3769+008.5417/`)
+- [ ] Video: ISO 6709 Parser verarbeitet verschiedene Formate korrekt (mit/ohne Höhe, mit/ohne Vorzeichen)
+- [ ] Video: GPS aus ISO 6709 wird als lat/lon in Metadaten gespeichert
+- [ ] Video: Dauer (duration) wird als Rohwert und formatiert gespeichert (z.B. `125.4` → `2m 05s`)
+- [ ] Video: Auflösung (width x height) korrekt extrahiert
+- [ ] Video: Megapixel aus Auflösung berechnet
+- [ ] Video: Codec (z.B. h264, hevc) korrekt extrahiert
+- [ ] Video: Framerate (z.B. 30, 60) korrekt extrahiert
+- [ ] Video: Bitrate korrekt extrahiert
+- [ ] Video: Rotation korrekt extrahiert (z.B. 0, 90, 180, 270)
+- [ ] Video: ffprobe nicht verfügbar → Fehler gefangen, Fallback auf ExifTool-Daten
+- [ ] Video: ffprobe liefert unvollständige Daten → vorhandene Felder gespeichert, fehlende ignoriert
 
 ### IA-02: Duplikat-Erkennung
 - [ ] Exaktes Duplikat (gleiche Datei nochmal) → SHA256-Match, Status "duplicate"
@@ -35,6 +48,11 @@
 - [ ] GIF → erster Frame als JPEG
 - [ ] Nicht unterstütztes Format → `converted: false`
 - [ ] Konvertierung fehlgeschlagen → Fehler gefangen
+- [ ] Video mit VIDEO_THUMBNAIL_ENABLED = False → kein Thumbnail extrahiert, `converted: false`
+- [ ] Video mit VIDEO_THUMBNAIL_ENABLED = True → Thumbnail bei 10% der Dauer extrahiert als temp JPEG
+- [ ] Video-Thumbnail: Dauer korrekt ermittelt, Frame bei 10% Position extrahiert
+- [ ] Video-Thumbnail: sehr kurzes Video (< 1s) → Thumbnail trotzdem extrahiert (Fallback auf erstes Frame)
+- [ ] Video-Thumbnail: ffmpeg nicht verfügbar → Fehler gefangen, `converted: false`
 
 ### IA-05: KI-Analyse
 - [ ] Persönliches Foto → `type: personal`, sinnvolle Tags
@@ -199,7 +217,7 @@
 - [ ] GIF — erster Frame konvertiert für KI
 - [ ] TIFF — Verarbeitung + Tags schreiben
 - [ ] DNG/CR2/NEF/ARW — PreviewImage für KI + pHash
-- [ ] MP4/MOV — Video erkannt, korrekt sortiert
+- [ ] MP4/MOV — Video erkannt, ffprobe-Metadaten extrahiert, korrekt sortiert
 - [ ] Nicht unterstütztes Format → sauber übersprungen
 
 ## 7. Edge Cases

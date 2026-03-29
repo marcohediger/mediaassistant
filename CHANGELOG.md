@@ -22,6 +22,10 @@
 - Keep-Aktion lädt Datei zu Immich hoch wenn Gruppe im Immich-Modus ist
 - Immich-Delete repariert (httpx DELETE mit Request Body)
 
+### Video-Verarbeitung
+- **IA-01**: Video-Metadaten via ffprobe ergänzt ExifTool — Datum, GPS (ISO 6709 Parser), Dauer (roh + formatiert), Auflösung, Megapixel, Codec, Framerate, Bitrate, Rotation
+- **IA-04**: Video-Thumbnail Extraktion via ffmpeg bei 10% der Dauer (vorbereitet, `VIDEO_THUMBNAIL_ENABLED = False`)
+
 ### Pipeline-Stabilität
 - **Filewatcher**: Dateigrössen-Check nach 2s Wartezeit verhindert Verarbeitung halbkopierter Dateien
 - **IA-07**: ExifTool `-m` Flag ignoriert kleinere Warnungen (z.B. DJI DNG "Maker notes")
