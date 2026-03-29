@@ -118,8 +118,9 @@ Verfügbare Trigger-Tags in Immich:
 ```
 Neue Datei in /inbox/mobile/ oder /inbox/manual/
         ↓
- 1. EXIF auslesen (ExifTool)
+ 1. EXIF auslesen (ExifTool; Videos zusätzlich via ffprobe)
     - Make, Model, DateTimeOriginal, GPS, Software
+    - Videos: Datum, GPS (ISO 6709), Dauer, Auflösung, Megapixel, Codec, Framerate, Bitrate, Rotation
         ↓
  2. Duplikaterkennung (vor KI — spart teure Analyse)
     - SHA256 Hash (exakt) + pHash (ähnlich)
@@ -131,6 +132,7 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
  4. Temp. Konvertierung für KI
     - HEIC/DNG/RAW/GIF → temp JPEG für KI-Analyse
     - JPG/PNG/WebP → direkt, keine Konvertierung
+    - Videos: Thumbnail via ffmpeg bei 10% der Dauer (vorbereitet, VIDEO_THUMBNAIL_ENABLED = False)
         ↓
  5. KI-Analyse (LM Studio Vision)
     - Typ: personal / screenshot / internet_image / document / meme
@@ -279,10 +281,10 @@ Jeder Verarbeitungsschritt wird mit einem Step-Code geloggt:
 
 | Code | Schritt |
 |---|---|
-| IA-01 | EXIF auslesen |
+| IA-01 | EXIF auslesen (+ ffprobe für Videos: Datum, GPS/ISO 6709, Dauer, Auflösung, Codec, Framerate, Bitrate, Rotation) |
 | IA-02 | Duplikaterkennung (SHA256 + pHash) |
 | IA-03 | Geocoding |
-| IA-04 | Temp. Konvertierung für KI (HEIC/DNG/RAW/GIF → JPEG) |
+| IA-04 | Temp. Konvertierung für KI (HEIC/DNG/RAW/GIF → JPEG; Video-Thumbnail via ffmpeg, vorbereitet) |
 | IA-05 | KI-Analyse |
 | IA-06 | OCR (Texterkennung) |
 | IA-07 | EXIF Tags schreiben |
@@ -583,8 +585,8 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: IA-07 ExifTool `-m` Flag für Minor Warnings (DJI DNG "Maker notes")
 - [x] FEAT: IA-01 speichert file_size, Fallback auf FileModifyDate
 - [x] FIX: httpx DELETE — `client.request` mit `content=` statt `json=`
-- [ ] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS, Dauer, Auflösung)
-- [ ] FEAT: Video-Thumbnail Extraktion via ffmpeg für KI-Analyse (vorbereiten, deaktiviert)
+- [x] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS mit ISO 6709 Parser, Dauer + formatiert, Auflösung, Megapixel, Codec, Framerate, Bitrate, Rotation) — ergänzt ExifTool in IA-01
+- [x] FEAT: Video-Thumbnail Extraktion via ffmpeg bei 10% der Dauer in IA-04 (vorbereitet, VIDEO_THUMBNAIL_ENABLED = False)
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 
@@ -621,9 +623,9 @@ Alle Dateiverschiebungen nutzen safe_move (Copy → SHA256-Verify → Delete) �
 | `.mts/.m2ts` | Videokameras | Metadaten via ffprobe |
 
 - Temporäre JPEG-Dateien werden nach KI-Analyse sofort gelöscht
-- Videos: Metadaten via ffprobe (Datum, GPS, Dauer, Auflösung, Gerät)
+- Videos: Metadaten via ffprobe (Datum, GPS mit ISO 6709 Parser, Dauer + formatiert, Auflösung, Megapixel, Codec, Framerate, Bitrate, Rotation)
 - Videos: kein KI-Analyse in v1 — nur sortieren nach Metadaten
-- Videos: Thumbnail-Extraktion via ffmpeg vorbereitet aber deaktiviert (v2)
+- Videos: Thumbnail-Extraktion via ffmpeg bei 10% der Dauer vorbereitet aber deaktiviert (VIDEO_THUMBNAIL_ENABLED = False)
 - ExifTool liest alle Formate nativ (keine Konvertierung für EXIF-Analyse nötig)
 - Nicht unterstützte Formate → /inbox/error/ mit Hinweis im Log
 - Unterstützte Formate konfigurierbar in config.yml

@@ -1,11 +1,11 @@
 flowchart TD
-    START([Neue Datei in Inbox]) --> EXIF[IA-01: EXIF extrahieren]
+    START([Neue Datei in Inbox]) --> EXIF[IA-01: EXIF extrahieren\nVideos: + ffprobe Metadaten\nDatum, GPS/ISO 6709, Dauer,\nAuflösung, Codec, Framerate,\nBitrate, Rotation]
     EXIF --> DUPES[IA-02: Duplikate erkennen]
     DUPES --> DUPECHECK{Duplikat?}
     DUPECHECK -->|Ja| STOP([Pipeline stopp])
     DUPECHECK -->|Nein| GEO[IA-03: Geocoding\nGPS → Ortsname]
 
-    GEO --> CONVERT[IA-04: Temp. Konvertierung für KI]
+    GEO --> CONVERT[IA-04: Temp. Konvertierung für KI\nVideos: Thumbnail bei 10% Dauer\nvia ffmpeg, vorbereitet, deaktiviert]
 
     CONVERT --> COLLECT[Alle Metadaten sammeln]
     COLLECT --> M1[Kamera & Datum]
