@@ -77,29 +77,47 @@ async def execute(job, session) -> dict:
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
 
-    # Determine category: filename rules first, then AI analysis
+    # Determine category: AI classification is primary, filename/EXIF are secondary signals
     ai_type = ai_result.get("type", "")
+    ai_confidence = ai_result.get("confidence", 0.0)
     filename = os.path.basename(job.original_path)
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
     has_no_exif = not exif.get("has_exif", False)
     has_uuid_name = bool(_WHATSAPP_UUID_RE.match(filename))
-    # Keine EXIF + UUID-Name oder -WA = Messenger-Bild (WhatsApp, Telegram, Signal etc.)
-    is_sourceless = has_uuid_name or "-WA" in filename.upper() or (has_no_exif and ai_type in ("internet_image", "meme", ""))
+    is_messenger_file = has_uuid_name or "-WA" in filename.upper()
+    file_size_kb = os.path.getsize(job.original_path) / 1024
+    is_small_file = file_size_kb < 100  # Memes/Internet-Bilder sind meist <100 KB
 
-    if is_video and is_sourceless:
-        category = "sourceless"
-    elif is_video:
-        category = "video"
-    elif ai_type == "screenshot" or "screenshot" in filename.lower():
+    # 1) Screenshots (KI oder Dateiname)
+    if ai_type == "screenshot" or "screenshot" in filename.lower():
         category = "screenshot"
-    elif is_sourceless and ai_type not in ("personal", "personal_photo"):
+    # 2) Memes & Internet-Bilder → immer aussortieren
+    elif ai_type == "meme":
         category = "sourceless"
-    elif ai_type in ("personal", "personal_photo", ""):
-        category = "photo"
-    elif ai_result.get("confidence", 1.0) < 0.5:
-        category = "unknown"
+    elif ai_type == "internet_image":
+        category = "sourceless"
+    # 3) Dokumente → aussortieren
+    elif ai_type == "document":
+        category = "sourceless"
+    # 4) Persönliche Fotos/Videos → behalten (auch von Chat-Apps)
+    elif ai_type in ("personal", "personal_photo"):
+        category = "video" if is_video else "photo"
+    # 5) Messenger-Datei ohne EXIF und KI unsicher/leer
+    elif is_messenger_file and has_no_exif:
+        # Kleine Dateien (<300 KB) sind sehr wahrscheinlich Schrott
+        if is_small_file:
+            category = "sourceless"
+        else:
+            category = "unknown"
+    # 6) Kein KI-Ergebnis, kein EXIF
+    elif ai_type == "" and has_no_exif:
+        if is_small_file:
+            category = "sourceless"
+        else:
+            category = "unknown"
+    # 7) Alles andere mit EXIF → normal einsortieren
     else:
-        category = "photo"
+        category = "video" if is_video else "photo"
 
     # Merge geocoding data into exif for path resolution
     if geo_result.get("country"):

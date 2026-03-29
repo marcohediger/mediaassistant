@@ -20,12 +20,12 @@ Analyze the following aspects:
 }
 
 Rules:
-- type: Choose the most fitting type
-  - "personal": Real photos of people, landscapes, animals, food, events, travel — anything captured with a camera or phone
+- type: Choose the most fitting type. Focus on WHETHER the image was personally captured vs. forwarded/downloaded.
+  - "personal": Real photos/selfies of people, landscapes, animals, food, events, travel — anything originally captured with a camera or phone. A personal photo is STILL personal even if it was sent via WhatsApp/Telegram/Signal (lower quality, no EXIF). Look for natural imperfections, candid moments, personal context.
   - "screenshot": ONLY real screen captures (status bar, app UI, browser visible). Do NOT confuse with: photographed screens, photos containing text/signs, graphics, or memes
-  - "internet_image": Downloaded images, stock photos, graphics without personal context
-  - "document": Scanned documents, receipts, letters
-  - "meme": Internet memes, jokes, social media images with text overlay
+  - "internet_image": Downloaded images, stock photos, graphics, social media reposts, infographics, promotional content — anything clearly NOT captured by the sender. Look for: watermarks, perfect composition, corporate branding, viral content.
+  - "document": Scanned documents, receipts, letters, forms
+  - "meme": Internet memes, jokes, images with text overlay, reaction images, comic panels
 - tags: 3-8 relevant tags in GERMAN (e.g. Landschaft, Essen, Tier, Selfie, Gruppe, Stadt, Natur, Sport, Feier)
 - description: In GERMAN, factual, 1-2 sentences
 - people_count: Number of visible people (0 if none)
@@ -60,6 +60,7 @@ async def execute(job, session) -> dict:
 
     # Build EXIF context
     exif = (job.step_result or {}).get("IA-01", {})
+    filename = os.path.basename(job.original_path)
     exif_context = ""
     if exif.get("has_exif"):
         parts = []
@@ -71,6 +72,13 @@ async def execute(job, session) -> dict:
             parts.append(f"GPS: {exif['gps_lat']}, {exif['gps_lon']}")
         if parts:
             exif_context = "\n\nEXIF-Daten: " + ", ".join(parts)
+    else:
+        file_size_kb = os.path.getsize(image_path) / 1024
+        exif_context = (
+            f"\n\nKeine EXIF-Daten vorhanden (typisch für Messenger-Bilder). "
+            f"Dateiname: {filename}, Dateigrösse: {file_size_kb:.0f} KB. "
+            f"Hinweis: Persönliche Fotos sind meist >500 KB, Memes/Internet-Bilder meist <100 KB."
+        )
 
     # Call AI API
     payload = {
