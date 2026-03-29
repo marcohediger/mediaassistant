@@ -77,7 +77,7 @@ async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dic
 
 
 async def archive_asset(asset_id: str) -> dict:
-    """Set an asset's visibility to 'archive' in Immich."""
+    """Set an asset to archived in Immich. Supports both new (visibility) and legacy (isArchived) API."""
     url, api_key = await get_immich_config()
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
@@ -85,11 +85,20 @@ async def archive_asset(asset_id: str) -> dict:
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
 
     async with httpx.AsyncClient(timeout=30) as client:
+        # Try new API first (v1.133.0+): visibility enum
         resp = await client.put(
             f"{url}/api/assets",
             headers=headers,
             json={"ids": [asset_id], "visibility": "archive"},
         )
+
+        # Fallback: legacy API (pre-v1.133.0): isArchived boolean
+        if resp.status_code not in (200, 204):
+            resp = await client.put(
+                f"{url}/api/assets",
+                headers=headers,
+                json={"ids": [asset_id], "isArchived": True},
+            )
 
     if resp.status_code not in (200, 204):
         raise RuntimeError(f"Immich archive failed: HTTP {resp.status_code} — {resp.text[:200]}")
