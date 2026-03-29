@@ -31,7 +31,9 @@
 
     <div class="review-content">
         <div class="review-thumb">
-            {% if item.exists and not item.is_video %}
+            {% if item.immich_asset_id %}
+            <img src="/api/thumbnail/immich/{{ item.immich_asset_id }}" alt="{{ item.filename }}" loading="lazy">
+            {% elif item.exists and not item.is_video %}
             <img src="/api/review/thumbnail/{{ item.job_id }}" alt="{{ item.filename }}" loading="lazy">
             {% elif item.is_video %}
             <div class="dup-thumb-missing">Video</div>

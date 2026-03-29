@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from config import config_manager
 from safe_file import safe_move
-from immich_client import upload_asset, replace_asset
+from immich_client import upload_asset, replace_asset, archive_asset
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -86,7 +86,6 @@ async def execute(job, session) -> dict:
     has_uuid_name = bool(_WHATSAPP_UUID_RE.match(filename))
     is_messenger_file = has_uuid_name or "-WA" in filename.upper()
     file_size_kb = os.path.getsize(job.original_path) / 1024
-    is_small_file = file_size_kb < 100  # Memes/Internet-Bilder sind meist <100 KB
 
     # 1) Screenshots (KI oder Dateiname)
     if ai_type == "screenshot" or "screenshot" in filename.lower():
@@ -102,19 +101,12 @@ async def execute(job, session) -> dict:
     # 4) Persönliche Fotos/Videos → behalten (auch von Chat-Apps)
     elif ai_type in ("personal", "personal_photo"):
         category = "video" if is_video else "photo"
-    # 5) Messenger-Datei ohne EXIF und KI unsicher/leer
+    # 5) Messenger-Datei ohne EXIF und KI unsicher/leer → Review
     elif is_messenger_file and has_no_exif:
-        # Kleine Dateien (<300 KB) sind sehr wahrscheinlich Schrott
-        if is_small_file:
-            category = "sourceless"
-        else:
-            category = "unknown"
-    # 6) Kein KI-Ergebnis, kein EXIF
+        category = "unknown"
+    # 6) Kein KI-Ergebnis, kein EXIF → Review
     elif ai_type == "" and has_no_exif:
-        if is_small_file:
-            category = "sourceless"
-        else:
-            category = "unknown"
+        category = "unknown"
     # 7) Alles andere mit EXIF → normal einsortieren
     else:
         category = "video" if is_video else "photo"
@@ -208,6 +200,14 @@ async def execute(job, session) -> dict:
 
         immich_result = await upload_asset(job.original_path, album_names=album_names)
 
+        asset_id = immich_result.get("id", "")
+
+        # Sourceless → Asset in Immich archivieren (aus Timeline ausblenden)
+        immich_archived = False
+        if category == "sourceless" and asset_id:
+            await archive_asset(asset_id)
+            immich_archived = True
+
         # Remove source file after successful upload
         await asyncio.to_thread(os.remove, job.original_path)
 
@@ -215,7 +215,6 @@ async def execute(job, session) -> dict:
         if job.source_inbox_path:
             await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
 
-        asset_id = immich_result.get("id", "")
         job.target_path = f"immich:{asset_id}"
         # Mark asset ID so Immich polling skips this asset
         job.immich_asset_id = asset_id
@@ -225,6 +224,7 @@ async def execute(job, session) -> dict:
             "target_path": job.target_path,
             "moved": False,
             "immich_upload": True,
+            "immich_archived": immich_archived,
             "immich_id": asset_id,
         }
 
