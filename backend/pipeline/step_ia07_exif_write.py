@@ -28,10 +28,8 @@ async def execute(job, session) -> dict:
         keywords.extend(ai_result["tags"])
     if ai_result.get("type") and ai_result["type"] != "unknown":
         keywords.append(ai_result["type"])
-    if ai_result.get("mood"):
-        keywords.append(ai_result["mood"])
-    if ai_result.get("quality"):
-        keywords.append(f"quality:{ai_result['quality']}")
+    if ai_result.get("quality") == "blurry":
+        keywords.append("blurry")
 
     # From geocoding (all available fields)
     for geo_field in ("country", "state", "city", "suburb"):
@@ -39,9 +37,9 @@ async def execute(job, session) -> dict:
         if val and val not in keywords:
             keywords.append(val)
 
-    # From OCR
-    if ocr_result.get("has_text") and ocr_result.get("text_type"):
-        keywords.append(f"text:{ocr_result['text_type']}")
+    # From OCR — just flag that text was detected (actual text is in UserComment)
+    if ocr_result.get("has_text"):
+        keywords.append("ocr")
 
     # Build description
     description_parts = []
