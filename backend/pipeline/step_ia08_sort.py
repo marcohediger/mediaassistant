@@ -202,9 +202,9 @@ async def execute(job, session) -> dict:
 
         asset_id = immich_result.get("id", "")
 
-        # Sourceless → Asset in Immich archivieren (aus Timeline ausblenden)
+        # Sourceless & Screenshots → Asset in Immich archivieren (aus Timeline ausblenden)
         immich_archived = False
-        if category == "sourceless" and asset_id:
+        if category in ("sourceless", "screenshot") and asset_id:
             await archive_asset(asset_id)
             immich_archived = True
 
