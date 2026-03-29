@@ -48,7 +48,7 @@
                 <td><span class="level-badge level-{{ log.level | lower }}">{{ log.level }}</span></td>
                 <td>{{ log.source }}</td>
                 <td>{{ log.message }}</td>
-                <td class="cell-error">{{ log.detail or '' }}</td>
+                <td class="cell-error" style="white-space: pre-wrap; font-family: monospace; font-size: 0.8rem; max-width: 600px;">{{ log.detail or '' }}</td>
             </tr>
             {% endfor %}
         </tbody>
