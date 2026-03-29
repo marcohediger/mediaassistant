@@ -13,9 +13,9 @@ STEPS = [
     ("IA-01", step_ia01_exif.execute),
     ("IA-02", step_ia02_convert.execute),
     ("IA-03", step_ia03_duplicates.execute),
+    ("IA-06", step_ia06_geocoding.execute),      # Geocoding VOR AI — Ortsdaten fliessen in KI-Prompt
     ("IA-04", step_ia04_ai.execute),
     ("IA-05", step_ia05_ocr.execute),
-    ("IA-06", step_ia06_geocoding.execute),
     ("IA-07", step_ia07_exif_write.execute),
     ("IA-08", step_ia08_sort.execute),
     ("IA-09", step_ia09_notify.execute),
