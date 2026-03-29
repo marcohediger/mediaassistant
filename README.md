@@ -119,12 +119,21 @@ All system log messages are always written in English, regardless of the UI lang
 - Batch-Clean: auto-delete all exact SHA256 duplicates
 - Orphaned entries: if a referenced original file no longer exists on disk (or was deleted from Immich), the match is skipped and the new file is treated as a fresh original
 
+### Review
+- Manual classification of unclear files (AI uncertain, no EXIF, messenger files)
+- Thumbnail preview (local or Immich)
+- AI description, tags, metadata displayed
+- Category buttons: Foto, Video, Screenshot, Sourceless
+- Immich: sourceless → archived, others stay in timeline
+- Batch action: classify all as sourceless
+
 ### Log Viewer
-- System log (errors, warnings, info)
-- Processing log (jobs with status and step details)
+- System log with full traceback on errors
+- Processing log with duration, status and step details
 - Filter, search, pagination
-- Job detail page with step results, paths, timestamps, hashes
+- Job detail page with step results, paths, timestamps, hashes, full error traceback
 - Live auto-refresh on job detail page
+- Immich thumbnail in job detail page
 
 ## AI Analysis
 
@@ -139,6 +148,23 @@ The AI prompt is fully editable in **Settings → AI Analysis**. The prompt is w
 | `meme` | Memes with text overlay on images |
 
 The AI returns JSON with: type, tags (German), description (German), mood, people_count, quality, confidence.
+
+### EXIF Tag Strategy
+
+Tags written to files (EXIF Keywords / XMP Subject) are kept clean and useful:
+
+| Source | Example Tags | Notes |
+|--------|-------------|-------|
+| AI content tags | `Landschaft`, `Tier`, `Essen`, `Selfie` | From AI analysis, in German |
+| AI type | `personal`, `screenshot`, `meme` | Classification type |
+| Geocoding | `Schweiz`, `Zürich`, `Altstadt` | Country, state, city, suburb |
+| Folder tags | `vacation`, `italy`, `album:vacation italy` | From inbox subdirectories |
+| OCR flag | `OCR` | Set when text was detected (actual text in EXIF UserComment) |
+| Quality | `blurry` | Only written when image is blurry |
+
+**Not written as tags:** mood (indoor/outdoor), quality levels other than blurry, OCR text type.
+
+**Planned:** Standardized tag vocabulary (inspired by IPTC Media Topics) to ensure consistent tags across all images.
 
 ## Library Structure
 
@@ -214,6 +240,10 @@ When enabled:
 - On first activation, the timestamp is set to "now" — existing assets are not processed
 - New assets are downloaded, processed (AI, OCR, Geocoding), tags are written to the file via EXIF, and the asset is replaced in Immich with the tagged version
 - Assets uploaded from an inbox are automatically skipped (no double processing)
+
+**Archiving:**
+- Sourceless files (memes, internet images, documents) and screenshots are automatically archived in Immich (hidden from timeline, accessible via Archive)
+- Personal photos and videos stay in the main timeline
 
 **Shared features:**
 - **Duplicate detection**: Previously uploaded files are tracked in the local database — re-uploading the same file triggers duplicate review with side-by-side comparison (Immich thumbnail vs. local file)
