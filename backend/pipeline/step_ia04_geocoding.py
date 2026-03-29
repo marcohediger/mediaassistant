@@ -73,7 +73,7 @@ async def _reverse_google(url: str, lat: float, lon: float, api_key: str) -> dic
 
 
 async def execute(job, session) -> dict:
-    """IA-06: Geocoding — GPS-Koordinaten in Ortsnamen umwandeln."""
+    """IA-04: Geocoding — GPS-Koordinaten in Ortsnamen umwandeln."""
     if not await config_manager.is_module_enabled("geocoding"):
         return {"status": "skipped", "reason": "module disabled"}
 

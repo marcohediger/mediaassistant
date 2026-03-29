@@ -7,7 +7,7 @@ async def execute(job, session) -> dict:
     parts = []
 
     # Category from AI analysis
-    ai_result = step_results.get("IA-04", {})
+    ai_result = step_results.get("IA-05", {})
     if ai_result.get("type"):
         parts.append(ai_result["type"])
 
@@ -17,12 +17,12 @@ async def execute(job, session) -> dict:
         parts.append(f"{tags_result['tags_count']} Tags")
 
     # OCR
-    ocr_result = step_results.get("IA-05", {})
+    ocr_result = step_results.get("IA-06", {})
     if ocr_result.get("has_text"):
         parts.append("OCR")
 
     # Geocoding
-    geo_result = step_results.get("IA-06", {})
+    geo_result = step_results.get("IA-04", {})
     if geo_result.get("city") and geo_result.get("country"):
         parts.append(f"{geo_result['city']}/{geo_result['country']}")
 
