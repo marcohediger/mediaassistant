@@ -7,9 +7,9 @@ import subprocess
 async def execute(job, session) -> dict:
     """IA-07: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben."""
     step_results = job.step_result or {}
-    ai_result = step_results.get("IA-04", {})
-    ocr_result = step_results.get("IA-05", {})
-    geo_result = step_results.get("IA-06", {})
+    ai_result = step_results.get("IA-05", {})
+    ocr_result = step_results.get("IA-06", {})
+    geo_result = step_results.get("IA-04", {})
 
     # Collect keywords
     keywords = []

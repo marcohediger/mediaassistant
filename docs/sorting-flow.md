@@ -4,7 +4,7 @@ flowchart TD
     CONVERT --> DUPES[IA-03: Duplikate erkennen]
     DUPES --> DUPECHECK{Duplikat?}
     DUPECHECK -->|Ja| STOP([Pipeline stopp])
-    DUPECHECK -->|Nein| GEO[IA-06: Geocoding\nGPS → Ortsname]
+    DUPECHECK -->|Nein| GEO[IA-04: Geocoding\nGPS → Ortsname]
 
     GEO --> COLLECT[Alle Metadaten sammeln]
     COLLECT --> M1[Kamera & Datum]
@@ -13,9 +13,9 @@ flowchart TD
     COLLECT --> M4[Dateiname-Muster]
     COLLECT --> M5[Messenger-Herkunft]
 
-    M1 & M2 & M3 & M4 & M5 --> AI[IA-04: KI-Analyse\nmit ALLEN Metadaten]
+    M1 & M2 & M3 & M4 & M5 --> AI[IA-05: KI-Analyse\nmit ALLEN Metadaten]
 
-    AI --> OCR[IA-05: OCR Text-Erkennung]
+    AI --> OCR[IA-06: OCR Text-Erkennung]
     OCR --> SORT[IA-08: Sortierung]
 
     SORT --> CHECK1{ai_type = screenshot\nODER 'screenshot' im Dateinamen?}

@@ -73,7 +73,7 @@ Gescannte Dokumente, Quittungen, Briefe, Formulare.
 
 
 async def execute(job, session) -> dict:
-    """IA-04: KI-Analyse via OpenAI-kompatiblem Endpunkt.
+    """IA-05: KI-Analyse via OpenAI-kompatiblem Endpunkt.
 
     Nutzt alle bisher gesammelten Metadaten (EXIF, Geocoding, Dateigrösse)
     für eine bestmögliche Klassifikation.
@@ -104,7 +104,7 @@ async def execute(job, session) -> dict:
     # ── Alle Metadaten sammeln ──────────────────────────────────────
     step_results = job.step_result or {}
     exif = step_results.get("IA-01", {})
-    geo = step_results.get("IA-06", {})
+    geo = step_results.get("IA-04", {})
     filename = os.path.basename(job.original_path)
     file_size_kb = os.path.getsize(filepath) / 1024
 
@@ -129,7 +129,7 @@ async def execute(job, session) -> dict:
     else:
         context_parts.append("Keine EXIF-Daten vorhanden (typisch für Messenger-Bilder)")
 
-    # Geocoding-Daten (wenn IA-06 vor uns lief)
+    # Geocoding-Daten (IA-04 lief vor uns)
     if geo.get("country"):
         location_parts = []
         if geo.get("suburb"):

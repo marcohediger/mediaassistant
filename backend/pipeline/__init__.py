@@ -7,15 +7,15 @@ from database import async_session
 from models import Job
 from safe_file import safe_move
 from system_logger import log_error, log_warning
-from pipeline import step_ia01_exif, step_ia02_convert, step_ia03_duplicates, step_ia04_ai, step_ia05_ocr, step_ia06_geocoding, step_ia07_exif_write, step_ia08_sort, step_ia09_notify, step_ia10_cleanup, step_ia11_log
+from pipeline import step_ia01_exif, step_ia02_convert, step_ia03_duplicates, step_ia04_geocoding, step_ia05_ai, step_ia06_ocr, step_ia07_exif_write, step_ia08_sort, step_ia09_notify, step_ia10_cleanup, step_ia11_log
 
 STEPS = [
     ("IA-01", step_ia01_exif.execute),
     ("IA-02", step_ia02_convert.execute),
     ("IA-03", step_ia03_duplicates.execute),
-    ("IA-06", step_ia06_geocoding.execute),      # Geocoding VOR AI — Ortsdaten fliessen in KI-Prompt
-    ("IA-04", step_ia04_ai.execute),
-    ("IA-05", step_ia05_ocr.execute),
+    ("IA-04", step_ia04_geocoding.execute),
+    ("IA-05", step_ia05_ai.execute),
+    ("IA-06", step_ia06_ocr.execute),
     ("IA-07", step_ia07_exif_write.execute),
     ("IA-08", step_ia08_sort.execute),
     ("IA-09", step_ia09_notify.execute),
@@ -70,7 +70,7 @@ async def run_pipeline(job_id: int):
                 if step_code in non_critical:
                     await log_warning("pipeline", f"{job.debug_key} {step_code} skipped", str(e))
                     existing_results[step_code] = {"status": "error", "reason": str(e)}
-                    if step_code == "IA-04":
+                    if step_code == "IA-05":
                         existing_results[step_code].update({
                             "type": "unknown",
                             "tags": [],

@@ -15,9 +15,9 @@ New files in inbox directories are automatically detected and processed through 
 | IA-01 | Read EXIF | Extract metadata via ExifTool |
 | IA-02 | Format Conversion | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis |
 | IA-03 | Duplicate Detection | SHA256 (exact) + pHash (similar), incl. Immich-uploaded files |
-| IA-04 | AI Analysis | Analyze image (type, tags, description, mood) |
-| IA-05 | OCR | Text recognition (screenshots, documents) |
-| IA-06 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
+| IA-04 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
+| IA-05 | AI Analysis | Analyze image (type, tags, description, mood) with all collected metadata |
+| IA-06 | OCR | Text recognition (screenshots, documents) |
 | IA-07 | Write EXIF Tags | Write tags, description, geocoding and folder-tags back to file |
 | IA-08 | Sort | Move file to library or upload to Immich, clean up empty source folders |
 | IA-09 | Notification | Email on errors (SMTP, Office 365 / Gmail) |

@@ -94,8 +94,8 @@ async def _build_review_items() -> list[dict]:
             exists = os.path.exists(filepath)
             step_results = job.step_result or {}
             exif = step_results.get("IA-01", {})
-            ai = step_results.get("IA-04", {})
-            geo = step_results.get("IA-06", {})
+            ai = step_results.get("IA-05", {})
+            geo = step_results.get("IA-04", {})
             sort = step_results.get("IA-08", {})
 
             file_size_kb = 0
@@ -201,7 +201,7 @@ async def classify_file(request: Request):
 
         step_results = job.step_result or {}
         exif = step_results.get("IA-01", {})
-        geo = step_results.get("IA-06", {})
+        geo = step_results.get("IA-04", {})
         immich_asset_id = job.immich_asset_id or ""
         target = job.target_path or ""
         is_immich = target.startswith("immich:") or bool(immich_asset_id)
