@@ -17,7 +17,8 @@ flowchart TD
     M1 & M2 & M3 & M4 & M5 --> AI[IA-05: KI-Analyse\nmit ALLEN Metadaten]
 
     AI --> OCR[IA-06: OCR Text-Erkennung]
-    OCR --> SORT[IA-08: Sortierung]
+    OCR --> TAGS[IA-07: EXIF-Tags schreiben]
+    TAGS --> SORT[IA-08: Sortierung]
 
     SORT --> CHECK1{ai_type = screenshot\nODER 'screenshot' im Dateinamen?}
     CHECK1 -->|Ja| CAT_SCREENSHOT[📂 screenshot]
