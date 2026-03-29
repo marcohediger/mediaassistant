@@ -66,7 +66,7 @@ async def execute(job, session) -> dict:
         }
 
     # Build ExifTool command
-    cmd = ["exiftool", "-overwrite_original"]
+    cmd = ["exiftool", "-overwrite_original", "-m"]
 
     # Write keywords
     for kw in keywords:

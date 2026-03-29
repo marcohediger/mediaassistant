@@ -106,3 +106,39 @@ code {
 .section-header {
     border-bottom-color: var(--border);
 }
+
+/* Review Page — light mode */
+.review-card {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.review-badge-type {
+    background: #4f46e5;
+    color: #fff;
+}
+
+.review-badge-confidence {
+    background: #059669;
+    color: #fff;
+}
+
+.review-tag {
+    background: #e0e7ff;
+    color: #3730a3;
+    border-color: #c7d2fe;
+}
+
+.review-actions .btn-success {
+    background: #059669;
+    color: #fff;
+}
+
+.review-actions .btn-warning {
+    background: #d97706;
+    color: #fff;
+}
+
+.review-actions .btn-danger {
+    background: #dc2626;
+    color: #fff;
+}

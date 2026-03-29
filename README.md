@@ -110,20 +110,24 @@ All system log messages are always written in English, regardless of the UI lang
 
 ### Duplicate Review
 - All files of a group side-by-side (transitive grouping via Union-Find)
-- Per file: thumbnail, file size, resolution, megapixels
-- Per file: all EXIF data read directly from file (date, camera, ISO, aperture, shutter speed, focal length, GPS)
+- Per file: thumbnail with lightbox (click to view original in full size), file size, resolution, megapixels
+- Per file: all EXIF data — read from file (local) or fetched via Immich API (Immich assets)
 - Per file: all keywords/tags and description from file
 - Per file: similarity score (SHA256 exact / pHash %)
+- Per file: badge (ORIGINAL/EXACT) is a clickable link — Immich assets open in Immich, local files download
 - **Immich duplicates**: Thumbnail fetched from Immich, "View in Immich" button, "Delete local copy" for the local file
-- Actions: "Keep this" (moves to library, deletes all others)
+- Actions: "Keep this" on all group members (not just local files) — uploads to Immich when group is in Immich mode
 - Batch-Clean: auto-delete all exact SHA256 duplicates
 - Orphaned entries: if a referenced original file no longer exists on disk (or was deleted from Immich), the match is skipped and the new file is treated as a fresh original
 
 ### Review
 - Manual classification of unclear files (AI uncertain, no EXIF, messenger files)
-- Thumbnail preview (local or Immich)
+- Thumbnail preview with lightbox (click to view original in full size)
 - AI description, tags, metadata displayed
+- File size (with Immich API fallback), dimensions, date (fallback to FileModifyDate/job.created_at)
+- Metadata fields shown conditionally (date/camera only when present)
 - Category buttons: Foto, Video, Screenshot, Sourceless
+- Delete button to remove review files directly
 - Immich: sourceless → archived, others stay in timeline
 - Batch action: classify all as sourceless
 
@@ -132,6 +136,7 @@ All system log messages are always written in English, regardless of the UI lang
 - Processing log with duration, status and step details
 - Filter, search, pagination
 - Job detail page with step results, paths, timestamps, hashes, full error traceback
+- Job detail page with lightbox (click thumbnail to view original in full size)
 - Live auto-refresh on job detail page
 - Immich thumbnail in job detail page
 

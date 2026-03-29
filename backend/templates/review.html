@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ t.review.title }} — MediaAssistant{% endblock %}
 {% block content %}
-<div class="dup-header">
+<div class="review-header">
     <h1>{{ t.review.title }}</h1>
-    <div class="dup-header-actions">
-        <span class="dup-count">{{ total }} {{ t.review.files if total != 1 else t.review.file }}</span>
+    <div class="review-header-actions">
+        <span class="review-count">{{ total }} {{ t.review.files if total != 1 else t.review.file }}</span>
         {% if total > 0 %}
         <form method="post" action="/api/review/classify-all" class="inline-form"
               onsubmit="return confirm('{{ t.review.batch_confirm }}')">
@@ -17,86 +17,60 @@
 
 {% if items %}
 {% for item in items %}
-<div class="dup-group">
-    <div class="dup-group-header">
-        <span class="dup-group-title">{{ item.debug_key }}</span>
-        {% if item.ai_type %}
-        <span class="match-badge match-similar">KI: {{ item.ai_type }}</span>
-        {% endif %}
-        {% if item.ai_confidence %}
-        <span class="match-badge match-exact">{{ (item.ai_confidence * 100) | round(0) | int }}%</span>
-        {% endif %}
-        <span class="dup-group-count">{{ item.file_size_kb }} KB</span>
-    </div>
-
+<div class="review-card">
     <div class="review-content">
         <div class="review-thumb">
             {% if item.immich_asset_id %}
-            <img src="/api/thumbnail/immich/{{ item.immich_asset_id }}" alt="{{ item.filename }}" loading="lazy">
+            <img src="/api/thumbnail/immich/{{ item.immich_asset_id }}" alt="{{ item.filename }}" loading="lazy"
+                 class="lightbox-trigger" data-fullsize="/api/original/immich/{{ item.immich_asset_id }}">
             {% elif item.exists and not item.is_video %}
-            <img src="/api/review/thumbnail/{{ item.job_id }}" alt="{{ item.filename }}" loading="lazy">
+            <img src="/api/review/thumbnail/{{ item.job_id }}" alt="{{ item.filename }}" loading="lazy"
+                 class="lightbox-trigger" data-fullsize="/api/original/local/{{ item.job_id }}">
             {% elif item.is_video %}
-            <div class="dup-thumb-missing">Video</div>
+            <div class="review-thumb-placeholder">Video</div>
             {% else %}
-            <div class="dup-thumb-missing">{{ t.review.not_found }}</div>
+            <div class="review-thumb-placeholder">{{ t.review.not_found }}</div>
             {% endif %}
         </div>
 
         <div class="review-details">
-            <div class="dup-filename" title="{{ item.filename }}">{{ item.filename }}</div>
+            <div class="review-title-row">
+                <span class="review-filename" title="{{ item.filename }}">{{ item.filename }}</span>
+                <span class="review-debug-key">{{ item.debug_key }}</span>
+            </div>
 
             {% if item.ai_description %}
-            <div class="dup-description">{{ item.ai_description }}</div>
+            <div class="review-description">{{ item.ai_description }}</div>
             {% endif %}
 
-            <div class="dup-props">
-                <div class="dup-prop">
-                    <span class="dup-prop-label">{{ t.review.size }}</span>
-                    <span>{{ item.file_size_kb }} KB</span>
-                </div>
-                {% if item.exif_date %}
-                <div class="dup-prop">
-                    <span class="dup-prop-label">{{ t.review.date }}</span>
-                    <span>{{ item.exif_date }}</span>
-                </div>
+            <div class="review-meta">
+                {% if item.ai_type %}
+                <span class="review-badge review-badge-type">{{ item.ai_type }}</span>
                 {% endif %}
+                {% if item.ai_confidence %}
+                <span class="review-badge review-badge-confidence">{{ (item.ai_confidence * 100) | round(0) | int }}%</span>
+                {% endif %}
+                <span class="review-meta-item">{{ t.review.size }}: {{ item.file_size_kb }} KB</span>
+                {% if item.dimensions %}
+                <span class="review-meta-item">{{ item.dimensions }}</span>
+                {% endif %}
+                <span class="review-meta-item">{{ t.review.date }}: {{ item.exif_date }}</span>
                 {% if item.exif_camera %}
-                <div class="dup-prop">
-                    <span class="dup-prop-label">{{ t.review.camera }}</span>
-                    <span>{{ item.exif_camera }}</span>
-                </div>
+                <span class="review-meta-item">{{ t.review.camera }}: {{ item.exif_camera }}</span>
                 {% endif %}
-                <div class="dup-prop">
-                    <span class="dup-prop-label">EXIF</span>
-                    <span>{% if item.has_exif %}{{ t.review.yes }}{% else %}{{ t.review.no }}{% endif %}</span>
-                </div>
-                <div class="dup-prop">
-                    <span class="dup-prop-label">GPS</span>
-                    <span>{% if item.has_gps %}{{ item.location or t.review.yes }}{% else %}{{ t.review.no }}{% endif %}</span>
-                </div>
-                {% if item.ai_people > 0 %}
-                <div class="dup-prop">
-                    <span class="dup-prop-label">{{ t.review.people }}</span>
-                    <span>{{ item.ai_people }}</span>
-                </div>
-                {% endif %}
-                {% if item.ai_quality %}
-                <div class="dup-prop">
-                    <span class="dup-prop-label">{{ t.review.quality }}</span>
-                    <span>{{ item.ai_quality }}</span>
-                </div>
-                {% endif %}
+                <span class="review-meta-item">EXIF: {% if item.has_exif %}✓{% else %}✗{% endif %}</span>
+                <span class="review-meta-item">GPS: {% if item.has_gps %}{{ item.location or '✓' }}{% else %}✗{% endif %}</span>
+                <span class="review-meta-item">{{ t.review.people }}: {{ item.ai_people }}</span>
+                <span class="review-meta-item">{{ t.review.quality }}: {{ item.ai_quality or '—' }}</span>
             </div>
 
             {% if item.ai_tags %}
-            <div class="dup-tags">
+            <div class="review-tags">
                 {% for tag in item.ai_tags %}
-                <span class="dup-tag">{{ tag }}</span>
+                <span class="review-tag">{{ tag }}</span>
                 {% endfor %}
             </div>
             {% endif %}
-
-            <div class="dup-path" title="{{ item.filepath }}">{{ item.filepath }}</div>
         </div>
 
         <div class="review-actions">
@@ -122,6 +96,12 @@
                 <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
                 <input type="hidden" name="category" value="sourceless">
                 <button type="submit" class="btn btn-small btn-danger">{{ t.review.sourceless }}</button>
+            </form>
+            <hr style="border: none; border-top: 1px solid var(--border); margin: 0.25rem 0;">
+            <form method="post" action="/api/review/delete" class="inline-form"
+                  onsubmit="return confirm('{{ t.review.delete_confirm }}')">
+                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
+                <button type="submit" class="btn btn-small btn-delete">{{ t.review.delete }}</button>
             </form>
         </div>
     </div>

@@ -34,9 +34,11 @@
         <div class="dup-card {{ 'dup-card-original' if member.is_original }}">
             <div class="dup-thumb">
                 {% if member.immich_asset_id %}
-                <img src="/api/thumbnail/immich/{{ member.immich_asset_id }}" alt="{{ member.filename }}" loading="lazy">
+                <img src="/api/thumbnail/immich/{{ member.immich_asset_id }}" alt="{{ member.filename }}" loading="lazy"
+                     class="lightbox-trigger" data-fullsize="/api/original/immich/{{ member.immich_asset_id }}">
                 {% elif member.exists %}
-                <img src="/api/thumbnail/{{ member.job_id }}" alt="{{ member.filename }}" loading="lazy">
+                <img src="/api/thumbnail/{{ member.job_id }}" alt="{{ member.filename }}" loading="lazy"
+                     class="lightbox-trigger" data-fullsize="/api/original/local/{{ member.job_id }}">
                 {% else %}
                 <div class="dup-thumb-missing">{{ t.duplicates.not_found }}</div>
                 {% endif %}
@@ -47,11 +49,27 @@
 
                 <div class="dup-badges">
                     {% if member.match_type == 'immich' %}
+                        {% if member.immich_link %}
+                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-immich dup-badge-link">{{ t.duplicates.immich_exists }}</a>
+                        {% else %}
                         <span class="match-badge match-immich">{{ t.duplicates.immich_exists }}</span>
+                        {% endif %}
                     {% elif member.is_original %}
+                        {% if member.immich_link %}
+                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-original dup-badge-link">{{ t.duplicates.original }}</a>
+                        {% elif member.exists %}
+                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-original dup-badge-link">{{ t.duplicates.original }}</a>
+                        {% else %}
                         <span class="match-badge match-original">{{ t.duplicates.original }}</span>
+                        {% endif %}
                     {% elif member.match_type == 'exact' %}
+                        {% if member.immich_link %}
+                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-exact dup-badge-link">{{ t.duplicates.exact | title }}</a>
+                        {% elif member.exists %}
+                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-exact dup-badge-link">{{ t.duplicates.exact | title }}</a>
+                        {% else %}
                         <span class="match-badge match-exact">{{ t.duplicates.exact | title }}</span>
+                        {% endif %}
                     {% else %}
                         <span class="match-badge match-similar">{{ ((64 - member.phash_distance) / 64 * 100) | round(0) | int }}%</span>
                     {% endif %}
@@ -117,15 +135,7 @@
             </div>
 
             <div class="dup-card-actions">
-                {% if member.immich_asset_id and member.immich_link %}
-                <a href="{{ member.immich_link }}" target="_blank" class="btn btn-small btn-secondary">{{ t.duplicates.view_in_immich }}</a>
-                {% elif group.is_immich_duplicate and member.exists %}
-                <form method="post" action="/api/duplicates/delete-all" class="inline-form"
-                      onsubmit="return confirm('{{ t.duplicates.delete_local }}?')">
-                    <input type="hidden" name="debug_key" value="{{ member.debug_key }}">
-                    <button type="submit" class="btn btn-small btn-danger">{{ t.duplicates.delete_local }}</button>
-                </form>
-                {% elif not group.is_immich_duplicate and member.exists %}
+                {% if group.members | length > 1 %}
                 <form method="post" action="/api/duplicates/keep" class="inline-form"
                       onsubmit="return confirm('{{ t.duplicates.keep_confirm | replace('{name}', member.filename) }}')">
                     <input type="hidden" name="keep_key" value="{{ member.debug_key }}">

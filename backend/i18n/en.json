@@ -259,6 +259,8 @@
     "sourceless": "Sourceless",
     "batch_sourceless": "All → Sourceless",
     "batch_confirm": "Classify all review files as sourceless?",
+    "delete": "Delete",
+    "delete_confirm": "Delete file permanently?",
     "size": "Size",
     "date": "Date",
     "camera": "Camera",

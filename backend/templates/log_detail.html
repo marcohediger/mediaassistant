@@ -14,9 +14,11 @@
 <div class="detail-section">
     <div class="detail-preview">
         {% if is_immich %}
-        <img src="/api/thumbnail/immich/{{ immich_asset_id }}" alt="{{ job.filename }}">
+        <img src="/api/thumbnail/immich/{{ immich_asset_id }}" alt="{{ job.filename }}"
+             class="lightbox-trigger" data-fullsize="/api/original/immich/{{ immich_asset_id }}">
         {% else %}
-        <img src="/api/thumbnail/{{ job.id }}" alt="{{ job.filename }}">
+        <img src="/api/thumbnail/{{ job.id }}" alt="{{ job.filename }}"
+             class="lightbox-trigger" data-fullsize="/api/original/local/{{ job.id }}">
         {% endif %}
     </div>
 </div>

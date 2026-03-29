@@ -146,7 +146,28 @@
     return div.innerHTML;
   }
 
+  // ── Lightbox ──
+  function initLightbox() {
+    const lightbox = document.getElementById("lightbox");
+    const lightboxImg = document.getElementById("lightbox-img");
+    if (!lightbox || !lightboxImg) return;
+
+    document.addEventListener("click", function (e) {
+      const trigger = e.target.closest(".lightbox-trigger");
+      if (!trigger) return;
+      e.preventDefault();
+      e.stopPropagation();
+      lightboxImg.src = trigger.dataset.fullsize || trigger.src;
+      lightbox.classList.add("active");
+    });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") lightbox.classList.remove("active");
+    });
+  }
+
   // ── Init ──
   initDashboard();
   initJobDetail();
+  initLightbox();
 })();

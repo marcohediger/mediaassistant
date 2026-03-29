@@ -106,6 +106,24 @@ async def archive_asset(asset_id: str) -> dict:
     return {"status": "archived", "asset_id": asset_id}
 
 
+async def get_asset_info(asset_id: str) -> dict | None:
+    """Get asset info from Immich (includes exifInfo with fileSizeInByte)."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key or not asset_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{url}/api/assets/{asset_id}",
+                headers={"x-api-key": api_key},
+            )
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return None
+
+
 async def asset_exists(asset_id: str) -> bool:
     """Check if an asset still exists in Immich."""
     url, api_key = await get_immich_config()
@@ -122,16 +140,17 @@ async def asset_exists(asset_id: str) -> bool:
         return False
 
 
-async def get_asset_thumbnail(asset_id: str) -> bytes | None:
-    """Fetch thumbnail for an asset from Immich."""
+async def get_asset_thumbnail(asset_id: str, size: str = "thumbnail") -> bytes | None:
+    """Fetch thumbnail for an asset from Immich. size=thumbnail|preview"""
     url, api_key = await get_immich_config()
     if not url or not api_key or not asset_id:
         return None
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 f"{url}/api/assets/{asset_id}/thumbnail",
                 headers={"x-api-key": api_key},
+                params={"size": size} if size != "thumbnail" else {},
             )
             if resp.status_code == 200:
                 return resp.content
