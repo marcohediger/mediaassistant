@@ -1,12 +1,13 @@
 flowchart TD
     START([Neue Datei in Inbox]) --> EXIF[IA-01: EXIF extrahieren]
-    EXIF --> CONVERT[IA-02: Format konvertieren]
-    CONVERT --> DUPES[IA-03: Duplikate erkennen]
+    EXIF --> DUPES[IA-02: Duplikate erkennen]
     DUPES --> DUPECHECK{Duplikat?}
     DUPECHECK -->|Ja| STOP([Pipeline stopp])
-    DUPECHECK -->|Nein| GEO[IA-04: Geocoding\nGPS → Ortsname]
+    DUPECHECK -->|Nein| GEO[IA-03: Geocoding\nGPS → Ortsname]
 
-    GEO --> COLLECT[Alle Metadaten sammeln]
+    GEO --> CONVERT[IA-04: Temp. Konvertierung für KI]
+
+    CONVERT --> COLLECT[Alle Metadaten sammeln]
     COLLECT --> M1[Kamera & Datum]
     COLLECT --> M2[GPS + Ortsname]
     COLLECT --> M3[Dateigrösse in KB]
@@ -41,15 +42,11 @@ flowchart TD
     CHECK5 -->|Nein| CHECK6
 
     CHECK6{Messenger-Datei\nUND kein EXIF?}
-    CHECK6 -->|Ja| CHECK_SIZE1{< 100 KB?}
-    CHECK_SIZE1 -->|Ja| CAT_SOURCELESS
-    CHECK_SIZE1 -->|Nein| CAT_UNKNOWN[📂 unknown — Review]
+    CHECK6 -->|Ja| CAT_UNKNOWN[📂 unknown — Review]
     CHECK6 -->|Nein| CHECK7
 
     CHECK7{ai_type leer\nUND kein EXIF?}
-    CHECK7 -->|Ja| CHECK_SIZE2{< 100 KB?}
-    CHECK_SIZE2 -->|Ja| CAT_SOURCELESS
-    CHECK_SIZE2 -->|Nein| CAT_UNKNOWN
+    CHECK7 -->|Ja| CAT_UNKNOWN
     CHECK7 -->|Nein| CHECK_VIDEO2
 
     CHECK_VIDEO2{Video?}

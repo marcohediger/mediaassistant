@@ -6,8 +6,8 @@ async def execute(job, session) -> dict:
     step_results = job.step_result or {}
     removed = []
 
-    # Remove temp JPEG from IA-02 (Formatkonvertierung)
-    convert_result = step_results.get("IA-02", {})
+    # Remove temp JPEG from IA-04 (Temp. Konvertierung für KI)
+    convert_result = step_results.get("IA-04", {})
     temp_path = convert_result.get("temp_path")
     if temp_path and os.path.exists(temp_path):
         os.remove(temp_path)

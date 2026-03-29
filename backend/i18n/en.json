@@ -85,9 +85,9 @@
   },
   "steps": {
     "IA-01": "Read EXIF",
-    "IA-02": "Format Conversion",
-    "IA-03": "Duplicate Detection",
-    "IA-04": "Geocoding",
+    "IA-02": "Duplicate Detection",
+    "IA-03": "Geocoding",
+    "IA-04": "Temp. Conversion for AI",
     "IA-05": "AI Analysis",
     "IA-06": "OCR",
     "IA-07": "Write EXIF Tags",

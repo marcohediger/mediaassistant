@@ -22,12 +22,12 @@ async def execute(job, session) -> dict:
         parts.append("OCR")
 
     # Geocoding
-    geo_result = step_results.get("IA-04", {})
+    geo_result = step_results.get("IA-03", {})
     if geo_result.get("city") and geo_result.get("country"):
         parts.append(f"{geo_result['city']}/{geo_result['country']}")
 
     # Duplicate
-    dup_result = step_results.get("IA-03", {})
+    dup_result = step_results.get("IA-02", {})
     if dup_result.get("duplicate"):
         parts.append("Duplicate")
 

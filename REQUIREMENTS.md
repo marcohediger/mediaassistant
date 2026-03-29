@@ -121,15 +121,18 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
  1. EXIF auslesen (ExifTool)
     - Make, Model, DateTimeOriginal, GPS, Software
         ↓
- 2. Formatkonvertierung
-    - HEIC/DNG/RAW/GIF → temp JPEG für KI-Analyse
-    - JPG/PNG/WebP → direkt, keine Konvertierung
-        ↓
- 3. Duplikaterkennung (vor KI — spart teure Analyse)
+ 2. Duplikaterkennung (vor KI — spart teure Analyse)
     - SHA256 Hash (exakt) + pHash (ähnlich)
     - Duplikat → Pipeline stoppt, Datei → /error/duplicates/
         ↓
- 4. KI-Analyse (LM Studio Vision)
+ 3. Geocoding
+    - GPS-Koordinaten → Ort, Land, Stadt
+        ↓
+ 4. Temp. Konvertierung für KI
+    - HEIC/DNG/RAW/GIF → temp JPEG für KI-Analyse
+    - JPG/PNG/WebP → direkt, keine Konvertierung
+        ↓
+ 5. KI-Analyse (LM Studio Vision)
     - Typ: personal / screenshot / internet_image / document / meme
     - Inhalt: Personen, Landschaft, Essen, Dokument, Tier, etc.
     - Stimmung: indoor / outdoor / nacht / gegenlicht
@@ -137,11 +140,8 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
     - Qualität: unscharf / gut / sehr gut
     - Beschreibung: Freitext (1-2 Sätze)
         ↓
- 5. OCR — Texterkennung
+ 6. OCR — Texterkennung
     - Screenshots, Dokumente, Schilder, Whiteboards
-        ↓
- 6. Geocoding
-    - GPS-Koordinaten → Ort, Land, Stadt
         ↓
  7. EXIF Tags schreiben (ExifTool, overwrite_original)
     - Keywords: Typ, Inhalt-Tags, Qualität, Ort, Ordner-Tags
@@ -193,9 +193,9 @@ completed_at    DATETIME
 ```json
 {
   "IA-01": {"make": "Apple", "model": "iPhone15", "date": "2024-06-12", "gps": true, "has_exif": true},
-  "IA-02": {"converted": true, "temp_path": "/tmp/IA-2025-0342.tmp.jpg"},
-  "IA-03": {"status": "ok", "phash": "b38e33e05c686733"},  // oder {"status": "duplicate", "match_type": "exact|similar", "original_debug_key": "MA-2026-0001"}
-  "IA-04": {"country": "Schweiz", "city": "Zürich", "suburb": "Altstadt", "provider": "nominatim"},
+  "IA-02": {"status": "ok", "phash": "b38e33e05c686733"},  // oder {"status": "duplicate", "match_type": "exact|similar", "original_debug_key": "MA-2026-0001"}
+  "IA-03": {"country": "Schweiz", "city": "Zürich", "suburb": "Altstadt", "provider": "nominatim"},
+  "IA-04": {"converted": true, "temp_path": "/tmp/IA-2025-0342.tmp.jpg"},
   "IA-05": {"type": "personal_photo", "tags": ["Zürich", "outdoor"], "quality": "gut", "confidence": 0.95},
   "IA-06": {"has_text": false, "text": "", "text_type": "keiner"},
   "IA-07": {"keywords_written": ["Zürich", "outdoor", "personal_photo"], "tags_count": 3, "file_size": 2458901, "file_hash": "a1b2c3..."},
@@ -280,9 +280,9 @@ Jeder Verarbeitungsschritt wird mit einem Step-Code geloggt:
 | Code | Schritt |
 |---|---|
 | IA-01 | EXIF auslesen |
-| IA-02 | Formatkonvertierung (HEIC/DNG/RAW/GIF → JPEG) |
-| IA-03 | Duplikaterkennung (SHA256 + pHash) |
-| IA-04 | Geocoding |
+| IA-02 | Duplikaterkennung (SHA256 + pHash) |
+| IA-03 | Geocoding |
+| IA-04 | Temp. Konvertierung für KI (HEIC/DNG/RAW/GIF → JPEG) |
 | IA-05 | KI-Analyse |
 | IA-06 | OCR (Texterkennung) |
 | IA-07 | EXIF Tags schreiben |
@@ -295,7 +295,9 @@ Log-Format pro Datei:
 ```
 2025-03-20 14:32:01 | IA-2025-0342 | IMG_1234.heic
   [IA-01] EXIF auslesen        ✓ Make=Apple, DateTimeOriginal=2024-06-12
-  [IA-02] Formatkonvertierung  ✓ temp JPEG erstellt
+  [IA-02] Duplikaterkennung    ✓ OK
+  [IA-03] Geocoding            ✓ Zürich, Schweiz
+  [IA-04] Konvertierung für KI ✓ temp JPEG erstellt
   [IA-05] KI-Analyse           ✗ FEHLER: LM Studio Timeout nach 30s
   [IA-10] Cleanup temp JPEG    ✓
   → Datei nach /inbox/error/ verschoben

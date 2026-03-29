@@ -89,9 +89,9 @@ async def execute(job, session) -> dict:
     api_key = await config_manager.get("ai.api_key", "not-needed")
     system_prompt = await config_manager.get("ai.prompt", DEFAULT_SYSTEM_PROMPT)
 
-    # Use pre-converted temp file from IA-02 if available
+    # Use pre-converted temp file from IA-04 if available
     filepath = job.original_path
-    convert_result = (job.step_result or {}).get("IA-02", {})
+    convert_result = (job.step_result or {}).get("IA-04", {})
     image_path = convert_result.get("temp_path") or filepath
 
     with open(image_path, "rb") as f:
@@ -104,7 +104,7 @@ async def execute(job, session) -> dict:
     # ── Alle Metadaten sammeln ──────────────────────────────────────
     step_results = job.step_result or {}
     exif = step_results.get("IA-01", {})
-    geo = step_results.get("IA-04", {})
+    geo = step_results.get("IA-03", {})
     filename = os.path.basename(job.original_path)
     file_size_kb = os.path.getsize(filepath) / 1024
 
@@ -129,7 +129,7 @@ async def execute(job, session) -> dict:
     else:
         context_parts.append("Keine EXIF-Daten vorhanden (typisch für Messenger-Bilder)")
 
-    # Geocoding-Daten (IA-04 lief vor uns)
+    # Geocoding-Daten (IA-03 lief vor uns)
     if geo.get("country"):
         location_parts = []
         if geo.get("suburb"):
