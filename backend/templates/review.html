@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}{{ t.review.title }} — MediaAssistant{% endblock %}
+{% block content %}
+<div class="dup-header">
+    <h1>{{ t.review.title }}</h1>
+    <div class="dup-header-actions">
+        <span class="dup-count">{{ total }} {{ t.review.files if total != 1 else t.review.file }}</span>
+        {% if total > 0 %}
+        <form method="post" action="/api/review/classify-all" class="inline-form"
+              onsubmit="return confirm('{{ t.review.batch_confirm }}')">
+            <input type="hidden" name="category" value="sourceless">
+            <button type="submit" class="btn btn-small btn-secondary">{{ t.review.batch_sourceless }}</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if items %}
+{% for item in items %}
+<div class="dup-group">
+    <div class="dup-group-header">
+        <span class="dup-group-title">{{ item.debug_key }}</span>
+        {% if item.ai_type %}
+        <span class="match-badge match-similar">KI: {{ item.ai_type }}</span>
+        {% endif %}
+        {% if item.ai_confidence %}
+        <span class="match-badge match-exact">{{ (item.ai_confidence * 100) | round(0) | int }}%</span>
+        {% endif %}
+        <span class="dup-group-count">{{ item.file_size_kb }} KB</span>
+    </div>
+
+    <div class="review-content">
+        <div class="review-thumb">
+            {% if item.exists and not item.is_video %}
+            <img src="/api/review/thumbnail/{{ item.job_id }}" alt="{{ item.filename }}" loading="lazy">
+            {% elif item.is_video %}
+            <div class="dup-thumb-missing">Video</div>
+            {% else %}
+            <div class="dup-thumb-missing">{{ t.review.not_found }}</div>
+            {% endif %}
+        </div>
+
+        <div class="review-details">
+            <div class="dup-filename" title="{{ item.filename }}">{{ item.filename }}</div>
+
+            {% if item.ai_description %}
+            <div class="dup-description">{{ item.ai_description }}</div>
+            {% endif %}
+
+            <div class="dup-props">
+                <div class="dup-prop">
+                    <span class="dup-prop-label">{{ t.review.size }}</span>
+                    <span>{{ item.file_size_kb }} KB</span>
+                </div>
+                {% if item.exif_date %}
+                <div class="dup-prop">
+                    <span class="dup-prop-label">{{ t.review.date }}</span>
+                    <span>{{ item.exif_date }}</span>
+                </div>
+                {% endif %}
+                {% if item.exif_camera %}
+                <div class="dup-prop">
+                    <span class="dup-prop-label">{{ t.review.camera }}</span>
+                    <span>{{ item.exif_camera }}</span>
+                </div>
+                {% endif %}
+                <div class="dup-prop">
+                    <span class="dup-prop-label">EXIF</span>
+                    <span>{% if item.has_exif %}{{ t.review.yes }}{% else %}{{ t.review.no }}{% endif %}</span>
+                </div>
+                <div class="dup-prop">
+                    <span class="dup-prop-label">GPS</span>
+                    <span>{% if item.has_gps %}{{ item.location or t.review.yes }}{% else %}{{ t.review.no }}{% endif %}</span>
+                </div>
+                {% if item.ai_people > 0 %}
+                <div class="dup-prop">
+                    <span class="dup-prop-label">{{ t.review.people }}</span>
+                    <span>{{ item.ai_people }}</span>
+                </div>
+                {% endif %}
+                {% if item.ai_quality %}
+                <div class="dup-prop">
+                    <span class="dup-prop-label">{{ t.review.quality }}</span>
+                    <span>{{ item.ai_quality }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if item.ai_tags %}
+            <div class="dup-tags">
+                {% for tag in item.ai_tags %}
+                <span class="dup-tag">{{ tag }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="dup-path" title="{{ item.filepath }}">{{ item.filepath }}</div>
+        </div>
+
+        <div class="review-actions">
+            <span class="review-actions-label">{{ t.review.classify_as }}</span>
+            <form method="post" action="/api/review/classify" class="inline-form">
+                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
+                <input type="hidden" name="category" value="photo">
+                <button type="submit" class="btn btn-small btn-success">{{ t.review.photo }}</button>
+            </form>
+            {% if item.is_video %}
+            <form method="post" action="/api/review/classify" class="inline-form">
+                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
+                <input type="hidden" name="category" value="video">
+                <button type="submit" class="btn btn-small btn-info">{{ t.review.video }}</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/api/review/classify" class="inline-form">
+                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
+                <input type="hidden" name="category" value="screenshot">
+                <button type="submit" class="btn btn-small btn-warning">{{ t.review.screenshot }}</button>
+            </form>
+            <form method="post" action="/api/review/classify" class="inline-form">
+                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
+                <input type="hidden" name="category" value="sourceless">
+                <button type="submit" class="btn btn-small btn-danger">{{ t.review.sourceless }}</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<p class="section-note">{{ t.review.no_items }}</p>
+{% endif %}
+{% endblock %}
