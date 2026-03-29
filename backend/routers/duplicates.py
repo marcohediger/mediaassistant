@@ -148,8 +148,8 @@ def _resolve_filepath(job) -> str:
     for path in [job.target_path, job.original_path]:
         if path and os.path.exists(path):
             return path
-    # Fallback: IA-02 converted temp file
-    convert_result = (job.step_result or {}).get("IA-02", {})
+    # Fallback: IA-04 converted temp file
+    convert_result = (job.step_result or {}).get("IA-04", {})
     temp_path = convert_result.get("temp_path")
     if temp_path and os.path.exists(temp_path):
         return temp_path
@@ -159,7 +159,7 @@ def _resolve_filepath(job) -> str:
 async def _build_member(job, session) -> dict:
     """Build a member dict for a single job — all info read directly from the file."""
     filepath = _resolve_filepath(job)
-    dup_info = (job.step_result or {}).get("IA-03", {})
+    dup_info = (job.step_result or {}).get("IA-02", {})
     is_dup = dup_info.get("status") == "duplicate"
     exists = os.path.exists(filepath)
     img_info = await asyncio.to_thread(_get_image_info, filepath) if exists else {}
@@ -204,7 +204,7 @@ async def _build_duplicate_groups() -> list[dict]:
         # Build links: each duplicate is linked to its original
         links = []
         for job in dup_jobs:
-            dup_info = (job.step_result or {}).get("IA-03", {})
+            dup_info = (job.step_result or {}).get("IA-02", {})
             original_key = dup_info.get("original_debug_key")
             if original_key:
                 links.append((job.debug_key, original_key))
@@ -324,7 +324,7 @@ async def keep_file(request: Request):
 
         links = []
         for dup in all_dups:
-            dup_info = (dup.step_result or {}).get("IA-03", {})
+            dup_info = (dup.step_result or {}).get("IA-02", {})
             orig_key = dup_info.get("original_debug_key")
             if orig_key:
                 links.append((dup.debug_key, orig_key))
@@ -460,7 +460,7 @@ async def batch_clean():
         dups = result.scalars().all()
 
         for dup in dups:
-            dup_info = (dup.step_result or {}).get("IA-03", {})
+            dup_info = (dup.step_result or {}).get("IA-02", {})
             if dup_info.get("match_type") != "exact":
                 continue
 

@@ -6,7 +6,7 @@ TEMP_DIR = os.path.join(os.path.dirname(os.environ.get("DATABASE_PATH", "/app/da
 
 
 async def execute(job, session) -> dict:
-    """IA-02: Formatkonvertierung — HEIC/DNG/RAW in temp JPEG für KI-Analyse."""
+    """IA-04: Temp. Konvertierung für KI — HEIC/DNG/RAW in temp JPEG."""
     filepath = job.original_path
     ext = os.path.splitext(filepath)[1].lower()
 

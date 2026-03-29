@@ -62,7 +62,7 @@ def _resolve_filepath(job) -> str:
     for path in [job.target_path, job.original_path]:
         if path and os.path.exists(path):
             return path
-    convert_result = (job.step_result or {}).get("IA-02", {})
+    convert_result = (job.step_result or {}).get("IA-04", {})
     temp_path = convert_result.get("temp_path")
     if temp_path and os.path.exists(temp_path):
         return temp_path
@@ -95,7 +95,7 @@ async def _build_review_items() -> list[dict]:
             step_results = job.step_result or {}
             exif = step_results.get("IA-01", {})
             ai = step_results.get("IA-05", {})
-            geo = step_results.get("IA-04", {})
+            geo = step_results.get("IA-03", {})
             sort = step_results.get("IA-08", {})
 
             file_size_kb = 0
@@ -201,7 +201,7 @@ async def classify_file(request: Request):
 
         step_results = job.step_result or {}
         exif = step_results.get("IA-01", {})
-        geo = step_results.get("IA-04", {})
+        geo = step_results.get("IA-03", {})
         immich_asset_id = job.immich_asset_id or ""
         target = job.target_path or ""
         is_immich = target.startswith("immich:") or bool(immich_asset_id)

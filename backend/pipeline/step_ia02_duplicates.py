@@ -1,5 +1,7 @@
 import asyncio
+import io
 import os
+import subprocess
 from datetime import datetime
 
 import imagehash
@@ -13,10 +15,15 @@ from system_logger import log_info, log_warning
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif", ".webp", ".gif", ".bmp", ".dng", ".cr2", ".nef", ".arw"}
+RAW_EXTENSIONS = {".dng", ".cr2", ".nef", ".arw"}
 
 
 def _compute_phash(filepath: str) -> str | None:
-    """Compute perceptual hash for an image file."""
+    """Compute perceptual hash for an image file.
+
+    For RAW formats (DNG, CR2, NEF, ARW) that Pillow cannot open natively,
+    the embedded PreviewImage is extracted via ExifTool and used instead.
+    """
     ext = os.path.splitext(filepath)[1].lower()
     if ext not in IMAGE_EXTENSIONS:
         return None
@@ -24,7 +31,25 @@ def _compute_phash(filepath: str) -> str | None:
         img = Image.open(filepath)
         return str(imagehash.phash(img))
     except Exception:
+        # Fallback for RAW formats: extract preview via ExifTool
+        if ext in RAW_EXTENSIONS:
+            return _phash_from_preview(filepath)
         return None
+
+
+def _phash_from_preview(filepath: str) -> str | None:
+    """Extract embedded PreviewImage via ExifTool and compute pHash from it."""
+    try:
+        result = subprocess.run(
+            ["exiftool", "-b", "-PreviewImage", filepath],
+            capture_output=True, timeout=15,
+        )
+        if result.stdout:
+            img = Image.open(io.BytesIO(result.stdout))
+            return str(imagehash.phash(img))
+    except Exception:
+        pass
+    return None
 
 
 async def _file_exists(job_entry) -> bool:
@@ -38,13 +63,11 @@ async def _file_exists(job_entry) -> bool:
 
 
 async def execute(job, session) -> dict:
-    """IA-03: Duplikat-Erkennung — SHA256 (exakt) + pHash (ähnlich)."""
+    """IA-02: Duplikat-Erkennung — SHA256 (exakt) + pHash (ähnlich)."""
     if not await config_manager.is_module_enabled("duplikat_erkennung"):
         return {"status": "skipped", "reason": "module disabled"}
 
-    # Use temp file from IA-02 if available (for pHash of converted formats)
-    convert_result = (job.step_result or {}).get("IA-02", {})
-    image_path = convert_result.get("temp_path") or job.original_path
+    image_path = job.original_path
 
     # --- Stage 1: SHA256 exact match ---
     file_hash = job.file_hash
@@ -67,7 +90,7 @@ async def execute(job, session) -> dict:
                     "original_path": existing.target_path or existing.original_path,
                 }
             else:
-                await log_warning("IA-03", f"Orphaned job {existing.debug_key}: file missing, skipping duplicate match")
+                await log_warning("IA-02", f"Orphaned job {existing.debug_key}: file missing, skipping duplicate match")
 
     # --- Stage 2: Perceptual hash (pHash) similarity ---
     phash_str = await asyncio.to_thread(_compute_phash, image_path)
@@ -106,7 +129,7 @@ async def execute(job, session) -> dict:
                         "original_path": candidate.target_path or candidate.original_path,
                     }
                 else:
-                    await log_warning("IA-03", f"Orphaned job {candidate.debug_key}: file missing, skipping duplicate match")
+                    await log_warning("IA-02", f"Orphaned job {candidate.debug_key}: file missing, skipping duplicate match")
 
 
     return {"status": "ok", "phash": phash_str}
@@ -123,7 +146,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     # Dry-run: detect but don't move
     if job.dry_run:
         job.status = "duplicate"
-        await log_info("IA-03", f"{job.debug_key} [dry-run] {desc}")
+        await log_info("IA-02", f"{job.debug_key} [dry-run] {desc}")
         return
 
     base_path = await config_manager.get("library.base_path", "/bibliothek")
@@ -160,7 +183,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     job.status = "duplicate"
     job.target_path = dup_path
 
-    await log_info("IA-03", f"{job.debug_key} {desc}")
+    await log_info("IA-02", f"{job.debug_key} {desc}")
 
 
 

@@ -5,7 +5,7 @@ Automated media processing: Photos and videos are detected, analyzed, tagged, an
 ## How it works
 
 ```
-Inbox  →  EXIF  →  Convert  →  Duplicates  →  AI  →  OCR  →  Geocoding  →  Tags  →  Sort  →  Notify  →  Library
+Inbox  →  EXIF  →  Duplicates  →  Geocoding  →  Convert  →  AI  →  OCR  →  Tags  →  Sort  →  Notify  →  Library
 ```
 
 New files in inbox directories are automatically detected and processed through an 11-step pipeline:
@@ -13,9 +13,9 @@ New files in inbox directories are automatically detected and processed through 
 | Step | Name | Description |
 |------|------|-------------|
 | IA-01 | Read EXIF | Extract metadata via ExifTool |
-| IA-02 | Format Conversion | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis |
-| IA-03 | Duplicate Detection | SHA256 (exact) + pHash (similar), incl. Immich-uploaded files |
-| IA-04 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
+| IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar), incl. Immich-uploaded files |
+| IA-03 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
+| IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis |
 | IA-05 | AI Analysis | Analyze image (type, tags, description, mood) with all collected metadata |
 | IA-06 | OCR | Text recognition (screenshots, documents) |
 | IA-07 | Write EXIF Tags | Write tags, description, geocoding and folder-tags back to file |

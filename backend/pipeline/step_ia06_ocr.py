@@ -44,9 +44,9 @@ async def execute(job, session) -> dict:
 
     api_key = await config_manager.get("ai.api_key", "not-needed")
 
-    # Use pre-converted temp file from IA-02 if available
+    # Use pre-converted temp file from IA-04 if available
     filepath = job.original_path
-    convert_result = (job.step_result or {}).get("IA-02", {})
+    convert_result = (job.step_result or {}).get("IA-04", {})
     image_path = convert_result.get("temp_path") or filepath
 
     with open(image_path, "rb") as f:
