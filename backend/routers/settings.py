@@ -51,6 +51,9 @@ async def _get_cfg() -> dict:
         "path_duplicate": await config_manager.get("library.path_duplicate", "error/duplicates/"),
         "immich_url": await config_manager.get("immich.url", ""),
         "immich_poll_enabled": await config_manager.get("immich.poll_enabled", False),
+        "video_thumbnail_enabled": await config_manager.get("video.thumbnail_enabled", False),
+        "video_thumbnail_frames": await config_manager.get("video.thumbnail_frames", 8),
+        "video_thumbnail_scale": await config_manager.get("video.thumbnail_scale", 50),
     }
 
 
@@ -159,6 +162,21 @@ async def save_settings(request: Request):
     if form.get("immich_api_key"):
         await config_manager.set("immich.api_key", form["immich_api_key"], encrypted=True)
     await config_manager.set("immich.poll_enabled", "immich_poll_enabled" in form)
+
+    # Video Thumbnails
+    await config_manager.set("video.thumbnail_enabled", "video_thumbnail_enabled" in form)
+    try:
+        frames = int(form.get("video_thumbnail_frames", 8))
+        frames = max(1, min(frames, 50))
+    except ValueError:
+        frames = 8
+    await config_manager.set("video.thumbnail_frames", frames)
+    try:
+        scale = int(form.get("video_thumbnail_scale", 50))
+        scale = max(10, min(scale, 100))
+    except ValueError:
+        scale = 50
+    await config_manager.set("video.thumbnail_scale", scale)
 
     # Filewatcher
     try:

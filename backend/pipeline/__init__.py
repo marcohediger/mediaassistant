@@ -123,7 +123,21 @@ async def run_pipeline(job_id: int):
                 await session.commit()
 
         if not pipeline_failed and not duplicate_detected:
-            job.status = "done"
+            # Check if any non-critical steps had errors
+            has_step_errors = any(
+                isinstance(r, dict) and r.get("status") == "error"
+                for r in existing_results.values()
+            )
+            if has_step_errors:
+                job.status = "done"
+                # Collect error summaries
+                error_steps = [
+                    code for code, r in existing_results.items()
+                    if isinstance(r, dict) and r.get("status") == "error"
+                ]
+                job.error_message = f"Warnungen in: {', '.join(error_steps)}"
+            else:
+                job.status = "done"
             job.completed_at = datetime.now()
             await session.commit()
         elif duplicate_detected:

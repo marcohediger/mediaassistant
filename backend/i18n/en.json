@@ -220,7 +220,16 @@
     "language": "Language",
     "theme": "Theme",
     "theme_dark": "Dark",
-    "theme_light": "Light"
+    "theme_light": "Light",
+    "video_thumbnails": "Video Thumbnails",
+    "video_thumbnails_desc": "Extract frames from videos for AI analysis (requires ffmpeg)",
+    "video_thumbnail_enabled": "Video thumbnails enabled",
+    "video_thumbnail_frames": "Number of frames",
+    "video_thumbnail_frames_hint": "Evenly distributed across video duration (1–50). Lower resolution = more frames possible.",
+    "video_thumbnail_scale": "Scale",
+    "video_thumbnail_scale_hint": "Percent of original resolution. 50% at 4K = 1080p, at 1080p = 540p.",
+    "resolution_default": "Default",
+    "resolution_original": "Original"
   },
   "modules": {
     "ki_analyse": "AI Analysis",

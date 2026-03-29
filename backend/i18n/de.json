@@ -220,7 +220,16 @@
     "language": "Sprache",
     "theme": "Theme",
     "theme_dark": "Dunkel",
-    "theme_light": "Hell"
+    "theme_light": "Hell",
+    "video_thumbnails": "Video-Thumbnails",
+    "video_thumbnails_desc": "Frames aus Videos extrahieren für KI-Analyse (benötigt ffmpeg)",
+    "video_thumbnail_enabled": "Video-Thumbnails aktiviert",
+    "video_thumbnail_frames": "Anzahl Frames",
+    "video_thumbnail_frames_hint": "Gleichmässig verteilt über die Videodauer (1–50). Tiefere Auflösung = mehr Frames möglich.",
+    "video_thumbnail_scale": "Skalierung",
+    "video_thumbnail_scale_hint": "Prozent der Original-Auflösung. 50% bei 4K = 1080p, bei 1080p = 540p.",
+    "resolution_default": "Standard",
+    "resolution_original": "Original"
   },
   "modules": {
     "ki_analyse": "KI-Analyse",

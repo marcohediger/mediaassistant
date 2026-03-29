@@ -59,13 +59,55 @@ def _scan_directory(path: str, min_age: float) -> list[str]:
     return files
 
 
-def _is_file_stable(filepath: str, expected_size: int, wait: float = 2.0) -> bool:
-    """Check if file size is stable (not still being copied)."""
+def _is_file_stable(filepath: str, expected_size: int) -> bool:
+    """Prüft ob eine Datei vollständig und lesbar ist.
+
+    Bei Videos: ffprobe muss Duration lesen können (moov-Atom am Dateiende).
+    Bei Bildern: exiftool muss die Datei parsen können.
+    Zusätzlich: Dateigrösse darf sich zwischen zwei Checks nicht ändern.
+    """
+    import subprocess
+
     try:
-        time.sleep(wait)
-        current_size = os.path.getsize(filepath)
-        return current_size == expected_size and current_size > 0
-    except OSError:
+        ext = os.path.splitext(filepath)[1].lower()
+
+        # Schritt 1: Grösse prüfen, warten, nochmal prüfen
+        size1 = os.path.getsize(filepath)
+        time.sleep(5)
+        if not os.path.exists(filepath):
+            return False
+        size2 = os.path.getsize(filepath)
+        if size1 != size2 or size1 == 0:
+            return False
+
+        # Schritt 2: Bei Videos — ffprobe MUSS duration lesen können
+        # Unvollständige MP4/MOV haben kein moov-Atom → keine Duration
+        if ext in VIDEO_EXTENSIONS:
+            result = subprocess.run(
+                ["ffprobe", "-v", "quiet",
+                 "-show_entries", "format=duration",
+                 "-of", "csv=p=0", filepath],
+                capture_output=True, text=True, timeout=30
+            )
+            duration = result.stdout.strip()
+            if result.returncode != 0 or not duration:
+                return False
+            # Duration muss eine gültige Zahl sein
+            try:
+                float(duration)
+            except ValueError:
+                return False
+        else:
+            # Bei Bildern: exiftool muss die Datei parsen können
+            result = subprocess.run(
+                ["exiftool", "-q", "-q", filepath],
+                capture_output=True, timeout=15
+            )
+            if result.returncode != 0:
+                return False
+
+        return True
+    except Exception:
         return False
 
 
@@ -80,7 +122,7 @@ async def _scan_and_process():
         return
 
     interval = await config_manager.get("filewatcher.interval", 5)
-    min_age = max(float(interval), 2.0)
+    min_age = max(float(interval), 10.0)
 
     for inbox in inboxes:
         if not os.path.isdir(inbox.path):
@@ -91,7 +133,6 @@ async def _scan_and_process():
             existing = await session.execute(
                 select(Job.original_path).where(
                     Job.original_path.like(f"{inbox.path}%"),
-                    Job.status.in_(("queued", "processing")),
                 )
             )
             known_paths = {row[0] for row in existing.all()}
@@ -105,10 +146,11 @@ async def _scan_and_process():
             if filepath in known_paths:
                 continue
 
-            # Stability check: wait and verify file size hasn't changed
+            # Stability check: wartet bis Dateigrösse + mtime sich nicht mehr ändern
             stable = await asyncio.to_thread(_is_file_stable, filepath, file_size)
             if not stable:
-                await log_info("filewatcher", f"Skipped (still copying): {os.path.basename(filepath)}")
+                size_mb = file_size / (1024 * 1024)
+                await log_info("filewatcher", f"Skipped (unstable): {os.path.basename(filepath)}", f"Size: {size_mb:.1f} MB")
                 continue
 
             filename = os.path.basename(filepath)
