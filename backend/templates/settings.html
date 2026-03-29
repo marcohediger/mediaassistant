@@ -145,6 +145,43 @@
     </div>
 </div>
 
+<!-- Video Thumbnails -->
+<div class="settings-section">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.video_thumbnails }}</h2>
+            <span class="section-desc">{{ t.settings.video_thumbnails_desc }}</span>
+        </div>
+        <label class="switch">
+            <input type="checkbox" name="video_thumbnail_enabled" value="1" {{ 'checked' if cfg.video_thumbnail_enabled else '' }}>
+            <span class="switch-slider"></span>
+        </label>
+    </div>
+    <div class="section-body">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="video_thumbnail_frames">{{ t.settings.video_thumbnail_frames }}</label>
+                <input type="range" id="video_thumbnail_frames" name="video_thumbnail_frames"
+                       value="{{ cfg.video_thumbnail_frames }}" min="1" max="50" step="1"
+                       oninput="document.getElementById('frames_val').textContent=this.value"
+                       style="max-width: 300px;">
+                <span id="frames_val" style="font-weight: bold; margin-left: 0.5rem;">{{ cfg.video_thumbnail_frames }}</span>
+                <small style="display: block; margin-top: 0.25rem;">{{ t.settings.video_thumbnail_frames_hint }}</small>
+            </div>
+            <div class="form-group">
+                <label for="video_thumbnail_scale">{{ t.settings.video_thumbnail_scale }}</label>
+                <select id="video_thumbnail_scale" name="video_thumbnail_scale">
+                    <option value="25" {{ 'selected' if cfg.video_thumbnail_scale == 25 else '' }}>25%</option>
+                    <option value="50" {{ 'selected' if cfg.video_thumbnail_scale == 50 else '' }}>50% — {{ t.settings.resolution_default }}</option>
+                    <option value="75" {{ 'selected' if cfg.video_thumbnail_scale == 75 else '' }}>75%</option>
+                    <option value="100" {{ 'selected' if cfg.video_thumbnail_scale == 100 else '' }}>100% ({{ t.settings.resolution_original }})</option>
+                </select>
+                <small>{{ t.settings.video_thumbnail_scale_hint }}</small>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Geocoding -->
 <div class="settings-section">
     <div class="section-header">

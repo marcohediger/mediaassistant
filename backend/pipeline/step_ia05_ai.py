@@ -89,17 +89,28 @@ async def execute(job, session) -> dict:
     api_key = await config_manager.get("ai.api_key", "not-needed")
     system_prompt = await config_manager.get("ai.prompt", DEFAULT_SYSTEM_PROMPT)
 
-    # Use pre-converted temp file from IA-04 if available
+    # Use pre-converted temp file(s) from IA-04 if available
     filepath = job.original_path
     convert_result = (job.step_result or {}).get("IA-04", {})
-    image_path = convert_result.get("temp_path") or filepath
 
-    with open(image_path, "rb") as f:
-        image_data = base64.b64encode(f.read()).decode("utf-8")
+    # Multi-frame support for videos
+    image_paths = convert_result.get("temp_paths") or []
+    if not image_paths:
+        single = convert_result.get("temp_path") or filepath
+        image_paths = [single]
 
-    ext = os.path.splitext(image_path)[1].lower()
-    mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
-    mime_type = mime_map.get(ext, "image/jpeg")
+    # Filter to existing files
+    image_paths = [p for p in image_paths if os.path.exists(p)]
+    if not image_paths:
+        image_paths = [filepath]
+
+    # Encode all images
+    image_data_list = []
+    for img_path in image_paths:
+        with open(img_path, "rb") as f:
+            image_data_list.append(base64.b64encode(f.read()).decode("utf-8"))
+
+    mime_type = "image/jpeg"
 
     # ── Alle Metadaten sammeln ──────────────────────────────────────
     step_results = job.step_result or {}
@@ -128,6 +139,18 @@ async def execute(job, session) -> dict:
             context_parts.append(f"Software: {exif['software']}")
     else:
         context_parts.append("Keine EXIF-Daten vorhanden (typisch für Messenger-Bilder)")
+
+    # Video-spezifische Metadaten
+    if exif.get("duration"):
+        context_parts.append(f"Medientyp: Video")
+        if exif.get("duration_formatted"):
+            context_parts.append(f"Dauer: {exif['duration_formatted']}")
+        if exif.get("video_codec"):
+            context_parts.append(f"Codec: {exif['video_codec']}")
+        if exif.get("video_frame_rate"):
+            context_parts.append(f"Framerate: {exif['video_frame_rate']} fps")
+        if exif.get("video_bitrate_kbps"):
+            context_parts.append(f"Bitrate: {exif['video_bitrate_kbps']} kbps")
 
     # Geocoding-Daten (IA-03 lief vor uns)
     if geo.get("country"):
@@ -159,21 +182,36 @@ async def execute(job, session) -> dict:
     metadata_context = "\n".join(context_parts)
 
     # ── API-Aufruf ──────────────────────────────────────────────────
-    user_message = f"""Analysiere dieses Bild.
+    is_video = len(image_data_list) > 1
+    if is_video:
+        user_message = f"""Analysiere dieses Video anhand von {len(image_data_list)} extrahierten Frames.
+
+Gesammelte Metadaten:
+{metadata_context}
+
+Nutze diese Informationen zusammen mit den Frames für deine Klassifikation.
+Beachte: Die Frames sind gleichmässig über die Videodauer verteilt."""
+    else:
+        user_message = f"""Analysiere dieses Bild.
 
 Gesammelte Metadaten:
 {metadata_context}
 
 Nutze diese Informationen zusammen mit dem Bildinhalt für deine Klassifikation."""
 
+    # Build content array with text + image(s)
+    content_parts = [{"type": "text", "text": user_message}]
+    for img_data in image_data_list:
+        content_parts.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{img_data}"}
+        })
+
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": [
-                {"type": "text", "text": user_message},
-                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
-            ]}
+            {"role": "user", "content": content_parts}
         ],
         "temperature": 0.3,
         "max_tokens": 500,

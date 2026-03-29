@@ -2,12 +2,11 @@ import asyncio
 import os
 import subprocess
 
+from config import config_manager
+
 TEMP_DIR = os.path.join(os.path.dirname(os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")), "tmp")
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp"}
-
-# Video-Thumbnail für KI-Analyse (deaktiviert — für spätere Aktivierung vorbereitet)
-VIDEO_THUMBNAIL_ENABLED = False
 
 
 async def execute(job, session) -> dict:
@@ -43,49 +42,115 @@ async def execute(job, session) -> dict:
                 capture_output=True, timeout=30, check=True
             )
         elif ext in VIDEO_EXTENSIONS:
-            if not VIDEO_THUMBNAIL_ENABLED:
+            thumbnail_enabled = await config_manager.get("video.thumbnail_enabled", False)
+            if not thumbnail_enabled:
                 return {"converted": False, "reason": "video thumbnail disabled"}
-            await _extract_video_thumbnail(filepath, temp_path, job)
+            num_frames = await config_manager.get("video.thumbnail_frames", 8)
+            num_frames = max(1, min(int(num_frames), 50))
+            scale_pct = await config_manager.get("video.thumbnail_scale", 50)
+            paths = await _extract_video_frames(filepath, job, num_frames, int(scale_pct))
+            if paths:
+                return {
+                    "converted": True,
+                    "temp_path": paths[0],
+                    "temp_paths": paths,
+                    "video_frames": len(paths),
+                }
+            return {"converted": False, "reason": "video frame extraction produced no output"}
         else:
             return {"converted": False, "reason": f"no conversion for {ext}"}
 
         if os.path.exists(temp_path):
             return {"converted": True, "temp_path": temp_path}
     except Exception as e:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        # Cleanup temp files on error
+        for f in _glob_temp_files(job.debug_key):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
         raise RuntimeError(f"Formatkonvertierung fehlgeschlagen: {e}")
 
     return {"converted": False, "reason": "conversion produced no output"}
 
 
-async def _extract_video_thumbnail(video_path: str, output_path: str, job) -> None:
-    """Extrahiere ein repräsentatives Frame aus einem Video via ffmpeg.
+def _glob_temp_files(debug_key: str) -> list[str]:
+    """Find all temp files for a debug key (single + multi-frame)."""
+    files = []
+    base = os.path.join(TEMP_DIR, f"{debug_key}.jpg")
+    if os.path.exists(base):
+        files.append(base)
+    for i in range(1, 51):
+        p = os.path.join(TEMP_DIR, f"{debug_key}_{i:02d}.jpg")
+        if os.path.exists(p):
+            files.append(p)
+    return files
 
-    Strategie: Frame bei 10% der Videodauer (vermeidet schwarze Intros).
-    Fallback: erstes Frame bei 1 Sekunde.
+
+async def _extract_video_frames(video_path: str, job, num_frames: int, scale_pct: int = 50) -> list[str]:
+    """Extrahiere N gleichmässig verteilte Frames aus einem Video via ffmpeg.
+
+    Strategie: Frames bei 5%–95% der Videodauer (vermeidet schwarze Intros/Outros).
+    Fallback bei kurzen Videos: ein Frame bei 1 Sekunde.
+    scale_pct: Skalierung in Prozent der Original-Auflösung (100 = keine Skalierung).
     """
-    # Dauer aus IA-01 step_result lesen
     step_results = job.step_result or {}
     ia01 = step_results.get("IA-01", {})
-    duration = ia01.get("duration", 0)
+    duration = float(ia01.get("duration", 0) or 0)
 
-    # Zeitpunkt: 10% der Dauer, mindestens 1s, maximal 30s
-    if duration and float(duration) > 2:
-        seek_time = min(float(duration) * 0.1, 30.0)
-    else:
-        seek_time = 1.0
+    paths = []
+
+    if duration < 3:
+        # Kurzes Video: nur 1 Frame bei 1s
+        path = os.path.join(TEMP_DIR, f"{job.debug_key}_01.jpg")
+        await _ffmpeg_extract_frame(video_path, 1.0, path, scale_pct)
+        if os.path.exists(path):
+            paths.append(path)
+        return paths
+
+    # N Frames gleichmässig verteilt zwischen 5% und 95% der Dauer
+    start_pct = 0.05
+    end_pct = 0.95
+    for i in range(num_frames):
+        if num_frames == 1:
+            pct = 0.5
+        else:
+            pct = start_pct + (end_pct - start_pct) * i / (num_frames - 1)
+        seek_time = round(duration * pct, 2)
+        path = os.path.join(TEMP_DIR, f"{job.debug_key}_{i + 1:02d}.jpg")
+        await _ffmpeg_extract_frame(video_path, seek_time, path, scale_pct)
+        if os.path.exists(path):
+            paths.append(path)
+
+    return paths
+
+
+async def _ffmpeg_extract_frame(video_path: str, seek_time: float, output_path: str, scale_pct: int = 50) -> None:
+    """Extrahiere ein einzelnes Frame via ffmpeg, optional skaliert.
+
+    scale_pct: Prozent der Original-Auflösung (100 = Original, 50 = halbe Grösse).
+    Funktioniert korrekt für jedes Seitenverhältnis (Landscape, Portrait, Quadrat etc.).
+    """
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(seek_time),
+        "-i", video_path,
+        "-vframes", "1",
+    ]
+
+    # Prozentuale Skalierung: iw*pct/100 × ih*pct/100, gerade Pixelwerte
+    if scale_pct and 0 < scale_pct < 100:
+        factor = scale_pct / 100.0
+        cmd += [
+            "-vf",
+            f"scale='trunc(iw*{factor}/2)*2':'trunc(ih*{factor}/2)*2'"
+        ]
+
+    cmd += ["-q:v", "2", output_path]
 
     await asyncio.to_thread(
         subprocess.run,
-        [
-            "ffmpeg", "-y",
-            "-ss", str(round(seek_time, 2)),
-            "-i", video_path,
-            "-vframes", "1",
-            "-q:v", "2",
-            output_path,
-        ],
+        cmd,
         capture_output=True, timeout=30, check=True
     )
 

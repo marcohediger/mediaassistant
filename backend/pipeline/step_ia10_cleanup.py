@@ -6,12 +6,17 @@ async def execute(job, session) -> dict:
     step_results = job.step_result or {}
     removed = []
 
-    # Remove temp JPEG from IA-04 (Temp. Konvertierung für KI)
+    # Remove temp JPEG(s) from IA-04 (Temp. Konvertierung für KI)
     convert_result = step_results.get("IA-04", {})
-    temp_path = convert_result.get("temp_path")
-    if temp_path and os.path.exists(temp_path):
-        os.remove(temp_path)
-        removed.append(temp_path)
+    temp_paths = convert_result.get("temp_paths") or []
+    if not temp_paths:
+        single = convert_result.get("temp_path")
+        if single:
+            temp_paths = [single]
+    for temp_path in temp_paths:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+            removed.append(temp_path)
 
     # Remove downloaded file and temp dir from Immich webhook
     if job.immich_asset_id and job.original_path and os.path.exists(job.original_path):
