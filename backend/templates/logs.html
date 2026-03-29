@@ -84,11 +84,21 @@
 
 {% if jobs %}
 <div class="log-table-wrap">
-    <table class="log-table">
+    <table class="log-table" style="table-layout: fixed; width: 100%;">
+        <colgroup>
+            <col style="width: 115px;">
+            <col style="width: 180px;">
+            <col style="width: 70px;">
+            <col style="width: 80px;">
+            <col style="width: 60px;">
+            <col style="width: 120px;">
+            <col>
+            <col style="width: 95px;">
+        </colgroup>
         <thead>
             <tr>
-                <th style="white-space: nowrap; min-width: 120px;">{{ t.logs.debug_key }}</th>
-                <th style="white-space: nowrap; min-width: 180px;">{{ t.logs.file }}</th>
+                <th>{{ t.logs.debug_key }}</th>
+                <th>{{ t.logs.file }}</th>
                 <th>{{ t.logs.source }}</th>
                 <th>{{ t.logs.status }}</th>
                 <th>{{ t.logs.step }}</th>
@@ -101,13 +111,13 @@
             {% for job in jobs %}
             <tr class="log-row log-{{ job.status }}">
                 <td style="white-space: nowrap;"><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
-                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{{ job.filename }}</td>
+                <td style="overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{{ job.filename }}</td>
                 <td>{{ job.source_label or '—' }}</td>
                 <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
                 <td>{{ job.current_step or '—' }}</td>
-                <td class="cell-error" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ job.error_message or '' }}">{{ job.error_message.split('\n')[0] if job.error_message else '' }}</td>
-                <td class="cell-path" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</td>
-                <td>{{ job.updated_at.strftime('%d.%m.%Y %H:%M') if job.updated_at else '—' }}</td>
+                <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ job.error_message or '' }}">{{ job.error_message.split('\n')[0] if job.error_message else '' }}</td>
+                <td style="overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all;" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</td>
+                <td style="white-space: nowrap;">{{ job.updated_at.strftime('%d.%m.%Y %H:%M') if job.updated_at else '—' }}</td>
             </tr>
             {% endfor %}
         </tbody>
