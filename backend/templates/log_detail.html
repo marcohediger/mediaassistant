@@ -2,16 +2,22 @@
 {% block title %}{{ job.debug_key }} — MediaAssistant{% endblock %}
 {% block content %}
 <div class="detail-header" data-page="job-detail" data-debug-key="{{ job.debug_key }}">
-    <a href="/logs" class="btn btn-small btn-secondary">{{ t.job_detail.back }}</a>
+    <a href="/logs?tab=jobs" class="btn btn-small btn-secondary">{{ t.job_detail.back }}</a>
     <h1><code>{{ job.debug_key }}</code></h1>
 </div>
 
 {% set filepath = job.target_path or job.original_path %}
-{% set ext = filepath.rsplit('.', 1)[-1].lower() if filepath and '.' in filepath else '' %}
-{% if ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif') %}
+{% set is_immich = filepath and filepath.startswith('immich:') %}
+{% set immich_asset_id = filepath[7:] if is_immich else '' %}
+{% set ext = filepath.rsplit('.', 1)[-1].lower() if filepath and '.' in filepath and not is_immich else '' %}
+{% if is_immich or ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif') %}
 <div class="detail-section">
     <div class="detail-preview">
+        {% if is_immich %}
+        <img src="/api/thumbnail/immich/{{ immich_asset_id }}" alt="{{ job.filename }}">
+        {% else %}
         <img src="/api/thumbnail/{{ job.id }}" alt="{{ job.filename }}">
+        {% endif %}
     </div>
 </div>
 {% endif %}
