@@ -87,8 +87,8 @@
     <table class="log-table">
         <thead>
             <tr>
-                <th>{{ t.logs.debug_key }}</th>
-                <th>{{ t.logs.file }}</th>
+                <th style="white-space: nowrap; min-width: 120px;">{{ t.logs.debug_key }}</th>
+                <th style="white-space: nowrap; min-width: 180px;">{{ t.logs.file }}</th>
                 <th>{{ t.logs.source }}</th>
                 <th>{{ t.logs.status }}</th>
                 <th>{{ t.logs.step }}</th>
@@ -100,13 +100,13 @@
         <tbody>
             {% for job in jobs %}
             <tr class="log-row log-{{ job.status }}">
-                <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
-                <td>{{ job.filename }}</td>
+                <td style="white-space: nowrap;"><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
+                <td style="white-space: nowrap;">{{ job.filename }}</td>
                 <td>{{ job.source_label or '—' }}</td>
                 <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
                 <td>{{ job.current_step or '—' }}</td>
-                <td class="cell-error" style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ job.error_message or '' }}">{{ job.error_message.split('\n')[0] if job.error_message else '' }}</td>
-                <td class="cell-path" style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</td>
+                <td class="cell-error" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ job.error_message or '' }}">{{ job.error_message.split('\n')[0] if job.error_message else '' }}</td>
+                <td class="cell-path" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</td>
                 <td>{{ job.updated_at.strftime('%d.%m.%Y %H:%M') if job.updated_at else '—' }}</td>
             </tr>
             {% endfor %}
