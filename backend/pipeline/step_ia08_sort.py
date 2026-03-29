@@ -119,6 +119,10 @@ async def execute(job, session) -> dict:
     else:
         category = "video" if is_video else "photo"
 
+    # Unknown → Status "review" setzen für manuelle Klassifikation
+    if category == "unknown":
+        job.status = "review"
+
     # Merge geocoding data into exif for path resolution
     if geo_result.get("country"):
         exif = {**exif, "country": geo_result["country"], "city": geo_result.get("city", "")}

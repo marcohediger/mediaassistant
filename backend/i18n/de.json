@@ -2,6 +2,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "duplicates": "Duplikate",
+    "review": "Review",
     "logs": "Logs",
     "settings": "Einstellungen"
   },
@@ -244,6 +245,27 @@
     "status_auth_failed": "Auth fehlgeschlagen",
     "status_not_found": "nicht gefunden",
     "status_inboxes_active": "{n} Verzeichnis(se) aktiv"
+  },
+  "review": {
+    "title": "Review — Manuelle Klassifikation",
+    "file": "Datei",
+    "files": "Dateien",
+    "no_items": "Keine Dateien zur manuellen Klassifikation.",
+    "not_found": "Nicht gefunden",
+    "classify_as": "Ablage:",
+    "photo": "Foto",
+    "video": "Video",
+    "screenshot": "Screenshot",
+    "sourceless": "Sourceless",
+    "batch_sourceless": "Alle → Sourceless",
+    "batch_confirm": "Alle Review-Dateien als Sourceless klassifizieren?",
+    "size": "Grösse",
+    "date": "Datum",
+    "camera": "Kamera",
+    "people": "Personen",
+    "quality": "Qualität",
+    "yes": "Ja",
+    "no": "Nein"
   },
   "common": {
     "yes": "Ja",
