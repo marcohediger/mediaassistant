@@ -39,7 +39,7 @@ async def execute(job, session) -> dict:
 
     # From OCR — just flag that text was detected (actual text is in UserComment)
     if ocr_result.get("has_text"):
-        keywords.append("ocr")
+        keywords.append("OCR")
 
     # Build description
     description_parts = []
