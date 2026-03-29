@@ -1,5 +1,6 @@
 import asyncio
 import os
+import traceback
 from datetime import datetime
 from sqlalchemy.orm.attributes import flag_modified
 from config import config_manager
@@ -68,7 +69,8 @@ async def run_pipeline(job_id: int):
             except Exception as e:
                 non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}
                 if step_code in non_critical:
-                    await log_warning("pipeline", f"{job.debug_key} {step_code} skipped", str(e))
+                    tb = traceback.format_exc()
+                    await log_warning("pipeline", f"{job.debug_key} {step_code} skipped", f"{e}\n\n{tb}")
                     existing_results[step_code] = {"status": "error", "reason": str(e)}
                     if step_code == "IA-05":
                         existing_results[step_code].update({
@@ -85,13 +87,14 @@ async def run_pipeline(job_id: int):
                     await session.commit()
                     continue
                 # Critical step failed — mark error, then run finalizers
+                tb = traceback.format_exc()
                 job.status = "error"
-                job.error_message = f"[{step_code}] {e}"
-                existing_results[step_code] = {"status": "error", "reason": str(e)}
+                job.error_message = f"[{step_code}] {e}\n\n{tb}"
+                existing_results[step_code] = {"status": "error", "reason": str(e), "traceback": tb}
                 job.step_result = existing_results
                 flag_modified(job, "step_result")
                 await session.commit()
-                await log_error("pipeline", f"{job.debug_key} Error at {step_code}", str(e))
+                await log_error("pipeline", f"{job.debug_key} Error at {step_code}", f"{e}\n\n{tb}")
                 pipeline_failed = True
                 break
 
@@ -112,7 +115,8 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
             except Exception as e:
-                await log_warning("pipeline", f"{job.debug_key} {step_code} übersprungen", str(e))
+                tb = traceback.format_exc()
+                await log_warning("pipeline", f"{job.debug_key} {step_code} übersprungen", f"{e}\n\n{tb}")
                 existing_results[step_code] = {"status": "error", "reason": str(e)}
                 job.step_result = existing_results
                 flag_modified(job, "step_result")

@@ -52,7 +52,7 @@
 {% if job.error_message %}
 <div class="detail-section">
     <h2>{{ t.job_detail.error }}</h2>
-    <div class="alert alert-error">{{ job.error_message }}</div>
+    <div class="alert alert-error" style="white-space: pre-wrap; font-family: monospace; font-size: 0.85rem;">{{ job.error_message }}</div>
     {% if job.status == 'error' %}
     <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
         <form method="post" action="/api/job/{{ job.debug_key }}/retry">
