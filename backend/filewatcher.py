@@ -9,7 +9,7 @@ from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
 from models import Job, InboxDirectory
-from system_logger import log_error, log_info
+from system_logger import log_error, log_info, log_warning
 from pipeline import run_pipeline
 
 logger = logging.getLogger("mediaassistant.filewatcher")
@@ -60,6 +60,10 @@ def _scan_directory(path: str, min_age: float) -> list[str]:
     except PermissionError:
         pass
     return files
+
+
+# Maximum file size: 10 GB — prevents OOM from excessively large files
+MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
 
 
 def _is_file_stable(filepath: str, expected_size: int, wait: float = 2.0) -> bool:
@@ -142,6 +146,13 @@ async def _scan_and_process():
                 size_mb = file_size / (1024 * 1024)
                 await log_info("filewatcher", f"Skipped (unstable): {os.path.basename(filepath)}", f"Size: {size_mb:.1f} MB")
                 logger.info(f"Skipped (unstable): {os.path.basename(filepath)} ({size_mb:.1f} MB)")
+                continue
+
+            # File size limit — prevent OOM from excessively large files
+            if file_size > MAX_FILE_SIZE:
+                size_gb = file_size / (1024 ** 3)
+                await log_warning("filewatcher", f"Skipped (too large): {os.path.basename(filepath)}", f"Size: {size_gb:.1f} GB, limit: {MAX_FILE_SIZE / (1024 ** 3):.0f} GB")
+                logger.warning(f"Skipped (too large): {os.path.basename(filepath)} ({size_gb:.1f} GB)")
                 continue
 
             filename = os.path.basename(filepath)
