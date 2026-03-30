@@ -163,6 +163,17 @@ async def get_asset_thumbnail(asset_id: str, size: str = "thumbnail") -> bytes |
     return None
 
 
+def _sanitize_filename(filename: str, fallback: str = "asset.jpg") -> str:
+    """Sanitize filename from Immich API to prevent path traversal."""
+    if not filename:
+        return fallback
+    # Use only the basename (strip any directory components)
+    filename = os.path.basename(filename)
+    # Remove dangerous characters
+    filename = filename.replace("..", "").replace("\x00", "")
+    return filename if filename else fallback
+
+
 async def download_asset(asset_id: str, target_path: str) -> str:
     """Download the original file of an Immich asset to target_path. Returns the file path."""
     url, api_key = await get_immich_config()
@@ -177,7 +188,8 @@ async def download_asset(asset_id: str, target_path: str) -> str:
         if info_resp.status_code != 200:
             raise RuntimeError(f"Immich asset not found: HTTP {info_resp.status_code}")
         asset_info = info_resp.json()
-        filename = asset_info.get("originalFileName", f"{asset_id}.jpg")
+        raw_filename = asset_info.get("originalFileName", f"{asset_id}.jpg")
+        filename = _sanitize_filename(raw_filename, f"{asset_id}.jpg")
 
         # Download original file
         resp = await client.get(
