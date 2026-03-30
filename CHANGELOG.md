@@ -3,8 +3,9 @@
 ## v2.4.0 — 2026-03-30
 
 ### JPG+RAW Paar-Erkennung
-- **Neuer Duplikat-Typ**: Dateien mit gleichem Basisnamen aber unterschiedlicher Endung (z.B. DJI_0988.JPG + DJI_0988.DNG) werden automatisch als Duplikat-Paar erkannt
-- Konfigurierbar in Einstellungen unter Duplikaterkennung (Standard: aktiviert)
+- **Konfigurierbares Verhalten**: Schalter in Einstellungen unter Duplikaterkennung
+- **AN** (Standard): JPG + RAW werden beide unabhängig verarbeitet und übernommen
+- **AUS**: Paare werden als Duplikat erkannt und landen im Review zur manuellen Auswahl
 - Eigener "JPG+RAW" Badge in der Duplikat-Review-Seite
 
 ### Duplikat-Erkennung Verbesserungen
