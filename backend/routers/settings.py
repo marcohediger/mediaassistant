@@ -33,6 +33,7 @@ async def _get_cfg() -> dict:
         "geo_provider": await config_manager.get("geo.provider", "nominatim"),
         "geo_url": await config_manager.get("geo.url", "https://nominatim.openstreetmap.org"),
         "phash_threshold": await config_manager.get("duplikat.phash_threshold", 5),
+        "dup_raw_jpg_pair": await config_manager.get("duplikat.raw_jpg_pair", True),
         "ocr_mode": await config_manager.get("ocr.mode", "smart"),
         "smtp_server": await config_manager.get("smtp.server", ""),
         "smtp_port": await config_manager.get("smtp.port", 587),
@@ -130,6 +131,7 @@ async def save_settings(request: Request):
     except ValueError:
         threshold = 5
     await config_manager.set("duplikat.phash_threshold", threshold)
+    await config_manager.set("duplikat.raw_jpg_pair", bool(form.get("dup_raw_jpg_pair")))
 
     # OCR
     await config_manager.set("ocr.mode", form.get("ocr_mode", "smart"))

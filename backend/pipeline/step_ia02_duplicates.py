@@ -70,13 +70,14 @@ async def execute(job, session) -> dict:
     image_path = job.original_path
 
     # --- Stage 1: SHA256 exact match ---
+    # Auch gegen fehlerhafte Jobs matchen → landet im Duplikat-Review
     file_hash = job.file_hash
     if file_hash:
         result = await session.execute(
             select(Job).where(
                 Job.file_hash == file_hash,
                 Job.id != job.id,
-                Job.status.in_(("done", "duplicate", "review", "processing")),
+                Job.status.in_(("done", "duplicate", "review", "processing", "error")),
             )
         )
         candidates = result.scalars().all()
@@ -92,6 +93,37 @@ async def execute(job, session) -> dict:
             else:
                 await log_warning("IA-02", f"Orphaned job {existing.debug_key}: file missing, skipping duplicate match")
 
+    # --- Stage 1.5: JPG+RAW Paar-Erkennung ---
+    raw_jpg_enabled = await config_manager.get("duplikat.raw_jpg_pair", True)
+    if raw_jpg_enabled:
+        basename = os.path.splitext(job.filename)[0]
+        ext = os.path.splitext(job.filename)[1].lower()
+        jpg_exts = {".jpg", ".jpeg"}
+        is_raw = ext in RAW_EXTENSIONS
+        is_jpg = ext in jpg_exts
+
+        if is_raw or is_jpg:
+            # Suche nach Job mit gleichem Basisnamen aber anderer Endung (JPG↔RAW)
+            result = await session.execute(
+                select(Job).where(
+                    Job.id != job.id,
+                    Job.status.in_(("done", "duplicate", "review", "processing", "error")),
+                    Job.filename.like(f"{basename}.%"),
+                )
+            )
+            for candidate in result.scalars().all():
+                cand_ext = os.path.splitext(candidate.filename)[1].lower()
+                # JPG sucht RAW-Partner und umgekehrt
+                if (is_jpg and cand_ext in RAW_EXTENSIONS) or (is_raw and cand_ext in jpg_exts):
+                    if await _file_exists(candidate):
+                        await _handle_duplicate(job, session, candidate, "raw_jpg_pair", 0)
+                        return {
+                            "status": "duplicate",
+                            "match_type": "raw_jpg_pair",
+                            "original_debug_key": candidate.debug_key,
+                            "original_path": candidate.target_path or candidate.original_path,
+                        }
+
     # --- Stage 2: Perceptual hash (pHash) similarity ---
     phash_str = await asyncio.to_thread(_compute_phash, image_path)
     if phash_str:
@@ -101,12 +133,12 @@ async def execute(job, session) -> dict:
         threshold = int(await config_manager.get("duplikat.phash_threshold", 5))
         current_hash = imagehash.hex_to_hash(phash_str)
 
-        # Query all jobs with a phash set (done or processing)
+        # Query all jobs with a phash set — inkl. fehlerhafte → Duplikat-Review
         result = await session.execute(
             select(Job).where(
                 Job.phash.isnot(None),
                 Job.id != job.id,
-                Job.status.in_(("done", "duplicate", "review", "processing")),
+                Job.status.in_(("done", "duplicate", "review", "processing", "error")),
             )
         )
         candidates = result.scalars().all()

@@ -46,7 +46,7 @@
 <div class="detail-section">
     <h2>{{ t.job_detail.paths }}</h2>
     <table class="detail-table">
-        <tr><td>{{ t.job_detail.original }}</td><td><code>{{ job.original_path }}</code></td></tr>
+        <tr><td>{{ t.job_detail.original }}</td><td><code>{{ job.original_path }}</code>{% if '/inbox' in (job.original_path or '') %} <small style="color: var(--text-muted);">(Inbox — temporär)</small>{% endif %}</td></tr>
         <tr><td>{{ t.job_detail.target }}</td><td><code data-field="target_path">{{ job.target_path or '—' }}</code></td></tr>
     </table>
 </div>
@@ -77,7 +77,25 @@
         <div class="step-item">
             <span class="step-code">{{ step }}</span>
             <span class="step-label">{{ t.steps[step] | default(step) }}</span>
+            {% if step == 'IA-05' and result is mapping and result.get('_context') %}
+            <div class="step-ai-detail">
+                <div style="margin-bottom: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
+                    <strong>Modell:</strong> {{ result._model }} — <strong>{{ result._images }}</strong> Bild{{ 'er' if result._images > 1 else '' }}
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <strong>Kontext an KI:</strong>
+                    <pre class="step-data" style="margin-top: 0.25rem; color: var(--text-muted);">{{ result._context }}</pre>
+                </div>
+                <strong>KI-Antwort:</strong>
+                {% set display_result = {} %}
+                {% for k, v in result.items() if not k.startswith('_') %}
+                    {% if display_result.update({k: v}) %}{% endif %}
+                {% endfor %}
+                <pre class="step-data" style="margin-top: 0.25rem;">{{ display_result | tojson_unicode(indent=2) }}</pre>
+            </div>
+            {% else %}
             <pre class="step-data">{{ result | tojson_unicode(indent=2) }}</pre>
+            {% endif %}
         </div>
         {% endfor %}
     </div>

@@ -170,6 +170,8 @@
     "dup_desc": "SHA256 + Perceptual Hash Vergleich",
     "phash_threshold": "pHash Schwellwert",
     "phash_hint": "0 = exakt identisch, höher = toleranter (Standard: 5)",
+    "dup_raw_jpg_pair": "JPG+RAW Paare erkennen",
+    "dup_raw_jpg_pair_hint": "Dateien mit gleichem Namen aber unterschiedlicher Endung (z.B. DJI_0988.JPG + DJI_0988.DNG) automatisch als Duplikat erkennen.",
     "ocr": "OCR",
     "ocr_desc": "Texterkennung in Bildern (Screenshots, Dokumente, Schilder)",
     "ocr_mode": "Modus",

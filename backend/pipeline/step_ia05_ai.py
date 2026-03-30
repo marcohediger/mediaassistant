@@ -246,4 +246,9 @@ Nutze diese Informationen zusammen mit dem Bildinhalt für deine Klassifikation.
     except json.JSONDecodeError:
         result = {"raw_response": content, "parse_error": True}
 
+    # KI-Kontext für Anzeige im Log-Detail speichern
+    result["_context"] = metadata_context
+    result["_images"] = len(image_data_list)
+    result["_model"] = model
+
     return result

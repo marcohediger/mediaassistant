@@ -237,6 +237,12 @@
                 <small>{{ t.settings.phash_hint }}</small>
             </div>
         </div>
+        <label class="switch-inline" style="margin-top: 1rem;">
+            <input type="checkbox" name="dup_raw_jpg_pair" value="1" {{ 'checked' if cfg.dup_raw_jpg_pair else '' }}>
+            <span class="switch-slider-sm"></span>
+            <span>{{ t.settings.dup_raw_jpg_pair }}</span>
+        </label>
+        <small style="display: block; margin-top: 0.25rem;">{{ t.settings.dup_raw_jpg_pair_hint }}</small>
     </div>
 </div>
 

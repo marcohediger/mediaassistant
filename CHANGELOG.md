@@ -1,5 +1,33 @@
 # Changelog
 
+## v2.4.0 — 2026-03-30
+
+### JPG+RAW Paar-Erkennung
+- **Neuer Duplikat-Typ**: Dateien mit gleichem Basisnamen aber unterschiedlicher Endung (z.B. DJI_0988.JPG + DJI_0988.DNG) werden automatisch als Duplikat-Paar erkannt
+- Konfigurierbar in Einstellungen unter Duplikaterkennung (Standard: aktiviert)
+- Eigener "JPG+RAW" Badge in der Duplikat-Review-Seite
+
+### Duplikat-Erkennung Verbesserungen
+- **Fehlerhafte Jobs einbezogen**: SHA256- und pHash-Vergleich matcht jetzt auch gegen Jobs mit Status "error" — diese landen im Duplikat-Review statt automatisch verarbeitet zu werden
+- **error_message Bereinigung**: Duplikat-Review setzt error_message korrekt auf NULL (verhindert doppelte Verarbeitung im Filewatcher)
+
+### Filewatcher Stabilisierung
+- **Hash-basierte Deduplizierung**: Nur noch erfolgreich abgeschlossene Jobs (done + kein Fehler) blockieren erneute Verarbeitung — fehlerhafte Dateien können erneut eingefügt werden
+- **Vereinfachter Stabilitätscheck**: Einfache Dateigrössen-Prüfung nach 2s Wartezeit (robust bei Docker/SMB)
+
+### Immich Upload Stabilität
+- **Grosse Dateien**: Upload/Replace liest Datei komplett in Memory vor dem Senden (verhindert halbfertige DNG/RAW Uploads)
+- **Separate Timeouts**: connect=10s, read=120s, write=300s für grosse Dateien (bis 10GB Videos)
+
+### KI-Kontext im Log
+- **IA-05 Detail-Ansicht**: Zeigt Modell, Anzahl Bilder, Metadaten-Kontext und KI-Antwort separat an
+- Auto-Refresh erhält die formatierte Darstellung bei
+
+### UI-Verbesserungen
+- **Inbox-Pfade versteckt**: Temporäre Inbox-Pfade werden nie als Referenz angezeigt, "(Inbox — temporär)" Markierung im Job-Detail
+- **Video-Thumbnails konfigurierbar**: Anzahl Frames (1–50) und Skalierung (25/50/75/100%) in Einstellungen
+- Cache-Busting für JavaScript (v3)
+
 ## v2.3.0 — 2026-03-29
 
 ### Lightbox

@@ -70,6 +70,14 @@
                         {% else %}
                         <span class="match-badge match-exact">{{ t.duplicates.exact | title }}</span>
                         {% endif %}
+                    {% elif member.match_type == 'raw_jpg_pair' %}
+                        {% if member.immich_link %}
+                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-exact dup-badge-link">JPG+RAW</a>
+                        {% elif member.exists %}
+                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-exact dup-badge-link">JPG+RAW</a>
+                        {% else %}
+                        <span class="match-badge match-exact">JPG+RAW</span>
+                        {% endif %}
                     {% else %}
                         <span class="match-badge match-similar">{{ ((64 - member.phash_distance) / 64 * 100) | round(0) | int }}%</span>
                     {% endif %}

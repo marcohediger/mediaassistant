@@ -59,55 +59,13 @@ def _scan_directory(path: str, min_age: float) -> list[str]:
     return files
 
 
-def _is_file_stable(filepath: str, expected_size: int) -> bool:
-    """Prüft ob eine Datei vollständig und lesbar ist.
-
-    Bei Videos: ffprobe muss Duration lesen können (moov-Atom am Dateiende).
-    Bei Bildern: exiftool muss die Datei parsen können.
-    Zusätzlich: Dateigrösse darf sich zwischen zwei Checks nicht ändern.
-    """
-    import subprocess
-
+def _is_file_stable(filepath: str, expected_size: int, wait: float = 2.0) -> bool:
+    """Check if file size is stable (not still being copied)."""
     try:
-        ext = os.path.splitext(filepath)[1].lower()
-
-        # Schritt 1: Grösse prüfen, warten, nochmal prüfen
-        size1 = os.path.getsize(filepath)
-        time.sleep(5)
-        if not os.path.exists(filepath):
-            return False
-        size2 = os.path.getsize(filepath)
-        if size1 != size2 or size1 == 0:
-            return False
-
-        # Schritt 2: Bei Videos — ffprobe MUSS duration lesen können
-        # Unvollständige MP4/MOV haben kein moov-Atom → keine Duration
-        if ext in VIDEO_EXTENSIONS:
-            result = subprocess.run(
-                ["ffprobe", "-v", "quiet",
-                 "-show_entries", "format=duration",
-                 "-of", "csv=p=0", filepath],
-                capture_output=True, text=True, timeout=30
-            )
-            duration = result.stdout.strip()
-            if result.returncode != 0 or not duration:
-                return False
-            # Duration muss eine gültige Zahl sein
-            try:
-                float(duration)
-            except ValueError:
-                return False
-        else:
-            # Bei Bildern: exiftool muss die Datei parsen können
-            result = subprocess.run(
-                ["exiftool", "-q", "-q", filepath],
-                capture_output=True, timeout=15
-            )
-            if result.returncode != 0:
-                return False
-
-        return True
-    except Exception:
+        time.sleep(wait)
+        current_size = os.path.getsize(filepath)
+        return current_size == expected_size and current_size > 0
+    except OSError:
         return False
 
 
@@ -122,20 +80,24 @@ async def _scan_and_process():
         return
 
     interval = await config_manager.get("filewatcher.interval", 5)
-    min_age = max(float(interval), 10.0)
+    min_age = max(float(interval), 2.0)
 
     for inbox in inboxes:
         if not os.path.isdir(inbox.path):
             continue
 
-        # Get paths of jobs that are still active (queued/processing)
+        # Get paths+hashes of all known jobs for this inbox
         async with async_session() as session:
             existing = await session.execute(
-                select(Job.original_path).where(
+                select(Job.original_path, Job.status, Job.file_hash, Job.error_message).where(
                     Job.original_path.like(f"{inbox.path}%"),
                 )
             )
-            known_paths = {row[0] for row in existing.all()}
+            rows = existing.all()
+            # Active jobs: never re-process
+            active_paths = {r[0] for r in rows if r[1] in ("queued", "processing")}
+            # Only truly successful jobs (done + no errors): skip same file
+            done_hashes = {(r[0], r[2]) for r in rows if r[1] == "done" and r[2] and not r[3]}
 
         # Scan for new files (returns list of (path, size) tuples)
         found_files = await asyncio.to_thread(_scan_directory, inbox.path, min_age)
@@ -143,10 +105,10 @@ async def _scan_and_process():
         # Phase 1: Create all jobs as "queued" first
         new_job_ids = []
         for filepath, file_size in found_files:
-            if filepath in known_paths:
+            if filepath in active_paths:
                 continue
 
-            # Stability check: wartet bis Dateigrösse + mtime sich nicht mehr ändern
+            # Stability check
             stable = await asyncio.to_thread(_is_file_stable, filepath, file_size)
             if not stable:
                 size_mb = file_size / (1024 * 1024)
@@ -155,6 +117,10 @@ async def _scan_and_process():
 
             filename = os.path.basename(filepath)
             file_hash = await asyncio.to_thread(_sha256, filepath)
+
+            # Skip if same file (same path + hash) was already processed successfully
+            if (filepath, file_hash) in done_hashes:
+                continue
 
             async with async_session() as session:
                 debug_key = await _generate_debug_key(session)

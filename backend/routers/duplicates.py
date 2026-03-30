@@ -167,16 +167,27 @@ def _union_find_groups(links: list[tuple[str, str]]) -> dict[str, set[str]]:
 
 
 def _resolve_filepath(job) -> str:
-    """Find the actual file path, checking target, original, and temp paths."""
-    for path in [job.target_path, job.original_path]:
-        if path and os.path.exists(path):
-            return path
+    """Find the actual file path, checking target, original, and temp paths.
+
+    Bevorzugt target_path — original_path nur wenn Datei dort noch existiert.
+    """
+    if job.target_path and os.path.exists(job.target_path):
+        return job.target_path
+    if job.original_path and os.path.exists(job.original_path):
+        return job.original_path
     # Fallback: IA-04 converted temp file
     convert_result = (job.step_result or {}).get("IA-04", {})
     temp_path = convert_result.get("temp_path")
     if temp_path and os.path.exists(temp_path):
         return temp_path
     return job.target_path or job.original_path
+
+
+def _display_path(job) -> str:
+    """Pfad für die Anzeige — nie Inbox-Pfade zeigen."""
+    if job.target_path:
+        return job.target_path
+    return job.original_path or "—"
 
 
 async def _build_member(job, session) -> dict:
@@ -209,7 +220,7 @@ async def _build_member(job, session) -> dict:
         "job_id": job.id,
         "debug_key": job.debug_key,
         "filename": job.filename,
-        "filepath": filepath,
+        "filepath": _display_path(job),
         "exists": exists,
         "is_original": not is_dup,
         "match_type": dup_info.get("match_type", "original") if is_dup else "original",
@@ -334,7 +345,7 @@ async def _build_duplicate_groups() -> list[dict]:
                 "members": members,
                 "count": len(members),
                 "all_exact": all(
-                    m["match_type"] in ("exact", "original") for m in members
+                    m["match_type"] in ("exact", "original", "raw_jpg_pair") for m in members
                 ),
                 "is_immich_duplicate": has_immich,
             })
@@ -550,7 +561,7 @@ async def keep_file(request: Request):
 
             if job.status == "duplicate":
                 job.status = "done"
-            job.error_message = f"Duplicate review: deleted (kept: {keep_key})"
+            job.error_message = None
             job.target_path = None
 
         # Move the kept file to its destination
@@ -606,7 +617,7 @@ async def keep_file(request: Request):
                 kept_job.target_path = target_path
 
             kept_job.status = "done"
-            kept_job.error_message = "Duplicate review: kept as best version"
+            kept_job.error_message = None
 
         await session.commit()
 
