@@ -35,6 +35,31 @@ def _parse_date(date_str: str) -> datetime | None:
     return None
 
 
+def _sanitize_path_component(value: str) -> str:
+    """Remove dangerous characters from path components to prevent path traversal."""
+    if not value:
+        return "unknown"
+    # Remove .. / \ and null bytes — prevents directory escape
+    value = value.replace("..", "").replace("/", "_").replace("\\", "_")
+    value = re.sub(r'[\x00-\x1f]', '', value)
+    return value.strip() or "unknown"
+
+
+def _validate_target_path(target_dir: str, base_path: str) -> str:
+    """Ensure target directory is within base_path (defense in depth).
+
+    Returns the validated real path or raises ValueError.
+    """
+    target_real = os.path.realpath(target_dir)
+    base_real = os.path.realpath(base_path)
+    if not target_real.startswith(base_real + os.sep) and target_real != base_real:
+        raise ValueError(
+            f"Security: target path escapes library boundary "
+            f"(target={target_dir}, base={base_path})"
+        )
+    return target_real
+
+
 def _resolve_path(template: str, exif: dict, date: datetime | None) -> str:
     """Replace placeholders in path template with actual values."""
     if not date:
@@ -51,10 +76,10 @@ def _resolve_path(template: str, exif: dict, date: datetime | None) -> str:
         "{MM}": date.strftime("%m"),
         "{DD}": date.strftime("%d"),
         "{YYYY-MM}": date.strftime("%Y-%m"),
-        "{CAMERA}": camera,
-        "{TYPE}": exif.get("type", "unknown"),
-        "{COUNTRY}": exif.get("country", ""),
-        "{CITY}": exif.get("city", ""),
+        "{CAMERA}": _sanitize_path_component(camera),
+        "{TYPE}": _sanitize_path_component(exif.get("type", "unknown")),
+        "{COUNTRY}": _sanitize_path_component(exif.get("country", "")),
+        "{CITY}": _sanitize_path_component(exif.get("city", "")),
     }
 
     result = template
@@ -156,6 +181,9 @@ async def execute(job, session) -> dict:
     # Build target directory
     relative_dir = _resolve_path(path_template, exif, date)
     target_dir = os.path.join(base_path, relative_dir)
+
+    # Security: ensure target stays within library
+    target_dir = _validate_target_path(target_dir, base_path)
 
     # Build target file path (handle name conflicts)
     filename = os.path.basename(job.original_path)

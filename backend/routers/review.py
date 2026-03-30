@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import re
 import subprocess
 import tempfile
 from datetime import datetime
@@ -14,9 +15,30 @@ from config import config_manager
 from database import async_session
 from models import Job
 from safe_file import safe_move
-from system_logger import log_info
+from system_logger import log_info, log_warning
 
 from template_engine import render
+
+
+def _sanitize_path_component(value: str) -> str:
+    """Remove dangerous characters from path components to prevent path traversal."""
+    if not value:
+        return "unknown"
+    value = value.replace("..", "").replace("/", "_").replace("\\", "_")
+    value = re.sub(r'[\x00-\x1f]', '', value)
+    return value.strip() or "unknown"
+
+
+def _validate_target_path(target_dir: str, base_path: str) -> str:
+    """Ensure target directory is within base_path (defense in depth)."""
+    target_real = os.path.realpath(target_dir)
+    base_real = os.path.realpath(base_path)
+    if not target_real.startswith(base_real + os.sep) and target_real != base_real:
+        raise ValueError(
+            f"Security: target path escapes library boundary "
+            f"(target={target_dir}, base={base_path})"
+        )
+    return target_real
 
 router = APIRouter()
 
@@ -295,16 +317,24 @@ async def classify_file(request: Request):
             "{MM}": date.strftime("%m"),
             "{DD}": date.strftime("%d"),
             "{YYYY-MM}": date.strftime("%Y-%m"),
-            "{CAMERA}": camera,
-            "{TYPE}": exif.get("type", "unknown"),
-            "{COUNTRY}": exif.get("country", ""),
-            "{CITY}": exif.get("city", ""),
+            "{CAMERA}": _sanitize_path_component(camera),
+            "{TYPE}": _sanitize_path_component(exif.get("type", "unknown")),
+            "{COUNTRY}": _sanitize_path_component(exif.get("country", "")),
+            "{CITY}": _sanitize_path_component(exif.get("city", "")),
         }
         relative_dir = path_template
         for key, value in replacements.items():
             relative_dir = relative_dir.replace(key, value)
 
         target_dir = os.path.join(base_path, relative_dir)
+
+        # Security: ensure target stays within library
+        try:
+            target_dir = _validate_target_path(target_dir, base_path)
+        except ValueError as e:
+            await log_warning("review", f"Path traversal blocked: {debug_key}", str(e))
+            return RedirectResponse(url="/review", status_code=303)
+
         filename = os.path.basename(filepath)
         target_path = os.path.join(target_dir, filename)
 
@@ -455,6 +485,14 @@ async def classify_all(request: Request):
             date = _parse_date(exif.get("date")) or datetime.now()
             relative_dir = path_template.replace("{YYYY}", date.strftime("%Y")).replace("{MM}", date.strftime("%m"))
             target_dir = os.path.join(base_path, relative_dir)
+
+            # Security: ensure target stays within library
+            try:
+                target_dir = _validate_target_path(target_dir, base_path)
+            except ValueError as e:
+                await log_warning("review", f"Path traversal blocked: {job.debug_key}", str(e))
+                continue
+
             filename = os.path.basename(filepath)
             target_path = os.path.join(target_dir, filename)
 

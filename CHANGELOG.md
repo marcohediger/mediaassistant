@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.4.4 — 2026-03-30
+
+### Security
+- **Fix S1: Path Traversal Schutz** in `step_ia08_sort.py`, `review.py`
+  - Neue Funktion `_sanitize_path_component()`: Entfernt `..`, `/`, `\` und Steuerzeichen aus EXIF-Werten (Country, City, Camera, Type) bevor sie in Pfade eingesetzt werden
+  - Neue Funktion `_validate_target_path()`: Prüft mit `os.path.realpath()` dass der Zielpfad innerhalb der Bibliothek bleibt (Defense in Depth)
+  - Geschützte Stellen: Pipeline IA-08 Sort, Review Classify, Review Classify-All
+
 ## v2.4.3 — 2026-03-30
 
 ### Bugfix
