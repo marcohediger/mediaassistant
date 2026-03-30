@@ -15,9 +15,16 @@ async def execute(job, session) -> dict:
     )
 
     if result.returncode != 0:
-        raise RuntimeError(f"ExifTool Fehler: {result.stderr.strip()}")
+        stderr = result.stderr.strip()
+        if stderr:
+            raise RuntimeError(f"ExifTool Fehler: {stderr}")
+        else:
+            raise RuntimeError(f"ExifTool konnte die Datei nicht lesen (möglicherweise beschädigt oder kein gültiges Bildformat)")
 
-    data = json.loads(result.stdout)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"ExifTool konnte die Datei nicht lesen (möglicherweise beschädigt oder kein gültiges Bildformat)")
     if not data:
         raise RuntimeError("ExifTool hat keine Daten zurückgegeben")
 

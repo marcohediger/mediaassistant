@@ -132,7 +132,7 @@ async def execute(job, session) -> dict:
         job.phash = phash_str
         await session.commit()
 
-        threshold = int(await config_manager.get("duplikat.phash_threshold", 5))
+        threshold = int(await config_manager.get("duplikat.phash_threshold", 3))
         current_hash = imagehash.hex_to_hash(phash_str)
 
         # Query all jobs with a phash set — inkl. fehlerhafte → Duplikat-Review

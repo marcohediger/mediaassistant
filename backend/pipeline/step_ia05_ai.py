@@ -89,6 +89,23 @@ async def execute(job, session) -> dict:
     api_key = await config_manager.get("ai.api_key", "not-needed")
     system_prompt = await config_manager.get("ai.prompt", DEFAULT_SYSTEM_PROMPT)
 
+    # Mindestgrösse prüfen — zu kleine Bilder erzeugen AI-Halluzinationen
+    exif = (job.step_result or {}).get("IA-01", {})
+    img_width = exif.get("width", 0) or 0
+    img_height = exif.get("height", 0) or 0
+    if img_width > 0 and img_height > 0 and img_width < 16 and img_height < 16:
+        return {
+            "type": "unknown",
+            "tags": [],
+            "description": f"Bild zu klein für Analyse ({img_width}x{img_height} px)",
+            "mood": "",
+            "people_count": 0,
+            "quality": "unbekannt",
+            "confidence": 0.0,
+            "_skipped": True,
+            "_reason": f"Mindestgrösse unterschritten ({img_width}x{img_height} px)",
+        }
+
     # Use pre-converted temp file(s) from IA-04 if available
     filepath = job.original_path
     convert_result = (job.step_result or {}).get("IA-04", {})

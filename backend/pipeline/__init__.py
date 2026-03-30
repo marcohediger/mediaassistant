@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import traceback
 from datetime import datetime
@@ -9,6 +10,8 @@ from models import Job
 from safe_file import safe_move
 from system_logger import log_error, log_warning
 from pipeline import step_ia01_exif, step_ia02_duplicates, step_ia03_geocoding, step_ia04_convert, step_ia05_ai, step_ia06_ocr, step_ia07_exif_write, step_ia08_sort, step_ia09_notify, step_ia10_cleanup, step_ia11_log
+
+logger = logging.getLogger("mediaassistant.pipeline")
 
 STEPS = [
     ("IA-01", step_ia01_exif.execute),
@@ -95,6 +98,7 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
                 await log_error("pipeline", f"{job.debug_key} Error at {step_code}", f"{e}\n\n{tb}")
+                logger.error(f"{job.debug_key} Error at {step_code}: {e}")
                 pipeline_failed = True
                 break
 

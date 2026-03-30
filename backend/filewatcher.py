@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 import os
 import tempfile
 import time
@@ -10,6 +11,8 @@ from database import async_session
 from models import Job, InboxDirectory
 from system_logger import log_error, log_info
 from pipeline import run_pipeline
+
+logger = logging.getLogger("mediaassistant.filewatcher")
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif", ".webp", ".gif", ".bmp", ".dng", ".cr2", ".nef", ".arw"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp"}
@@ -89,15 +92,40 @@ async def _scan_and_process():
         # Get paths+hashes of all known jobs for this inbox
         async with async_session() as session:
             existing = await session.execute(
-                select(Job.original_path, Job.status, Job.file_hash, Job.error_message).where(
+                select(Job.original_path, Job.status, Job.file_hash, Job.error_message, Job.target_path, Job.dry_run).where(
                     Job.original_path.like(f"{inbox.path}%"),
                 )
             )
             rows = existing.all()
             # Active jobs: never re-process
             active_paths = {r[0] for r in rows if r[1] in ("queued", "processing")}
-            # Only truly successful jobs (done + no errors): skip same file
-            done_hashes = {(r[0], r[2]) for r in rows if r[1] == "done" and r[2] and not r[3]}
+            # Successful jobs (done + no errors) OR duplicate jobs: skip same file
+            # Bug 1 fix: Include dry_run jobs to prevent endless re-processing
+            # Bug 2 fix: Only skip if target file still exists
+            done_hashes = set()
+            for r in rows:
+                path, status, fhash, err, target, dry_run = r
+                if not fhash:
+                    continue
+                # Dry-run jobs: always skip (file stays in inbox, don't re-process)
+                if dry_run and status in ("done", "duplicate"):
+                    done_hashes.add((path, fhash))
+                    continue
+                # Duplicate jobs: skip (already handled)
+                if status == "duplicate" and fhash:
+                    done_hashes.add((path, fhash))
+                    continue
+                # Done jobs without errors: skip only if target still exists
+                if status == "done" and not err:
+                    if target and target.startswith("immich:"):
+                        # Immich assets: trust the DB (checking API each scan is too expensive)
+                        done_hashes.add((path, fhash))
+                    elif target and os.path.exists(target):
+                        done_hashes.add((path, fhash))
+                    elif not target:
+                        # Job with no target (e.g. deleted via keep-action): skip
+                        done_hashes.add((path, fhash))
+                    # else: target file missing → allow re-import
 
         # Scan for new files (returns list of (path, size) tuples)
         found_files = await asyncio.to_thread(_scan_directory, inbox.path, min_age)
@@ -113,6 +141,7 @@ async def _scan_and_process():
             if not stable:
                 size_mb = file_size / (1024 * 1024)
                 await log_info("filewatcher", f"Skipped (unstable): {os.path.basename(filepath)}", f"Size: {size_mb:.1f} MB")
+                logger.info(f"Skipped (unstable): {os.path.basename(filepath)} ({size_mb:.1f} MB)")
                 continue
 
             filename = os.path.basename(filepath)
@@ -140,10 +169,13 @@ async def _scan_and_process():
                 new_job_ids.append((job.id, filename, debug_key))
 
             await log_info("filewatcher", f"New file detected: {filename}", f"Inbox: {inbox.label}, Key: {debug_key}")
+            logger.info(f"New file: {filename} → {debug_key} (Inbox: {inbox.label})")
 
         # Phase 2: Process queued jobs one by one
         for job_id, filename, debug_key in new_job_ids:
+            logger.info(f"Pipeline start: {debug_key} ({filename})")
             await run_pipeline(job_id)
+            logger.info(f"Pipeline done: {debug_key} ({filename})")
 
 
 async def _poll_immich():
@@ -236,6 +268,7 @@ async def _poll_immich():
 
 async def start_filewatcher(shutdown_event: asyncio.Event):
     """Main filewatcher loop, runs as background task."""
+    logger.info("Filewatcher started")
     # Resume interrupted jobs on startup
     async with async_session() as session:
         result = await session.execute(
@@ -244,6 +277,7 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
         interrupted = result.scalars().all()
         for job_id in interrupted:
             await log_info("filewatcher", f"Job resumed", f"Job-ID: {job_id}")
+            logger.info(f"Resuming interrupted job: {job_id}")
             await run_pipeline(job_id)
 
     while not shutdown_event.is_set():
@@ -252,6 +286,7 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
                 await _scan_and_process()
         except Exception as e:
             await log_error("filewatcher", f"Scan error: {e}")
+            logger.error(f"Scan error: {e}")
 
         try:
             if await config_manager.is_module_enabled("immich"):
@@ -260,6 +295,7 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
                     await _poll_immich()
         except Exception as e:
             await log_error("immich_poll", f"Poll error: {e}")
+            logger.error(f"Immich poll error: {e}")
 
         interval = await config_manager.get("filewatcher.interval", 5)
         try:
