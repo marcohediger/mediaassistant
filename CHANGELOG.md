@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.4.2 — 2026-03-30
+
+### Bugfixes aus E2E-Testing (DJI DNG, MP4, JPG+DNG Paare)
+- **Fix: Video-Datumsformate**: ISO 8601 mit Mikrosekunden (`.000000`) und Timezone (`Z`, `+02:00`) werden jetzt korrekt geparst — Videos werden ins richtige Jahres-Verzeichnis sortiert statt ins aktuelle Datum
+- **Fix: Filewatcher done_hashes**: Erkennt bereits verarbeitete Dateien zuverlässig — prüft dry_run-Jobs, Immich-Assets und Target-Existenz auf Dateisystem
+- **Fix: Logging**: `logging.basicConfig()` in main.py — alle Pipeline-Logs erscheinen in Docker stdout (`docker logs`)
+- **Fix: Pipeline-Fehler**: werden geloggt statt verschluckt (logger in `pipeline/__init__.py`)
+- **Fix: ExifTool-Fehlermeldungen**: Bessere Fehlermeldungen bei korrupten/unlesbare Dateien
+- **Fix: Kleine Bilder**: Bilder unter 16×16 Pixel werden von der KI-Analyse übersprungen (verhindert API-Fehler)
+- **Fix: pHash-Threshold**: von 5 auf 3 gesenkt (weniger False Positives bei Duplikaterkennung)
+- **Fix: Batch-Clean Label**: verdeutlicht, dass nur exakte SHA256-Duplikate automatisch bereinigt werden
+- **UI: Preview-Badge**: Dry-Run-Jobs zeigen "Preview"-Badge in Log-Übersicht und Job-Detail
+
+### Getestete Szenarien (DJI-Daten)
+- DNG RAW-Dateien (25MB–97MB): EXIF, pHash aus Preview, Konvertierung, KI, Geocoding ✓
+- MP4-Videos (57MB–304MB): ffprobe, Thumbnails, KI, Immich-Upload ✓
+- JPG+DNG Paare: Paar-Erkennung (keep_both true/false) ✓
+- Sonderzeichen in Dateinamen: Leerzeichen, Klammern ✓
+- Alle Modi: Dateiablage, Immich, Dry-Run ✓
+- Duplikat-Szenarien: SHA256, Cross-Mode, Keep/Delete, Batch-Clean ✓
+
 ## v2.4.0 — 2026-03-30
 
 ### JPG+RAW Paar-Erkennung

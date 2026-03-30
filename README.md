@@ -15,7 +15,7 @@ New files in inbox directories are automatically detected and processed through 
 | IA-01 | Read EXIF | Extract metadata via ExifTool; videos additionally via ffprobe (date, GPS with ISO 6709 parser, duration + formatted, resolution, megapixels, codec, framerate, bitrate, rotation) |
 | IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar), incl. Immich-uploaded files |
 | IA-03 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
-| IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis; video thumbnail extraction via ffmpeg at 10% duration (prepared, `VIDEO_THUMBNAIL_ENABLED = False`) |
+| IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis; video thumbnail extraction via ffmpeg (configurable number of frames evenly distributed across video duration) |
 | IA-05 | AI Analysis | Analyze image (type, tags, description, mood) with all collected metadata |
 | IA-06 | OCR | Text recognition (screenshots, documents) |
 | IA-07 | Write EXIF Tags | Write tags, description, geocoding and folder-tags back to file |
