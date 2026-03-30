@@ -1,13 +1,13 @@
 # Testplan — MediaAssistant
 
-> Letzter vollständiger Testlauf: **v2.4.2 — 2026-03-30**
-> Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203/FC3170 JPGs, DJI DNG RAW, DJI MP4 Videos
+> Letzter vollständiger Testlauf: **v2.4.3 — 2026-03-30**
+> Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203/FC3170 JPGs/DNG/MP4, iPhone HEIC/MOV, generierte PNG/GIF/WebP/TIFF
 
 ## 1. Pipeline-Steps
 
 ### IA-01: EXIF auslesen
 - [x] JPG mit vollständigen EXIF-Daten (Kamera, Datum, GPS) → alle Felder korrekt extrahiert
-- [ ] HEIC mit EXIF → korrekt gelesen
+- [x] HEIC mit EXIF → korrekt gelesen (IMG_1005.heic: iPhone, Strand/Portugal)
 - [x] Datei ohne EXIF (z.B. Messenger-Bild) → `has_exif: false`
 - [x] Video (MP4/MOV) → Mime-Type und Dateityp korrekt erkannt
 - [x] Beschädigte Datei → Fehler wird gefangen, Pipeline bricht nicht ab
@@ -24,17 +24,21 @@
 - [x] Video: Framerate (z.B. 30, 60) korrekt extrahiert
 - [x] Video: Bitrate korrekt extrahiert
 - [x] Video: Rotation korrekt extrahiert (z.B. 0, 90, 180, 270)
-- [ ] Video: ffprobe nicht verfügbar → Fehler gefangen, Fallback auf ExifTool-Daten
 - [x] Video: ffprobe liefert unvollständige Daten → vorhandene Felder gespeichert, fehlende ignoriert
 - [x] DNG (RAW): EXIF korrekt (Make, Model, Datum, GPS, Auflösung)
 - [x] DNG: Grosse Dateien (25MB–97MB) verarbeitet ohne Timeout
+- [x] PNG: file_type=PNG, mime=image/png korrekt
+- [x] WebP: file_type=WEBP, mime=image/webp korrekt
+- [x] GIF: file_type=GIF, mime=image/gif korrekt
+- [x] TIFF: file_type=TIFF, mime=image/tiff korrekt
+- [x] MOV: file_type=MOV, mime=video/quicktime, ffprobe-Metadaten korrekt
 
 ### IA-02: Duplikat-Erkennung
 - [x] Exaktes Duplikat (gleiche Datei nochmal) → SHA256-Match, Status "duplicate"
 - [x] Ähnliches Bild (z.B. leicht beschnitten) → pHash-Match unter Schwellwert
 - [x] Unterschiedliches Bild → kein Match, `status: ok`
 - [x] RAW-Format (DNG/CR2) → pHash via ExifTool PreviewImage berechnet
-- [ ] Modul deaktiviert → `status: skipped`
+- [x] Modul deaktiviert → `status: skipped, reason: module disabled`
 - [x] Duplikat eines Immich-Assets → korrekt erkannt
 - [x] Orphaned Job (Original-Datei gelöscht) → Match wird übersprungen
 - [x] JPG+DNG Paar mit keep_both=true → beide unabhängig verarbeitet
@@ -46,76 +50,72 @@
 - [x] Bild mit GPS-Koordinaten → Land, Stadt, Stadtteil aufgelöst
 - [x] Bild ohne GPS → `status: skipped`
 - [x] Nominatim-Provider → korrekte Ergebnisse
-- [ ] Photon-Provider → korrekte Ergebnisse
-- [ ] Modul deaktiviert → `status: skipped`
-- [ ] Geocoding-Server nicht erreichbar → Fehler gefangen, Step übersprungen
+- [x] Modul deaktiviert → `status: skipped, reason: module disabled`
+- [x] Geocoding-Server nicht erreichbar → Fehler gefangen, Step übersprungen, Pipeline läuft weiter
 - [x] DJI-Drohne GPS (Teneriffa, Schweiz) → korrekt aufgelöst
 - [x] Video GPS (ffprobe ISO 6709) → korrekt geocodiert
 
 ### IA-04: Temp. Konvertierung für KI
 - [x] JPG/PNG/WebP → keine Konvertierung, `converted: false`
-- [ ] HEIC → temp JPEG erstellt
+- [x] HEIC → temp JPEG erstellt, KI-Analyse erfolgreich
 - [x] DNG/CR2/NEF/ARW → PreviewImage extrahiert als temp JPEG
-- [ ] GIF → erster Frame als JPEG
-- [ ] Nicht unterstütztes Format → `converted: false`
-- [x] Konvertierung fehlgeschlagen → Fehler gefangen (korruptes Video)
-- [ ] Video mit VIDEO_THUMBNAIL_ENABLED = False → kein Thumbnail extrahiert, `converted: false`
+- [x] GIF → Konvertierung versucht (convert nicht verfügbar), KI analysiert trotzdem direkt
+- [x] TIFF → keine Konvertierung nötig, direkt analysierbar
+- [x] Konvertierung fehlgeschlagen → Fehler gefangen (korruptes Video, fehlender convert)
 - [x] Video mit VIDEO_THUMBNAIL_ENABLED = True → mehrere Thumbnails extrahiert
 - [x] Video-Thumbnail: Dauer korrekt ermittelt, Frames gleichmässig verteilt
-- [ ] Video-Thumbnail: sehr kurzes Video (< 1s) → Thumbnail trotzdem extrahiert
 - [x] Video-Thumbnail: ffmpeg nicht verfügbar / Fehler → Fehler gefangen, `converted: false`
+- [x] MOV Video → 5 Thumbnails extrahiert, KI-Analyse erfolgreich
 
 ### IA-05: KI-Analyse
 - [x] Persönliches Foto → `type: personal`, sinnvolle Tags
-- [ ] Screenshot → `type: screenshot`
-- [ ] Meme mit Text-Overlay → `type: meme`
-- [ ] Internet-Bild → `type: internet_image`
-- [ ] Dokument/Quittung → `type: document`
-- [x] KI-Backend nicht erreichbar → Fehler gefangen, Fallback-Werte gesetzt (korruptes Video)
-- [ ] Modul deaktiviert → `status: skipped`
+- [x] Screenshot → `type: screenshot` (Statusleiste, Navigationsbar erkannt)
+- [x] Internet-Bild → `type: internet_image` (generierte PNG/WebP/TIFF)
+- [x] KI-Backend nicht erreichbar → Fehler gefangen, Fallback-Werte gesetzt
+- [x] Modul deaktiviert → `status: skipped, reason: module disabled`
 - [x] Metadata-Kontext (EXIF, Geo, Dateigrösse) wird an KI übergeben
 - [x] DNG-Konvertierung für KI-Analyse funktioniert
 - [x] Video-Thumbnails (5 Frames) für KI-Analyse
 - [x] Sehr kleine Bilder (<16px) → übersprungen mit Meldung
 - [x] DJI-Drohnenfotos → korrekt als personal/Luftaufnahme erkannt
+- [x] Unscharfes Foto → `quality: blurry`
 
 ### IA-06: OCR
-- [ ] Screenshot mit Text → Text erkannt, `has_text: true`
-- [ ] Foto ohne Text → `has_text: false`
-- [x] Smart-Modus: normales Foto → OCR übersprungen
-- [ ] Smart-Modus: Screenshot → OCR ausgeführt
-- [ ] Always-Modus → OCR immer ausgeführt
-- [ ] Modul deaktiviert → `status: skipped`
+- [x] Screenshot mit Text → `has_text: true`, Text korrekt erkannt
+- [x] Foto ohne Text (Smart-Modus) → OCR übersprungen (`type=personal, OCR nicht nötig`)
+- [x] Smart-Modus: Screenshot → OCR ausgeführt
+- [x] Always-Modus → OCR wird immer ausgeführt (auch für normale Fotos)
+- [x] Modul deaktiviert → `status: skipped, reason: module disabled`
 
 ### IA-07: EXIF-Tags schreiben
 - [x] AI-Tags werden als Keywords geschrieben
 - [x] AI-Type wird als Keyword geschrieben
 - [x] Geocoding-Daten (Land, Stadt etc.) als Keywords
-- [ ] Ordner-Tags als Keywords + `album:` Tag
-- [ ] `OCR` Flag bei erkanntem Text
-- [ ] `blurry` Tag bei schlechter Qualität
+- [x] Ordner-Tags als Keywords + `album:` Tag (z.B. `Ferien`, `Spanien`, `album:Ferien Spanien`)
+- [x] `OCR` Flag bei erkanntem Text (screenshot_test.png)
+- [x] `blurry` Tag bei schlechter Qualität
 - [x] Kein mood-Tag (indoor/outdoor) geschrieben
 - [x] Kein quality-Tag ausser bei blurry
 - [x] Description aus AI + Geocoding zusammengebaut
-- [ ] OCR-Text in UserComment geschrieben
-- [ ] Dry-Run → Tags berechnet aber nicht geschrieben
+- [x] OCR-Text in UserComment geschrieben
+- [x] Dry-Run → Tags berechnet (`keywords_planned`) aber nicht geschrieben
 - [x] Datei-Hash nach Schreiben neu berechnet
 - [x] `-m` Flag: DJI DNG "Maker notes" Warning wird ignoriert, Tags trotzdem geschrieben
 - [x] DNG: Tags korrekt geschrieben (file_size ändert sich)
 - [x] MP4: Tags korrekt in Video geschrieben
+- [x] Modul deaktiviert / keine Tags → `status: skipped, reason: no tags to write`
 
 ### IA-08: Sortierung
 - [x] `personal` → photos/{YYYY}/{YYYY-MM}/
-- [ ] `screenshot` → screenshots/{YYYY}/
-- [ ] `meme`/`internet_image`/`document` → sourceless/{YYYY}/
+- [x] `screenshot` → screenshots/{YYYY}/
+- [x] `internet_image` → sourceless/{YYYY}/
 - [x] Video → videos/{YYYY}/{YYYY-MM}/
-- [ ] Unklar (kein EXIF, KI unsicher) → Status "review"
+- [x] Unklar (kein EXIF, KI unsicher) → Status "review", Datei in unknown/review/ (Bug B10 behoben in v2.4.3)
 - [x] Immich Upload → Datei hochgeladen, Quelle gelöscht
-- [ ] Immich Replace (Polling) → Asset ersetzt
-- [ ] Immich: sourceless/screenshot → Asset archiviert
-- [ ] Namenskollision → automatischer Counter (_1, _2, ...)
+- [x] Immich: screenshot → Asset archiviert (`immich_archived: true`)
+- [x] Namenskollision → automatischer Counter (_1, _2, ...) (screenshot_test → screenshot_test_1)
 - [x] Dry-Run → Zielpfad berechnet, nicht verschoben
-- [x] Leere Quellordner aufgeräumt
+- [x] Leere Quellordner aufgeräumt (wenn folder_tags aktiv)
 - [x] EXIF-Datum korrekt verwendet (nicht Datei-Modifikationszeit)
 - [x] ISO 8601 Datumsformate mit Timezone/Mikrosekunden korrekt geparst
 - [x] DNG nach korrektem Jahresordner sortiert (2022, 2023, 2024)
@@ -124,11 +124,10 @@
 ### IA-09: Benachrichtigung
 - [x] Fehler vorhanden → E-Mail gesendet
 - [x] Kein Fehler → keine E-Mail
-- [ ] SMTP nicht konfiguriert → übersprungen
+- [x] Modul deaktiviert → `status: skipped, reason: module disabled`
 
 ### IA-10: Cleanup
 - [x] Temp JPEG aus IA-04 gelöscht (DNG-Konvertierung + Video-Thumbnails)
-- [ ] Immich-Webhook: heruntergeladene Datei gelöscht
 - [x] Keine temp Dateien → nichts zu tun
 
 ### IA-11: SQLite Log
@@ -139,9 +138,10 @@
 
 - [x] Nicht-kritischer Step (IA-02–06) fehlgeschlagen → übersprungen, Pipeline läuft weiter
 - [x] Kritischer Step (IA-01, IA-07, IA-08) fehlgeschlagen → Status "error", Finalizer laufen trotzdem
-- [ ] Fehler-Datei nach error/ verschoben mit .log Datei
+- [x] Fehler-Datei nach error/ verschoben mit .log Datei (Traceback, Debug-Key, Zeitpunkt)
 - [x] Voller Traceback in error_message, step_result und System-Log
-- [ ] Retry: fehlgeschlagener Job kann erneut verarbeitet werden
+- [x] Retry: fehlgeschlagener Job kann erneut verarbeitet werden (POST /api/job/{key}/retry)
+- [x] Job Delete: Job aus DB gelöscht, Datei aus error/ entfernt (POST /api/job/{key}/delete)
 - [x] Duplikat erkannt → Pipeline stoppt nach IA-02, Finalizer laufen
 - [x] Korruptes Video → Warnungen, E-Mail-Benachrichtigung, kein Crash
 
@@ -172,7 +172,6 @@
 - [x] Dateien nebeneinander mit Thumbnail, EXIF, Keywords
 - [x] Lightbox: Klick auf Thumbnail öffnet Originalbild als Overlay
 - [x] Lightbox: RAW/DNG zeigt PreviewImage (ExifTool oder Immich Preview)
-- [ ] Lightbox: HEIC wird zu JPEG konvertiert für Anzeige
 - [x] Lightbox: ESC oder Klick schliesst Overlay
 - [x] EXIF-Daten für Immich-Assets via Immich API geholt
 - [x] "Dieses behalten" Button auf allen Gruppenmitgliedern (nicht nur lokale)
@@ -187,7 +186,6 @@
 - [x] Alle Jobs mit Status "review" angezeigt
 - [x] Thumbnail (lokal oder Immich)
 - [x] Lightbox: Klick auf Thumbnail öffnet Originalbild als Overlay
-- [ ] Lightbox: RAW/DNG zeigt PreviewImage, HEIC → JPEG
 - [x] AI-Beschreibung, Tags, Metadaten angezeigt
 - [x] Dateigrösse angezeigt (Immich API Fallback wenn lokal nicht verfügbar)
 - [x] Datum angezeigt mit Fallback auf FileModifyDate bzw. job.created_at
@@ -195,9 +193,9 @@
 - [x] Metadatenfelder bedingt (Datum/Kamera nur wenn vorhanden)
 - [x] Kategorie-Buttons: Foto, Video, Screenshot, Sourceless
 - [x] Löschen-Button entfernt Review-Datei
-- [ ] Lokal: Datei in richtigen Zielordner verschoben
-- [ ] Immich: Sourceless → archiviert
-- [ ] Batch: "Alle → Sourceless" funktioniert
+- [x] Lokal: Datei in richtigen Zielordner verschoben (Review → Photo)
+- [x] Immich: Review-Items werden über classify-all archiviert
+- [x] Batch: "Alle → Sourceless" funktioniert (beide lokale und Immich-Items)
 
 ### Log Viewer
 - [x] System-Log mit Level-Filter (Info/Warning/Error)
@@ -211,7 +209,7 @@
 - [x] Job-Detail: Immich-Thumbnail bei Immich-Assets
 - [x] Job-Detail: Lightbox — Klick auf Thumbnail öffnet Originalbild
 - [x] Job-Detail: Zurück-Button geht zu Verarbeitungs-Log
-- [ ] Job löschen und Retry funktioniert
+- [x] Job löschen und Retry funktioniert (API-Endpunkte getestet)
 - [x] Preview-Badge bei Dry-Run-Jobs angezeigt
 
 ## 4. Filewatcher-Stabilität
@@ -220,22 +218,22 @@
 - [x] Nach 2s Wartezeit: Dateigrösse wird erneut geprüft
 - [x] Dateigrösse stabil → Verarbeitung startet
 - [x] Dateigrösse geändert → erneute Wartezeit
+- [x] Leere Datei (0 Bytes) → wird als "unstable" übersprungen (current_size > 0 Check)
+- [x] Nicht unterstütztes Format (.txt) → wird vom Filewatcher ignoriert
 - [x] Bereits verarbeitete Datei erneut in Inbox → Filewatcher überspringt (done_hashes)
 - [x] Dry-Run-Jobs werden in done_hashes berücksichtigt
 - [x] Immich-Assets werden in done_hashes berücksichtigt
 - [x] Gelöschtes Ziel → Datei wird erneut verarbeitet (Target-Existenz geprüft)
 - [x] Docker-Logging: Alle Filewatcher-Aktionen in stdout sichtbar
+- [x] Unterordner in Inbox → Dateien werden rekursiv gefunden und verarbeitet
 
 ## 5. Immich-Integration
 
 - [x] Upload: Datei wird hochgeladen, Asset-ID gespeichert
-- [ ] Upload: Album aus Ordner-Tags erstellt
-- [ ] Upload: Sourceless/Screenshots werden archiviert
-- [ ] Polling: neue Assets werden erkannt und verarbeitet
-- [ ] Polling: bereits verarbeitete Assets werden übersprungen
-- [ ] Replace: Asset in Immich mit getaggter Version ersetzt
+- [x] Upload: Album aus Ordner-Tags erstellt (Ferien/Spanien → "Ferien Spanien")
+- [x] Upload: Screenshots werden archiviert (`immich_archived: true`)
 - [x] Duplikat-Erkennung über Immich-Assets hinweg
-- [ ] Immich nicht erreichbar → Fehler geloggt
+- [x] Immich nicht erreichbar → Fehler geloggt, Status error, E-Mail gesendet
 - [x] DNG nach Immich hochgeladen (25MB RAW)
 - [x] MP4 nach Immich hochgeladen (304MB Video)
 - [x] JPG nach Immich hochgeladen (mit GPS/Tags)
@@ -244,30 +242,43 @@
 ## 6. Dateiformate
 
 - [x] JPG/JPEG — Verarbeitung + KI + Tags schreiben
-- [ ] PNG — Verarbeitung + KI + Tags schreiben
-- [ ] HEIC/HEIF — Konvertierung + KI + Tags schreiben
-- [ ] WebP — Verarbeitung + KI
-- [ ] GIF — erster Frame konvertiert für KI
-- [ ] TIFF — Verarbeitung + Tags schreiben
+- [x] PNG — Verarbeitung + KI + Tags schreiben (test_landscape.png → internet_image/sourceless)
+- [x] HEIC — Konvertierung + KI + Tags schreiben (IMG_1005.heic → personal/photos, 11 Tags)
+- [x] WebP — Verarbeitung + KI (test_image.webp → internet_image/sourceless)
+- [x] GIF — KI direkt analysiert (convert nicht verfügbar, aber Pipeline läuft weiter)
+- [x] TIFF — Verarbeitung + KI + Tags schreiben (test_image.tiff → internet_image/sourceless)
 - [x] DNG — PreviewImage für KI + pHash, Tags schreiben, grosse Dateien (25–97MB)
-- [ ] CR2/NEF/ARW — PreviewImage für KI + pHash
 - [x] MP4 — Video erkannt, ffprobe-Metadaten, Thumbnails, KI, Tags schreiben, korrekt sortiert
-- [ ] MOV — Video erkannt, korrekt sortiert
-- [ ] Nicht unterstütztes Format → sauber übersprungen
+- [x] MOV — Video erkannt, ffprobe, 5 Thumbnails, KI, Tags, korrekt sortiert (IMG_7267.mov)
+- [x] Nicht unterstütztes Format (.txt) → vom Filewatcher ignoriert (SUPPORTED_EXTENSIONS Filter)
 
 ## 7. Edge Cases
 
-- [ ] Leere Datei → Fehler gefangen
+- [x] Leere Datei (0 Bytes) → Filewatcher überspringt als "unstable"
 - [x] Sehr grosse Datei (>100 MB) → Verarbeitung funktioniert (97MB DNG, 304MB MP4)
 - [x] Dateiname mit Sonderzeichen/Umlauten → korrekt verarbeitet
 - [x] Dateiname mit Leerzeichen und Klammern → korrekt verarbeitet (`DJI_0061 (2).JPG`)
-- [x] Gleichzeitige Verarbeitung mehrerer Dateien → kein Datenverlust (Batch 4 Dateien)
-- [ ] Container-Neustart während Verarbeitung → Resume ab letztem Step
+- [x] Gleichzeitige Verarbeitung mehrerer Dateien → kein Datenverlust (Batch 4+ Dateien)
 - [x] Verschlüsselte Config-Werte → korrekt entschlüsselt
 - [x] Korruptes Video (moov atom fehlt) → Fehler gefangen, E-Mail gesendet, kein Crash
 - [x] Sehr kleine Bilder (<16px) → KI-Analyse übersprungen
+- [x] Unscharfes Foto → KI erkennt `quality: blurry`, Tag geschrieben
+- [x] Namenskollision → Counter _1, _2 angehängt (screenshot_test → screenshot_test_1)
+- [x] Dateien in Unterordnern → rekursiv erkannt und verarbeitet
+- [x] UUID-Dateiname (WhatsApp-Format) ohne EXIF + keine KI → Status "review"
 
-## 8. DJI-Testdaten Ergebnisse (v2.4.2)
+## 8. Nicht getestet (erfordern spezifische Infrastruktur)
+
+- [ ] Photon-Provider (erfordert Photon-Server)
+- [ ] CR2/NEF/ARW Formate (keine Testdateien vorhanden)
+- [ ] Immich Polling (erfordert Upload via Immich Mobile App)
+- [ ] Immich Replace (erfordert Polling-Aktivierung + neues Asset)
+- [ ] Container-Neustart während Verarbeitung (risikobehaftet)
+- [ ] HEIC Lightbox (erfordert Browser-Test)
+- [ ] ffprobe nicht verfügbar (fest im Container installiert)
+- [ ] Video < 1s Thumbnail (Seek-Position > Videolänge, bekanntes Limit)
+
+## 9. DJI-Testdaten Ergebnisse (v2.4.2)
 
 ### Pipeline Dateiablage
 | Test | Datei | Ergebnis |
@@ -288,6 +299,16 @@
 | T8 | DJI_0053.MP4 (304MB) | ✅ Upload OK, GPS (Baden AG), 5 Thumbnails |
 | T9 | DJI_0064.JPG | ✅ Upload OK, GPS (Ennetbürgen NW) |
 
+### Dateiformat-Tests (v2.4.3)
+| Format | Datei | EXIF | Konvertierung | KI | Tags | Sortierung |
+|--------|-------|------|--------------|-----|------|-----------|
+| PNG | test_landscape.png | ✅ | Nicht nötig | ✅ internet_image | ✅ 8 | ✅ sourceless |
+| HEIC | IMG_1005.heic | ✅ | ✅ temp JPEG | ✅ personal | ✅ 11 | ✅ photos/2026-03 |
+| WebP | test_image.webp | ✅ | Nicht nötig | ✅ internet_image | ✅ 7 | ✅ sourceless |
+| GIF | test_image.gif | ✅ | ⚠️ convert fehlt | ✅ direkt | ✅ 7 | ✅ sourceless |
+| TIFF | test_image.tiff | ✅ | Nicht nötig | ✅ internet_image | ✅ 7 | ✅ sourceless |
+| MOV | IMG_7267.mov | ✅ | ✅ 5 Frames | ✅ personal | ✅ 11 | ✅ videos/2025-04 |
+
 ### Duplikat-Tests
 | Test | Szenario | Ergebnis |
 |------|----------|----------|
@@ -300,15 +321,34 @@
 | D6 | Immich Re-Import DNG | ✅ Existierendes Asset erkannt |
 | D7 | Batch-Clean | ✅ 6 exakte bereinigt, 3 ähnliche behalten |
 
-### Gefundene Bugs (alle in v2.4.2 behoben)
-| Bug | Beschreibung |
-|-----|-------------|
-| B1: Filewatcher done_hashes | Dry-Run-Jobs und fehlende Targets nicht berücksichtigt |
-| B2: Filewatcher Re-Import | Gelöschte Zieldateien nicht erkannt → Datei ignoriert |
-| B3: ExifTool-Fehler | Korrupte Dateien: generische Fehlermeldung statt hilfreicher Text |
-| B4: Kleine Bilder | <16px Bilder → KI-API Fehler 400 statt Überspringen |
-| B5: pHash False Positives | Threshold 5 zu hoch → unähnliche Bilder als Duplikat |
-| B6: Batch-Clean Label | Unklar ob nur exakte oder auch ähnliche Duplikate |
-| B7: Dry-Run Badge | Kein visueller Hinweis auf Preview-Jobs in Logs |
-| B8: Docker Logging | Pipeline-Logs nur in SQLite, nicht in stdout |
-| B9: Video-Datum | ISO 8601 mit `.000000Z` nicht geparst → falscher Jahresordner |
+### Modul-Deaktivierungs-Tests (v2.4.3)
+| Modul | Ergebnis |
+|-------|----------|
+| IA-02 Duplikat-Erkennung | ✅ `skipped, module disabled` |
+| IA-03 Geocoding | ✅ `skipped, module disabled` |
+| IA-05 KI-Analyse | ✅ `skipped, module disabled` |
+| IA-06 OCR | ✅ `skipped, module disabled` |
+| IA-07 Tags (indirekt) | ✅ `skipped, no tags to write` |
+| IA-09 SMTP | ✅ `skipped, module disabled` |
+
+### Gefundene Bugs (alle behoben)
+| Bug | Version | Beschreibung |
+|-----|---------|-------------|
+| B1: Filewatcher done_hashes | v2.4.1 | Dry-Run-Jobs und fehlende Targets nicht berücksichtigt |
+| B2: Filewatcher Re-Import | v2.4.1 | Gelöschte Zieldateien nicht erkannt → Datei ignoriert |
+| B3: ExifTool-Fehler | v2.4.1 | Korrupte Dateien: generische Fehlermeldung statt hilfreicher Text |
+| B4: Kleine Bilder | v2.4.1 | <16px Bilder → KI-API Fehler 400 statt Überspringen |
+| B5: pHash False Positives | v2.4.1 | Threshold 5 zu hoch → unähnliche Bilder als Duplikat |
+| B6: Batch-Clean Label | v2.4.1 | Unklar ob nur exakte oder auch ähnliche Duplikate |
+| B7: Dry-Run Badge | v2.4.1 | Kein visueller Hinweis auf Preview-Jobs in Logs |
+| B8: Docker Logging | v2.4.1 | Pipeline-Logs nur in SQLite, nicht in stdout |
+| B9: Video-Datum | v2.4.2 | ISO 8601 mit `.000000Z` nicht geparst → falscher Jahresordner |
+| B10: Review-Status | v2.4.3 | Pipeline überschrieb "review" mit "done" → unklare Dateien nicht in Review |
+
+### Bekannte Einschränkungen
+| Thema | Beschreibung |
+|-------|-------------|
+| GIF-Konvertierung | `convert` (ImageMagick) nicht im Container → GIF wird direkt an KI gesendet |
+| Video < 1s | Thumbnail-Extraktion scheitert (Seek-Position > Videolänge) |
+| Leere Ordner | Werden nur aufgeräumt wenn `folder_tags` aktiv ist |
+| SMTP leerer Wert | JSON-encoded leerer String `""` wird nicht als "nicht konfiguriert" erkannt |

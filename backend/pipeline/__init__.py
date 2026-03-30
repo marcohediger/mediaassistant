@@ -133,7 +133,9 @@ async def run_pipeline(job_id: int):
                 for r in existing_results.values()
             )
             if has_step_errors:
-                job.status = "done"
+                # Preserve "review" status set by IA-08 for unknown files
+                if job.status != "review":
+                    job.status = "done"
                 # Collect error summaries
                 error_steps = [
                     code for code, r in existing_results.items()
@@ -141,7 +143,9 @@ async def run_pipeline(job_id: int):
                 ]
                 job.error_message = f"Warnungen in: {', '.join(error_steps)}"
             else:
-                job.status = "done"
+                # Preserve "review" status set by IA-08 for unknown files
+                if job.status != "review":
+                    job.status = "done"
             job.completed_at = datetime.now()
             await session.commit()
         elif duplicate_detected:
