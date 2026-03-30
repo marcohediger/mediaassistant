@@ -1,6 +1,6 @@
 # Testplan — MediaAssistant
 
-> Letzter vollständiger Testlauf: **v2.4.3 — 2026-03-30**
+> Letzter vollständiger Testlauf: **v2.5.0 — 2026-03-30**
 > Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203/FC3170 JPGs/DNG/MP4, iPhone HEIC/MOV, generierte PNG/GIF/WebP/TIFF
 
 ## 1. Pipeline-Steps
@@ -267,7 +267,29 @@
 - [x] Dateien in Unterordnern → rekursiv erkannt und verarbeitet
 - [x] UUID-Dateiname (WhatsApp-Format) ohne EXIF + keine KI → Status "review"
 
-## 8. Nicht getestet (erfordern spezifische Infrastruktur)
+## 8. Security (v2.4.4–v2.4.5)
+
+- [ ] Path Traversal: EXIF country `../../etc` → Pfad wird sanitisiert, bleibt in Bibliothek
+- [ ] Path Traversal: `_validate_target_path()` blockiert Ausbruch als Defense-in-Depth
+- [ ] Path Traversal: Normaler EXIF-Wert (Schweiz/Zürich) wird durchgelassen
+- [ ] Immich Filename: `../../etc/passwd` → `os.path.basename()` extrahiert nur Dateiname
+- [ ] Immich Filename: Leerer Name → Fallback auf `asset_id.jpg`
+- [ ] Dateigrössenlimit: `MAX_FILE_SIZE = 10 GB` korrekt gesetzt
+- [ ] Dateigrössenlimit: Datei > 10 GB wird im Filewatcher übersprungen
+
+## 9. Performance (v2.5.0)
+
+- [ ] DB-Indexes: 7 Indexes auf jobs + system_logs erstellt
+- [ ] Dashboard: 1 GROUP BY Query statt 6 COUNT Queries
+- [ ] Dashboard JSON-Endpoint Antwortzeit < 100ms
+- [ ] Duplikat pHash: Batched Query (BATCH_SIZE=5000, nur leichte Spalten)
+- [ ] safe_move: Datei wird nur 1× gelesen (Hash während Copy)
+- [ ] Immich Upload: Streaming von Disk (kein `f.read()`)
+- [ ] Log-Rotation: Logs > 90 Tage werden automatisch gelöscht
+- [ ] Temp-Cleanup: `shutil.rmtree()` bei fehlgeschlagenen Immich-Downloads
+- [ ] Docker: Memory-Limit 2 GB und CPU-Limit 2.0 gesetzt
+
+## 10. Nicht getestet (erfordern spezifische Infrastruktur)
 
 - [ ] Photon-Provider (erfordert Photon-Server)
 - [ ] CR2/NEF/ARW Formate (keine Testdateien vorhanden)
@@ -278,7 +300,7 @@
 - [ ] ffprobe nicht verfügbar (fest im Container installiert)
 - [ ] Video < 1s Thumbnail (Seek-Position > Videolänge, bekanntes Limit)
 
-## 9. DJI-Testdaten Ergebnisse (v2.4.2)
+## 11. DJI-Testdaten Ergebnisse (v2.4.2)
 
 ### Pipeline Dateiablage
 | Test | Datei | Ergebnis |
