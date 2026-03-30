@@ -4,6 +4,8 @@ services:
       context: ./backend
     container_name: mediaassistant
     restart: unless-stopped
+    mem_limit: 2g
+    cpus: 2.0
     ports:
       - "8000:8000"
     volumes:

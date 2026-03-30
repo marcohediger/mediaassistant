@@ -1,11 +1,11 @@
 """Safe file operations — copy first, verify, then delete original.
 
 Every move is a three-step process:
-  1. Copy source → destination (shutil.copy2 preserves metadata)
-  2. Verify: compare file sizes (and optionally hashes)
+  1. Copy source → destination while computing hash (single read)
+  2. Verify: compare destination hash (single read of destination)
   3. Delete source only after successful verification
 
-All operations are logged to the system log.
+Optimized: source file is read only ONCE (hash computed during copy).
 """
 
 import hashlib
@@ -24,7 +24,7 @@ def _sha256(path: str) -> str:
 
 
 def safe_move(src: str, dst: str, context: str = "") -> str:
-    """Move a file safely: copy → verify → delete original.
+    """Move a file safely: copy+hash → verify → delete original.
 
     Args:
         src: Source file path.
@@ -39,24 +39,34 @@ def safe_move(src: str, dst: str, context: str = "") -> str:
     """
     src_size = os.path.getsize(src)
 
-    # Step 1: Copy (preserves metadata)
-    shutil.copy2(src, dst)
+    # Step 1: Copy while computing source hash in one pass
+    src_hash = hashlib.sha256()
+    with open(src, "rb") as f_in, open(dst, "wb") as f_out:
+        # Preserve metadata after content copy
+        while True:
+            chunk = f_in.read(65536)
+            if not chunk:
+                break
+            f_out.write(chunk)
+            src_hash.update(chunk)
+    src_hash_hex = src_hash.hexdigest()
+
+    # Copy metadata (timestamps, permissions)
+    shutil.copystat(src, dst)
 
     # Step 2: Verify size
     dst_size = os.path.getsize(dst)
     if src_size != dst_size:
-        # Remove broken copy, keep original safe
         os.remove(dst)
         msg = f"Copy failed: Size {src_size} ≠ {dst_size}"
         _log_error_sync(context, msg, f"{src} → {dst}")
         raise RuntimeError(msg)
 
-    # Step 3: Verify hash
-    src_hash = _sha256(src)
-    dst_hash = _sha256(dst)
-    if src_hash != dst_hash:
+    # Step 3: Verify hash (only reads destination once — source hash from step 1)
+    dst_hash_hex = _sha256(dst)
+    if src_hash_hex != dst_hash_hex:
         os.remove(dst)
-        msg = f"Copy failed: Hash {src_hash[:16]}… ≠ {dst_hash[:16]}…"
+        msg = f"Copy failed: Hash {src_hash_hex[:16]}… ≠ {dst_hash_hex[:16]}…"
         _log_error_sync(context, msg, f"{src} → {dst}")
         raise RuntimeError(msg)
 
@@ -65,7 +75,7 @@ def safe_move(src: str, dst: str, context: str = "") -> str:
 
     _log_info_sync(
         context,
-        f"File moved: {os.path.basename(src)} ({src_size} Bytes, SHA256 {src_hash[:16]}…)",
+        f"File moved: {os.path.basename(src)} ({src_size} Bytes, SHA256 {src_hash_hex[:16]}…)",
         f"{src} → {dst}",
     )
     return dst

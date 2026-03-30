@@ -246,11 +246,9 @@ async def _poll_immich():
             file_path = await download_asset(asset_id, tmp_dir)
         except Exception as e:
             await log_error("immich_poll", f"Download failed: {filename}", str(e))
-            # Clean up temp dir
-            try:
-                os.rmdir(tmp_dir)
-            except OSError:
-                pass
+            # Clean up temp dir including any partial downloads
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
             continue
 
         file_hash = await asyncio.to_thread(_sha256, file_path)

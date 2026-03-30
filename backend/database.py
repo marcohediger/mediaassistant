@@ -34,6 +34,19 @@ async def _migrate_columns(conn):
         except Exception:
             await conn.execute(sqlalchemy.text(sql))
 
+    # Performance indexes for large databases (150k+ jobs)
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_job_status ON jobs(status)",
+        "CREATE INDEX IF NOT EXISTS idx_job_file_hash ON jobs(file_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_job_phash ON jobs(phash)",
+        "CREATE INDEX IF NOT EXISTS idx_job_original_path ON jobs(original_path)",
+        "CREATE INDEX IF NOT EXISTS idx_job_created_at ON jobs(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_job_updated_at ON jobs(updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_syslog_created_at ON system_logs(created_at)",
+    ]
+    for sql in indexes:
+        await conn.execute(sqlalchemy.text(sql))
+
 
 async def init_db():
     os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
