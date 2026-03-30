@@ -127,11 +127,35 @@
       if (section) {
         section.innerHTML = Object.entries(job.step_result)
           .map(
-            ([step, result]) => `<div class="step-item">
-            <span class="step-code">${esc(step)}</span>
-            <span class="step-label">${esc(job.step_labels && job.step_labels[step] || step)}</span>
-            <pre class="step-data">${esc(JSON.stringify(result, null, 2))}</pre>
-          </div>`
+            ([step, result]) => {
+              const label = esc(job.step_labels && job.step_labels[step] || step);
+              if (step === "IA-05" && result && result._context) {
+                const displayResult = {};
+                for (const [k, v] of Object.entries(result)) {
+                  if (!k.startsWith("_")) displayResult[k] = v;
+                }
+                return `<div class="step-item">
+                  <span class="step-code">${esc(step)}</span>
+                  <span class="step-label">${label}</span>
+                  <div class="step-ai-detail">
+                    <div style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85rem;">
+                      <strong>Modell:</strong> ${esc(result._model)} — <strong>${result._images}</strong> Bild${result._images > 1 ? "er" : ""}
+                    </div>
+                    <div style="margin-bottom:0.5rem;">
+                      <strong>Kontext an KI:</strong>
+                      <pre class="step-data" style="margin-top:0.25rem;color:var(--text-muted);">${esc(result._context)}</pre>
+                    </div>
+                    <strong>KI-Antwort:</strong>
+                    <pre class="step-data" style="margin-top:0.25rem;">${esc(JSON.stringify(displayResult, null, 2))}</pre>
+                  </div>
+                </div>`;
+              }
+              return `<div class="step-item">
+                <span class="step-code">${esc(step)}</span>
+                <span class="step-label">${label}</span>
+                <pre class="step-data">${esc(JSON.stringify(result, null, 2))}</pre>
+              </div>`;
+            }
           )
           .join("");
       }
