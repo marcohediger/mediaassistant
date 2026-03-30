@@ -14,12 +14,22 @@ _WHATSAPP_UUID_RE = re.compile(
 
 
 def _parse_date(date_str: str) -> datetime | None:
-    """Parse EXIF date string into datetime."""
+    """Parse EXIF/video date string into datetime."""
     if not date_str:
         return None
-    for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+    # Strip timezone suffix (Z, +00:00, +02:00 etc.) for naive datetime
+    cleaned = re.sub(r"[+-]\d{2}:\d{2}$", "", date_str)
+    cleaned = cleaned.rstrip("Z")
+    # Strip sub-second precision (.000000)
+    cleaned = re.sub(r"\.\d+$", "", cleaned)
+    for fmt in (
+        "%Y:%m:%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y/%m/%d %H:%M:%S",
+    ):
         try:
-            return datetime.strptime(date_str, fmt)
+            return datetime.strptime(cleaned, fmt)
         except (ValueError, TypeError):
             continue
     return None
