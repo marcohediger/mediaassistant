@@ -94,8 +94,10 @@ async def execute(job, session) -> dict:
                 await log_warning("IA-02", f"Orphaned job {existing.debug_key}: file missing, skipping duplicate match")
 
     # --- Stage 1.5: JPG+RAW Paar-Erkennung ---
-    raw_jpg_enabled = await config_manager.get("duplikat.raw_jpg_pair", True)
-    if raw_jpg_enabled:
+    # Wenn raw_jpg_keep_both=True → beide Dateien unabhängig verarbeiten (kein Duplikat)
+    # Wenn raw_jpg_keep_both=False → Paar als Duplikat erkennen → landet im Review
+    raw_jpg_keep_both = await config_manager.get("duplikat.raw_jpg_pair", True)
+    if not raw_jpg_keep_both:
         basename = os.path.splitext(job.filename)[0]
         ext = os.path.splitext(job.filename)[1].lower()
         jpg_exts = {".jpg", ".jpeg"}
