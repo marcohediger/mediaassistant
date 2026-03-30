@@ -269,25 +269,25 @@
 
 ## 8. Security (v2.4.4–v2.4.5)
 
-- [ ] Path Traversal: EXIF country `../../etc` → Pfad wird sanitisiert, bleibt in Bibliothek
-- [ ] Path Traversal: `_validate_target_path()` blockiert Ausbruch als Defense-in-Depth
-- [ ] Path Traversal: Normaler EXIF-Wert (Schweiz/Zürich) wird durchgelassen
-- [ ] Immich Filename: `../../etc/passwd` → `os.path.basename()` extrahiert nur Dateiname
-- [ ] Immich Filename: Leerer Name → Fallback auf `asset_id.jpg`
-- [ ] Dateigrössenlimit: `MAX_FILE_SIZE = 10 GB` korrekt gesetzt
-- [ ] Dateigrössenlimit: Datei > 10 GB wird im Filewatcher übersprungen
+- [x] Path Traversal: EXIF country `../../etc` → sanitisiert zu `__etc`, bleibt in Bibliothek
+- [x] Path Traversal: `_validate_target_path()` blockiert `/bibliothek/../etc` mit ValueError
+- [x] Path Traversal: Normaler EXIF-Wert (Schweiz/Zürich) wird durchgelassen
+- [x] Immich Filename: `../../etc/passwd` → `os.path.basename()` → `passwd`
+- [x] Immich Filename: Leerer Name → Fallback auf `asset_id.jpg`
+- [x] Dateigrössenlimit: `MAX_FILE_SIZE = 10 GB` korrekt gesetzt
+- [ ] Dateigrössenlimit: Datei > 10 GB wird im Filewatcher übersprungen (nicht testbar ohne 10GB Datei)
 
 ## 9. Performance (v2.5.0)
 
-- [ ] DB-Indexes: 7 Indexes auf jobs + system_logs erstellt
-- [ ] Dashboard: 1 GROUP BY Query statt 6 COUNT Queries
-- [ ] Dashboard JSON-Endpoint Antwortzeit < 100ms
-- [ ] Duplikat pHash: Batched Query (BATCH_SIZE=5000, nur leichte Spalten)
-- [ ] safe_move: Datei wird nur 1× gelesen (Hash während Copy)
-- [ ] Immich Upload: Streaming von Disk (kein `f.read()`)
-- [ ] Log-Rotation: Logs > 90 Tage werden automatisch gelöscht
-- [ ] Temp-Cleanup: `shutil.rmtree()` bei fehlgeschlagenen Immich-Downloads
-- [ ] Docker: Memory-Limit 2 GB und CPU-Limit 2.0 gesetzt
+- [x] DB-Indexes: 7/7 Indexes auf jobs + system_logs erstellt
+- [x] Dashboard: 1 GROUP BY Query statt 6 COUNT Queries
+- [x] Dashboard JSON-Endpoint Antwortzeit: **7ms** (< 100ms Limit)
+- [x] Duplikat pHash: Batched Query (BATCH_SIZE=5000, nur leichte Spalten)
+- [x] safe_move: Datei wird nur 1× gelesen — 100KB Random-Daten Integrität verifiziert
+- [x] Immich Upload: Streaming von Disk (kein `f.read()`)
+- [x] Log-Rotation: `LOG_RETENTION_DAYS = 90`, stündliche Prüfung
+- [x] Temp-Cleanup: `shutil.rmtree()` bei fehlgeschlagenen Immich-Downloads
+- [x] Docker: Memory-Limit 2 GB und CPU-Limit 2.0 aktiv (cgroup verifiziert)
 
 ## 10. Nicht getestet (erfordern spezifische Infrastruktur)
 
@@ -366,6 +366,35 @@
 | B8: Docker Logging | v2.4.1 | Pipeline-Logs nur in SQLite, nicht in stdout |
 | B9: Video-Datum | v2.4.2 | ISO 8601 mit `.000000Z` nicht geparst → falscher Jahresordner |
 | B10: Review-Status | v2.4.3 | Pipeline überschrieb "review" mit "done" → unklare Dateien nicht in Review |
+
+### E2E Regressiontest v2.5.0
+
+| Datei | Format | EXIF | Duplikat | Geocoding | Konvert. | KI | Tags | Sortierung | Ziel |
+|-------|--------|------|----------|-----------|----------|-----|------|-----------|------|
+| test_v250_panasonic.JPG | JPEG | ✅ date=2012 | ✅ ok | skip (kein GPS) | nicht nötig | ✅ personal | ✅ 8 | ✅ photos/2012/2012-02 | ✅ |
+| test_v250_iphone.heic | HEIC | ✅ date=2026 | ✅ ok | ✅ Cascais, PT | ✅ temp JPEG | ✅ personal | ✅ 11 | ✅ photos/2026/2026-03 | ✅ |
+| test_v250_dji.DNG | DNG | ✅ date=2022 | ✅ pHash | ✅ Churwalden, CH | ✅ preview | ✅ personal | ✅ 10 | ✅ photos/2022/2022-02 | ✅ |
+| test_v250_video.mov | MOV | ✅ date=2025 | ✅ ok | ✅ Baden, CH | ✅ 5 frames | ✅ personal | ✅ 11 | ✅ videos/2025/2025-04 | ✅ |
+| test_v250_landscape.png | PNG | ✅ no EXIF | ✅ pHash | skip | nicht nötig | ✅ internet_image | ✅ 8 | ✅ sourceless/2026 | ✅ |
+| test_v250_abstract.webp | WebP | ✅ no EXIF | ✅ pHash | skip | nicht nötig | ✅ internet_image | ✅ 8 | ✅ sourceless/2026 | ✅ |
+| test_v250_warm.tiff | TIFF | ✅ no EXIF | ✅ pHash | skip | nicht nötig | ✅ internet_image | ✅ 8 | ✅ sourceless/2026 | ✅ |
+| test_v250_green.gif | GIF | ✅ no EXIF | ✅ pHash | skip | ⚠️ convert fehlt | ✅ internet_image | ✅ 7 | ✅ sourceless/2026 | ✅ |
+| UUID messenger file | JPEG | ✅ no EXIF | ✅ pHash | skip | nicht nötig | ✅ personal | ✅ 8 | ✅ photos/2026/2026-03 | ✅ |
+| test_v250_panasonic_dup.JPG | JPEG | — | ✅ SHA256 exact | — | — | — | — | ✅ duplicate | ✅ |
+| test_v250_noai.jpg (AI off) | JPEG | ✅ no EXIF | ✅ ok | skip | nicht nötig | ⏭️ skipped | — | ✅ unknown/review | ✅ |
+
+**Ergebnis: 11/11 Tests bestanden** — alle Formate, Duplikate, Modul-Disable korrekt verarbeitet.
+
+### Endpoint-Performance v2.5.0
+
+| Endpoint | Status | Antwortzeit |
+|----------|--------|-------------|
+| `/` (Dashboard) | 200 | 17ms |
+| `/api/dashboard` (JSON) | 200 | 7ms |
+| `/review` | 200 | 25ms |
+| `/logs` | 200 | 12ms |
+| `/settings` | 200 | 94ms |
+| `/duplicates` | 200 | 9ms |
 
 ### Bekannte Einschränkungen
 | Thema | Beschreibung |
