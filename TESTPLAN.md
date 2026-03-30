@@ -1,7 +1,8 @@
 # Testplan — MediaAssistant
 
-> Letzter vollständiger Testlauf: **v2.5.0 — 2026-03-30**
+> Letzter vollständiger Testlauf: **v2.5.0 — 2026-03-30** (228/237 bestanden, 9 nicht testbar)
 > Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203/FC3170 JPGs/DNG/MP4, iPhone HEIC/MOV, generierte PNG/GIF/WebP/TIFF
+> Container: v2.5.0, Docker 2GB RAM / 2 CPUs, SQLite mit 7 Indexes
 
 ## 1. Pipeline-Steps
 
@@ -385,16 +386,88 @@
 
 **Ergebnis: 11/11 Tests bestanden** — alle Formate, Duplikate, Modul-Disable korrekt verarbeitet.
 
-### Endpoint-Performance v2.5.0
+### Vollständiger Regressionstest v2.5.0 — 30.03.2026
+
+19 Jobs verarbeitet, 228/237 Tests bestanden (9 nicht testbar wegen fehlender Infrastruktur).
+
+#### Funktionale Tests
+
+| Test | Beschreibung | Ergebnis |
+|------|-------------|----------|
+| Dry-Run (Duplikat) | `T50_dryrun_test.JPG` → SHA256-Match, `dry_run=True`, Datei bleibt in Inbox | ✅ |
+| Dry-Run (Unique) | `T51_dryrun_unique.jpg` → Pipeline komplett, Target berechnet (`photos/2026/2026-03/`), Datei bleibt in Inbox | ✅ |
+| Subfolder Rekursion | `vacation/spain/T52_subfolder.jpg` → aus verschachteltem Unterordner verarbeitet | ✅ |
+| Namenskollision | `screenshot_test.png` → `screenshot_test_1.png` (Counter-Suffix) | ✅ |
+| Geocoding Non-Critical | IA-03 in `non_critical` Set → Fehler gefangen, Pipeline fährt fort | ✅ |
+| Leere Datei | `T10_empty.jpg` (0 Bytes) → Filewatcher ignoriert als "unstable" | ✅ |
+| Nicht-unterstützt | `T11_document.txt` → Filewatcher ignoriert (SUPPORTED_EXTENSIONS) | ✅ |
+| SMTP: kein Fehler | `IA-09: {"status": "skipped", "reason": "no errors to report"}` | ✅ |
+| SMTP: mit Fehler | `IA-09: {"sent": true, "recipient": "ds@marcohediger.ch", "errors_reported": 1}` | ✅ |
+| Modul-Disable: AI | `T30_noai.jpg` → AI skipped, Status review → classify als sourceless | ✅ |
+| Modul-Disable: Geo | `T31_nogeo.jpg` → Geocoding skipped | ✅ |
+| Modul-Disable: OCR | `T32_noocr.jpg` → OCR skipped | ✅ |
+| Modul-Disable: Dup | `T33_nodup.jpg` → Duplikat-Erkennung skipped | ✅ |
+| Sonderzeichen | `T12_Ferien Foto (2026) #1.jpg` → korrekt verarbeitet | ✅ |
+| UUID-Dateiname | `b2c3d4e5-f6a7-8901-bcde-f12345678901.jpg` → screenshots/2026/ | ✅ |
+| Duplikat Exact | `T01_panasonic.JPG` (SHA256-Match) → duplicate, Datei in error/duplicates/ | ✅ |
+
+#### Security-Tests
+
+| Test | Beschreibung | Ergebnis |
+|------|-------------|----------|
+| S1-1 | `_sanitize_path_component("../../etc/passwd")` → `"__etc_passwd"` | ✅ |
+| S1-2 | `_sanitize_path_component("Zürich")` → `"Zürich"` (normaler Wert durchgelassen) | ✅ |
+| S1-3 | `_validate_target_path("/etc/passwd", "/bibliothek")` → `ValueError` raised | ✅ |
+| S1-4 | `_validate_target_path("/bibliothek/photos/2026", "/bibliothek")` → akzeptiert | ✅ |
+| S1-5 | Control-Characters (`\x00\x01\x1f`) → entfernt | ✅ |
+| S7 | `MAX_FILE_SIZE = 10737418240` (10 GB) korrekt gesetzt | ✅ |
+| S8-1 | `_sanitize_filename("../../etc/passwd")` → `"passwd"` | ✅ |
+| S8-2 | `_sanitize_filename("/etc/passwd")` → `"passwd"` | ✅ |
+| S8-3 | `_sanitize_filename("")` → `"asset.jpg"` (Fallback) | ✅ |
+| S8-4 | `_sanitize_filename(None)` → `"asset.jpg"` (Fallback) | ✅ |
+| S8-5 | `_sanitize_filename("photo_2026.jpg")` → `"photo_2026.jpg"` (normaler Wert) | ✅ |
+
+#### Performance-Tests
+
+| Test | Beschreibung | Ergebnis |
+|------|-------------|----------|
+| R1 | Immich `upload_asset()`: Streaming mit `files=` (kein `f.read()`) | ✅ |
+| R2 | Dashboard JSON: 17ms avg (3 Runs: 14ms, 15ms, 22ms) — unter 100ms Limit | ✅ |
+| R3 | pHash Batching: `BATCH_SIZE=5000`, `.offset()` + `.limit()`, SHA256 `.limit(10)` | ✅ |
+| R4 | 7/7 DB-Indexes vorhanden: `idx_job_status`, `idx_job_file_hash`, `idx_job_phash`, `idx_job_original_path`, `idx_job_created_at`, `idx_job_updated_at`, `idx_syslog_created_at` | ✅ |
+| R5 | Docker Limits: Memory=2147483648 (2GB), NanoCPUs=2000000000 (2.0) | ✅ |
+| R6 | `shutil.rmtree()` in filewatcher.py (Zeile 251) | ✅ |
+| R7 | `LOG_RETENTION_DAYS=90`, `_CLEANUP_INTERVAL=3600s` (1h) | ✅ |
+| R8 | `safe_move`: Streaming Hash (`f_out.write(chunk)` + `src_hash.update(chunk)`), Source 1× gelesen | ✅ |
+
+#### Endpoint-Performance v2.5.0
 
 | Endpoint | Status | Antwortzeit |
 |----------|--------|-------------|
-| `/` (Dashboard) | 200 | 17ms |
-| `/api/dashboard` (JSON) | 200 | 7ms |
-| `/review` | 200 | 25ms |
-| `/logs` | 200 | 12ms |
-| `/settings` | 200 | 94ms |
-| `/duplicates` | 200 | 9ms |
+| `/` (Dashboard) | 200 | 744ms (initial) |
+| `/api/dashboard` (JSON) | 200 | 15ms |
+| `/review` | 200 | 36ms |
+| `/logs` | 200 | 19ms |
+| `/settings` | 200 | 100ms |
+| `/duplicates` | 200 | 40ms |
+
+#### Bibliothek-Struktur nach Test
+
+```
+/bibliothek/
+├── photos/
+│   ├── 2012/2012-02/  T01_panasonic.JPG, test_v250_panasonic.JPG
+│   ├── 2022/2022-02/  T03_dji_raw.DNG, test_v250_dji.DNG
+│   └── 2026/2026-03/  T02_iphone.heic, T52_subfolder.jpg, UUID-messenger
+├── videos/
+│   └── 2025/2025-04/  T04_video.mov, test_v250_video.mov
+├── sourceless/
+│   └── 2026/          T05-T08 (PNG/WebP/TIFF/GIF), T30-T33 (Modul-Tests)
+├── screenshots/
+│   └── 2026/          screenshot_test.png, screenshot_test_1.png (Kollision)
+└── error/
+    └── duplicates/    T01_panasonic.JPG (SHA256 exact duplicate)
+```
 
 ### Bekannte Einschränkungen
 | Thema | Beschreibung |
