@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.4.3 — 2026-03-30
+
+### Bugfix
+- **Fix B10: Review-Status überschrieben**: Pipeline hat `job.status = "review"` (gesetzt von IA-08 für unklare Dateien) mit `"done"` überschrieben — UUID-Dateien ohne EXIF landeten im richtigen Verzeichnis (`unknown/review/`), aber mit Status "done" statt "review"
+
+### Umfassendes E2E-Testing
+- **Format-Tests**: PNG, HEIC, WebP, GIF, TIFF, MOV — alle Formate durch Pipeline verifiziert
+- **Edge Cases**: Leere Dateien (abgewiesen), nicht unterstützte Formate (.txt abgewiesen), Dateinamenkollisionen (_1 Suffix), Screenshots (AI-Erkennung), kurze Videos (<1s, bekannte Limitation)
+- **Modul-Disable**: AI, Geocoding, OCR einzeln deaktiviert — Pipeline läuft korrekt weiter mit Fallback-Werten
+- **Job Retry/Delete**: Fehlgeschlagene Jobs wiederholt, gelöschte Jobs korrekt bereinigt
+- **Review-System**: Einzelklassifikation und Batch-Classify-All verifiziert
+- **Immich**: Ordner-Tags → Album-Erstellung, Sourceless-Archivierung bestätigt
+- **Geocoding-Fehler**: Ungültige URL → nicht-kritischer Fehler, Pipeline fährt fort
+- **Dry-Run**: Tags werden berechnet aber nicht geschrieben, Datei bleibt im Inbox
+- **OCR**: Smart-Modus erkennt Screenshots, All-Modus verarbeitet alle Bilder
+- **Blurry-Erkennung**: Unscharfe Bilder erhalten `blurry` Tag und Quality-Flag
+- **Messenger-Dateien**: UUID-Dateinamen werden als sourceless erkannt, gehen in Review
+
 ## v2.4.2 — 2026-03-30
 
 ### Bugfixes aus E2E-Testing (DJI DNG, MP4, JPG+DNG Paare)
