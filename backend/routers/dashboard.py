@@ -249,15 +249,13 @@ async def dashboard(request: Request):
         return RedirectResponse(url="/setup", status_code=302)
 
     async with async_session() as session:
-        total = (await session.execute(select(func.count(Job.id)))).scalar() or 0
-        done = (await session.execute(select(func.count(Job.id)).where(Job.status == "done"))).scalar() or 0
-        errors = (await session.execute(select(func.count(Job.id)).where(Job.status == "error"))).scalar() or 0
-        queued = (await session.execute(select(func.count(Job.id)).where(Job.status == "queued"))).scalar() or 0
-        processing = (await session.execute(select(func.count(Job.id)).where(Job.status == "processing"))).scalar() or 0
-        duplicates = (await session.execute(select(func.count(Job.id)).where(Job.status == "duplicate"))).scalar() or 0
+        # Single GROUP BY query instead of 6 separate COUNT queries
+        count_result = await session.execute(
+            select(Job.status, func.count(Job.id)).group_by(Job.status)
+        )
+        counts = {row[0] or "unknown": row[1] for row in count_result.all()}
+        total = sum(counts.values())
 
-    # Recent jobs
-    async with async_session() as session:
         recent_result = await session.execute(
             select(Job).order_by(Job.updated_at.desc()).limit(20)
         )
@@ -270,11 +268,11 @@ async def dashboard(request: Request):
     return await render(request, "dashboard.html", {
         "stats": {
             "total": total,
-            "done": done,
-            "errors": errors,
-            "queued": queued,
-            "processing": processing,
-            "duplicates": duplicates,
+            "done": counts.get("done", 0),
+            "errors": counts.get("error", 0),
+            "queued": counts.get("queued", 0),
+            "processing": counts.get("processing", 0),
+            "duplicates": counts.get("duplicate", 0),
         },
         "modules": modules,
         "recent_jobs": recent_jobs,
@@ -285,14 +283,13 @@ async def dashboard(request: Request):
 async def dashboard_json():
     """JSON endpoint for live-updating the dashboard."""
     async with async_session() as session:
-        total = (await session.execute(select(func.count(Job.id)))).scalar() or 0
-        done = (await session.execute(select(func.count(Job.id)).where(Job.status == "done"))).scalar() or 0
-        errors = (await session.execute(select(func.count(Job.id)).where(Job.status == "error"))).scalar() or 0
-        queued = (await session.execute(select(func.count(Job.id)).where(Job.status == "queued"))).scalar() or 0
-        processing = (await session.execute(select(func.count(Job.id)).where(Job.status == "processing"))).scalar() or 0
-        duplicates = (await session.execute(select(func.count(Job.id)).where(Job.status == "duplicate"))).scalar() or 0
+        # Single GROUP BY query instead of 6 separate COUNT queries
+        count_result = await session.execute(
+            select(Job.status, func.count(Job.id)).group_by(Job.status)
+        )
+        counts = {row[0] or "unknown": row[1] for row in count_result.all()}
+        total = sum(counts.values())
 
-    async with async_session() as session:
         recent_result = await session.execute(
             select(Job).order_by(Job.updated_at.desc()).limit(20)
         )
@@ -305,11 +302,11 @@ async def dashboard_json():
     return {
         "stats": {
             "total": total,
-            "done": done,
-            "errors": errors,
-            "queued": queued,
-            "processing": processing,
-            "duplicates": duplicates,
+            "done": counts.get("done", 0),
+            "errors": counts.get("error", 0),
+            "queued": counts.get("queued", 0),
+            "processing": counts.get("processing", 0),
+            "duplicates": counts.get("duplicate", 0),
         },
         "modules": [
             {

@@ -73,12 +73,13 @@ async def execute(job, session) -> dict:
     # Auch gegen fehlerhafte Jobs matchen → landet im Duplikat-Review
     file_hash = job.file_hash
     if file_hash:
+        # Use indexed file_hash column — fast lookup even with 150k+ jobs
         result = await session.execute(
             select(Job).where(
                 Job.file_hash == file_hash,
                 Job.id != job.id,
                 Job.status.in_(("done", "duplicate", "review", "processing", "error")),
-            )
+            ).limit(10)
         )
         candidates = result.scalars().all()
         for existing in candidates:
@@ -135,35 +136,51 @@ async def execute(job, session) -> dict:
         threshold = int(await config_manager.get("duplikat.phash_threshold", 3))
         current_hash = imagehash.hex_to_hash(phash_str)
 
-        # Query all jobs with a phash set — inkl. fehlerhafte → Duplikat-Review
-        result = await session.execute(
-            select(Job).where(
-                Job.phash.isnot(None),
-                Job.id != job.id,
-                Job.status.in_(("done", "duplicate", "review", "processing", "error")),
+        # Query only necessary columns for pHash comparison (not full Job objects)
+        # Process in batches to avoid loading 150k+ rows into memory at once
+        BATCH_SIZE = 5000
+        offset = 0
+        found_duplicate = None
+
+        while not found_duplicate:
+            result = await session.execute(
+                select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id).where(
+                    Job.phash.isnot(None),
+                    Job.id != job.id,
+                    Job.status.in_(("done", "duplicate", "review", "processing", "error")),
+                ).offset(offset).limit(BATCH_SIZE)
             )
-        )
-        candidates = result.scalars().all()
+            rows = result.all()
+            if not rows:
+                break
 
-        for candidate in candidates:
-            try:
-                candidate_hash = imagehash.hex_to_hash(candidate.phash)
-                distance = int(current_hash - candidate_hash)
-            except Exception:
-                continue
+            for row in rows:
+                try:
+                    candidate_hash = imagehash.hex_to_hash(row.phash)
+                    distance = int(current_hash - candidate_hash)
+                except Exception:
+                    continue
 
-            if distance <= threshold:
-                if await _file_exists(candidate):
-                    await _handle_duplicate(job, session, candidate, "similar", distance)
-                    return {
-                        "status": "duplicate",
-                        "match_type": "similar",
-                        "phash_distance": distance,
-                        "original_debug_key": candidate.debug_key,
-                        "original_path": candidate.target_path or candidate.original_path,
-                    }
-                else:
-                    await log_warning("IA-02", f"Orphaned job {candidate.debug_key}: file missing, skipping duplicate match")
+                if distance <= threshold:
+                    # Load full Job object only for the match
+                    candidate = await session.get(Job, row.id)
+                    if candidate and await _file_exists(candidate):
+                        await _handle_duplicate(job, session, candidate, "similar", distance)
+                        found_duplicate = {
+                            "status": "duplicate",
+                            "match_type": "similar",
+                            "phash_distance": distance,
+                            "original_debug_key": candidate.debug_key,
+                            "original_path": candidate.target_path or candidate.original_path,
+                        }
+                        break
+                    elif candidate:
+                        await log_warning("IA-02", f"Orphaned job {candidate.debug_key}: file missing, skipping duplicate match")
+
+            offset += BATCH_SIZE
+
+        if found_duplicate:
+            return found_duplicate
 
 
     return {"status": "ok", "phash": phash_str}

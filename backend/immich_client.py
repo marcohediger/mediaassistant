@@ -22,21 +22,19 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None) -> 
 
     headers = {"x-api-key": api_key}
 
-    # Datei komplett in Memory lesen — verhindert Partial-Uploads bei grossen Dateien
-    with open(file_path, "rb") as f:
-        file_data = f.read()
-
+    # Stream file directly from disk — avoids loading entire file into RAM
     timeout = httpx.Timeout(connect=10, read=120, write=300, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            f"{url}/api/assets",
-            headers=headers,
-            data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
-                  "deviceId": "MediaAssistant",
-                  "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                  "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
-            files={"assetData": (filename, file_data)},
-        )
+        with open(file_path, "rb") as f:
+            resp = await client.post(
+                f"{url}/api/assets",
+                headers=headers,
+                data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
+                      "deviceId": "MediaAssistant",
+                      "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                      "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
+                files={"assetData": (filename, f)},
+            )
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Immich upload failed: HTTP {resp.status_code} — {resp.text[:200]}")
@@ -217,22 +215,21 @@ async def replace_asset(asset_id: str, file_path: str) -> dict:
     stat = os.stat(file_path)
     headers = {"x-api-key": api_key}
 
-    with open(file_path, "rb") as f:
-        file_data = f.read()
-
+    # Stream file directly from disk — avoids loading entire file into RAM
     timeout = httpx.Timeout(connect=10, read=120, write=300, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.put(
-            f"{url}/api/assets/{asset_id}/original",
-            headers=headers,
-            data={
-                "deviceAssetId": f"mediaassistant-{asset_id}",
-                "deviceId": "MediaAssistant",
-                "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-            },
-            files={"assetData": (filename, file_data)},
-        )
+        with open(file_path, "rb") as f:
+            resp = await client.put(
+                f"{url}/api/assets/{asset_id}/original",
+                headers=headers,
+                data={
+                    "deviceAssetId": f"mediaassistant-{asset_id}",
+                    "deviceId": "MediaAssistant",
+                    "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                },
+                files={"assetData": (filename, f)},
+            )
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Immich replace failed: HTTP {resp.status_code} — {resp.text[:200]}")
