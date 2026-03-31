@@ -75,28 +75,13 @@
 
         <div class="review-actions">
             <span class="review-actions-label">{{ t.review.classify_as }}</span>
+            {% for cat in review_categories %}
             <form method="post" action="/api/review/classify" class="inline-form">
                 <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
-                <input type="hidden" name="category" value="photo">
-                <button type="submit" class="btn btn-small btn-success">{{ t.review.photo }}</button>
+                <input type="hidden" name="category" value="{{ cat.key }}">
+                <button type="submit" class="btn btn-small btn-secondary">{{ cat.label }}</button>
             </form>
-            {% if item.is_video %}
-            <form method="post" action="/api/review/classify" class="inline-form">
-                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
-                <input type="hidden" name="category" value="video">
-                <button type="submit" class="btn btn-small btn-info">{{ t.review.video }}</button>
-            </form>
-            {% endif %}
-            <form method="post" action="/api/review/classify" class="inline-form">
-                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
-                <input type="hidden" name="category" value="screenshot">
-                <button type="submit" class="btn btn-small btn-warning">{{ t.review.screenshot }}</button>
-            </form>
-            <form method="post" action="/api/review/classify" class="inline-form">
-                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
-                <input type="hidden" name="category" value="sourceless">
-                <button type="submit" class="btn btn-small btn-danger">{{ t.review.sourceless }}</button>
-            </form>
+            {% endfor %}
             <hr style="border: none; border-top: 1px solid var(--border); margin: 0.25rem 0;">
             <form method="post" action="/api/review/delete" class="inline-form"
                   onsubmit="return confirm('{{ t.review.delete_confirm }}')">

@@ -23,11 +23,11 @@ async def execute(job, session) -> dict:
             # Add combined album tag for album identification
             keywords.append(f"album:{' '.join(folder_parts)}")
 
-    # From AI analysis
+    # From AI analysis (tags + source — category tag is written by IA-08)
     if ai_result.get("tags"):
         keywords.extend(ai_result["tags"])
-    if ai_result.get("type") and ai_result["type"] != "unknown":
-        keywords.append(ai_result["type"])
+    if ai_result.get("source"):
+        keywords.append(ai_result["source"])
     if ai_result.get("quality") == "blurry":
         keywords.append("blurry")
 
