@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.10.0 — 2026-03-31
+
+### NSFW-Erkennung
+- **KI erkennt nicht-jugendfreie Inhalte**: Neues `nsfw`-Feld in der KI-Antwort
+- **Immich: Gesperrter Ordner**: NSFW-Assets werden automatisch in den gesperrten Ordner verschoben (`visibility: locked`)
+- Funktioniert im Upload-Pfad (Inbox → Immich) und Polling-Pfad (Immich → Pipeline)
+- Locked hat Vorrang vor Archivierung
+
+### Ordner-Tags überarbeitet
+- **Einzelwort-Tags**: Ordnernamen werden in Wörter aufgesplittet (`Ferien/Mallorca 2025/` → `Ferien`, `Mallorca`, `2025`)
+- **Zusammengesetzter Tag**: Zusätzlich kombinierter Tag aus dem Gesamtpfad (`Ferien Mallorca 2025`)
+- **`album:`-Prefix entfernt**: Kein `album:`-Prefix mehr in EXIF-Keywords
+
+### Stabilität
+- **Immich Polling-Loop behoben**: Nach `replace_asset` erhielt das Asset eine neue ID, was zu endloser Wiederverarbeitung führte. Jetzt wird SHA256-Hash nach Download geprüft
+- **Reprocess-Verzeichnis**: Dateien werden nie zurück in die Inbox verschoben. Retry und Duplikat-Keep nutzen `/app/data/reprocess/`
+- **Duplikat-Keep Fix**: file_hash wird auf gelöschten Group-Members genullt, damit IA-02 sie nicht erneut matcht
+
 ## v2.9.0 — 2026-03-31
 
 ### Video-Kategorien & Medientyp-Filter
