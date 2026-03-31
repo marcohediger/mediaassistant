@@ -383,16 +383,27 @@ def trigger_manual_scan():
 async def start_filewatcher(shutdown_event: asyncio.Event):
     """Main filewatcher loop, runs as background task."""
     logger.info("Filewatcher started")
-    # Resume interrupted jobs on startup
+    # Resume interrupted jobs on startup (max 3 retries to prevent infinite loops)
+    MAX_RETRIES = 3
     async with async_session() as session:
         result = await session.execute(
-            select(Job.id).where(Job.status == "processing")
+            select(Job).where(Job.status == "processing")
         )
         interrupted = result.scalars().all()
-        for job_id in interrupted:
-            await log_info("filewatcher", f"Job resumed", f"Job-ID: {job_id}")
-            logger.info(f"Resuming interrupted job: {job_id}")
-            await run_pipeline(job_id)
+        for job in interrupted:
+            retry = (job.retry_count or 0) + 1
+            if retry > MAX_RETRIES:
+                job.status = "error"
+                job.error_message = f"Max retries ({MAX_RETRIES}) exceeded — job keeps crashing"
+                await session.commit()
+                await log_error("filewatcher", f"{job.debug_key} abandoned after {MAX_RETRIES} retries", job.filename)
+                logger.error(f"Job {job.debug_key} abandoned after {MAX_RETRIES} retries")
+                continue
+            job.retry_count = retry
+            await session.commit()
+            await log_info("filewatcher", f"Job resumed (attempt {retry}/{MAX_RETRIES})", f"{job.debug_key} ({job.filename})")
+            logger.info(f"Resuming {job.debug_key} (attempt {retry}/{MAX_RETRIES})")
+            await run_pipeline(job.id)
 
     while not shutdown_event.is_set():
         try:
