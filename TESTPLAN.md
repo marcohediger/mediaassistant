@@ -1,8 +1,9 @@
 # Testplan — MediaAssistant
 
 > Letzter vollständiger Testlauf: **v2.9.0 — 2026-03-31** (254/263 bestanden, 9 nicht testbar)
-> Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203/FC3170 JPGs/DNG/MP4, iPhone HEIC/MOV, generierte PNG/GIF/WebP/TIFF
-> Container: v2.5.0, Docker 2GB RAM / 2 CPUs, SQLite mit 7 Indexes
+> Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203 JPGs, iPhone 12 Pro HEIC/MOV, Casio EX-S600 JPGs, generierte PNG/GIF/WebP/TIFF, UUID Messenger-Dateien
+> Container: v2.9.0, Docker 2GB RAM / 2 CPUs, SQLite mit 7 Indexes
+> Testlauf: 19 Jobs verarbeitet (16 done, 3 duplicate, 0 error, 0 review), Inbox leer nach Abschluss
 >
 > **v2.8.0 Änderungen**: Kategorien sind dynamisch aus DB (library_categories). Statische Regeln primär, KI verifies/korrigiert. AI gibt type (DB-Key), source (Herkunft), tags (beschreibend) zurück. Review-Buttons dynamisch. EXIF-Tags: IA-07 schreibt AI-Tags+Source, IA-08 schreibt Kategorie-Label+Source. Noch nicht regressionsgetestet.
 >
