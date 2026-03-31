@@ -660,7 +660,18 @@ Bidirektionale Verbindung mit Immich via REST API.
 - ✅ API-Key + URL im Webinterface konfigurierbar
 - ✅ Poll-Toggle im Webinterface, Intervall = Filewatcher-Intervall
 - ❌ Trigger-Tags (ia-process, ia-location, ia-ocr, ia-sync) — nicht umgesetzt
-- ❌ Immich DB Metadaten → Originaldateien zurückschreiben — nicht umgesetzt
+- ❌ Immich DB Metadaten → Originaldateien zurückschreiben — geplant für v2.11
+
+### Immich Tag/Album Sync (v2.11)
+Periodischer Abgleich zwischen Immich-DB und EXIF-Tags in den Originaldateien.
+- Immich PostgreSQL DB lesen (nur SELECT, kein Schreibzugriff)
+- Tags und Alben-Zuweisungen pro Asset auslesen
+- Mit EXIF-Keywords in der Datei vergleichen (direkt auf Volume, kein Download)
+- Bei Differenz: ExifTool schreibt fehlende Tags in die Datei
+- Delta-Sync: nur geänderte Dateien werden geschrieben
+- Manueller Trigger via `POST /api/sync-tags` + optionaler Cron (z.B. 1x monatlich)
+- Geschätzte Performance: DB-Read 150k Assets ~4 Min, ExifTool ~230ms/Datei
+- Ziel: EXIF-Tags als portables Backup unabhängig von Immich
 
 ### SSO Login (OIDC)
 - Provider: sso.marcohediger.ch (Synology SSO Server)
