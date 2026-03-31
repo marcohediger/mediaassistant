@@ -135,25 +135,26 @@ Neue Datei in /inbox/mobile/ oder /inbox/manual/
     - Videos: Thumbnail via ffmpeg bei 10% der Dauer (vorbereitet, VIDEO_THUMBNAIL_ENABLED = False)
         ↓
  5. KI-Analyse (LM Studio Vision)
-    - Typ: personal / screenshot / internet_image / document / meme
-    - Inhalt: Personen, Landschaft, Essen, Dokument, Tier, etc.
-    - Stimmung: indoor / outdoor / nacht / gegenlicht
-    - Personenanzahl (keine Namen)
-    - Qualität: unscharf / gut / sehr gut
+    - Type: Kategorie-Key aus DB (z.B. personliches_foto, screenshot, sourceless)
+    - Source: Herkunft (z.B. Kamerafoto, Meme, Internetbild, Screenshot) — KI definiert frei
+    - Tags: Beschreibende Tags (z.B. Landschaft, Tier, Haus, Boot) — KI generiert frei
     - Beschreibung: Freitext (1-2 Sätze)
+    - Stimmung, Personenanzahl, Qualität, Konfidenz
+    - Kategorien werden dynamisch aus DB geladen und im Prompt übergeben
+    - Statische Regel-Vorklassifikation wird der KI als Kontext mitgegeben
         ↓
  6. OCR — Texterkennung
     - Screenshots, Dokumente, Schilder, Whiteboards
         ↓
  7. EXIF Tags schreiben (ExifTool, overwrite_original)
-    - Keywords: Typ, Inhalt-Tags, Qualität, Ort, Ordner-Tags
+    - Keywords: AI-Tags, AI-Source, Qualität, Ort, Ordner-Tags
     - ImageDescription: KI-Freitext + Ort
         ↓
- 8. Sortieren — Zielordner bestimmen + Datei sicher verschieben
-    - photos/YYYY/YYYY-MM/    (personal, Datum aus EXIF)
-    - sourceless/YYYY/        (Bilder ohne EXIF / Messenger)
-    - screenshots/YYYY/       (screenshot)
-    - unknown/review/         (KI-Konfidenz < Schwellwert oder unklar)
+ 8. Sortieren — Statische Regeln + KI-Verifikation → Kategorie
+    - Statische Regeln werden immer zuerst ausgewertet
+    - KI prüft ALLE Dateien und kann Kategorie korrigieren
+    - Kategorie-Label + Source als EXIF-Keywords geschrieben
+    - Zielordner aus library_categories DB (konfigurierbar)
     - Sichere Verschiebung: Kopie → SHA256-Verifikation → Original löschen
     - Leere Quellordner nach Verschiebung automatisch aufräumen
         ↓
@@ -198,13 +199,13 @@ completed_at    DATETIME
   "IA-02": {"status": "ok", "phash": "b38e33e05c686733"},  // oder {"status": "duplicate", "match_type": "exact|similar", "original_debug_key": "MA-2026-0001"}
   "IA-03": {"country": "Schweiz", "city": "Zürich", "suburb": "Altstadt", "provider": "nominatim"},
   "IA-04": {"converted": true, "temp_path": "/tmp/IA-2025-0342.tmp.jpg"},
-  "IA-05": {"type": "personal_photo", "tags": ["Zürich", "outdoor"], "quality": "gut", "confidence": 0.95},
+  "IA-05": {"type": "personliches_foto", "source": "Kamerafoto", "tags": ["Zürich", "Stadtbild", "Altstadt"], "description": "...", "quality": "gut", "confidence": 0.95},
   "IA-06": {"has_text": false, "text": "", "text_type": "keiner"},
-  "IA-07": {"keywords_written": ["Zürich", "outdoor", "personal_photo"], "tags_count": 3, "file_size": 2458901, "file_hash": "a1b2c3..."},
-  "IA-08": {"category": "photo", "target_path": "/bibliothek/photos/2024/2024-06/IMG_1234.jpg", "moved": true},
+  "IA-07": {"keywords_written": ["Zürich", "Stadtbild", "Altstadt", "Kamerafoto", "Schweiz"], "tags_count": 5, "file_size": 2458901, "file_hash": "a1b2c3..."},
+  "IA-08": {"category": "personliches_foto", "target_path": "/bibliothek/persoenliche_fotos/2024/2024-06/IMG_1234.jpg", "moved": true},
   "IA-09": {"sent": true, "recipient": "user@example.com", "errors_reported": 0},
   "IA-10": {"removed": ["/tmp/IA-2025-0342.tmp.jpg"], "count": 1},
-  "IA-11": {"logged": true, "summary": "personal_photo, 3 Tags, Zürich/Schweiz"}
+  "IA-11": {"logged": true, "summary": "personliches_foto, 5 Tags, Zürich/Schweiz"}
 }
 ```
 
@@ -449,25 +450,27 @@ Konfigurierbar im Webinterface, gespeichert in SQLite:
 - Bei aktivem Zeitfenster: eingehende Dateien werden gequeued und beim nächsten Fenster verarbeitet
 - Nächste geplante Ausführung im Dashboard anzeigen
 
-### Einstellungen — Ablage-Ordnerstruktur
-Zielordner-Schema konfigurierbar im Webinterface pro Kategorie:
+### Einstellungen — Ziel-Ablagen (Library Categories)
+Kategorien sind vollständig dynamisch in der Datenbank (`library_categories`-Tabelle) definiert und im Webinterface konfigurierbar:
 
-| Kategorie | Standard-Schema | Beispiel |
-|---|---|---|
-| personal | `photos/{YYYY}/{YYYY-MM}/` | `photos/2024/2024-06/` |
-| sourceless | `sourceless/{YYYY}/` | `sourceless/2024/` |
-| screenshot | `screenshots/{YYYY}/` | `screenshots/2024/` |
-| video | `videos/{YYYY}/{YYYY-MM}/` | `videos/2024/2024-06/` |
-| unknown | `unknown/review/` | `unknown/review/` |
-| error | `error/` | `error/` |
-| duplicate | `error/duplicates/` | `error/duplicates/` |
+| Kategorie (Key) | Label | Standard-Schema | Immich Archiv |
+|---|---|---|---|
+| personliches_foto | Persönliches Foto | `persoenliche_fotos/{YYYY}/{YYYY-MM}/` | Nein |
+| video | Video | `videos/{YYYY}/{YYYY-MM}/` | Nein |
+| screenshot | Screenshot | `screenshots/{YYYY}/` | Ja |
+| sourceless | Sourceless | `sourceless/{YYYY}/` | Ja |
+| unknown | Unbekannt / Review | `unknown/review/` | — (fixed) |
+| error | Fehler | `error/` | — (fixed) |
+| duplicate | Duplikate | `error/duplicates/` | — (fixed) |
+
+Neue Kategorien können im Webinterface hinzugefügt werden. Pro Kategorie konfigurierbar: Key, Label, Pfad-Template, Immich-Archivierung, Position.
 
 Verfügbare Platzhalter:
 - `{YYYY}` — Jahr (aus EXIF DateTimeOriginal)
 - `{MM}` — Monat (zweistellig)
 - `{DD}` — Tag (zweistellig)
 - `{CAMERA}` — Kamera/Gerät (aus EXIF Make+Model, z.B. "Apple-iPhone15")
-- `{TYPE}` — KI-Klassifizierung (personal, screenshot, internet_image, document, meme)
+- `{TYPE}` — Kategorie-Key aus DB (z.B. personliches_foto, screenshot, sourceless)
 - `{COUNTRY}` — Land (z.B. "Schweiz")
 - `{CITY}` — Stadt (z.B. "Zuerich")
 - `{YEAR-MONTH}` — kombiniert, z.B. "2024-06"
@@ -511,22 +514,26 @@ Flach:               photos/{YYYY}/
 ### Einstellungen — KI Prompts
 - System-Prompt editierbar im Webinterface (Settings → AI Analysis)
 - Prompt in Englisch, KI-Antwort (Tags/Description) auf Deutsch
-- Typen: personal / screenshot / internet_image / document / meme
+- Kategorien dynamisch aus DB: KI erhält Liste der verfügbaren Kategorie-Keys
+- KI erhält Vor-Klassifikation aus statischen Regeln als Kontext
+- Drei Ausgabefelder: `type` (Kategorie-Key), `source` (Herkunft), `tags` (beschreibend)
 - Prompt wird in SQLite gespeichert, Default-Prompt als Fallback wenn leer
-- Striktere Screenshot-Erkennung (muss OS-UI-Elemente wie Statusbar haben)
 
 ### Einstellungen — Sortier-Regeln
 - Regel-Liste editierbar im Webinterface
-- Reihenfolge per Drag-and-Drop änderbar (erste Regel die matcht gewinnt)
+- Reihenfolge per Pfeil-Buttons änderbar (erste Regel die matcht gewinnt)
+- Statische Regeln werden immer zuerst ausgewertet — KI prüft anschliessend alle Dateien und kann korrigieren
 - Pro Regel konfigurierbar:
-  - Bedingung: Dateiname enthält / EXIF-Feld leer / EXIF-Feld enthält / Dateierweiterung
-  - Wert: z.B. "-WA", "Screenshot", "Apple"
-  - Aktion: → whatsapp / screenshot / photo / unknown
+  - Bedingung: Dateiname enthält / Dateiname Pattern (Regex) / EXIF-Ausdruck / Dateierweiterung
+  - Wert: z.B. "-WA", `^IMG_\d+`, `make != "" & date != ""`, `.png`
+  - Ziel-Kategorie: dynamisch aus library_categories DB
+- EXIF-Ausdrücke unterstützen: `==`, `!=`, `~` (enthält), `!~` (enthält nicht), `&` (AND), `|` (OR)
+- Beispiele: `has_exif == False`, `make ~ Apple & date != ""`, `make != "" | date != ""`
 - Standard-Regeln beim ersten Start:
-  1. Dateiname enthält "-WA" → whatsapp
+  1. Dateiname enthält "-WA" → sourceless
   2. Dateiname enthält "Screenshot" → screenshot
-  3. EXIF Make + DateTimeOriginal vorhanden → photo
-  4. EXIF komplett leer → unknown (→ KI-Analyse)
+  3. EXIF: `make != "" & date != ""` → personliches_foto
+  4. EXIF: `has_exif == False` → unknown
 - Regeln werden in SQLite gespeichert
 
 ## Tasks

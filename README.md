@@ -16,10 +16,10 @@ New files in inbox directories are automatically detected and processed through 
 | IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar), incl. Immich-uploaded files |
 | IA-03 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
 | IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis; video thumbnail extraction via ffmpeg (configurable number of frames evenly distributed across video duration) |
-| IA-05 | AI Analysis | Analyze image (type, tags, description, mood) with all collected metadata |
+| IA-05 | AI Analysis | Classify image (type from DB categories, source, tags, description) with all collected metadata + static rule pre-classification |
 | IA-06 | OCR | Text recognition (screenshots, documents) |
-| IA-07 | Write EXIF Tags | Write tags, description, geocoding and folder-tags back to file |
-| IA-08 | Sort | Move file to library or upload to Immich, clean up empty source folders |
+| IA-07 | Write EXIF Tags | Write AI tags, source, description, geocoding and folder-tags back to file |
+| IA-08 | Sort | Static rules + AI verification → category; write category tag; move to library or upload to Immich |
 | IA-09 | Notification | Email on errors (SMTP, Office 365 / Gmail) |
 | IA-10 | Cleanup | Remove temporary files |
 | IA-11 | SQLite Log | Log processing summary |
@@ -127,9 +127,9 @@ All system log messages are always written in English, regardless of the UI lang
 - AI description, tags, metadata displayed
 - File size (with Immich API fallback), dimensions, date (fallback to FileModifyDate/job.created_at)
 - Metadata fields shown conditionally (date/camera only when present)
-- Category buttons: Foto, Video, Screenshot, Sourceless
+- Category buttons loaded dynamically from database (all non-fixed categories)
 - Delete button to remove review files directly
-- Immich: sourceless → archived, others stay in timeline
+- Immich: archiving per category (configurable via `immich_archive` flag in library categories)
 - Batch action: classify all as sourceless
 
 ### Log Viewer
@@ -143,34 +143,43 @@ All system log messages are always written in English, regardless of the UI lang
 
 ## AI Analysis
 
-The AI prompt is fully editable in **Settings → AI Analysis**. The prompt is written in English and instructs the AI to classify images into types:
+The AI prompt is fully editable in **Settings → AI Analysis**. Available categories are loaded dynamically from the database (`library_categories` table) and passed to the AI prompt as context. Static sorting rule pre-classification is also provided so the AI can verify or correct it.
 
-| Type | Description |
-|------|-------------|
-| `personal` | Personal photos (people, selfies, pets, food, travel, events) |
-| `screenshot` | Device screenshots (must have OS UI elements like status bar, navigation) |
-| `internet_image` | Downloaded images, memes, ads, stock photos |
-| `document` | Scanned documents, receipts, forms, handwritten notes |
-| `meme` | Memes with text overlay on images |
+The AI returns JSON with three main fields:
 
-The AI returns JSON with: type, tags (German), description (German), mood, people_count, quality, confidence.
+| Field | Description | Example |
+|-------|-------------|---------|
+| `type` | Category key from database | `personliches_foto`, `screenshot`, `sourceless` |
+| `source` | Origin/source of the image | `Kamerafoto`, `Meme`, `Internetbild`, `Screenshot` |
+| `tags` | Descriptive content tags | `Landschaft`, `Tier`, `Haus`, `Boot` |
+
+Additional fields: `description` (German), `mood`, `people_count`, `quality`, `confidence`.
+
+Categories are fully configurable in **Settings → Library Categories** — no hardcoded types in the code.
 
 ### EXIF Tag Strategy
 
-Tags written to files (EXIF Keywords / XMP Subject) are kept clean and useful:
+Tags are written in two pipeline steps to keep them clean and organized:
+
+**IA-07 (EXIF Write)** — AI-generated tags:
 
 | Source | Example Tags | Notes |
 |--------|-------------|-------|
-| AI content tags | `Landschaft`, `Tier`, `Essen`, `Selfie` | From AI analysis, in German |
-| AI type | `personal`, `screenshot`, `meme` | Classification type |
+| AI descriptive tags | `Landschaft`, `Tier`, `Essen`, `Selfie` | From AI `tags` field |
+| AI source | `Kamerafoto`, `Meme`, `Internetbild` | From AI `source` field |
 | Geocoding | `Schweiz`, `Zürich`, `Altstadt` | Country, state, city, suburb |
 | Folder tags | `vacation`, `italy`, `album:vacation italy` | From inbox subdirectories |
 | OCR flag | `OCR` | Set when text was detected (actual text in EXIF UserComment) |
 | Quality | `blurry` | Only written when image is blurry |
 
-**Not written as tags:** mood (indoor/outdoor), quality levels other than blurry, OCR text type.
+**IA-08 (Sort)** — Category tags:
 
-**Planned:** Standardized tag vocabulary (inspired by IPTC Media Topics) to ensure consistent tags across all images.
+| Source | Example Tags | Notes |
+|--------|-------------|-------|
+| Category label | `Persönliches Foto`, `Screenshot` | From library_categories DB |
+| AI source | `Kamerafoto`, `Meme` | Repeated for category context |
+
+**Not written as tags:** mood (indoor/outdoor), quality levels other than blurry, OCR text type.
 
 ## Library Structure
 
@@ -187,17 +196,17 @@ Target structure is configurable per category with placeholders:
 | `{COUNTRY}` | Schweiz |
 | `{CITY}` | Ehrendingen |
 
-Default structure:
+Default structure (categories configurable in Settings → Library Categories):
 
 ```
 /bibliothek/
-├── photos/{YYYY}/{YYYY-MM}/       ← personal photos, chronological
-├── sourceless/{YYYY}/             ← images without EXIF (messenger, apps)
-├── screenshots/{YYYY}/            ← screenshots
-├── videos/{YYYY}/{YYYY-MM}/       ← videos
-├── unknown/review/                ← AI uncertain, manual review
-├── error/                         ← failed files
-└── error/duplicates/              ← detected duplicates
+├── persoenliche_fotos/{YYYY}/{YYYY-MM}/  ← personal photos, chronological
+├── sourceless/{YYYY}/                    ← images without source (messenger, memes)
+├── screenshots/{YYYY}/                   ← screenshots
+├── videos/{YYYY}/{YYYY-MM}/              ← videos
+├── unknown/review/                       ← AI uncertain, manual review
+├── error/                                ← failed files
+└── error/duplicates/                     ← detected duplicates
 ```
 
 ## Features
@@ -214,16 +223,16 @@ Each inbox directory has a dry-run toggle. When enabled:
 Useful for testing the pipeline on an existing photo library before committing changes.
 
 ### Sorting Rules
-Configurable sorting rules in **Settings → Sorting Rules**. Rules are evaluated when the AI has no classification result (AI always takes precedence). First matching rule wins.
+Configurable sorting rules in **Settings → Sorting Rules**. Static rules are evaluated first — the AI then verifies ALL files and can correct the classification if needed (e.g. rescue a personal photo from "Sourceless"). First matching rule wins.
 
 | Condition | Example | Description |
 |-----------|---------|-------------|
 | Filename contains | `-WA` | Match if filename contains the value |
-| EXIF empty | `*` | Match if file has no EXIF data |
-| EXIF contains | `make+date` | Match if Make + DateTimeOriginal present |
+| Filename pattern | `^IMG_\d+` | Match by regex pattern |
+| EXIF expression | `make != "" & date != ""` | Match with operators (`==`, `!=`, `~`, `!~`) and logic (`&` AND, `\|` OR) |
 | File extension | `.png` | Match by file extension |
 
-Each rule maps to a target category (photo, video, screenshot, sourceless, unknown/review). Rules can be reordered with up/down buttons and individually enabled/disabled.
+Each rule maps to a target category from the database (configurable in Settings → Library Categories). Rules can be reordered with up/down buttons and individually enabled/disabled.
 
 ### Folder Tags
 Inbox subdirectory names can be automatically added as EXIF keywords. Configurable per inbox directory. Example: a file in `/inbox/manual/vacation/italy/` gets keywords `["vacation", "italy"]` and an `album:vacation italy` tag.
@@ -261,8 +270,9 @@ When enabled:
 - Assets uploaded from an inbox are automatically skipped (no double processing)
 
 **Archiving:**
-- Sourceless files (memes, internet images, documents) and screenshots are automatically archived in Immich (hidden from timeline, accessible via Archive)
-- Personal photos and videos stay in the main timeline
+- Each library category has a configurable `immich_archive` flag (Settings → Library Categories)
+- Categories with archiving enabled (e.g. Sourceless, Screenshot) are automatically archived in Immich (hidden from timeline, accessible via Archive)
+- Categories without archiving (e.g. personal photos, videos) stay in the main timeline
 
 **Shared features:**
 - **Duplicate detection**: Previously uploaded files are tracked in the local database — re-uploading the same file triggers duplicate review with side-by-side comparison (Immich thumbnail vs. local file)

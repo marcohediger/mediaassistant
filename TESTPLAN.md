@@ -3,6 +3,8 @@
 > Letzter vollständiger Testlauf: **v2.5.0 — 2026-03-30** (228/237 bestanden, 9 nicht testbar)
 > Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203/FC3170 JPGs/DNG/MP4, iPhone HEIC/MOV, generierte PNG/GIF/WebP/TIFF
 > Container: v2.5.0, Docker 2GB RAM / 2 CPUs, SQLite mit 7 Indexes
+>
+> **v2.8.0 Änderungen**: Kategorien sind dynamisch aus DB (library_categories). Statische Regeln primär, KI verifies/korrigiert. AI gibt type (DB-Key), source (Herkunft), tags (beschreibend) zurück. Review-Buttons dynamisch. EXIF-Tags: IA-07 schreibt AI-Tags+Source, IA-08 schreibt Kategorie-Label+Source. Noch nicht regressionsgetestet.
 
 ## 1. Pipeline-Steps
 
@@ -69,12 +71,15 @@
 - [x] MOV Video → 5 Thumbnails extrahiert, KI-Analyse erfolgreich
 
 ### IA-05: KI-Analyse
-- [x] Persönliches Foto → `type: personal`, sinnvolle Tags
+- [x] Persönliches Foto → `type: personliches_foto`, sinnvolle Tags (v2.8.0: type = DB-Key)
 - [x] Screenshot → `type: screenshot` (Statusleiste, Navigationsbar erkannt)
-- [x] Internet-Bild → `type: internet_image` (generierte PNG/WebP/TIFF)
+- [x] Internet-Bild → `type: sourceless` (generierte PNG/WebP/TIFF, v2.8.0: kein internet_image mehr)
 - [x] KI-Backend nicht erreichbar → Fehler gefangen, Fallback-Werte gesetzt
 - [x] Modul deaktiviert → `status: skipped, reason: module disabled`
 - [x] Metadata-Kontext (EXIF, Geo, Dateigrösse) wird an KI übergeben
+- [ ] Kategorien aus DB werden im Prompt übergeben (v2.8.0)
+- [ ] Statische Regel-Vorklassifikation wird der KI als Kontext mitgegeben (v2.8.0)
+- [ ] KI gibt `source` (Herkunft) und `tags` (beschreibend) separat zurück (v2.8.0)
 - [x] DNG-Konvertierung für KI-Analyse funktioniert
 - [x] Video-Thumbnails (5 Frames) für KI-Analyse
 - [x] Sehr kleine Bilder (<16px) → übersprungen mit Meldung
@@ -90,7 +95,7 @@
 
 ### IA-07: EXIF-Tags schreiben
 - [x] AI-Tags werden als Keywords geschrieben
-- [x] AI-Type wird als Keyword geschrieben
+- [ ] AI-Source (Herkunft) wird als Keyword geschrieben (v2.8.0, ersetzt AI-Type)
 - [x] Geocoding-Daten (Land, Stadt etc.) als Keywords
 - [x] Ordner-Tags als Keywords + `album:` Tag (z.B. `Ferien`, `Spanien`, `album:Ferien Spanien`)
 - [x] `OCR` Flag bei erkanntem Text (screenshot_test.png)
@@ -107,20 +112,24 @@
 - [x] Modul deaktiviert / keine Tags → `status: skipped, reason: no tags to write`
 
 ### IA-08: Sortierung
-- [x] `personal` → photos/{YYYY}/{YYYY-MM}/
+- [ ] Statische Regeln werden immer zuerst ausgewertet (v2.8.0)
+- [ ] KI verifies/korrigiert Kategorie gegen DB (v2.8.0)
+- [ ] Kategorie-Label + Source als EXIF-Keywords geschrieben (v2.8.0)
+- [ ] Pfad-Template aus library_categories DB geladen (v2.8.0)
+- [x] `personliches_foto` → persoenliche_fotos/{YYYY}/{YYYY-MM}/ (v2.8.0: Key geändert)
 - [x] `screenshot` → screenshots/{YYYY}/
-- [x] `internet_image` → sourceless/{YYYY}/
+- [x] `sourceless` → sourceless/{YYYY}/ (v2.8.0: ersetzt internet_image)
 - [x] Video → videos/{YYYY}/{YYYY-MM}/
-- [x] Unklar (kein EXIF, KI unsicher) → Status "review", Datei in unknown/review/ (Bug B10 behoben in v2.4.3)
+- [x] Unklar (kein EXIF, KI unsicher) → Status "review", Datei in unknown/review/
 - [x] Immich Upload → Datei hochgeladen, Quelle gelöscht
-- [x] Immich: screenshot → Asset archiviert (`immich_archived: true`)
-- [x] Namenskollision → automatischer Counter (_1, _2, ...) (screenshot_test → screenshot_test_1)
+- [ ] Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (v2.8.0)
+- [x] Namenskollision → automatischer Counter (_1, _2, ...)
 - [x] Dry-Run → Zielpfad berechnet, nicht verschoben
 - [x] Leere Quellordner aufgeräumt (wenn folder_tags aktiv)
 - [x] EXIF-Datum korrekt verwendet (nicht Datei-Modifikationszeit)
 - [x] ISO 8601 Datumsformate mit Timezone/Mikrosekunden korrekt geparst
-- [x] DNG nach korrektem Jahresordner sortiert (2022, 2023, 2024)
-- [x] Video nach korrektem Jahresordner sortiert (nach Datum-Fix v2.4.2)
+- [x] DNG nach korrektem Jahresordner sortiert
+- [x] Video nach korrektem Jahresordner sortiert
 
 ### IA-09: Benachrichtigung
 - [x] Fehler vorhanden → E-Mail gesendet
@@ -161,7 +170,7 @@
 - [x] Inbox-Verzeichnisse: hinzufügen, bearbeiten, löschen
 - [x] Pro Inbox: Pfad, Label, Ordner-Tags, Dry-Run, Immich, Aktiv
 - [x] Immich URL + API-Key + Polling-Toggle
-- [x] Bibliothek-Pfade mit Platzhaltern
+- [ ] Ziel-Ablagen (library_categories): Key, Label, Pfad-Template, Immich-Archiv, Position (v2.8.0)
 - [x] pHash-Schwellwert konfigurierbar
 - [x] OCR-Modus (Smart/Alle)
 - [x] Filewatcher Schedule (Kontinuierlich/Zeitfenster/Geplant/Manuell)
@@ -192,10 +201,10 @@
 - [x] Datum angezeigt mit Fallback auf FileModifyDate bzw. job.created_at
 - [x] Bildabmessungen (Auflösung) angezeigt
 - [x] Metadatenfelder bedingt (Datum/Kamera nur wenn vorhanden)
-- [x] Kategorie-Buttons: Foto, Video, Screenshot, Sourceless
+- [ ] Kategorie-Buttons dynamisch aus DB geladen (v2.8.0, alle non-fixed Kategorien)
 - [x] Löschen-Button entfernt Review-Datei
 - [x] Lokal: Datei in richtigen Zielordner verschoben (Review → Photo)
-- [x] Immich: Review-Items werden über classify-all archiviert
+- [ ] Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (v2.8.0)
 - [x] Batch: "Alle → Sourceless" funktioniert (beide lokale und Immich-Items)
 
 ### Log Viewer
