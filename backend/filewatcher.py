@@ -122,15 +122,19 @@ async def _scan_and_process():
                 if status == "duplicate" and fhash:
                     done_hashes.add((path, fhash))
                     continue
-                # Done jobs without errors: skip only if target still exists
+                # Done jobs without errors: skip only if source was moved (no longer at original path)
+                # or target still exists. If file is still at original path, re-process it
+                # (it will land in duplicate check via IA-02).
                 if status == "done" and not err:
+                    source_still_exists = os.path.exists(path)
+                    if source_still_exists:
+                        # File was NOT moved — don't skip, let it re-process
+                        continue
                     if target and target.startswith("immich:"):
-                        # Immich assets: trust the DB (checking API each scan is too expensive)
                         done_hashes.add((path, fhash))
                     elif target and os.path.exists(target):
                         done_hashes.add((path, fhash))
                     elif not target:
-                        # Job with no target (e.g. deleted via keep-action): skip
                         done_hashes.add((path, fhash))
                     # else: target file missing → allow re-import
 
