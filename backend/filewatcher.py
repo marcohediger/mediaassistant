@@ -14,6 +14,9 @@ from pipeline import run_pipeline
 
 logger = logging.getLogger("mediaassistant.filewatcher")
 
+# Track whether we already logged "outside schedule" to avoid log spam
+_schedule_logged = False
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif", ".webp", ".gif", ".bmp", ".dng", ".cr2", ".nef", ".arw"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp"}
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
@@ -275,6 +278,102 @@ async def _poll_immich():
     await config_manager.set("immich.last_poll", now)
 
 
+async def _is_within_schedule() -> bool:
+    """Check if the current time is within the configured schedule.
+
+    Returns True if processing should happen now, False otherwise.
+    Schedule modes:
+    - continuous: always True
+    - manual: always False (only via manual trigger)
+    - window: True if current time is between window_start and window_end
+    - scheduled: True if current weekday is in scheduled_days AND current time matches scheduled_time (within interval)
+    """
+    global _schedule_logged
+    mode = await config_manager.get("filewatcher.schedule_mode", "continuous")
+
+    if mode == "continuous":
+        _schedule_logged = False
+        return True
+
+    if mode == "manual":
+        if not _schedule_logged:
+            logger.info("Schedule mode: manual — skipping automatic processing")
+            _schedule_logged = True
+        return False
+
+    now = datetime.now()
+
+    if mode == "window":
+        start_str = await config_manager.get("filewatcher.window_start", "22:00")
+        end_str = await config_manager.get("filewatcher.window_end", "06:00")
+        try:
+            start_h, start_m = map(int, start_str.split(":"))
+            end_h, end_m = map(int, end_str.split(":"))
+        except (ValueError, AttributeError):
+            return True  # invalid config → fallback to continuous
+
+        current_minutes = now.hour * 60 + now.minute
+        start_minutes = start_h * 60 + start_m
+        end_minutes = end_h * 60 + end_m
+
+        if start_minutes <= end_minutes:
+            # Same-day window (e.g. 08:00–18:00)
+            in_window = start_minutes <= current_minutes < end_minutes
+        else:
+            # Overnight window (e.g. 22:00–06:00)
+            in_window = current_minutes >= start_minutes or current_minutes < end_minutes
+
+        if not in_window and not _schedule_logged:
+            logger.info(f"Outside time window ({start_str}–{end_str}), pausing")
+            _schedule_logged = True
+        elif in_window:
+            _schedule_logged = False
+        return in_window
+
+    if mode == "scheduled":
+        days_str = await config_manager.get("filewatcher.scheduled_days", "0,1,2,3,4")
+        time_str = await config_manager.get("filewatcher.scheduled_time", "23:00")
+        try:
+            allowed_days = {int(d.strip()) for d in days_str.split(",")}
+        except (ValueError, AttributeError):
+            allowed_days = set(range(7))
+        try:
+            sched_h, sched_m = map(int, time_str.split(":"))
+        except (ValueError, AttributeError):
+            return True
+
+        if now.weekday() not in allowed_days:
+            if not _schedule_logged:
+                logger.info(f"Scheduled mode: today (weekday {now.weekday()}) not in schedule")
+                _schedule_logged = True
+            return False
+
+        # Allow processing within a 1-hour window starting at scheduled_time
+        interval = await config_manager.get("filewatcher.interval", 5)
+        sched_minutes = sched_h * 60 + sched_m
+        current_minutes = now.hour * 60 + now.minute
+        window = max(int(interval), 60)  # at least 60 minutes
+        in_window = sched_minutes <= current_minutes < sched_minutes + window
+
+        if not in_window and not _schedule_logged:
+            logger.info(f"Scheduled mode: outside window ({time_str}+{window}min)")
+            _schedule_logged = True
+        elif in_window:
+            _schedule_logged = False
+        return in_window
+
+    return True  # unknown mode → fallback to continuous
+
+
+# Flag for manual trigger (set via API, consumed by filewatcher loop)
+_manual_trigger = asyncio.Event()
+
+
+def trigger_manual_scan():
+    """Trigger a single scan cycle from the API (for manual mode)."""
+    _manual_trigger.set()
+
+
 async def start_filewatcher(shutdown_event: asyncio.Event):
     """Main filewatcher loop, runs as background task."""
     logger.info("Filewatcher started")
@@ -292,7 +391,15 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
     while not shutdown_event.is_set():
         try:
             if await config_manager.is_module_enabled("filewatcher"):
-                await _scan_and_process()
+                should_scan = await _is_within_schedule()
+                # Manual trigger overrides schedule
+                if _manual_trigger.is_set():
+                    _manual_trigger.clear()
+                    should_scan = True
+                    await log_info("filewatcher", "Manual scan triggered")
+
+                if should_scan:
+                    await _scan_and_process()
         except Exception as e:
             await log_error("filewatcher", f"Scan error: {e}")
             logger.error(f"Scan error: {e}")
@@ -301,7 +408,9 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
             if await config_manager.is_module_enabled("immich"):
                 poll_enabled = await config_manager.get("immich.poll_enabled", False)
                 if poll_enabled:
-                    await _poll_immich()
+                    # Immich polling follows same schedule
+                    if await _is_within_schedule() or _manual_trigger.is_set():
+                        await _poll_immich()
         except Exception as e:
             await log_error("immich_poll", f"Poll error: {e}")
             logger.error(f"Immich poll error: {e}")

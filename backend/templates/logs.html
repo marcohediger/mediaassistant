@@ -6,6 +6,7 @@
 <div class="tabs">
     <a href="/logs?tab=system" class="tab {{ 'tab-active' if tab == 'system' else '' }}">{{ t.logs.system_log }}</a>
     <a href="/logs?tab=jobs" class="tab {{ 'tab-active' if tab == 'jobs' else '' }}">{{ t.logs.job_log }}</a>
+    <a href="/logs/dryrun-report" class="btn btn-small btn-secondary" style="margin-left: auto;">{{ t.dryrun.report_button }}</a>
 </div>
 
 {% if tab == 'system' %}

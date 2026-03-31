@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}{{ t.dryrun.title }} — MediaAssistant{% endblock %}
+{% block content %}
+<h1>{{ t.dryrun.title }}</h1>
+<p class="section-note">{{ t.dryrun.subtitle }} — {{ t.dryrun.generated }}: {{ generated_at }}</p>
+
+<div class="stats-grid" style="margin-bottom: 2rem;">
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-label">{{ t.dashboard.total }}</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-value">{{ stats.done }}</div>
+        <div class="stat-label">{{ t.dashboard.done }}</div>
+    </div>
+    <div class="stat-card stat-error">
+        <div class="stat-value">{{ stats.errors }}</div>
+        <div class="stat-label">{{ t.dashboard.errors }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.duplicates }}</div>
+        <div class="stat-label">{{ t.dashboard.duplicates }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.review }}</div>
+        <div class="stat-label">Review</div>
+    </div>
+</div>
+
+<h2>{{ t.dryrun.by_category }}</h2>
+<div class="log-table-wrap">
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>{{ t.dryrun.category }}</th>
+                <th>{{ t.dryrun.count }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cat, count in categories.items() %}
+            <tr>
+                <td>{{ cat }}</td>
+                <td>{{ count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if by_inbox %}
+<h2>{{ t.dryrun.by_inbox }}</h2>
+{% for inbox_label, inbox_stats in by_inbox.items() %}
+<h3>{{ inbox_label }} ({{ inbox_stats.total }})</h3>
+<div class="log-table-wrap">
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>{{ t.dryrun.category }}</th>
+                <th>{{ t.dryrun.count }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cat, count in inbox_stats.categories.items() %}
+            <tr>
+                <td>{{ cat }}</td>
+                <td>{{ count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+{% endif %}
+
+<h2>{{ t.dryrun.file_list }}</h2>
+<div class="log-table-wrap">
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>{{ t.dashboard.debug_key }}</th>
+                <th>{{ t.dashboard.file }}</th>
+                <th>{{ t.dryrun.category }}</th>
+                <th>{{ t.dryrun.target_path }}</th>
+                <th>{{ t.dashboard.status }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr class="log-row log-{{ job.status }}">
+                <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key }}</code></a></td>
+                <td>{{ job.filename }}</td>
+                <td>{{ job.step_result.get('IA-08', {}).get('category', '—') if job.step_result else '—' }}</td>
+                <td style="font-size: 0.85rem; word-break: break-all;">{{ job.target_path or '—' }}</td>
+                <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if errors %}
+<h2>{{ t.dryrun.errors }}</h2>
+<div class="log-table-wrap">
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>{{ t.dashboard.debug_key }}</th>
+                <th>{{ t.dashboard.file }}</th>
+                <th>{{ t.dryrun.error_message }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in errors %}
+            <tr class="log-row log-error">
+                <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key }}</code></a></td>
+                <td>{{ job.filename }}</td>
+                <td>{{ job.error_message or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="log-link" style="margin-top: 2rem;">
+    <a href="/logs?tab=jobs" class="btn btn-small btn-secondary">{{ t.dryrun.back_to_logs }}</a>
+</div>
+{% endblock %}

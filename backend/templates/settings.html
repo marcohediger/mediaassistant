@@ -199,9 +199,7 @@
             <div class="form-group">
                 <label for="geo_provider">{{ t.settings.provider }}</label>
                 <select id="geo_provider" name="geo_provider">
-                    <option value="nominatim" {{ 'selected' if cfg.geo_provider == 'nominatim' else '' }}>Nominatim (OpenStreetMap)</option>
-                    <option value="photon" {{ 'selected' if cfg.geo_provider == 'photon' else '' }}>Photon (OpenStreetMap)</option>
-                    <option value="google" {{ 'selected' if cfg.geo_provider == 'google' else '' }}>Google Maps API</option>
+                    <option value="nominatim" selected>Nominatim (OpenStreetMap)</option>
                 </select>
             </div>
             <div class="form-group">
@@ -209,10 +207,6 @@
                 <input type="url" id="geo_url" name="geo_url" value="{{ cfg.geo_url }}">
                 <small>{{ t.settings.url_hint }}</small>
             </div>
-        </div>
-        <div class="form-group">
-            <label for="geo_api_key">{{ t.settings.geo_api_key }}</label>
-            <input type="password" id="geo_api_key" name="geo_api_key" placeholder="••••••••">
         </div>
     </div>
 </div>
@@ -368,40 +362,166 @@
             <input type="text" id="library_path" name="library_path" value="{{ cfg.library_path }}">
             <small>{{ t.settings.library_hint }}</small>
         </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="path_photo">{{ t.settings.photos }}</label>
-                <input type="text" id="path_photo" name="path_photo" value="{{ cfg.path_photo }}" placeholder="photos/{YYYY}/{YYYY-MM}/">
+
+        <div class="inbox-list" style="margin-top: 1rem;">
+            {% for cat in library_categories if not cat.fixed %}
+            <div class="inbox-item">
+                <div style="display: flex; align-items: flex-end; gap: 0.75rem;">
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.cat_name }}</span>
+                        <input type="text" name="cat_label_{{ cat.id }}" value="{{ cat.label }}" style="width: 160px; height: 2.4rem; box-sizing: border-box;">
+                    </div>
+                    <div class="field-group-grow">
+                        <span class="field-label">{{ t.settings.path }}</span>
+                        <input type="text" name="cat_path_{{ cat.id }}" value="{{ cat.path_template }}" style="width: 100%; height: 2.4rem; box-sizing: border-box;" placeholder="photos/{YYYY}/{YYYY-MM}/">
+                    </div>
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.cat_immich_archive }}</span>
+                        <label class="switch-inline" style="margin: 0; height: 2.4rem; display: flex; align-items: center;">
+                            <input type="checkbox" name="cat_immich_archive_{{ cat.id }}" value="1" {{ 'checked' if cat.immich_archive else '' }}>
+                            <span class="switch-slider-sm"></span>
+                        </label>
+                    </div>
+                    <button type="button" class="btn btn-small btn-danger" style="height: 2.4rem;" onclick="if(confirm('{{ t.settings.cat_delete_confirm }}')) { var f=document.createElement('form'); f.method='post'; f.action='/settings/category/{{ cat.id }}/delete'; document.body.appendChild(f); f.submit(); }">{{ t.settings.delete }}</button>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="path_sourceless">{{ t.settings.sourceless }}</label>
-                <input type="text" id="path_sourceless" name="path_sourceless" value="{{ cfg.path_sourceless }}" placeholder="unbekannte_quelle/{YYYY}/">
-                <small>{{ t.settings.sourceless_hint }}</small>
+            {% endfor %}
+        </div>
+
+        <div style="margin: 1.25rem 0 0.5rem; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;">{{ t.settings.cat_fixed }}</div>
+        <div class="inbox-list">
+            {% for cat in library_categories if cat.fixed %}
+            <div class="inbox-item" style="padding: 0.65rem 1rem; opacity: 0.7;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <span style="font-size: 0.85rem; color: var(--text-muted);">{{ cat.label }}</span>
+                    <span style="color: var(--text-muted);">→</span>
+                    <span style="font-size: 0.85rem; color: var(--text-muted);">{{ cat.path_template }}</span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="inbox-add" style="margin-top: 1rem;">
+            <h3>{{ t.settings.add_category }}</h3>
+            <div class="inbox-item" id="add-cat-box">
+                <div style="display: flex; align-items: flex-end; gap: 0.75rem;">
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.cat_name }}</span>
+                        <input type="text" id="new_cat_label" style="width: 160px; height: 2.4rem; box-sizing: border-box;">
+                    </div>
+                    <div class="field-group-grow">
+                        <span class="field-label">{{ t.settings.path }}</span>
+                        <input type="text" id="new_cat_path" style="width: 100%; height: 2.4rem; box-sizing: border-box;" placeholder="ordner/{YYYY}/">
+                    </div>
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.cat_immich_archive }}</span>
+                        <label class="switch-inline" style="margin: 0; height: 2.4rem; display: flex; align-items: center;">
+                            <input type="checkbox" id="new_cat_immich_archive" value="1">
+                            <span class="switch-slider-sm"></span>
+                        </label>
+                    </div>
+                    <button type="button" class="btn btn-small btn-primary" style="height: 2.4rem;" onclick="var f=document.createElement('form'); f.method='post'; f.action='/settings/category/add'; ['cat_label','cat_path_template','cat_immich_archive'].forEach(function(n){ var i=document.createElement('input'); i.type='hidden'; i.name=n; f.appendChild(i); }); f.querySelector('[name=cat_label]').value=document.getElementById('new_cat_label').value; f.querySelector('[name=cat_path_template]').value=document.getElementById('new_cat_path').value; if(document.getElementById('new_cat_immich_archive').checked) f.querySelector('[name=cat_immich_archive]').value='1'; else f.removeChild(f.querySelector('[name=cat_immich_archive]')); document.body.appendChild(f); f.submit();">{{ t.settings.add }}</button>
+                </div>
             </div>
         </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="path_screenshot">{{ t.settings.screenshots }}</label>
-                <input type="text" id="path_screenshot" name="path_screenshot" value="{{ cfg.path_screenshot }}" placeholder="screenshots/{YYYY}/">
-            </div>
-            <div class="form-group">
-                <label for="path_video">{{ t.settings.videos }}</label>
-                <input type="text" id="path_video" name="path_video" value="{{ cfg.path_video }}" placeholder="videos/{YYYY}/{YYYY-MM}/">
-            </div>
+    </div>
+</div>
+
+<!-- Sorting Rules -->
+<div class="settings-section">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.sorting_rules }}</h2>
+            <span class="section-desc">{{ t.settings.sorting_rules_desc }}</span>
         </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="path_unknown">{{ t.settings.unknown }}</label>
-                <input type="text" id="path_unknown" name="path_unknown" value="{{ cfg.path_unknown }}" placeholder="unknown/review/">
-            </div>
-            <div class="form-group">
-                <label for="path_error">{{ t.settings.error_path }}</label>
-                <input type="text" id="path_error" name="path_error" value="{{ cfg.path_error }}" placeholder="error/">
-            </div>
+    </div>
+    <div class="section-body">
+        <div style="margin-bottom: 1.25rem; font-size: 0.82rem; color: var(--text-muted); line-height: 1.6;">
+            {{ t.settings.sorting_rules_hint }}
+            <details style="margin-top: 0.5rem;">
+                <summary style="cursor: pointer; color: var(--primary); font-size: 0.82rem;">{{ t.settings.sorting_rules_help_title }}</summary>
+                <div style="margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-input); border-radius: 6px; font-size: 0.8rem; line-height: 1.7;">
+                    {{ t.settings.sorting_rules_help | safe }}
+                </div>
+            </details>
         </div>
-        <div class="form-group">
-            <label for="path_duplicate">{{ t.settings.duplicates_path }}</label>
-            <input type="text" id="path_duplicate" name="path_duplicate" value="{{ cfg.path_duplicate }}" placeholder="error/duplicates/">
+        {% if sorting_rules %}
+        <div class="inbox-list">
+            {% for rule in sorting_rules %}
+            <div class="inbox-item" id="rule-{{ rule.id }}">
+                <div style="display: flex; align-items: flex-end; gap: 0.5rem;">
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.sorting_rules_condition }}</span>
+                        <select data-rule="condition" style="width: auto; height: 2.4rem;">
+                            <option value="filename_contains" {{ 'selected' if rule.condition == 'filename_contains' else '' }}>{{ t.settings.rule_filename_contains }}</option>
+                            <option value="filename_pattern" {{ 'selected' if rule.condition == 'filename_pattern' else '' }}>{{ t.settings.rule_filename_pattern }}</option>
+                            <option value="exif_expression" {{ 'selected' if rule.condition == 'exif_expression' else '' }}>{{ t.settings.rule_exif_expression }}</option>
+                            <option value="extension" {{ 'selected' if rule.condition == 'extension' else '' }}>{{ t.settings.rule_extension }}</option>
+                        </select>
+                    </div>
+                    <div class="field-group-grow" style="min-width: 150px;">
+                        <span class="field-label">{{ t.settings.rule_value }}</span>
+                        <input type="text" data-rule="value" value="{{ rule.value }}" style="width: 100%; height: 2.4rem; box-sizing: border-box;">
+                    </div>
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.sorting_rules_target }}</span>
+                        <select data-rule="target" style="width: auto; height: 2.4rem;">
+                            {% for cat in library_categories %}
+                            <option value="{{ cat.key }}" {{ 'selected' if rule.target_category == cat.key else '' }}>{{ cat.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.active }}</span>
+                        <label class="switch-inline" style="margin: 0; height: 2.4rem; display: flex; align-items: center;">
+                            <input type="checkbox" data-rule="active" value="1" {{ 'checked' if rule.active else '' }}>
+                            <span class="switch-slider-sm"></span>
+                        </label>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+                    <button type="button" class="btn btn-small btn-secondary" style="width: 2rem; height: 2rem; padding: 0; display: inline-flex; align-items: center; justify-content: center;" onclick="postAction('/settings/rule/{{ rule.id }}/move', {direction:'up'})">&#9650;</button>
+                    <button type="button" class="btn btn-small btn-secondary" style="width: 2rem; height: 2rem; padding: 0; display: inline-flex; align-items: center; justify-content: center;" onclick="postAction('/settings/rule/{{ rule.id }}/move', {direction:'down'})">&#9660;</button>
+                    <div style="margin-left: auto; display: flex; gap: 0.5rem;">
+                        <button type="button" class="btn btn-small btn-secondary" onclick="saveRule({{ rule.id }})">{{ t.settings.save }}</button>
+                        <button type="button" class="btn btn-small btn-danger" onclick="if(confirm('{{ t.settings.rule_delete_confirm }}')) postAction('/settings/rule/{{ rule.id }}/delete', {})">{{ t.settings.delete }}</button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="section-note">{{ t.settings.no_rules }}</p>
+        {% endif %}
+
+        <div class="inbox-add" style="margin-top: 1rem;">
+            <h3>{{ t.settings.add_rule }}</h3>
+            <div class="inbox-item" id="add-rule-box">
+                <div style="display: flex; align-items: flex-end; gap: 0.5rem;">
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.sorting_rules_condition }}</span>
+                        <select id="new_rule_condition" style="width: auto; height: 2.4rem;">
+                            <option value="filename_contains">{{ t.settings.rule_filename_contains }}</option>
+                            <option value="filename_pattern">{{ t.settings.rule_filename_pattern }}</option>
+                            <option value="exif_expression">{{ t.settings.rule_exif_expression }}</option>
+                            <option value="extension">{{ t.settings.rule_extension }}</option>
+                        </select>
+                    </div>
+                    <div class="field-group-grow" style="min-width: 150px;">
+                        <span class="field-label">{{ t.settings.rule_value }}</span>
+                        <input type="text" id="new_rule_value" style="width: 100%; height: 2.4rem; box-sizing: border-box;">
+                    </div>
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.sorting_rules_target }}</span>
+                        <select id="new_rule_target" style="width: auto; height: 2.4rem;">
+                            {% for cat in library_categories %}
+                            <option value="{{ cat.key }}">{{ cat.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="button" class="btn btn-small btn-primary" style="height: 2.4rem;" onclick="postAction('/settings/rule/add', {rule_condition: document.getElementById('new_rule_condition').value, rule_value: document.getElementById('new_rule_value').value, rule_target: document.getElementById('new_rule_target').value})">{{ t.settings.add }}</button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -426,7 +546,7 @@
             </div>
             <div class="form-group">
                 <label for="schedule_mode">{{ t.settings.schedule_mode }}</label>
-                <select id="schedule_mode" name="schedule_mode">
+                <select id="schedule_mode" name="schedule_mode" onchange="toggleScheduleFields()">
                     <option value="continuous" {{ 'selected' if cfg.schedule_mode == 'continuous' else '' }}>{{ t.settings.continuous }}</option>
                     <option value="window" {{ 'selected' if cfg.schedule_mode == 'window' else '' }}>{{ t.settings.window }}</option>
                     <option value="scheduled" {{ 'selected' if cfg.schedule_mode == 'scheduled' else '' }}>{{ t.settings.scheduled }}</option>
@@ -434,6 +554,58 @@
                 </select>
             </div>
         </div>
+        <div id="schedule-window-fields" class="form-row" style="display: none;">
+            <div class="form-group">
+                <label for="window_start">{{ t.settings.window_start }}</label>
+                <input type="time" id="window_start" name="window_start" value="{{ cfg.window_start }}">
+            </div>
+            <div class="form-group">
+                <label for="window_end">{{ t.settings.window_end }}</label>
+                <input type="time" id="window_end" name="window_end" value="{{ cfg.window_end }}">
+            </div>
+        </div>
+        <div id="schedule-planned-fields" style="display: none;">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="scheduled_time">{{ t.settings.scheduled_time }}</label>
+                    <input type="time" id="scheduled_time" name="scheduled_time" value="{{ cfg.scheduled_time }}">
+                </div>
+                <div class="form-group">
+                    <label>{{ t.settings.scheduled_days }}</label>
+                    <div class="day-checkboxes">
+                        {% set active_days = cfg.scheduled_days.split(',') %}
+                        {% for day_val, day_label in [('0', t.settings.day_mon), ('1', t.settings.day_tue), ('2', t.settings.day_wed), ('3', t.settings.day_thu), ('4', t.settings.day_fri), ('5', t.settings.day_sat), ('6', t.settings.day_sun)] %}
+                        <label class="day-check">
+                            <input type="checkbox" name="scheduled_day_{{ day_val }}" value="1" {{ 'checked' if day_val in active_days else '' }}>
+                            <span>{{ day_label }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" id="scheduled_days" name="scheduled_days" value="{{ cfg.scheduled_days }}">
+                </div>
+            </div>
+        </div>
+        <small id="schedule-manual-hint" style="display: none; color: var(--text-muted);">{{ t.settings.manual_hint }}</small>
+        <script>
+        function toggleScheduleFields() {
+            var mode = document.getElementById('schedule_mode').value;
+            document.getElementById('schedule-window-fields').style.display = mode === 'window' ? '' : 'none';
+            document.getElementById('schedule-planned-fields').style.display = mode === 'scheduled' ? '' : 'none';
+            document.getElementById('schedule-manual-hint').style.display = mode === 'manual' ? '' : 'none';
+        }
+        function updateScheduledDays() {
+            var days = [];
+            for (var i = 0; i < 7; i++) {
+                var cb = document.querySelector('input[name="scheduled_day_' + i + '"]');
+                if (cb && cb.checked) days.push(i);
+            }
+            document.getElementById('scheduled_days').value = days.join(',');
+        }
+        document.querySelectorAll('.day-checkboxes input').forEach(function(cb) {
+            cb.addEventListener('change', updateScheduledDays);
+        });
+        toggleScheduleFields();
+        </script>
     </div>
 </div>
 
@@ -471,4 +643,32 @@
 </div>
 
 </form>
+<script>
+function postAction(url, data) {
+    var f = document.createElement('form');
+    f.method = 'post';
+    f.action = url;
+    for (var k in data) {
+        var i = document.createElement('input');
+        i.type = 'hidden';
+        i.name = k;
+        i.value = data[k];
+        f.appendChild(i);
+    }
+    document.body.appendChild(f);
+    f.submit();
+}
+function saveRule(id) {
+    var box = document.getElementById('rule-' + id);
+    var data = {
+        rule_condition: box.querySelector('[data-rule=condition]').value,
+        rule_value: box.querySelector('[data-rule=value]').value,
+        rule_target: box.querySelector('[data-rule=target]').value
+    };
+    if (box.querySelector('[data-rule=active]').checked) {
+        data['rule_active_' + id] = '1';
+    }
+    postAction('/settings/rule/' + id + '/update', data);
+}
+</script>
 {% endblock %}

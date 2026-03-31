@@ -1,5 +1,35 @@
 # Changelog
 
+## v2.6.0 — 2026-03-31
+
+### Schedule-Modus Enforcement
+- **Zeitfenster-Modus**: Filewatcher verarbeitet nur innerhalb des konfigurierten Zeitfensters (z.B. 22:00–06:00), unterstützt Overnight-Fenster
+- **Geplanter Modus**: Verarbeitung nur an bestimmten Wochentagen zu einer festen Uhrzeit (z.B. Mo–Fr 23:00)
+- **Manueller Modus**: Keine automatische Verarbeitung — nur über "Jetzt scannen" Button im Dashboard
+- **Kontinuierlich**: Wie bisher, 24/7 Verarbeitung
+- Neuer API-Endpoint `POST /api/trigger-scan` für manuellen Scan-Trigger
+- "Jetzt scannen" Button im Dashboard (funktioniert unabhängig vom Modus)
+
+### Sortier-Regeln
+- Editierbare Sortier-Regeln im Webinterface (Einstellungen → Sortier-Regeln)
+- Bedingungen: Dateiname enthält, EXIF leer, EXIF enthält, Dateiendung
+- Jede Regel mappt auf eine Zielkategorie (Foto, Video, Screenshot, Sourceless, Review)
+- Reihenfolge per Pfeil-Buttons änderbar (erste Regel die matcht gewinnt)
+- KI-Klassifikation hat immer Vorrang — Regeln greifen nur ohne KI-Ergebnis
+- Standard-Regeln werden beim ersten Start geseedet
+
+### HTML-Report nach Dry-Run
+- Neuer Report unter Logs → "Dry-Run Report"
+- Übersicht: Anzahl Dateien, Kategorien, Fehler, Duplikate, Review
+- Aufschlüsselung nach Eingangsverzeichnis
+- Vollständige Dateiliste mit Zielpfad und Status
+- Fehlerübersicht mit Details
+
+### Geocoding
+- Photon und Google Maps API aus Auswahlmenü entfernt (verschoben auf v2)
+- Nur noch Nominatim (OpenStreetMap) als Provider wählbar
+- Backend-Code für Photon/Google bleibt erhalten für spätere Aktivierung
+
 ## v2.5.0 — 2026-03-30
 
 ### Performance-Optimierung für NAS-Betrieb (150k+ Dateien)

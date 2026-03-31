@@ -105,7 +105,8 @@ All system log messages are always written in English, regardless of the UI lang
 - Library target structure with placeholders
 - Duplicate detection threshold (pHash)
 - OCR mode (smart / all images)
-- File watcher schedule mode (continuous / time window / scheduled / manual)
+- File watcher schedule mode (continuous / time window / scheduled / manual) with enforcement
+- Manual scan trigger button on dashboard
 - Appearance: Language (DE/EN) and Theme (dark/light)
 
 ### Duplicate Review
@@ -208,8 +209,21 @@ Each inbox directory has a dry-run toggle. When enabled:
 - **IA-08**: Target path is calculated but the file is **not moved**
 - Step results show `status: "dry_run"` with the planned values
 - The file stays untouched in the inbox
+- **HTML Report**: After a dry-run, view a summary report under **Logs → Dry-Run Report** with category counts, per-inbox breakdown, file list, and errors
 
 Useful for testing the pipeline on an existing photo library before committing changes.
+
+### Sorting Rules
+Configurable sorting rules in **Settings → Sorting Rules**. Rules are evaluated when the AI has no classification result (AI always takes precedence). First matching rule wins.
+
+| Condition | Example | Description |
+|-----------|---------|-------------|
+| Filename contains | `-WA` | Match if filename contains the value |
+| EXIF empty | `*` | Match if file has no EXIF data |
+| EXIF contains | `make+date` | Match if Make + DateTimeOriginal present |
+| File extension | `.png` | Match by file extension |
+
+Each rule maps to a target category (photo, video, screenshot, sourceless, unknown/review). Rules can be reordered with up/down buttons and individually enabled/disabled.
 
 ### Folder Tags
 Inbox subdirectory names can be automatically added as EXIF keywords. Configurable per inbox directory. Example: a file in `/inbox/manual/vacation/italy/` gets keywords `["vacation", "italy"]` and an `album:vacation italy` tag.

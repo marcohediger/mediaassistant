@@ -2,9 +2,10 @@ import asyncio
 import os
 import re
 from datetime import datetime
+from sqlalchemy import select
 from config import config_manager
 from safe_file import safe_move
-from immich_client import upload_asset, replace_asset, archive_asset
+from immich_client import upload_asset, replace_asset, archive_asset, tag_asset
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -103,6 +104,83 @@ def _cleanup_empty_dirs(start_dir: str, stop_at: str):
         current = os.path.dirname(current)
 
 
+def _eval_exif_expression(expression: str, exif: dict) -> bool:
+    """Evaluate an EXIF expression like 'make != "" & date != ""'.
+
+    Supported operators: == != ~ !~
+    Conditions joined with & (AND) or | (OR).
+    Values with or without quotes. "" means empty string.
+    """
+    # Split on | first (OR has lower precedence), then & (AND)
+    if "|" in expression:
+        return any(_eval_exif_expression(part.strip(), exif) for part in expression.split("|"))
+
+    # All parts joined by & must be true (AND)
+    parts = [p.strip() for p in expression.split("&")]
+    for part in parts:
+        if not part:
+            continue
+        if not _eval_single_condition(part, exif):
+            return False
+    return True
+
+
+def _eval_single_condition(cond: str, exif: dict) -> bool:
+    """Evaluate a single condition like 'make != ""' or 'make ~ Apple'."""
+    cond = cond.strip()
+    # Try each operator (longer first to avoid partial matches)
+    for op in ("!~", "!=", "==", "~"):
+        if op in cond:
+            field, value = cond.split(op, 1)
+            field = field.strip().lower()
+            value = value.strip().strip('"').strip("'")
+            raw = exif.get(field, "")
+            actual = str(raw).strip() if raw is not None else ""
+
+            if op == "==" and value == "":
+                return actual == ""
+            elif op == "==" :
+                return actual.lower() == value.lower()
+            elif op == "!=" and value == "":
+                return actual != ""
+            elif op == "!=":
+                return actual.lower() != value.lower()
+            elif op == "~":
+                return value.lower() in actual.lower()
+            elif op == "!~":
+                return value.lower() not in actual.lower()
+    return False
+
+
+async def _match_sorting_rules(filename: str, exif: dict, session) -> str | None:
+    """Check file against user-defined sorting rules. Returns category or None."""
+    from models import SortingRule
+    result = await session.execute(
+        select(SortingRule).where(SortingRule.active == True).order_by(SortingRule.position)
+    )
+    rules = result.scalars().all()
+
+    for rule in rules:
+        matched = False
+        if rule.condition == "filename_contains":
+            matched = rule.value.lower() in filename.lower()
+        elif rule.condition == "filename_pattern":
+            try:
+                matched = bool(re.search(rule.value, filename, re.IGNORECASE))
+            except re.error:
+                matched = False
+        elif rule.condition == "extension":
+            ext = os.path.splitext(filename)[1].lower()
+            allowed = [e.strip().lower().lstrip(".") for e in rule.value.split(",")]
+            matched = ext.lstrip(".") in allowed
+        elif rule.condition == "exif_expression":
+            matched = _eval_exif_expression(rule.value, exif)
+
+        if matched:
+            return rule.target_category
+    return None
+
+
 async def execute(job, session) -> dict:
     """IA-08: Datei in Zielordner verschieben."""
     step_results = job.step_result or {}
@@ -122,8 +200,19 @@ async def execute(job, session) -> dict:
     is_messenger_file = has_uuid_name or "-WA" in filename.upper()
     file_size_kb = os.path.getsize(job.original_path) / 1024
 
+    # First: check user-defined sorting rules (only if AI had no clear result)
+    rule_category = None
+    if not ai_type:
+        rule_category = await _match_sorting_rules(filename, exif, session)
+
+    if rule_category:
+        # Video override: if rule says "photo" but file is actually a video
+        if rule_category == "photo" and is_video:
+            category = "video"
+        else:
+            category = rule_category
     # 1) Screenshots (KI oder Dateiname)
-    if ai_type == "screenshot" or "screenshot" in filename.lower():
+    elif ai_type == "screenshot" or "screenshot" in filename.lower():
         category = "screenshot"
     # 2) Memes & Internet-Bilder → immer aussortieren
     elif ai_type == "meme":
@@ -154,25 +243,27 @@ async def execute(job, session) -> dict:
     if geo_result.get("country"):
         exif = {**exif, "country": geo_result["country"], "city": geo_result.get("city", "")}
 
-    # Get path template from config
-    category_key_map = {
-        "photo": "library.path_photo",
-        "sourceless": "library.path_sourceless",
-        "screenshot": "library.path_screenshot",
-        "video": "library.path_video",
-        "unknown": "library.path_unknown",
-    }
-    defaults = {
-        "photo": "photos/{YYYY}/{YYYY-MM}/",
-        "sourceless": "sourceless/{YYYY}/",
-        "screenshot": "screenshots/{YYYY}/",
-        "video": "videos/{YYYY}/{YYYY-MM}/",
-        "unknown": "unknown/review/",
-    }
-
-    config_key = category_key_map.get(category, "library.path_unknown")
-    default_path = defaults.get(category, "unknown/review/")
-    path_template = await config_manager.get(config_key, default_path)
+    # Get path template from library_categories table
+    from models import LibraryCategory
+    cat_result = await session.execute(
+        select(LibraryCategory).where(LibraryCategory.key == category)
+    )
+    lib_cat = cat_result.scalar()
+    if lib_cat:
+        path_template = lib_cat.path_template
+    else:
+        # Fallback: try config (legacy) or default
+        fallback_defaults = {
+            "photo": "photos/{YYYY}/{YYYY-MM}/",
+            "sourceless": "sourceless/{YYYY}/",
+            "screenshot": "screenshots/{YYYY}/",
+            "video": "videos/{YYYY}/{YYYY-MM}/",
+            "unknown": "unknown/review/",
+        }
+        path_template = await config_manager.get(
+            f"library.path_{category}",
+            fallback_defaults.get(category, "unknown/review/"),
+        )
     base_path = await config_manager.get("library.base_path", "/bibliothek")
 
     # Parse date from EXIF
@@ -240,9 +331,19 @@ async def execute(job, session) -> dict:
 
         asset_id = immich_result.get("id", "")
 
-        # Sourceless & Screenshots → Asset in Immich archivieren (aus Timeline ausblenden)
+        # Tag asset with category label in Immich
+        immich_tagged = False
+        if asset_id and lib_cat:
+            try:
+                await tag_asset(asset_id, lib_cat.label)
+                immich_tagged = True
+            except Exception:
+                pass  # non-critical — don't fail the pipeline
+
+        # Archive in Immich if configured for this category
         immich_archived = False
-        if category in ("sourceless", "screenshot") and asset_id:
+        should_archive = lib_cat.immich_archive if lib_cat else category in ("sourceless", "screenshot")
+        if should_archive and asset_id:
             await archive_asset(asset_id)
             immich_archived = True
 
