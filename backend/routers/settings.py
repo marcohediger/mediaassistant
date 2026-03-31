@@ -310,11 +310,13 @@ async def add_sorting_rule(request: Request):
     async with async_session() as session:
         from sqlalchemy import func as sqla_func
         max_pos = (await session.execute(select(sqla_func.max(SortingRule.position)))).scalar() or 0
+        media_type = form.get("rule_media_type", "").strip() or None
         session.add(SortingRule(
             position=max_pos + 1,
             condition=condition,
             value=value,
             target_category=target,
+            media_type=media_type,
             active=True,
         ))
         await session.commit()
@@ -333,6 +335,7 @@ async def update_sorting_rule(request: Request, rule_id: int):
         rule.condition = form.get("rule_condition", rule.condition).strip()
         rule.value = form.get("rule_value", rule.value).strip()
         rule.target_category = form.get("rule_target", rule.target_category).strip()
+        rule.media_type = form.get("rule_media_type", "").strip() or None
         rule.active = f"rule_active_{rule_id}" in form
 
         # Position update (move up/down)

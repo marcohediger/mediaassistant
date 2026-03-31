@@ -67,6 +67,7 @@ class SortingRule(Base):
     condition = Column(Text, nullable=False)  # filename_contains / exif_empty / exif_contains / extension
     value = Column(Text, nullable=False)  # match value (e.g. "-WA", "Screenshot", ".png")
     target_category = Column(Text, nullable=False)  # photo / screenshot / sourceless / video / unknown
+    media_type = Column(Text, nullable=True)  # "image" / "video" / None (= all)
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

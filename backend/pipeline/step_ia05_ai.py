@@ -145,7 +145,10 @@ async def execute(job, session) -> dict:
 
     # Statische Regel vorab auswerten für Kontext
     from pipeline.step_ia08_sort import _match_sorting_rules
-    rule_category = await _match_sorting_rules(filename, exif, session)
+    file_type = (exif.get("file_type") or "").upper()
+    mime = exif.get("mime_type", "")
+    is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
+    rule_category = await _match_sorting_rules(filename, exif, session, is_video=is_video)
     rule_cat_label = ""
     if rule_category:
         for c in categories:
