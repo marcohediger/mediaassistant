@@ -564,6 +564,9 @@ async def keep_file(request: Request):
                 job.status = "done"
             job.error_message = None
             job.target_path = None
+            # Clear hash so IA-02 won't match against this deleted job
+            job.file_hash = None
+            job.phash = None
 
         # Re-run pipeline for the kept file (AI analysis, tag writing, sorting)
         if kept_job:
