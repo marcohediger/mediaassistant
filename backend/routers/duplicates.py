@@ -583,10 +583,6 @@ async def keep_file(request: Request):
                     if os.path.exists(log_path):
                         await asyncio.to_thread(os.remove, log_path)
 
-                # If group has Immich jobs, ensure the kept job uses Immich too
-                if group_is_immich and not kept_job.use_immich:
-                    kept_job.use_immich = True
-
                 # Reset job for re-processing: keep IA-01 (EXIF), clear everything else
                 step_results = kept_job.step_result or {}
                 ia01 = step_results.get("IA-01")
