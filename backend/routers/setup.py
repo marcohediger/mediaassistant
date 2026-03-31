@@ -35,7 +35,7 @@ async def setup_step(request: Request, step: int):
         return await render(request, "setup/step2_smtp.html", context)
     elif step == 3:
         context["inbox_path"] = config_manager.get_env("INBOX_PATH", "/inbox")
-        context["library_path"] = config_manager.get_env("LIBRARY_PATH", "/bibliothek")
+        context["library_path"] = config_manager.get_env("LIBRARY_PATH", "/library")
         return await render(request, "setup/step3_paths.html", context)
     elif step == 4:
         return await render(request, "setup/step4_done.html", context)

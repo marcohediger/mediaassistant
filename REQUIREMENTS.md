@@ -18,7 +18,7 @@ Eine Pipeline, mehrere konfigurierbare Eingangsverzeichnisse.
 ├── IMG_1234.jpg     ← fehlgeschlagene Dateien
 └── IMG_1234.log     ← Fehlergrund
 
-/volume1/bibliothek/
+/volume1/library/
 ├── photos/
 │   └── 2025/2025-03/   ← echte Fotos, chronologisch (Jahr/Monat)
 ├── whatsapp/
@@ -202,7 +202,7 @@ completed_at    DATETIME
   "IA-05": {"type": "personliches_foto", "source": "Kamerafoto", "tags": ["Zürich", "Stadtbild", "Altstadt"], "description": "...", "quality": "gut", "confidence": 0.95},
   "IA-06": {"has_text": false, "text": "", "text_type": "keiner"},
   "IA-07": {"keywords_written": ["Zürich", "Stadtbild", "Altstadt", "Kamerafoto", "Schweiz"], "tags_count": 5, "file_size": 2458901, "file_hash": "a1b2c3..."},
-  "IA-08": {"category": "personliches_foto", "target_path": "/bibliothek/persoenliche_fotos/2024/2024-06/IMG_1234.jpg", "moved": true},
+  "IA-08": {"category": "personliches_foto", "target_path": "/library/persoenliche_fotos/2024/2024-06/IMG_1234.jpg", "moved": true},
   "IA-09": {"sent": true, "recipient": "user@example.com", "errors_reported": 0},
   "IA-10": {"removed": ["/tmp/IA-2025-0342.tmp.jpg"], "count": 1},
   "IA-11": {"logged": true, "summary": "personliches_foto, 5 Tags, Zürich/Schweiz"}
@@ -251,8 +251,8 @@ Duplikate landen in:
 ```
 /inbox/error/duplicates/
 ├── IMG_1234.jpg       ← Duplikat
-└── IMG_1234.log       ← "Exaktes Duplikat von: /bibliothek/photos/2023/..."
-                          oder "Ähnlich zu: /bibliothek/photos/2023/... (Score: 0.97)"
+└── IMG_1234.log       ← "Exaktes Duplikat von: /library/photos/2023/..."
+                          oder "Ähnlich zu: /library/photos/2023/... (Score: 0.97)"
 ```
 
 - SHA256 Hash wird beim ersten Import in SQLite gespeichert

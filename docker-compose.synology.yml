@@ -25,11 +25,11 @@ services:
     volumes:
       - mediaassistant-data:/app/data
       - ${INBOX_PATH}:/inbox
-      - ${UPLOAD_LOCATION}:/bibliothek
+      - ${UPLOAD_LOCATION}:/library
     environment:
       - DATABASE_PATH=/app/data/mediaassistant.db
       - INBOX_PATH=/inbox
-      - LIBRARY_PATH=/bibliothek
+      - LIBRARY_PATH=/library
       - TZ=${TZ:-Europe/Zurich}
     depends_on:
       immich-server:

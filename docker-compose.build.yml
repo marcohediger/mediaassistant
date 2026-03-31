@@ -16,12 +16,12 @@ services:
     volumes:
       - ./data:/app/data
       - ${INBOX_PATH:-./inbox}:/inbox
-      - ${LIBRARY_PATH:-./library}:/bibliothek
+      - ${LIBRARY_PATH:-./library}:/library
     env_file:
       - .env
     environment:
       - DATABASE_PATH=/app/data/mediaassistant.db
       - INBOX_PATH=/inbox
-      - LIBRARY_PATH=/bibliothek
+      - LIBRARY_PATH=/library
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - TZ=${TZ:-Europe/Zurich}

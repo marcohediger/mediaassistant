@@ -317,7 +317,7 @@ async def classify_file(request: Request):
             path_template = lib_cat.path_template
         else:
             path_template = "unknown/review/"
-        base_path = await config_manager.get("library.base_path", "/bibliothek")
+        base_path = await config_manager.get("library.base_path", "/library")
 
         # Parse date
         date = _parse_date(exif.get("date"))
@@ -511,7 +511,7 @@ async def classify_all(request: Request):
             step_results = job.step_result or {}
             exif = step_results.get("IA-01", {})
 
-            base_path = await config_manager.get("library.base_path", "/bibliothek")
+            base_path = await config_manager.get("library.base_path", "/library")
             path_template = lib_cat.path_template if lib_cat else "unknown/review/"
 
             date = _parse_date(exif.get("date")) or datetime.now()

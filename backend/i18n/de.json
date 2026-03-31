@@ -201,7 +201,7 @@
     "storage_desc": "Ordnerstruktur in der Bibliothek",
     "storage_placeholders": "Platzhalter: {YYYY}, {MM}, {DD}, {YYYY-MM}, {CAMERA}, {TYPE}, {COUNTRY}, {CITY}",
     "library_path": "Bibliothek-Basispfad",
-    "library_hint": "Basis-Verzeichnis für die sortierte Ablage (z.B. /bibliothek)",
+    "library_hint": "Basis-Verzeichnis für die sortierte Ablage (z.B. /library)",
     "photos": "Fotos",
     "sourceless": "Sourceless",
     "sourceless_hint": "Bilder ohne EXIF (Messenger, Apps etc.)",
