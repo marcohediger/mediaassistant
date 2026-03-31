@@ -40,7 +40,7 @@ async def execute(job, session) -> dict:
         ai_result = (job.step_result or {}).get("IA-05", {})
         ai_type = ai_result.get("type", "")
         ai_source = ai_result.get("source", "").lower()
-        is_ocr_relevant = ai_type == "screenshot" or "dokument" in ai_source or "document" in ai_source or "quittung" in ai_source
+        is_ocr_relevant = ai_type.lower() == "screenshot" or "dokument" in ai_source or "document" in ai_source or "quittung" in ai_source
         if ai_type and not is_ocr_relevant and not ai_result.get("parse_error"):
             return {"status": "skipped", "reason": f"type={ai_type}, OCR nicht nötig (Modus: smart)"}
 

@@ -213,18 +213,22 @@ async def execute(job, session) -> dict:
         else:
             category = "video" if is_video else "photo"
 
-    # 2) AI verifies ALL files — AI returns a category key directly
+    # 2) AI verifies ALL files — AI returns a category label
     if ai_type:
-        # Validate AI category exists in DB (ignore invalid/unknown keys)
+        # Validate AI category exists in DB by label (ignore invalid/unknown)
         from models import LibraryCategory
         ai_cat_result = await session.execute(
-            select(LibraryCategory).where(LibraryCategory.key == ai_type)
+            select(LibraryCategory).where(LibraryCategory.label == ai_type)
         )
         ai_cat = ai_cat_result.scalar()
 
         # AI overrides static result when it returns a valid, different category
-        if ai_cat and ai_type != category and ai_type not in ("error", "duplicate", "unknown"):
-            category = ai_type
+        # But: videos must stay in "video" category unless AI explicitly says sourceless/screenshot
+        if ai_cat and ai_cat.key != category and ai_cat.key not in ("error", "duplicate", "unknown"):
+            if is_video and ai_cat.key == "personliches_foto":
+                category = "video"  # keep video in video category
+            else:
+                category = ai_cat.key
 
     # Unknown → Status "review" setzen für manuelle Klassifikation
     if category == "unknown":
@@ -279,25 +283,14 @@ async def execute(job, session) -> dict:
             target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
             counter += 1
 
-    # Write category tag into file (EXIF keywords) — AI tags + source are written by IA-07
+    # All EXIF keywords are written by IA-07 (type, tags, source, geo, folder tags).
+    # Build tag list for Immich tagging (category label + all IA-07 keywords).
     cat_label = lib_cat.label if lib_cat else category.replace("_", " ").title()
     tag_keywords = [cat_label]
-    ai_source = ai_result.get("source", "")
-    if ai_source:
-        tag_keywords.append(ai_source)
-
-    try:
-        tag_cmd = ["exiftool", "-overwrite_original", "-m"]
-        for kw in tag_keywords:
-            tag_cmd.append(f"-Keywords+={kw}")
-            tag_cmd.append(f"-Subject+={kw}")
-        tag_cmd.append(job.original_path)
-        await asyncio.to_thread(
-            subprocess.run, tag_cmd,
-            capture_output=True, text=True, timeout=15
-        )
-    except Exception:
-        pass  # non-critical
+    ia07_result = step_results.get("IA-07", {})
+    for kw in ia07_result.get("keywords_written", []):
+        if kw not in tag_keywords:
+            tag_keywords.append(kw)
 
     # Dry-run: report where file would go, but don't move
     if job.dry_run:
