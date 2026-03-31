@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ t.dashboard.title }} — MediaAssistant{% endblock %}
 {% block content %}
-<h1>{{ t.dashboard.title }}</h1>
+<div style="display: flex; justify-content: space-between; align-items: center;">
+    <h1 style="margin: 0;">{{ t.dashboard.title }}</h1>
+    <form method="post" action="/api/trigger-scan" style="margin: 0;">
+        <button type="submit" class="btn btn-small btn-primary">{{ t.dashboard.trigger_scan }}</button>
+    </form>
+</div>
 
 <div class="stats-grid" id="stats-grid">
     <div class="stat-card">
@@ -57,12 +62,7 @@
     <span><span class="legend-dot legend-disabled">○</span> {{ t.dashboard.disabled }}</span>
 </div>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2rem;">
-    <h2 style="margin: 0;">{{ t.dashboard.recent }}</h2>
-    <form method="post" action="/api/trigger-scan" style="margin: 0;">
-        <button type="submit" class="btn btn-small btn-primary">{{ t.dashboard.trigger_scan }}</button>
-    </form>
-</div>
+<h2 style="margin-top: 2rem;">{{ t.dashboard.recent }}</h2>
 {% if recent_jobs %}
 <div class="log-table-wrap">
     <table class="log-table">

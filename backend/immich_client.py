@@ -125,8 +125,8 @@ async def tag_asset(asset_id: str, tag_name: str) -> dict:
         )
         if resp.status_code in (200, 201):
             tag_id = resp.json().get("id")
-        elif resp.status_code == 409:
-            # Tag already exists — find it
+        elif resp.status_code in (400, 409):
+            # Tag already exists — Immich returns 400 (or 409) for duplicates
             list_resp = await client.get(f"{url}/api/tags", headers=headers)
             tags = list_resp.json() if list_resp.status_code == 200 else []
             tag_id = next((t["id"] for t in tags if t.get("name") == tag_name), None)
