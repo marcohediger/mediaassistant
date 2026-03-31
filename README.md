@@ -59,7 +59,7 @@ AI_MODEL=qwen/qwen3-vl-4b
 
 # Paths
 INBOX_PATH=/volume1/inbox
-LIBRARY_PATH=/volume1/bibliothek
+LIBRARY_PATH=/volume1/library
 
 # SMTP (e.g. Office 365)
 SMTP_SERVER=smtp.office365.com
@@ -218,7 +218,7 @@ Target structure is configurable per category with placeholders:
 Default structure (categories configurable in Settings → Library Categories):
 
 ```
-/bibliothek/
+/library/
 ├── photos/{YYYY}/{YYYY-MM}/          ← personal photos, chronological
 ├── videos/{YYYY}/{YYYY-MM}/          ← personal videos, chronological
 ├── sourceless/foto/{YYYY}/           ← images without source (messenger, memes)

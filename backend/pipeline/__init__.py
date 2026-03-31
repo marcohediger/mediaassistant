@@ -170,7 +170,7 @@ async def _move_to_error(job, session):
     if not os.path.exists(job.original_path):
         return
 
-    base_path = await config_manager.get("library.base_path", "/bibliothek")
+    base_path = await config_manager.get("library.base_path", "/library")
     error_dir = os.path.join(base_path, "error")
     await asyncio.to_thread(os.makedirs, error_dir, exist_ok=True)
 

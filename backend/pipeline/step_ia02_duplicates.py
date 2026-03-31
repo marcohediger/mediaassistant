@@ -299,7 +299,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
         await log_info("IA-02", f"{job.debug_key} [dry-run] {desc}")
         return
 
-    base_path = await config_manager.get("library.base_path", "/bibliothek")
+    base_path = await config_manager.get("library.base_path", "/library")
     dup_rel = await config_manager.get("library.path_duplicate", "error/duplicates/")
     dup_dir = os.path.join(base_path, dup_rel)
     await asyncio.to_thread(os.makedirs, dup_dir, exist_ok=True)

@@ -9,13 +9,13 @@ services:
       - ./backend:/app
       - ./data:/app/data
       - ./test_inbox:/inbox
-      - ./test_library:/bibliothek
+      - ./test_library:/library
     env_file:
       - .env
     environment:
       - DATABASE_PATH=/app/data/mediaassistant.db
       - INBOX_PATH=/inbox
-      - LIBRARY_PATH=/bibliothek
+      - LIBRARY_PATH=/library
       - LOG_LEVEL=DEBUG
       - TZ=Europe/Zurich
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload

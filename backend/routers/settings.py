@@ -46,7 +46,7 @@ async def _get_cfg() -> dict:
         "window_end": await config_manager.get("filewatcher.window_end", "06:00"),
         "scheduled_days": await config_manager.get("filewatcher.scheduled_days", "0,1,2,3,4"),
         "scheduled_time": await config_manager.get("filewatcher.scheduled_time", "23:00"),
-        "library_path": await config_manager.get("library.base_path", "/bibliothek"),
+        "library_path": await config_manager.get("library.base_path", "/library"),
         "immich_url": await config_manager.get("immich.url", ""),
         "immich_poll_enabled": await config_manager.get("immich.poll_enabled", False),
         "video_thumbnail_enabled": await config_manager.get("video.thumbnail_enabled", False),
@@ -153,7 +153,7 @@ async def save_settings(request: Request):
     await config_manager.set("smtp.ssl", "smtp_ssl" in form)
 
     # Ziel-Ablage (base path only — categories are managed separately)
-    await config_manager.set("library.base_path", form.get("library_path", "/bibliothek"))
+    await config_manager.set("library.base_path", form.get("library_path", "/library"))
 
     # Update library categories path templates from form
     async with async_session() as session:

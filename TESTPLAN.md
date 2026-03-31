@@ -312,7 +312,7 @@
 ## 8. Security (v2.4.4–v2.4.5)
 
 - [x] Path Traversal: EXIF country `../../etc` → sanitisiert zu `__etc`, bleibt in Bibliothek
-- [x] Path Traversal: `_validate_target_path()` blockiert `/bibliothek/../etc` mit ValueError
+- [x] Path Traversal: `_validate_target_path()` blockiert `/library/../etc` mit ValueError
 - [x] Path Traversal: Normaler EXIF-Wert (Schweiz/Zürich) wird durchgelassen
 - [x] Immich Filename: `../../etc/passwd` → `os.path.basename()` → `passwd`
 - [x] Immich Filename: Leerer Name → Fallback auf `asset_id.jpg`
@@ -458,8 +458,8 @@
 |------|-------------|----------|
 | S1-1 | `_sanitize_path_component("../../etc/passwd")` → `"__etc_passwd"` | ✅ |
 | S1-2 | `_sanitize_path_component("Zürich")` → `"Zürich"` (normaler Wert durchgelassen) | ✅ |
-| S1-3 | `_validate_target_path("/etc/passwd", "/bibliothek")` → `ValueError` raised | ✅ |
-| S1-4 | `_validate_target_path("/bibliothek/photos/2026", "/bibliothek")` → akzeptiert | ✅ |
+| S1-3 | `_validate_target_path("/etc/passwd", "/library")` → `ValueError` raised | ✅ |
+| S1-4 | `_validate_target_path("/library/photos/2026", "/library")` → akzeptiert | ✅ |
 | S1-5 | Control-Characters (`\x00\x01\x1f`) → entfernt | ✅ |
 | S7 | `MAX_FILE_SIZE = 10737418240` (10 GB) korrekt gesetzt | ✅ |
 | S8-1 | `_sanitize_filename("../../etc/passwd")` → `"passwd"` | ✅ |
@@ -495,7 +495,7 @@
 #### Bibliothek-Struktur nach Test
 
 ```
-/bibliothek/
+/library/
 ├── photos/
 │   ├── 2012/2012-02/  T01_panasonic.JPG, test_v250_panasonic.JPG
 │   ├── 2022/2022-02/  T03_dji_raw.DNG, test_v250_dji.DNG

@@ -264,7 +264,7 @@ async def execute(job, session) -> dict:
             f"library.path_{category}",
             fallback_defaults.get(category, "unknown/review/"),
         )
-    base_path = await config_manager.get("library.base_path", "/bibliothek")
+    base_path = await config_manager.get("library.base_path", "/library")
 
     # Parse date from EXIF
     date = _parse_date(exif.get("date"))
