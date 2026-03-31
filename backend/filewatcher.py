@@ -222,17 +222,38 @@ async def _poll_immich():
         await config_manager.set("immich.last_poll", now)
         return
 
-    # Filter out assets already processed (by immich_asset_id in jobs table)
+    # Filter out assets already processed
+    # Check by immich_asset_id AND by file_hash (catches replaced assets with new IDs)
     asset_ids = [a["id"] for a in assets]
     async with async_session() as session:
-        existing = await session.execute(
+        existing_by_id = await session.execute(
             select(Job.immich_asset_id).where(
                 Job.immich_asset_id.in_(asset_ids)
             )
         )
-        already_processed = {row[0] for row in existing.all()}
+        already_by_id = {row[0] for row in existing_by_id.all()}
 
-    new_assets = [a for a in assets if a["id"] not in already_processed]
+        # Get file hashes from all Immich-sourced done jobs
+        existing_hashes = await session.execute(
+            select(Job.file_hash).where(
+                Job.source_label == "Immich",
+                Job.file_hash.isnot(None),
+                Job.status.in_(("done", "duplicate")),
+            )
+        )
+        processed_hashes = {row[0] for row in existing_hashes.all()}
+
+        # Also get file hashes from inbox-uploaded jobs (uploaded via use_immich)
+        uploaded_hashes = await session.execute(
+            select(Job.file_hash).where(
+                Job.use_immich == True,
+                Job.file_hash.isnot(None),
+                Job.status.in_(("done", "duplicate")),
+            )
+        )
+        processed_hashes.update(row[0] for row in uploaded_hashes.all())
+
+    new_assets = [a for a in assets if a["id"] not in already_by_id]
     if not new_assets:
         await config_manager.set("immich.last_poll", now)
         return
@@ -261,6 +282,12 @@ async def _poll_immich():
             continue
 
         file_hash = await asyncio.to_thread(_sha256, file_path)
+
+        # Skip if this file was already processed (catches replaced assets with new IDs)
+        if file_hash in processed_hashes:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            continue
 
         async with async_session() as session:
             debug_key = await _generate_debug_key(session)
