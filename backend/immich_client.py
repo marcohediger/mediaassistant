@@ -108,6 +108,27 @@ async def archive_asset(asset_id: str) -> dict:
     return {"status": "archived", "asset_id": asset_id}
 
 
+async def lock_asset(asset_id: str) -> dict:
+    """Move an asset to the locked folder in Immich (visibility: locked)."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"{url}/api/assets",
+            headers=headers,
+            json={"ids": [asset_id], "visibility": "locked"},
+        )
+
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"Immich lock failed: HTTP {resp.status_code} — {resp.text[:200]}")
+
+    return {"status": "locked", "asset_id": asset_id}
+
+
 async def tag_asset(asset_id: str, tag_name: str) -> dict:
     """Add a tag to an asset in Immich. Creates the tag if it doesn't exist."""
     url, api_key = await get_immich_config()

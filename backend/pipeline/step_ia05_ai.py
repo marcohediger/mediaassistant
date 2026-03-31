@@ -19,7 +19,8 @@ Respond ONLY with valid JSON (no markdown, no surrounding text):
   "mood": "indoor|outdoor|night|backlit|studio",
   "people_count": 0,
   "quality": "blurry|average|good|excellent",
-  "confidence": 0.0-1.0
+  "confidence": 0.0-1.0,
+  "nsfw": false
 }
 
 ## 1) type — Category (target library folder)
@@ -68,7 +69,8 @@ Examples: Landschaft, Essen, Tier, Hund, Katze, Gruppe, Stadt, Natur, Sport, Fei
 - description: In GERMAN, factual, 1-2 sentences
 - people_count: Number of visible people (0 if none)
 - quality: Technical image quality
-- confidence: How certain about the type classification (0.0-1.0)"""
+- confidence: How certain about the type classification (0.0-1.0)
+- nsfw: true if the image contains nudity, explicit sexual content, or other not-safe-for-work material. Always false for landscapes, food, animals, buildings, etc."""
 
 
 async def execute(job, session) -> dict:
