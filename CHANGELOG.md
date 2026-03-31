@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.8.0 — 2026-03-31
+
+### Dynamische KI-Klassifikation & DB-gesteuerte Kategorien
+- **Statische Regeln primär, KI ergänzt**: Sortier-Regeln werden immer zuerst ausgewertet. Die KI prüft anschliessend ALLE Dateien und kann das Ergebnis korrigieren (z.B. ein persönliches Foto aus «Sourceless» retten)
+- **Kategorien aus Datenbank**: Alle Kategorien (Ziel-Ablagen) kommen dynamisch aus der `library_categories`-Tabelle — keine hardcodierten Kategorie-Werte mehr im Code
+- **KI-Prompt dynamisch**: Verfügbare Kategorien werden aus der DB geladen und dem AI-Prompt als Kontext übergeben, inkl. Vor-Klassifikation durch statische Regeln
+- **Drei KI-Ausgabefelder**: `type` (Kategorie-Key aus DB), `source` (Herkunft wie Meme/Kamerafoto/Internetbild), `tags` (beschreibende Tags wie Landschaft, Tier, Haus)
+- **Tag-Strategie überarbeitet**:
+  - IA-07 schreibt AI-Tags + Source als EXIF-Keywords
+  - IA-08 schreibt Kategorie-Label + Source als EXIF-Keywords
+  - Keine doppelten Tags durch statische Regeln
+- **Review-Seite dynamisch**: Klassifikations-Buttons werden aus der DB geladen statt hardcodiert
+- **OCR Smart-Modus**: Verwendet AI `source`-Feld statt hardcodierter Typen für die Relevanzprüfung
+- **Immich-Archivierung**: Pro Kategorie konfigurierbar in der Ziel-Ablage (DB-Feld `immich_archive`)
+- **i18n aktualisiert**: Beschreibungen der Sortier-Regeln spiegeln den neuen Ablauf wider
+
+## v2.7.0 — 2026-03-31
+
+### Settings UI Redesign & EXIF Expression Engine
+- **EXIF-Ausdrücke**: Neue Bedingung `exif_expression` für Sortier-Regeln mit Operatoren (`==`, `!=`, `~`, `!~`) und Verknüpfungen (`&` AND, `|` OR)
+- **Nested-Form-Fix**: Delete/Add-Buttons in Einstellungen verwenden JavaScript statt verschachtelter HTML-Formulare
+- **Immich-Archiv-Toggle**: Pro Ziel-Ablage konfigurierbar ob Dateien in Immich archiviert werden
+- **Alte Bedingungen entfernt**: `exif_empty` und `exif_contains` durch `exif_expression` ersetzt
+
 ## v2.6.0 — 2026-03-31
 
 ### Schedule-Modus Enforcement
