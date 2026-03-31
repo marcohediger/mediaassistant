@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 from PIL import Image
 from sqlalchemy import select, func
+from sqlalchemy.orm.attributes import flag_modified
 
 from config import config_manager
 from database import async_session
@@ -564,60 +565,43 @@ async def keep_file(request: Request):
             job.error_message = None
             job.target_path = None
 
-        # Move the kept file to its destination
+        # Re-run pipeline for the kept file (AI analysis, tag writing, sorting)
         if kept_job:
             kept_filepath = kept_job.target_path or kept_job.original_path
             is_already_in_immich = (kept_job.target_path or "").startswith("immich:") or bool(kept_job.immich_asset_id)
 
             if is_already_in_immich:
-                # Already in Immich — nothing to move
-                pass
-            elif group_is_immich and kept_job.status == "duplicate" and os.path.exists(kept_filepath):
-                # Immich mode: upload the kept local file to Immich
-                try:
-                    from immich_client import upload_asset
-                    result = await upload_asset(kept_filepath)
-                    new_asset_id = result.get("id", "")
-                    if new_asset_id:
-                        kept_job.target_path = f"immich:{new_asset_id}"
-                        kept_job.immich_asset_id = new_asset_id
-                        # Delete local file after successful upload
-                        if os.path.exists(kept_filepath):
-                            await asyncio.to_thread(os.remove, kept_filepath)
-                except Exception as e:
-                    await log_info("duplicates", f"Immich upload failed for {kept_job.debug_key}: {e}")
+                # Already in Immich — nothing to do
+                kept_job.status = "done"
+                kept_job.error_message = None
             elif kept_job.status == "duplicate" and os.path.exists(kept_filepath):
-                # Local mode: move to library
-                if library_path:
-                    target_dir = os.path.dirname(library_path)
-                else:
-                    base_path = await config_manager.get("library.base_path", "/bibliothek")
-                    exif = (kept_job.step_result or {}).get("IA-01", {})
-                    date_str = exif.get("date", "")
-                    if date_str:
-                        try:
-                            dt = datetime.strptime(date_str.split(" ")[0], "%Y:%m:%d")
-                        except ValueError:
-                            dt = datetime.now()
-                    else:
-                        dt = datetime.now()
-                    target_dir = os.path.join(base_path, "photos", dt.strftime("%Y"), dt.strftime("%Y-%m"))
+                # Move file back to original inbox path for re-processing
+                original_dir = os.path.dirname(kept_job.original_path)
+                if os.path.exists(original_dir) and kept_filepath != kept_job.original_path:
+                    await asyncio.to_thread(safe_move, kept_filepath, kept_job.original_path, kept_job.debug_key)
+                    # Remove .log file
+                    log_path = kept_filepath + ".log"
+                    if os.path.exists(log_path):
+                        await asyncio.to_thread(os.remove, log_path)
 
-                await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
-                target_path = os.path.join(target_dir, kept_job.filename)
+                # Reset job for re-processing: keep IA-01 (EXIF), clear everything else
+                step_results = kept_job.step_result or {}
+                ia01 = step_results.get("IA-01")
+                kept_job.step_result = {"IA-01": ia01} if ia01 else {}
+                flag_modified(kept_job, "step_result")
+                kept_job.status = "queued"
+                kept_job.target_path = None
+                kept_job.error_message = None
+                await session.commit()
 
-                if os.path.exists(target_path):
-                    name, ext = os.path.splitext(kept_job.filename)
-                    counter = 1
-                    while os.path.exists(target_path):
-                        target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
-                        counter += 1
-
-                await asyncio.to_thread(safe_move, kept_filepath, target_path, kept_job.debug_key)
-                kept_job.target_path = target_path
-
-            kept_job.status = "done"
-            kept_job.error_message = None
+                # Re-run pipeline in background
+                from pipeline import run_pipeline
+                asyncio.create_task(run_pipeline(kept_job.id))
+                await log_info("duplicates", f"Review: Group {group_key}, kept: {keep_key} → re-processing")
+                return RedirectResponse(url="/duplicates", status_code=303)
+            else:
+                kept_job.status = "done"
+                kept_job.error_message = None
 
         await session.commit()
 
