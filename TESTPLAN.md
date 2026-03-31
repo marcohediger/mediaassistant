@@ -120,8 +120,9 @@
 - [ ] Pfad-Template aus library_categories DB geladen (v2.8.0)
 - [x] `personliches_foto` → persoenliche_fotos/{YYYY}/{YYYY-MM}/ (v2.8.0: Key geändert)
 - [x] `screenshot` → screenshots/{YYYY}/
-- [x] `sourceless` → sourceless/{YYYY}/ (v2.8.0: ersetzt internet_image)
-- [x] Video → videos/{YYYY}/{YYYY-MM}/
+- [x] `sourceless_foto` → sourceless/foto/{YYYY}/
+- [x] `sourceless_video` → sourceless/video/{YYYY}/
+- [x] `personliches_video` → videos/{YYYY}/{YYYY-MM}/
 - [ ] Sorting Rule media_type=image → Regel wird nur auf Bilder angewendet, Videos übersprungen
 - [ ] Sorting Rule media_type=video → Regel wird nur auf Videos angewendet, Bilder übersprungen
 - [ ] iPhone MOV (make=Apple) → Pre-Classification "Persönliches Video", Kategorie personliches_video
@@ -180,6 +181,7 @@
 - [x] Pro Inbox: Pfad, Label, Ordner-Tags, Dry-Run, Immich, Aktiv
 - [x] Immich URL + API-Key + Polling-Toggle
 - [ ] Ziel-Ablagen (library_categories): Key, Label, Pfad-Template, Immich-Archiv, Position (v2.8.0)
+- [ ] Sorting Rules: Medientyp-Filter (Alle/Bilder/Videos) in UI und Logik
 - [x] pHash-Schwellwert konfigurierbar
 - [x] OCR-Modus (Smart/Alle)
 - [x] Filewatcher Schedule (Kontinuierlich/Zeitfenster/Geplant/Manuell)
@@ -194,7 +196,9 @@
 - [x] Lightbox: ESC oder Klick schliesst Overlay
 - [x] EXIF-Daten für Immich-Assets via Immich API geholt
 - [x] "Dieses behalten" Button auf allen Gruppenmitgliedern (nicht nur lokale)
-- [x] "Dieses behalten" bei Immich-Gruppe → Upload zu Immich
+- [ ] "Dieses behalten" → volle Pipeline wird nachgeholt (KI, Tags, Sortierung/Immich)
+- [ ] "Dieses behalten" bei Immich-Gruppe → KI + Tags + Upload zu Immich
+- [ ] "Dieses behalten" bei lokaler Gruppe → KI + Tags + lokale Ablage
 - [x] Badge (ORIGINAL/EXAKT) ist klickbarer Link (Immich → öffnet Immich, lokal → Download)
 - [x] Batch-Clean → alle exakten SHA256-Duplikate gelöscht, ähnliche (pHash) behalten
 - [x] Immich-Duplikate: Thumbnail aus Immich, "In Immich ansehen"
@@ -282,6 +286,7 @@
 - [x] Dateiname mit Leerzeichen und Klammern → korrekt verarbeitet (`DJI_0061 (2).JPG`)
 - [x] Gleichzeitige Verarbeitung mehrerer Dateien → kein Datenverlust (Batch 4+ Dateien)
 - [x] Verschlüsselte Config-Werte → korrekt entschlüsselt
+- [ ] Ungültiges JSON in Config-Wert → kein Crash, Rohwert zurückgegeben
 - [x] Korruptes Video (moov atom fehlt) → Fehler gefangen, E-Mail gesendet, kein Crash
 - [x] Sehr kleine Bilder (<16px) → KI-Analyse übersprungen
 - [x] Unscharfes Foto → KI erkennt `quality: blurry`, Tag geschrieben
@@ -356,8 +361,8 @@
 ### Duplikat-Tests
 | Test | Szenario | Ergebnis |
 |------|----------|----------|
-| D1 | DNG erneut einfügen (SHA256) | ✅ Filewatcher überspringt |
-| D2 | Video erneut einfügen (SHA256) | ✅ Filewatcher überspringt |
+| D1 | DNG erneut einfügen (SHA256) | ✅ Filewatcher verarbeitet, IA-02 erkennt Duplikat |
+| D2 | Video erneut einfügen (SHA256) | ✅ Filewatcher verarbeitet, IA-02 erkennt Duplikat |
 | D3 | Cross-Mode (Dateiablage → Immich) | ✅ Hash erkannt trotz Moduswechsel |
 | D4 | Keep JPG / Delete DNG (Paar) | ✅ JPG verschoben, DNG gelöscht |
 | D5 | Dry-Run DNG | ✅ Alle Schritte, Datei bleibt in Inbox |
