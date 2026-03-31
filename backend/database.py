@@ -1,6 +1,6 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from models import Base, Module
+from models import Base, Module, SortingRule, LibraryCategory
 
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")
 
@@ -27,6 +27,7 @@ async def _migrate_columns(conn):
         ("jobs", "use_immich", "ALTER TABLE jobs ADD COLUMN use_immich BOOLEAN DEFAULT 0"),
         ("inbox_directories", "use_immich", "ALTER TABLE inbox_directories ADD COLUMN use_immich BOOLEAN DEFAULT 0"),
         ("jobs", "immich_asset_id", "ALTER TABLE jobs ADD COLUMN immich_asset_id TEXT"),
+        ("library_categories", "immich_archive", "ALTER TABLE library_categories ADD COLUMN immich_archive BOOLEAN DEFAULT 0"),
     ]
     for table, column, sql in migrations:
         try:
@@ -62,3 +63,36 @@ async def init_db():
             if not existing:
                 session.add(Module(name=name, enabled=enabled))
         await session.commit()
+
+    # Seed default library categories (only if table is empty)
+    async with async_session() as session:
+        from sqlalchemy import select, func
+        count = (await session.execute(select(func.count(LibraryCategory.id)))).scalar()
+        if count == 0:
+            defaults = [
+                LibraryCategory(key="photo", label="Fotos", path_template="photos/{YYYY}/{YYYY-MM}/", fixed=False, immich_archive=False, position=1),
+                LibraryCategory(key="video", label="Videos", path_template="videos/{YYYY}/{YYYY-MM}/", fixed=False, immich_archive=False, position=2),
+                LibraryCategory(key="screenshot", label="Screenshots", path_template="screenshots/{YYYY}/", fixed=False, immich_archive=True, position=3),
+                LibraryCategory(key="sourceless", label="Sourceless", path_template="sourceless/{YYYY}/", fixed=False, immich_archive=True, position=4),
+                LibraryCategory(key="unknown", label="Unbekannt / Review", path_template="unknown/review/", fixed=True, immich_archive=False, position=5),
+                LibraryCategory(key="error", label="Fehler", path_template="error/", fixed=True, immich_archive=False, position=6),
+                LibraryCategory(key="duplicate", label="Duplikate", path_template="error/duplicates/", fixed=True, immich_archive=False, position=7),
+            ]
+            session.add_all(defaults)
+            await session.commit()
+
+    # Seed default sorting rules (only if table is empty)
+    async with async_session() as session:
+        from sqlalchemy import select, func
+        count = (await session.execute(select(func.count(SortingRule.id)))).scalar()
+        if count == 0:
+            default_rules = [
+                SortingRule(position=1, condition="filename_contains", value="-WA", target_category="sourceless"),
+                SortingRule(position=2, condition="filename_pattern", value=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\w+$", target_category="sourceless"),
+                SortingRule(position=3, condition="filename_contains", value="Screenshot", target_category="screenshot"),
+                SortingRule(position=4, condition="extension", value=".mp4,.mov,.avi,.mkv,.m4v,.3gp", target_category="video"),
+                SortingRule(position=5, condition="exif_expression", value='make != "" & date != ""', target_category="photo"),
+                SortingRule(position=6, condition="exif_expression", value='has_exif == False', target_category="unknown"),
+            ]
+            session.add_all(default_rules)
+            await session.commit()

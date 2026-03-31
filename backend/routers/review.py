@@ -282,23 +282,18 @@ async def classify_file(request: Request):
         if geo.get("country"):
             exif = {**exif, "country": geo["country"], "city": geo.get("city", "")}
 
-        # Get path template
-        category_key_map = {
-            "photo": "library.path_photo",
-            "sourceless": "library.path_sourceless",
-            "screenshot": "library.path_screenshot",
-            "video": "library.path_video",
-        }
-        defaults = {
-            "photo": "photos/{YYYY}/{YYYY-MM}/",
-            "sourceless": "sourceless/{YYYY}/",
-            "screenshot": "screenshots/{YYYY}/",
-            "video": "videos/{YYYY}/{YYYY-MM}/",
-        }
-
-        config_key = category_key_map[category]
-        default_path = defaults[category]
-        path_template = await config_manager.get(config_key, default_path)
+        # Get path template from library_categories table
+        from models import LibraryCategory
+        cat_result = await session.execute(
+            select(LibraryCategory).where(LibraryCategory.key == category)
+        )
+        lib_cat = cat_result.scalar()
+        if lib_cat:
+            path_template = lib_cat.path_template
+        else:
+            fallback = {"photo": "photos/{YYYY}/{YYYY-MM}/", "sourceless": "sourceless/{YYYY}/",
+                        "screenshot": "screenshots/{YYYY}/", "video": "videos/{YYYY}/{YYYY-MM}/"}
+            path_template = await config_manager.get(f"library.path_{category}", fallback.get(category, "unknown/review/"))
         base_path = await config_manager.get("library.base_path", "/bibliothek")
 
         # Parse date
@@ -480,7 +475,12 @@ async def classify_all(request: Request):
             exif = step_results.get("IA-01", {})
 
             base_path = await config_manager.get("library.base_path", "/bibliothek")
-            path_template = await config_manager.get("library.path_sourceless", "sourceless/{YYYY}/")
+            from models import LibraryCategory
+            cat_result = await session.execute(
+                select(LibraryCategory).where(LibraryCategory.key == "sourceless")
+            )
+            lib_cat = cat_result.scalar()
+            path_template = lib_cat.path_template if lib_cat else await config_manager.get("library.path_sourceless", "sourceless/{YYYY}/")
 
             date = _parse_date(exif.get("date")) or datetime.now()
             relative_dir = path_template.replace("{YYYY}", date.strftime("%Y")).replace("{MM}", date.strftime("%m"))

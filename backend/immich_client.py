@@ -108,6 +108,44 @@ async def archive_asset(asset_id: str) -> dict:
     return {"status": "archived", "asset_id": asset_id}
 
 
+async def tag_asset(asset_id: str, tag_name: str) -> dict:
+    """Add a tag to an asset in Immich. Creates the tag if it doesn't exist."""
+    url, api_key = await get_immich_config()
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Get or create tag
+        resp = await client.post(
+            f"{url}/api/tags",
+            headers=headers,
+            json={"name": tag_name, "type": "OBJECT"},
+        )
+        if resp.status_code in (200, 201):
+            tag_id = resp.json().get("id")
+        elif resp.status_code == 409:
+            # Tag already exists — find it
+            list_resp = await client.get(f"{url}/api/tags", headers=headers)
+            tags = list_resp.json() if list_resp.status_code == 200 else []
+            tag_id = next((t["id"] for t in tags if t.get("name") == tag_name), None)
+        else:
+            return {"status": "error", "detail": f"Create tag failed: HTTP {resp.status_code}"}
+
+        if not tag_id:
+            return {"status": "error", "detail": f"Tag '{tag_name}' not found after creation"}
+
+        # Assign tag to asset
+        resp = await client.put(
+            f"{url}/api/tags/{tag_id}/assets",
+            headers=headers,
+            json={"ids": [asset_id]},
+        )
+
+    return {"status": "tagged", "tag_name": tag_name, "tag_id": tag_id, "asset_id": asset_id}
+
+
 async def get_asset_info(asset_id: str) -> dict | None:
     """Get asset info from Immich (includes exifInfo with fileSizeInByte)."""
     url, api_key = await get_immich_config()

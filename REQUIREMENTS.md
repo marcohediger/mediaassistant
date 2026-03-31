@@ -587,6 +587,10 @@ Flach:               photos/{YYYY}/
 - [x] FIX: httpx DELETE — `client.request` mit `content=` statt `json=`
 - [x] FEAT: Video-Metadaten auslesen via ffprobe (Datum, GPS mit ISO 6709 Parser, Dauer + formatiert, Auflösung, Megapixel, Codec, Framerate, Bitrate, Rotation) — ergänzt ExifTool in IA-01
 - [x] FEAT: Video-Thumbnail Extraktion via ffmpeg bei 10% der Dauer in IA-04 (vorbereitet, VIDEO_THUMBNAIL_ENABLED = False)
+- [x] FEAT: Schedule-Modus Enforcement (Zeitfenster, Geplant, Manuell werden durchgesetzt, nicht nur konfiguriert)
+- [x] FEAT: Sortier-Regeln editierbar im Webinterface (Bedingung → Kategorie, Reihenfolge per Pfeile, KI hat Vorrang)
+- [x] FEAT: HTML-Report nach Dry-Run (Übersicht: Kategorien, Inbox, Dateien, Fehler)
+- [x] FEAT: Manueller Scan-Trigger im Dashboard ("Jetzt scannen" Button)
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 

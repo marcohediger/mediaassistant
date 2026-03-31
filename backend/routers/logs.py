@@ -97,6 +97,65 @@ async def log_detail(request: Request, debug_key: str):
     return await render(request, "log_detail.html", {"job": job})
 
 
+@router.get("/dryrun-report")
+async def dryrun_report(request: Request):
+    """HTML report summarizing all dry-run jobs."""
+    if not await config_manager.is_setup_complete():
+        return RedirectResponse(url="/setup", status_code=302)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.dry_run == True).order_by(Job.created_at.desc())
+        )
+        all_jobs = result.scalars().all()
+
+    # Stats
+    total = len(all_jobs)
+    done = sum(1 for j in all_jobs if j.status == "done")
+    errors_count = sum(1 for j in all_jobs if j.status == "error")
+    duplicates = sum(1 for j in all_jobs if j.status == "duplicate")
+    review_count = sum(1 for j in all_jobs if j.status == "review")
+
+    # Categories from IA-08 step result
+    categories = {}
+    for j in all_jobs:
+        sr = j.step_result or {}
+        cat = sr.get("IA-08", {}).get("category", "unknown")
+        categories[cat] = categories.get(cat, 0) + 1
+
+    # By inbox
+    by_inbox = {}
+    for j in all_jobs:
+        label = j.source_label or "—"
+        if label not in by_inbox:
+            by_inbox[label] = {"total": 0, "categories": {}}
+        by_inbox[label]["total"] += 1
+        sr = j.step_result or {}
+        cat = sr.get("IA-08", {}).get("category", "unknown")
+        by_inbox[label]["categories"][cat] = by_inbox[label]["categories"].get(cat, 0) + 1
+
+    # Error jobs
+    error_jobs = [j for j in all_jobs if j.status == "error"]
+
+    from datetime import datetime
+    generated_at = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    return await render(request, "dryrun_report.html", {
+        "jobs": all_jobs,
+        "stats": {
+            "total": total,
+            "done": done,
+            "errors": errors_count,
+            "duplicates": duplicates,
+            "review": review_count,
+        },
+        "categories": dict(sorted(categories.items())),
+        "by_inbox": by_inbox,
+        "errors": error_jobs,
+        "generated_at": generated_at,
+    })
+
+
 @router.get("/job/{debug_key}/json")
 async def log_detail_json(debug_key: str):
     """JSON endpoint for live-updating the job detail page."""

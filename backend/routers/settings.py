@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from config import config_manager
 from database import async_session
-from models import Module, InboxDirectory
+from models import Module, InboxDirectory, SortingRule, LibraryCategory
 from system_logger import log_warning, log_info
 from template_engine import render
 
@@ -42,14 +42,11 @@ async def _get_cfg() -> dict:
         "smtp_ssl": await config_manager.get("smtp.ssl", True),
         "watch_interval": await config_manager.get("filewatcher.interval", 5),
         "schedule_mode": await config_manager.get("filewatcher.schedule_mode", "continuous"),
+        "window_start": await config_manager.get("filewatcher.window_start", "22:00"),
+        "window_end": await config_manager.get("filewatcher.window_end", "06:00"),
+        "scheduled_days": await config_manager.get("filewatcher.scheduled_days", "0,1,2,3,4"),
+        "scheduled_time": await config_manager.get("filewatcher.scheduled_time", "23:00"),
         "library_path": await config_manager.get("library.base_path", "/bibliothek"),
-        "path_photo": await config_manager.get("library.path_photo", "photos/{YYYY}/{YYYY-MM}/"),
-        "path_sourceless": await config_manager.get("library.path_sourceless", "sourceless/{YYYY}/"),
-        "path_screenshot": await config_manager.get("library.path_screenshot", "screenshots/{YYYY}/"),
-        "path_video": await config_manager.get("library.path_video", "videos/{YYYY}/{YYYY-MM}/"),
-        "path_unknown": await config_manager.get("library.path_unknown", "unknown/review/"),
-        "path_error": await config_manager.get("library.path_error", "error/"),
-        "path_duplicate": await config_manager.get("library.path_duplicate", "error/duplicates/"),
         "immich_url": await config_manager.get("immich.url", ""),
         "immich_poll_enabled": await config_manager.get("immich.poll_enabled", False),
         "video_thumbnail_enabled": await config_manager.get("video.thumbnail_enabled", False),
@@ -69,6 +66,10 @@ async def settings_page(request: Request):
     async with async_session() as session:
         result = await session.execute(select(InboxDirectory).order_by(InboxDirectory.id))
         inboxes = result.scalars().all()
+        rules_result = await session.execute(select(SortingRule).order_by(SortingRule.position))
+        sorting_rules = rules_result.scalars().all()
+        cats_result = await session.execute(select(LibraryCategory).order_by(LibraryCategory.position))
+        library_categories = cats_result.scalars().all()
 
     # Translate message key from query params
     msg_key = request.query_params.get("msg")
@@ -89,6 +90,8 @@ async def settings_page(request: Request):
         "modules": type("M", (), modules)(),
         "cfg": type("C", (), cfg)(),
         "inboxes": inboxes,
+        "sorting_rules": sorting_rules,
+        "library_categories": library_categories,
         "success": success,
         "error": error,
     })
@@ -149,15 +152,38 @@ async def save_settings(request: Request):
     await config_manager.set("smtp.recipient", form.get("smtp_recipient", ""))
     await config_manager.set("smtp.ssl", "smtp_ssl" in form)
 
-    # Ziel-Ablage
+    # Ziel-Ablage (base path only — categories are managed separately)
     await config_manager.set("library.base_path", form.get("library_path", "/bibliothek"))
-    await config_manager.set("library.path_photo", form.get("path_photo", "photos/{YYYY}/{YYYY-MM}/"))
-    await config_manager.set("library.path_sourceless", form.get("path_sourceless", "sourceless/{YYYY}/"))
-    await config_manager.set("library.path_screenshot", form.get("path_screenshot", "screenshots/{YYYY}/"))
-    await config_manager.set("library.path_video", form.get("path_video", "videos/{YYYY}/{YYYY-MM}/"))
-    await config_manager.set("library.path_unknown", form.get("path_unknown", "unknown/review/"))
-    await config_manager.set("library.path_error", form.get("path_error", "error/"))
-    await config_manager.set("library.path_duplicate", form.get("path_duplicate", "error/duplicates/"))
+
+    # Update library categories path templates from form
+    async with async_session() as session:
+        cats = (await session.execute(select(LibraryCategory))).scalars().all()
+        for cat in cats:
+            new_template = form.get(f"cat_path_{cat.id}")
+            if new_template is not None:
+                cat.path_template = new_template.strip()
+            if not cat.fixed:
+                cat.immich_archive = f"cat_immich_archive_{cat.id}" in form
+            new_label = form.get(f"cat_label_{cat.id}")
+            if new_label is not None and not cat.fixed:
+                new_label = new_label.strip()
+                cat.label = new_label
+                # Sync key from label
+                import re as _re
+                import unicodedata
+                normalized = unicodedata.normalize("NFKD", new_label).encode("ascii", "ignore").decode()
+                new_key = _re.sub(r"[^a-z0-9]+", "_", normalized.lower()).strip("_")
+                if new_key and new_key != cat.key:
+                    old_key = cat.key
+                    cat.key = new_key
+                    # Update sorting rules that reference the old key
+                    from sqlalchemy import update
+                    await session.execute(
+                        update(SortingRule)
+                        .where(SortingRule.target_category == old_key)
+                        .values(target_category=new_key)
+                    )
+        await session.commit()
 
     # Immich
     await config_manager.set("immich.url", form.get("immich_url", ""))
@@ -187,6 +213,10 @@ async def save_settings(request: Request):
         interval = 5
     await config_manager.set("filewatcher.interval", interval)
     await config_manager.set("filewatcher.schedule_mode", form.get("schedule_mode", "continuous"))
+    await config_manager.set("filewatcher.window_start", form.get("window_start", "22:00"))
+    await config_manager.set("filewatcher.window_end", form.get("window_end", "06:00"))
+    await config_manager.set("filewatcher.scheduled_days", form.get("scheduled_days", "0,1,2,3,4"))
+    await config_manager.set("filewatcher.scheduled_time", form.get("scheduled_time", "23:00"))
 
     return RedirectResponse(url="/settings?msg=saved", status_code=302)
 
@@ -263,3 +293,146 @@ async def delete_inbox(request: Request, inbox_id: int):
             await log_info("filewatcher", f"Directory removed: {path}", f"Label: {label}")
 
     return RedirectResponse(url="/settings?msg=inbox_deleted", status_code=302)
+
+
+# --- Sorting Rules ---
+
+@router.post("/rule/add")
+async def add_sorting_rule(request: Request):
+    form = await request.form()
+    condition = form.get("rule_condition", "").strip()
+    value = form.get("rule_value", "").strip()
+    target = form.get("rule_target", "").strip()
+
+    if not condition or not value or not target:
+        return RedirectResponse(url="/settings?msg=rule_fields_required&msg_type=error", status_code=302)
+
+    async with async_session() as session:
+        from sqlalchemy import func as sqla_func
+        max_pos = (await session.execute(select(sqla_func.max(SortingRule.position)))).scalar() or 0
+        session.add(SortingRule(
+            position=max_pos + 1,
+            condition=condition,
+            value=value,
+            target_category=target,
+            active=True,
+        ))
+        await session.commit()
+
+    return RedirectResponse(url="/settings?msg=rule_added", status_code=302)
+
+
+@router.post("/rule/{rule_id}/update")
+async def update_sorting_rule(request: Request, rule_id: int):
+    form = await request.form()
+    async with async_session() as session:
+        rule = await session.get(SortingRule, rule_id)
+        if not rule:
+            return RedirectResponse(url="/settings?msg=rule_not_found&msg_type=error", status_code=302)
+
+        rule.condition = form.get("rule_condition", rule.condition).strip()
+        rule.value = form.get("rule_value", rule.value).strip()
+        rule.target_category = form.get("rule_target", rule.target_category).strip()
+        rule.active = f"rule_active_{rule_id}" in form
+
+        # Position update (move up/down)
+        new_pos = form.get("rule_position")
+        if new_pos is not None:
+            try:
+                rule.position = int(new_pos)
+            except ValueError:
+                pass
+
+        await session.commit()
+
+    return RedirectResponse(url="/settings?msg=rule_updated", status_code=302)
+
+
+@router.post("/rule/{rule_id}/delete")
+async def delete_sorting_rule(request: Request, rule_id: int):
+    async with async_session() as session:
+        rule = await session.get(SortingRule, rule_id)
+        if rule:
+            await session.delete(rule)
+            await session.commit()
+
+    return RedirectResponse(url="/settings?msg=rule_deleted", status_code=302)
+
+
+@router.post("/rule/{rule_id}/move")
+async def move_sorting_rule(request: Request, rule_id: int):
+    """Move a rule up or down in the list."""
+    form = await request.form()
+    direction = form.get("direction", "up")
+
+    async with async_session() as session:
+        rules = (await session.execute(
+            select(SortingRule).order_by(SortingRule.position)
+        )).scalars().all()
+
+        idx = next((i for i, r in enumerate(rules) if r.id == rule_id), None)
+        if idx is None:
+            return RedirectResponse(url="/settings?msg=rule_not_found&msg_type=error", status_code=302)
+
+        if direction == "up" and idx > 0:
+            rules[idx].position, rules[idx - 1].position = rules[idx - 1].position, rules[idx].position
+        elif direction == "down" and idx < len(rules) - 1:
+            rules[idx].position, rules[idx + 1].position = rules[idx + 1].position, rules[idx].position
+
+        await session.commit()
+
+    return RedirectResponse(url="/settings?msg=rule_updated", status_code=302)
+
+
+# --- Library Categories ---
+
+@router.post("/category/add")
+async def add_category(request: Request):
+    form = await request.form()
+    label = form.get("cat_label", "").strip()
+    path_template = form.get("cat_path_template", "").strip()
+
+    if not label or not path_template:
+        return RedirectResponse(url="/settings?msg=cat_fields_required&msg_type=error", status_code=302)
+
+    # Auto-generate key from label
+    import re as _re
+    import unicodedata
+    normalized = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode()
+    key = _re.sub(r"[^a-z0-9]+", "_", normalized.lower()).strip("_")
+
+    if not key:
+        return RedirectResponse(url="/settings?msg=cat_fields_required&msg_type=error", status_code=302)
+
+    async with async_session() as session:
+        existing = await session.execute(select(LibraryCategory).where(LibraryCategory.key == key))
+        if existing.scalar():
+            return RedirectResponse(url="/settings?msg=cat_exists&msg_type=error", status_code=302)
+
+        from sqlalchemy import func as sqla_func
+        max_pos = (await session.execute(select(sqla_func.max(LibraryCategory.position)))).scalar() or 0
+        session.add(LibraryCategory(
+            key=key,
+            label=label,
+            path_template=path_template,
+            fixed=False,
+            immich_archive="cat_immich_archive" in form,
+            position=max_pos + 1,
+        ))
+        await session.commit()
+
+    return RedirectResponse(url="/settings?msg=cat_added", status_code=302)
+
+
+@router.post("/category/{cat_id}/delete")
+async def delete_category(request: Request, cat_id: int):
+    async with async_session() as session:
+        cat = await session.get(LibraryCategory, cat_id)
+        if not cat:
+            return RedirectResponse(url="/settings?msg=cat_not_found&msg_type=error", status_code=302)
+        if cat.fixed:
+            return RedirectResponse(url="/settings?msg=cat_is_fixed&msg_type=error", status_code=302)
+        await session.delete(cat)
+        await session.commit()
+
+    return RedirectResponse(url="/settings?msg=cat_deleted", status_code=302)

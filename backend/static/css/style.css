@@ -3,6 +3,7 @@
 :root {
     --bg: #0f1117;
     --bg-card: #1a1d27;
+    --bg-item: #1f222e;
     --bg-input: #252830;
     --border: #2e3140;
     --text: #e1e4ed;
@@ -384,7 +385,7 @@ select:focus {
 }
 
 .inbox-item {
-    background: var(--bg-input);
+    background: var(--bg-item);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 1rem;
@@ -475,9 +476,10 @@ select:focus {
     width: 36px;
     height: 20px;
     background: var(--bg-input);
+    border: 1px solid var(--border);
     border-radius: 10px;
     position: relative;
-    transition: background 0.3s;
+    transition: background 0.3s, border-color 0.3s;
     flex-shrink: 0;
 }
 
@@ -495,11 +497,124 @@ select:focus {
 
 .switch-inline input:checked + .switch-slider-sm {
     background: rgba(52, 211, 153, 0.3);
+    border-color: transparent;
 }
 
 .switch-inline input:checked + .switch-slider-sm::before {
     transform: translateX(16px);
     background: var(--success);
+}
+
+.day-checkboxes {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.day-check {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.day-check input:checked + span {
+    color: var(--success);
+    font-weight: 600;
+}
+
+/* Category Table */
+.cat-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+}
+.cat-table th {
+    text-align: left;
+    padding: 0.5rem 0.625rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 1px solid var(--border);
+}
+.cat-table td {
+    padding: 0.5rem 0.625rem;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+.cat-table tr:last-child td { border-bottom: none; }
+.cat-table .cat-key {
+    color: var(--text-muted);
+    font-family: monospace;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+.cat-table input[type="text"] {
+    width: 100%;
+    padding: 0.375rem 0.5rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.85rem;
+    height: 2.2rem;
+    box-sizing: border-box;
+}
+.cat-table input[type="text"]:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+.cat-fixed-divider td {
+    padding: 0.75rem 0.625rem 0.375rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Field Labels (above inputs) */
+.field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.field-group-grow {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 1;
+    min-width: 180px;
+}
+.field-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.field-group input[type="text"],
+.field-group-grow input[type="text"],
+.field-group select,
+.field-group-grow select {
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.85rem;
+}
+.field-group input[type="text"]:focus,
+.field-group-grow input[type="text"]:focus,
+.field-group select:focus,
+.field-group-grow select:focus {
+    outline: none;
+    border-color: var(--primary);
 }
 
 .cell-error {

@@ -39,6 +39,15 @@ async def retry_job_endpoint(debug_key: str):
     return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
 
 
+@router.post("/trigger-scan")
+async def trigger_scan():
+    """Manual trigger: run one scan cycle regardless of schedule mode."""
+    from filewatcher import trigger_manual_scan
+    trigger_manual_scan()
+    await log_info("api", "Manual scan triggered via API")
+    return RedirectResponse(url="/", status_code=303)
+
+
 @router.post("/job/{debug_key}/delete")
 async def delete_job_endpoint(debug_key: str):
     async with async_session() as session:
