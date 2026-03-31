@@ -20,8 +20,6 @@ async def execute(job, session) -> dict:
         if rel and rel != ".":
             folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
             keywords.extend(folder_parts)
-            # Add combined album tag for album identification
-            keywords.append(f"album:{' '.join(folder_parts)}")
 
     # From AI analysis (type + tags + source)
     if ai_result.get("type"):
