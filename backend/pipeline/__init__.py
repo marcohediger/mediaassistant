@@ -69,6 +69,18 @@ async def run_pipeline(job_id: int):
                     duplicate_detected = True
                     break
 
+                # Post-IA-04: Video pHash duplicate check (frames now available)
+                if step_code == "IA-04":
+                    from pipeline.step_ia02_duplicates import execute_video_phash
+                    vphash_result = await execute_video_phash(job, session)
+                    if vphash_result and vphash_result.get("status") == "duplicate":
+                        existing_results["IA-02"] = vphash_result
+                        job.step_result = existing_results
+                        flag_modified(job, "step_result")
+                        await session.commit()
+                        duplicate_detected = True
+                        break
+
             except Exception as e:
                 non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}
                 if step_code in non_critical:

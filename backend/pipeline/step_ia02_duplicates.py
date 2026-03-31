@@ -18,6 +18,9 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif", 
 RAW_EXTENSIONS = {".dng", ".cr2", ".nef", ".arw"}
 
 
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp"}
+
+
 def _compute_phash(filepath: str) -> str | None:
     """Compute perceptual hash for an image file.
 
@@ -35,6 +38,29 @@ def _compute_phash(filepath: str) -> str | None:
         if ext in RAW_EXTENSIONS:
             return _phash_from_preview(filepath)
         return None
+
+
+def _compute_video_phash(frame_paths: list[str]) -> str | None:
+    """Compute average perceptual hash from video frame images.
+
+    Each frame gets its own pHash (8x8 bool matrix). The average is computed
+    by majority vote across all frames: a bit is set if >50% of frames have it set.
+    """
+    import numpy as np
+    if not frame_paths:
+        return None
+    hash_arrays = []
+    for path in frame_paths:
+        try:
+            img = Image.open(path)
+            h = imagehash.phash(img)
+            hash_arrays.append(h.hash.astype(float))
+        except Exception:
+            continue
+    if not hash_arrays:
+        return None
+    avg = np.mean(hash_arrays, axis=0) > 0.5
+    return str(imagehash.ImageHash(avg))
 
 
 def _phash_from_preview(filepath: str) -> str | None:
@@ -184,6 +210,79 @@ async def execute(job, session) -> dict:
 
 
     return {"status": "ok", "phash": phash_str}
+
+
+async def execute_video_phash(job, session) -> dict | None:
+    """Post-IA-04 video pHash check: compute average pHash from extracted frames
+    and check for similar duplicates. Returns duplicate result or None."""
+    if not await config_manager.is_module_enabled("duplikat_erkennung"):
+        return None
+
+    # Only for videos that don't have a pHash yet
+    ext = os.path.splitext(job.filename)[1].lower()
+    if ext not in VIDEO_EXTENSIONS or job.phash:
+        return None
+
+    # Get frame paths from IA-04 result
+    step_results = job.step_result or {}
+    ia04 = step_results.get("IA-04", {})
+    frame_paths = ia04.get("temp_paths") or []
+    if not frame_paths:
+        single = ia04.get("temp_path")
+        if single:
+            frame_paths = [single]
+    if not frame_paths:
+        return None
+
+    # Compute average pHash from frames
+    phash_str = await asyncio.to_thread(_compute_video_phash, frame_paths)
+    if not phash_str:
+        return None
+
+    job.phash = phash_str
+    await session.commit()
+
+    # Check against existing pHashes
+    threshold = int(await config_manager.get("duplikat.phash_threshold", 3))
+    current_hash = imagehash.hex_to_hash(phash_str)
+
+    BATCH_SIZE = 5000
+    offset = 0
+
+    while True:
+        result = await session.execute(
+            select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id).where(
+                Job.phash.isnot(None),
+                Job.id != job.id,
+                Job.status.in_(("done", "duplicate", "review", "processing", "error")),
+            ).offset(offset).limit(BATCH_SIZE)
+        )
+        rows = result.all()
+        if not rows:
+            break
+
+        for row in rows:
+            try:
+                candidate_hash = imagehash.hex_to_hash(row.phash)
+                distance = int(current_hash - candidate_hash)
+            except Exception:
+                continue
+
+            if distance <= threshold:
+                candidate = await session.get(Job, row.id)
+                if candidate and await _file_exists(candidate):
+                    await _handle_duplicate(job, session, candidate, "similar", distance)
+                    return {
+                        "status": "duplicate",
+                        "match_type": "similar",
+                        "phash_distance": distance,
+                        "original_debug_key": candidate.debug_key,
+                        "original_path": candidate.target_path or candidate.original_path,
+                    }
+
+        offset += BATCH_SIZE
+
+    return None
 
 
 async def _handle_duplicate(job, session, original, match_type: str, distance: int):

@@ -472,6 +472,14 @@
                         </select>
                     </div>
                     <div class="field-group">
+                        <span class="field-label">{{ t.settings.rule_media_type }}</span>
+                        <select data-rule="media_type" style="width: auto; height: 2.4rem;">
+                            <option value="" {{ 'selected' if not rule.media_type else '' }}>{{ t.settings.rule_media_all }}</option>
+                            <option value="image" {{ 'selected' if rule.media_type == 'image' else '' }}>{{ t.settings.rule_media_image }}</option>
+                            <option value="video" {{ 'selected' if rule.media_type == 'video' else '' }}>{{ t.settings.rule_media_video }}</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
                         <span class="field-label">{{ t.settings.active }}</span>
                         <label class="switch-inline" style="margin: 0; height: 2.4rem; display: flex; align-items: center;">
                             <input type="checkbox" data-rule="active" value="1" {{ 'checked' if rule.active else '' }}>
@@ -519,7 +527,15 @@
                             {% endfor %}
                         </select>
                     </div>
-                    <button type="button" class="btn btn-small btn-primary" style="height: 2.4rem;" onclick="postAction('/settings/rule/add', {rule_condition: document.getElementById('new_rule_condition').value, rule_value: document.getElementById('new_rule_value').value, rule_target: document.getElementById('new_rule_target').value})">{{ t.settings.add }}</button>
+                    <div class="field-group">
+                        <span class="field-label">{{ t.settings.rule_media_type }}</span>
+                        <select id="new_rule_media_type" style="width: auto; height: 2.4rem;">
+                            <option value="">{{ t.settings.rule_media_all }}</option>
+                            <option value="image">{{ t.settings.rule_media_image }}</option>
+                            <option value="video">{{ t.settings.rule_media_video }}</option>
+                        </select>
+                    </div>
+                    <button type="button" class="btn btn-small btn-primary" style="height: 2.4rem;" onclick="postAction('/settings/rule/add', {rule_condition: document.getElementById('new_rule_condition').value, rule_value: document.getElementById('new_rule_value').value, rule_target: document.getElementById('new_rule_target').value, rule_media_type: document.getElementById('new_rule_media_type').value})">{{ t.settings.add }}</button>
                 </div>
             </div>
         </div>
@@ -663,7 +679,8 @@ function saveRule(id) {
     var data = {
         rule_condition: box.querySelector('[data-rule=condition]').value,
         rule_value: box.querySelector('[data-rule=value]').value,
-        rule_target: box.querySelector('[data-rule=target]').value
+        rule_target: box.querySelector('[data-rule=target]').value,
+        rule_media_type: box.querySelector('[data-rule=media_type]').value
     };
     if (box.querySelector('[data-rule=active]').checked) {
         data['rule_active_' + id] = '1';

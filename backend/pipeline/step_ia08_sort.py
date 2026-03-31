@@ -153,7 +153,7 @@ def _eval_single_condition(cond: str, exif: dict) -> bool:
     return False
 
 
-async def _match_sorting_rules(filename: str, exif: dict, session) -> str | None:
+async def _match_sorting_rules(filename: str, exif: dict, session, is_video: bool = False) -> str | None:
     """Check file against user-defined sorting rules. Returns category or None."""
     from models import SortingRule
     result = await session.execute(
@@ -162,6 +162,12 @@ async def _match_sorting_rules(filename: str, exif: dict, session) -> str | None
     rules = result.scalars().all()
 
     for rule in rules:
+        # Filter by media_type if set
+        if rule.media_type == "image" and is_video:
+            continue
+        if rule.media_type == "video" and not is_video:
+            continue
+
         matched = False
         if rule.condition == "filename_contains":
             matched = rule.value.lower() in filename.lower()
@@ -198,20 +204,17 @@ async def execute(job, session) -> dict:
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
 
     # 1) Static sorting rules (always evaluated first)
-    rule_category = await _match_sorting_rules(filename, exif, session)
+    rule_category = await _match_sorting_rules(filename, exif, session, is_video=is_video)
 
     if rule_category:
-        if rule_category == "photo" and is_video:
-            category = "video"
-        else:
-            category = rule_category
+        category = rule_category
     else:
         # No rule matched → default based on EXIF
         has_no_exif = not exif.get("has_exif", False)
         if has_no_exif:
             category = "unknown"
         else:
-            category = "video" if is_video else "photo"
+            category = "personliches_video" if is_video else "personliches_foto"
 
     # 2) AI verifies ALL files — AI returns a category label
     if ai_type:
@@ -223,10 +226,12 @@ async def execute(job, session) -> dict:
         ai_cat = ai_cat_result.scalar()
 
         # AI overrides static result when it returns a valid, different category
-        # But: videos must stay in "video" category unless AI explicitly says sourceless/screenshot
         if ai_cat and ai_cat.key != category and ai_cat.key not in ("error", "duplicate", "unknown"):
+            # Don't let AI override a video into a photo category or vice versa
             if is_video and ai_cat.key == "personliches_foto":
-                category = "video"  # keep video in video category
+                category = "personliches_video"
+            elif not is_video and ai_cat.key == "personliches_video":
+                category = "personliches_foto"
             else:
                 category = ai_cat.key
 
