@@ -1,7 +1,6 @@
 services:
   mediaassistant:
-    build:
-      context: ./backend
+    image: ghcr.io/marcohediger/mediaassistant:latest
     container_name: mediaassistant
     restart: unless-stopped
     mem_limit: 2g
@@ -10,8 +9,10 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-      - ${INBOX_PATH:-./test_inbox}:/inbox
+      - ${INBOX_PATH:-./inbox}:/inbox
       - ${LIBRARY_PATH:-./library}:/bibliothek
+    env_file:
+      - .env
     environment:
       - DATABASE_PATH=/app/data/mediaassistant.db
       - INBOX_PATH=/inbox

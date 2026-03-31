@@ -1,0 +1,27 @@
+## Local build variant — use this instead of docker-compose.yml
+## if you want to build the image locally instead of pulling from ghcr.io
+##
+## Usage: docker compose -f docker-compose.build.yml up -d
+
+services:
+  mediaassistant:
+    build:
+      context: ./backend
+    container_name: mediaassistant
+    restart: unless-stopped
+    mem_limit: 2g
+    cpus: 2.0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ${INBOX_PATH:-./inbox}:/inbox
+      - ${LIBRARY_PATH:-./library}:/bibliothek
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=/app/data/mediaassistant.db
+      - INBOX_PATH=/inbox
+      - LIBRARY_PATH=/bibliothek
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TZ=${TZ:-Europe/Zurich}

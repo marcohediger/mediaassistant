@@ -36,8 +36,17 @@ IA-09 to IA-11 are **finalizers** — they always run, even if a critical step f
 ### Installation
 
 ```bash
-git clone https://github.com/your-username/mediaassistant.git
-cd ma-core
+mkdir mediaassistant && cd mediaassistant
+curl -O https://raw.githubusercontent.com/marcohediger/mediaassistant/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/marcohediger/mediaassistant/main/.env.example
+cp .env.example .env
+```
+
+Or clone the full repository:
+
+```bash
+git clone https://github.com/marcohediger/mediaassistant.git
+cd mediaassistant
 cp .env.example .env
 ```
 
@@ -72,9 +81,19 @@ Environment variables are imported into the database on first start. After that,
 docker compose up -d
 ```
 
+This pulls the image from `ghcr.io/marcohediger/mediaassistant:latest`.
+
 Web interface: **http://localhost:8000**
 
 On first start, the setup wizard is displayed.
+
+### Start (Local Build)
+
+If you want to build the image locally instead of pulling from ghcr.io:
+
+```bash
+docker compose -f docker-compose.build.yml up -d
+```
 
 ### Start (Development)
 
