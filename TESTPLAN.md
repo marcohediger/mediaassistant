@@ -102,7 +102,12 @@
 - [x] AI-Tags werden als Keywords geschrieben
 - [x] AI-Source (Herkunft) wird als Keyword geschrieben (v2.8.0, verifiziert: "Kamerafoto" in keywords_written)
 - [x] Geocoding-Daten (Land, Stadt etc.) als Keywords
-- [x] Ordner-Tags als Keywords + `album:` Tag (z.B. `Ferien`, `Spanien`, `album:Ferien Spanien`)
+- [x] Ordner-Tags: Einzelwörter + zusammengesetzter Tag (z.B. `Ferien/Mallorca 2025/` → `Ferien`, `Mallorca`, `2025`, `Ferien Mallorca 2025`)
+- [x] Ordner-Tags: Einfacher Ordner → nur Ordnername als Tag (z.B. `Geburtstag/` → `Geburtstag`)
+- [x] Ordner-Tags: Tief verschachtelt mit Umlauten (z.B. `Ferien/Nänikon 2026/Tag 3/` → 6 Tags)
+- [x] Ordner-Tags: Gemischter Inhalt (JPG + MOV + UUID im gleichen Ordner) → alle bekommen gleiche Tags
+- [x] Ordner-Tags: Immich-Tags werden aus IA-07 Keywords übernommen (identisch zu EXIF-Tags)
+- [x] Ordner-Tags: Immich-Album wird aus zusammengesetztem Pfad erstellt (z.B. "Ferien Mallorca 2025")
 - [x] `OCR` Flag bei erkanntem Text (screenshot_test.png)
 - [x] `blurry` Tag bei schlechter Qualität
 - [x] Kein mood-Tag (indoor/outdoor) geschrieben
