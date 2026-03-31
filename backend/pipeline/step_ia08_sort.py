@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import select
 from config import config_manager
 from safe_file import safe_move
-from immich_client import upload_asset, replace_asset, archive_asset, tag_asset
+from immich_client import upload_asset, replace_asset, archive_asset, lock_asset, tag_asset
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -357,10 +357,19 @@ async def execute(job, session) -> dict:
                 except Exception:
                     pass  # non-critical
 
-        # Archive in Immich if configured for this category
+        # NSFW: move to locked folder in Immich
+        immich_locked = False
+        if ai_result.get("nsfw") and asset_id:
+            try:
+                await lock_asset(asset_id)
+                immich_locked = True
+            except Exception:
+                pass  # non-critical, older Immich versions may not support locked
+
+        # Archive in Immich if configured for this category (skip if already locked)
         immich_archived = False
         should_archive = lib_cat.immich_archive if lib_cat else category in ("sourceless", "screenshot")
-        if should_archive and asset_id:
+        if should_archive and asset_id and not immich_locked:
             await archive_asset(asset_id)
             immich_archived = True
 
@@ -381,6 +390,7 @@ async def execute(job, session) -> dict:
             "moved": False,
             "immich_upload": True,
             "immich_archived": immich_archived,
+            "immich_locked": immich_locked,
             "immich_id": asset_id,
         }
 
