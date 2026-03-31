@@ -36,7 +36,7 @@ IA-09 to IA-11 are **finalizers** — they always run, even if a critical step f
 ### Installation
 
 ```bash
-git clone https://git.marcohediger.ch/MediaAssistant/ma-core.git
+git clone https://github.com/your-username/mediaassistant.git
 cd ma-core
 cp .env.example .env
 ```

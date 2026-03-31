@@ -443,7 +443,7 @@
 | Leere Datei | `T10_empty.jpg` (0 Bytes) → Filewatcher ignoriert als "unstable" | ✅ |
 | Nicht-unterstützt | `T11_document.txt` → Filewatcher ignoriert (SUPPORTED_EXTENSIONS) | ✅ |
 | SMTP: kein Fehler | `IA-09: {"status": "skipped", "reason": "no errors to report"}` | ✅ |
-| SMTP: mit Fehler | `IA-09: {"sent": true, "recipient": "ds@marcohediger.ch", "errors_reported": 1}` | ✅ |
+| SMTP: mit Fehler | `IA-09: {"sent": true, "recipient": "user@example.com", "errors_reported": 1}` | ✅ |
 | Modul-Disable: AI | `T30_noai.jpg` → AI skipped, Status review → classify als sourceless | ✅ |
 | Modul-Disable: Geo | `T31_nogeo.jpg` → Geocoding skipped | ✅ |
 | Modul-Disable: OCR | `T32_noocr.jpg` → OCR skipped | ✅ |
