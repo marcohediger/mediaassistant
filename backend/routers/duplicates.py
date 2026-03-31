@@ -577,14 +577,22 @@ async def keep_file(request: Request):
                 # Original that was already fully processed — nothing to do
                 pass
             elif kept_job.status == "duplicate" and kept_filepath and os.path.exists(kept_filepath):
-                # Move file back to original inbox path for re-processing
-                original_dir = os.path.dirname(kept_job.original_path)
-                if os.path.exists(original_dir) and kept_filepath != kept_job.original_path:
-                    await asyncio.to_thread(safe_move, kept_filepath, kept_job.original_path, kept_job.debug_key)
-                    # Remove .log file
-                    log_path = kept_filepath + ".log"
-                    if os.path.exists(log_path):
-                        await asyncio.to_thread(os.remove, log_path)
+                # Move file to internal temp directory (never back to inbox)
+                import tempfile
+                reprocess_dir = os.path.join("/app/data", "reprocess")
+                await asyncio.to_thread(os.makedirs, reprocess_dir, exist_ok=True)
+                reprocess_path = os.path.join(reprocess_dir, kept_job.filename)
+                if os.path.exists(reprocess_path):
+                    name, ext = os.path.splitext(kept_job.filename)
+                    reprocess_path = os.path.join(reprocess_dir, f"{name}_{kept_job.debug_key}{ext}")
+                await asyncio.to_thread(safe_move, kept_filepath, reprocess_path, kept_job.debug_key)
+                # Remove .log file
+                log_path = kept_filepath + ".log"
+                if os.path.exists(log_path):
+                    await asyncio.to_thread(os.remove, log_path)
+
+                # Update original_path to the reprocess location
+                kept_job.original_path = reprocess_path
 
                 # Reset job for re-processing: keep IA-01 (EXIF), clear everything else
                 step_results = kept_job.step_result or {}
