@@ -26,6 +26,20 @@
 - **Config-Crash-Resilience**: Ungültiges JSON in Config-Werten führt nicht mehr zum Internal Server Error
 - **Immich Tag-Fix**: HTTP 400 (statt nur 409) wird korrekt als "Tag existiert bereits" behandelt — alle Tags werden zugewiesen
 
+### NSFW-Erkennung
+- **KI-Prompt um `nsfw`-Feld erweitert**: Die KI erkennt nicht-jugendfreie Inhalte automatisch
+- **Immich: Gesperrter Ordner**: NSFW-Bilder/Videos werden in den gesperrten Ordner verschoben (`visibility: locked`)
+- **Locked hat Vorrang** vor Archivierung — ein NSFW-Bild wird nicht archiviert, sondern gesperrt
+- Funktioniert sowohl im Upload-Pfad (Inbox → Immich) als auch im Polling-Pfad (Immich → Pipeline)
+
+### Ordner-Tags
+- **Einzelwort-Tags**: Ordnernamen werden in einzelne Wörter aufgesplittet (`Ferien/Spanien 2024/` → `Ferien`, `Spanien`, `2024`)
+- **Zusammengesetzter Tag**: Zusätzlich wird ein kombinierter Tag aus dem gesamten Pfad erstellt (`Ferien Spanien 2024`)
+- **`album:`-Prefix entfernt**: Tags enthalten kein `album:`-Prefix mehr
+
+### Immich Polling Fix
+- **Duplikat-Loop behoben**: Nach `replace_asset` erhält das Asset eine neue ID — der Poller erkannte es als "neues Asset" und verarbeitete es endlos. Jetzt wird auch der SHA256-Hash nach dem Download geprüft
+
 ### UI
 - **"Jetzt scannen" und "Dry-Run Report" Buttons** nach oben neben Seitentitel verschoben
 

@@ -90,6 +90,8 @@
 - [x] Sehr kleine Bilder (<16px) → übersprungen mit Meldung
 - [x] DJI-Drohnenfotos → korrekt als personal/Luftaufnahme erkannt
 - [x] Unscharfes Foto → `quality: blurry`
+- [x] NSFW-Erkennung: KI gibt `nsfw: true` für nicht-jugendfreie Inhalte zurück
+- [x] NSFW-Erkennung: `nsfw: false` für normale Bilder (Landschaft, Essen, etc.)
 
 ### IA-06: OCR
 - [x] Screenshot mit Text → `has_text: true`, Text korrekt erkannt
@@ -141,6 +143,9 @@
 - [x] Unklar (kein EXIF, KI unsicher) → Status "review", Datei in unknown/review/
 - [x] Immich Upload → Datei hochgeladen, Quelle gelöscht
 - [x] Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (verifiziert: screenshot+sourceless archived=True, personal archived=False)
+- [x] Immich: NSFW-Bild → gesperrter Ordner (`visibility: locked`), nicht archiviert (locked hat Vorrang)
+- [x] Immich: NSFW-Lock funktioniert im Upload-Pfad (Inbox → Immich)
+- [x] Immich: NSFW-Lock funktioniert im Replace-Pfad (Polling → Immich)
 - [x] Namenskollision → automatischer Counter (_1, _2, ...)
 - [x] Dry-Run → Zielpfad berechnet, nicht verschoben
 - [x] Leere Quellordner aufgeräumt (wenn folder_tags aktiv)

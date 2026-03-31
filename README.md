@@ -270,10 +270,11 @@ When enabled:
 - New assets are downloaded, processed (AI, OCR, Geocoding), tags are written to the file via EXIF, and the asset is replaced in Immich with the tagged version
 - Assets uploaded from an inbox are automatically skipped (no double processing)
 
-**Archiving:**
+**Archiving & Locked Folder:**
 - Each library category has a configurable `immich_archive` flag (Settings → Library Categories)
 - Categories with archiving enabled (e.g. Sourceless, Screenshot) are automatically archived in Immich (hidden from timeline, accessible via Archive)
 - Categories without archiving (e.g. personal photos, videos) stay in the main timeline
+- **NSFW detection**: The AI flags explicit/not-safe-for-work content (`nsfw: true`). These assets are automatically moved to the **locked folder** in Immich (`visibility: locked`). Locked takes priority over archiving. Works for both upload and polling paths.
 
 **Shared features:**
 - **Duplicate detection**: Previously uploaded files are tracked in the local database — re-uploading the same file triggers duplicate review with side-by-side comparison (Immich thumbnail vs. local file)
