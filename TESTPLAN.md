@@ -5,6 +5,8 @@
 > Container: v2.5.0, Docker 2GB RAM / 2 CPUs, SQLite mit 7 Indexes
 >
 > **v2.8.0 Änderungen**: Kategorien sind dynamisch aus DB (library_categories). Statische Regeln primär, KI verifies/korrigiert. AI gibt type (DB-Key), source (Herkunft), tags (beschreibend) zurück. Review-Buttons dynamisch. EXIF-Tags: IA-07 schreibt AI-Tags+Source, IA-08 schreibt Kategorie-Label+Source. Noch nicht regressionsgetestet.
+>
+> **v2.9.0 Änderungen**: Sorting Rules mit media_type Filter (Bilder/Videos/Alle). Video-pHash Duplikaterkennung (Durchschnitt aus IA-04 Frames). Separate Kategorien sourceless_foto/sourceless_video/personliches_video. Duplikat-"Behalten" startet volle Pipeline nach. Inbox-Garantie: keine Datei bleibt unbeachtet. Retry-Counter (max 3) gegen Crash-Loops. Immich Tag-Fix (HTTP 400). Config JSON-Crash Resilience.
 
 ## 1. Pipeline-Steps
 
@@ -164,6 +166,8 @@
 - [x] Job Delete: Job aus DB gelöscht, Datei aus error/ entfernt (POST /api/job/{key}/delete)
 - [x] Duplikat erkannt → Pipeline stoppt nach IA-02, Finalizer laufen
 - [x] Korruptes Video → Warnungen, E-Mail-Benachrichtigung, kein Crash
+- [ ] Job in "processing" nach Crash → max. 3 Retry-Versuche, danach Status "error"
+- [ ] Retry-Counter wird bei jedem Neustart-Versuch hochgezählt und geloggt
 
 ## 3. Web Interface
 
