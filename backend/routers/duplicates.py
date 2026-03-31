@@ -568,13 +568,12 @@ async def keep_file(request: Request):
         # Re-run pipeline for the kept file (AI analysis, tag writing, sorting)
         if kept_job:
             kept_filepath = kept_job.target_path or kept_job.original_path
-            is_already_in_immich = (kept_job.target_path or "").startswith("immich:") or bool(kept_job.immich_asset_id)
+            is_already_done = kept_job.status == "done"
 
-            if is_already_in_immich:
-                # Already in Immich — nothing to do
-                kept_job.status = "done"
-                kept_job.error_message = None
-            elif kept_job.status == "duplicate" and os.path.exists(kept_filepath):
+            if is_already_done:
+                # Original that was already fully processed — nothing to do
+                pass
+            elif kept_job.status == "duplicate" and kept_filepath and os.path.exists(kept_filepath):
                 # Move file back to original inbox path for re-processing
                 original_dir = os.path.dirname(kept_job.original_path)
                 if os.path.exists(original_dir) and kept_filepath != kept_job.original_path:
@@ -583,6 +582,10 @@ async def keep_file(request: Request):
                     log_path = kept_filepath + ".log"
                     if os.path.exists(log_path):
                         await asyncio.to_thread(os.remove, log_path)
+
+                # If group has Immich jobs, ensure the kept job uses Immich too
+                if group_is_immich and not kept_job.use_immich:
+                    kept_job.use_immich = True
 
                 # Reset job for re-processing: keep IA-01 (EXIF), clear everything else
                 step_results = kept_job.step_result or {}
