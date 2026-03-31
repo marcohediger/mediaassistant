@@ -601,14 +601,12 @@ Flach:               photos/{YYYY}/
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 
-### Optional (v2)
-- [ ] SSO Login via OIDC (fastapi-sso + <sso-host>)
-- [ ] Video KI-Analyse (Thumbnail → LM Studio Vision)
+### Optional (v3)
+- [ ] SSO Login via OIDC (fastapi-sso)
 - [ ] KI-basierte Ortschätzung für Bilder ohne GPS (Vision → "estimated_location" Tag)
 - [ ] GeoCLIP für präzise GPS-Schätzung ohne GPS-EXIF
 - [ ] Google Vision API Landmark Detection (für alte Fotos ohne GPS)
 - [ ] Geocoding-Cache in SQLite (Koordinaten-Lookup cachen, relevant bei Migration/Google API)
-- [ ] HTML-Report nach Dry-Run (Anzahl Dateien, Kategorien, Duplikate, Fehler)
 - [ ] config.example.yml (alle Optionen mit Kommentaren)
 - [ ] docs/ (installation.md, configuration.md, migration.md)
 - [ ] GitHub Actions Workflow → automatischer Docker Hub Build
@@ -648,7 +646,7 @@ Alle Dateiverschiebungen nutzen safe_move (Copy → SHA256-Verify → Delete) �
 - Kein n8n-Workflow
 - ~~Keine Immich Integration~~ → **umgesetzt in v1.1.0–v1.5.0**
 
-## Optional (v2)
+## Optional (v3)
 ### ~~Immich Integration (Modus 2)~~ ✅ Umgesetzt
 Bidirektionale Verbindung mit Immich via REST API.
 - ✅ Upload: Inbox-Dateien nach Immich (pro Inbox konfigurierbar)
@@ -660,9 +658,9 @@ Bidirektionale Verbindung mit Immich via REST API.
 - ✅ API-Key + URL im Webinterface konfigurierbar
 - ✅ Poll-Toggle im Webinterface, Intervall = Filewatcher-Intervall
 - ❌ Trigger-Tags (ia-process, ia-location, ia-ocr, ia-sync) — nicht umgesetzt
-- ❌ Immich DB Metadaten → Originaldateien zurückschreiben — geplant für v2.11
+- ❌ Immich DB Metadaten → Originaldateien zurückschreiben — geplant für v3
 
-### Immich Tag/Album Sync (v2.11)
+### Immich Tag/Album Sync (v3)
 Periodischer Abgleich zwischen Immich-DB und EXIF-Tags in den Originaldateien.
 - Immich PostgreSQL DB lesen (nur SELECT, kein Schreibzugriff)
 - Tags und Alben-Zuweisungen pro Asset auslesen
@@ -673,8 +671,8 @@ Periodischer Abgleich zwischen Immich-DB und EXIF-Tags in den Originaldateien.
 - Geschätzte Performance: DB-Read 150k Assets ~4 Min, ExifTool ~230ms/Datei
 - Ziel: EXIF-Tags als portables Backup unabhängig von Immich
 
-### SSO Login (OIDC)
-- Provider: <sso-host> (Synology SSO Server)
+### SSO Login (OIDC) (v3)
+- Provider: OIDC-kompatibler SSO Server
 - Bibliothek: `fastapi-sso` (OIDC fertig eingebaut)
 - OIDC Client in Synology SSO registrieren (analog Paperless-ngx, Open WebUI etc.)
 - Alle FastAPI Endpoints hinter Login absichern
@@ -711,7 +709,7 @@ README.md Inhalt:
 - Configuration Reference
 
 Docker Hub:
-- Image: `marcohediger/imageassistant:latest`
+- Image: `mediaassistant:latest`
 - Automatischer Build via GitHub Actions bei neuem Release
 
 ## Technologie
