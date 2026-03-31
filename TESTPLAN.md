@@ -47,7 +47,9 @@
 - [x] JPG+DNG Paar mit keep_both=true → beide unabhängig verarbeitet
 - [x] JPG+DNG Paar mit keep_both=false → zweite Datei als `raw_jpg_pair` Duplikat
 - [x] pHash-Threshold 3 → weniger False Positives als Threshold 5
-- [x] Video: kein pHash (Videos haben keinen pHash), nur SHA256
+- [x] Video: pHash aus Durchschnitt der IA-04 Frames berechnet (post-IA-04 Check)
+- [ ] Video: Re-encoded Video (anderer Codec/Bitrate) → pHash-Match, als "similar" Duplikat erkannt
+- [ ] Video: Exakte Kopie eines Videos → SHA256-Match, als "exact" Duplikat erkannt
 
 ### IA-03: Geocoding
 - [x] Bild mit GPS-Koordinaten → Land, Stadt, Stadtteil aufgelöst
@@ -120,6 +122,13 @@
 - [x] `screenshot` → screenshots/{YYYY}/
 - [x] `sourceless` → sourceless/{YYYY}/ (v2.8.0: ersetzt internet_image)
 - [x] Video → videos/{YYYY}/{YYYY-MM}/
+- [ ] Sorting Rule media_type=image → Regel wird nur auf Bilder angewendet, Videos übersprungen
+- [ ] Sorting Rule media_type=video → Regel wird nur auf Videos angewendet, Bilder übersprungen
+- [ ] iPhone MOV (make=Apple) → Pre-Classification "Persönliches Video", Kategorie personliches_video
+- [ ] UUID MP4 ohne EXIF → Pre-Classification "Sourceless Video", Kategorie sourceless_video
+- [ ] WhatsApp Video (-WA im Namen) → Kategorie sourceless_video
+- [ ] KI-Prompt enthält korrekte Pre-Classification für Videos (nicht "Persönliches Foto")
+- [ ] KI gibt "Kameravideo" statt "Kamerafoto" als Source zurück bei Videos
 - [x] Unklar (kein EXIF, KI unsicher) → Status "review", Datei in unknown/review/
 - [x] Immich Upload → Datei hochgeladen, Quelle gelöscht
 - [ ] Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (v2.8.0)
@@ -230,10 +239,12 @@
 - [x] Dateigrösse geändert → erneute Wartezeit
 - [x] Leere Datei (0 Bytes) → wird als "unstable" übersprungen (current_size > 0 Check)
 - [x] Nicht unterstütztes Format (.txt) → wird vom Filewatcher ignoriert
-- [x] Bereits verarbeitete Datei erneut in Inbox → Filewatcher überspringt (done_hashes)
-- [x] Dry-Run-Jobs werden in done_hashes berücksichtigt
+- [ ] Bereits verarbeitete Datei erneut in Inbox → wird erneut verarbeitet, IA-02 erkennt Duplikat
+- [ ] Datei liegt nach Verarbeitung noch in Inbox (Move fehlgeschlagen) → wird erneut verarbeitet
+- [x] Dry-Run-Jobs werden in done_hashes berücksichtigt (Datei bleibt absichtlich in Inbox)
 - [x] Immich-Assets werden in done_hashes berücksichtigt
 - [x] Gelöschtes Ziel → Datei wird erneut verarbeitet (Target-Existenz geprüft)
+- [ ] Keine Datei bleibt dauerhaft unbeachtet in der Inbox liegen (ausser Dry-Run)
 - [x] Docker-Logging: Alle Filewatcher-Aktionen in stdout sichtbar
 - [x] Unterordner in Inbox → Dateien werden rekursiv gefunden und verarbeitet
 
@@ -247,6 +258,7 @@
 - [x] DNG nach Immich hochgeladen (25MB RAW)
 - [x] MP4 nach Immich hochgeladen (304MB Video)
 - [x] JPG nach Immich hochgeladen (mit GPS/Tags)
+- [ ] Immich: Alle Tags korrekt zugewiesen (auch bereits existierende Tags, HTTP 400 Handling)
 - [x] Cross-Mode Duplikat: Dateiablage → Immich erkannt
 
 ## 6. Dateiformate
