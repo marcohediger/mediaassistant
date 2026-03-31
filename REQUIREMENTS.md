@@ -62,7 +62,7 @@ Beispiel:
   - `docker-compose.yml` → Produktion (NAS/Server, absolute Pfade)
   - `docker-compose.dev.yml` → Entwicklung (Windows, relative Pfade)
 - Alle Pfade über Umgebungsvariablen konfigurierbar — kein hardcodierter Pfad im Code
-- Entwicklung auf Windows, Deploy auf Synology ohne Code-Änderung
+- Entwicklung lokal, Deploy auf NAS/Server ohne Code-Änderung
 
 ## Modi
 
@@ -343,7 +343,7 @@ Anwendungsorte:
 - Löschen-Button im Webinterface (Job + Datei endgültig entfernen)
 
 ## Migration (Einmalig)
-- Gleiche Pipeline wie oben, aber Quelle: /volume1/photo/ (Synology Photos)
+- Gleiche Pipeline wie oben, aber Quelle: bestehende Foto-Bibliothek
 - Dry-Run Modus: nur Report, keine Dateien verschieben
 - Batch-Modus: Ordner für Ordner verarbeitbar
 - HTML-Report pro Lauf: Anzahl Dateien, Kategorien, Fehler
@@ -444,7 +444,7 @@ Konfigurierbar im Webinterface, gespeichert in SQLite:
 | Geplant | Bestimmte Tage + Uhrzeit | Mo-Fr 23:00 |
 | Manuell | Nur auf Knopfdruck im Webinterface | — |
 
-- Separate Einstellung pro Eingangskanal (mobile, manual, Synology, Immich)
+- Separate Einstellung pro Eingangskanal (mobile, manual, Archiv, Immich)
 - Zeitzone konfigurierbar
 - "Jetzt ausführen" Button im Dashboard unabhängig vom Zeitplan
 - Bei aktivem Zeitfenster: eingehende Dateien werden gequeued und beim nächsten Fenster verarbeitet
@@ -672,9 +672,8 @@ Periodischer Abgleich zwischen Immich-DB und EXIF-Tags in den Originaldateien.
 - Ziel: EXIF-Tags als portables Backup unabhängig von Immich
 
 ### SSO Login (OIDC) (v3)
-- Provider: OIDC-kompatibler SSO Server
-- Bibliothek: `fastapi-sso` (OIDC fertig eingebaut)
-- OIDC Client in Synology SSO registrieren (analog Paperless-ngx, Open WebUI etc.)
+- OIDC-kompatiblen Provider anbinden (z.B. Keycloak, Authelia, Authentik)
+- Bibliothek: `fastapi-sso` oder ähnlich
 - Alle FastAPI Endpoints hinter Login absichern
 - Nur sinnvoll wenn Webinterface von aussen erreichbar gemacht wird
 
