@@ -19,16 +19,15 @@ async def execute(job, session) -> dict:
         rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
         if rel and rel != ".":
             folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
+            # Split all folder names into individual words as tags
             for part in folder_parts:
-                # Add the full folder name as tag
-                if part not in keywords:
-                    keywords.append(part)
-                # Also split into individual words as separate tags
-                words = part.split()
-                if len(words) > 1:
-                    for word in words:
-                        if word and word not in keywords:
-                            keywords.append(word)
+                for word in part.split():
+                    if word and word not in keywords:
+                        keywords.append(word)
+            # Add combined tag from all folder parts (e.g. "Ferien Spanien 2024")
+            combined = " ".join(folder_parts)
+            if combined not in keywords:
+                keywords.append(combined)
 
     # From AI analysis (type + tags + source)
     if ai_result.get("type"):
