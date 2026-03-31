@@ -33,7 +33,10 @@ class ConfigManager:
             if result.encrypted:
                 fernet = await self._get_fernet()
                 value = fernet.decrypt(value.encode()).decode()
-            return json.loads(value)
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                return value
 
     async def set(self, key: str, value, encrypted: bool = False):
         serialized = json.dumps(value)
