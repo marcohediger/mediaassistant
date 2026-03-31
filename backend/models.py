@@ -26,6 +26,7 @@ class Job(Base):
     immich_asset_id = Column(Text)  # source asset ID when processing via Immich webhook
     file_hash = Column(Text)  # SHA256
     phash = Column(Text)  # perceptual hash
+    retry_count = Column(Integer, default=0)  # number of pipeline restart attempts
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
     completed_at = Column(DateTime)
