@@ -323,12 +323,33 @@ async def execute(job, session) -> dict:
             except Exception:
                 pass
 
+        # NSFW: move to locked folder
+        immich_locked = False
+        if ai_result.get("nsfw"):
+            try:
+                await lock_asset(job.immich_asset_id)
+                immich_locked = True
+            except Exception:
+                pass
+
+        # Archive if configured (skip if locked)
+        immich_archived = False
+        should_archive = lib_cat.immich_archive if lib_cat else category in ("sourceless", "screenshot")
+        if should_archive and not immich_locked:
+            try:
+                await archive_asset(job.immich_asset_id)
+                immich_archived = True
+            except Exception:
+                pass
+
         return {
             "category": category,
             "target_path": job.target_path,
             "moved": False,
             "immich_upload": False,
             "immich_replace": True,
+            "immich_archived": immich_archived,
+            "immich_locked": immich_locked,
             "immich_asset_id": job.immich_asset_id,
         }
 
