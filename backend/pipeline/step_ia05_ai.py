@@ -6,50 +6,68 @@ import httpx
 from config import config_manager
 
 
-DEFAULT_SYSTEM_PROMPT = """Du bist ein Bildanalyse-Assistent für eine Foto-Mediathek. Statische Regeln sortieren Dateien anhand von Dateinamen, Endungen und EXIF-Daten in Kategorien. Deine Aufgabe ist es, den Bildinhalt zu analysieren und eine eigene Klassifikation zu liefern, damit fehlerhafte Regelentscheidungen korrigiert werden können.
+DEFAULT_SYSTEM_PROMPT = """You are an image analysis assistant for a photo media library. Static rules pre-classify files based on filename, extension, and EXIF metadata. Your job is to verify the pre-classification and correct it ONLY when the image content clearly contradicts it.
 
-Die verfügbaren Kategorien und die Vorklassifikation der statischen Regel werden dir mit den Metadaten übergeben.
+The available categories and the static rule pre-classification are provided with the metadata.
 
-Antworte NUR mit validem JSON (kein Markdown, kein umgebender Text):
+Respond ONLY with valid JSON (no markdown, no surrounding text):
 {
-  "type": "<kategorie_key>",
-  "source": "Quelle des Bildes",
+  "type": "<category_label>",
+  "source": "Origin of the image",
   "tags": ["Tag1", "Tag2", ...],
-  "description": "Kurze Beschreibung in 1-2 Sätzen",
+  "description": "Short description in 1-2 sentences",
   "mood": "indoor|outdoor|night|backlit|studio",
   "people_count": 0,
   "quality": "blurry|average|good|excellent",
   "confidence": 0.0-1.0
 }
 
-## 1) type — Kategorie (Ziel-Ablage)
-Verwende einen der Kategorie-Keys aus der übergebenen Liste.
-Prüfe ob die Vorklassifikation der statischen Regel plausibel ist. Korrigiere wenn nötig.
-WICHTIG: Im Zweifel lieber persönliches Foto — besser ein Meme behalten als ein echtes Foto aussortieren.
+## 1) type — Category (target library folder)
+Use one of the category labels EXACTLY as provided in the list (e.g. "Persönliches Foto", "Screenshot").
 
-## 2) source — Quelle / Herkunft
-Beschreibt woher das Bild stammt. Grossbuchstabe am Anfang, menschenlesbar.
-Beispiele: Kamerafoto, Selfie, Meme, Internet Bild, Werbung, Infografik, Dokument, Quittung, Screenshot App, Screenshot Web, Sticker, Comic, Weitergeleitetes Bild
-Du kannst auch eigene passende Quellen definieren wenn keine der Beispiele passt.
+CRITICAL RULES for pre-classification handling:
+- If a static rule assigned a category AND the metadata supports it (e.g. camera make/model present, GPS coordinates, real EXIF date), you MUST keep that classification. The metadata is objective evidence — do NOT override it based on image appearance alone.
+- Only override the pre-classification when the image content CLEARLY contradicts it. Example: a meme with text overlay was classified as personal photo because it had EXIF from a forwarding app — override to sourceless.
+- When NO static rule matched, classify based on image content and metadata combined.
+- When in doubt, prefer personal photo — it is better to keep a meme in personal photos than to lose a real photo to sourceless.
 
-## 3) tags — Allgemeine beschreibende Tags
-3-8 Tags die den Bildinhalt beschreiben. Auf DEUTSCH, Grossbuchstabe am Anfang, menschenlesbar.
-Beispiele: Landschaft, Essen, Tier, Hund, Katze, Gruppe, Stadt, Natur, Sport, Feier, Strand, Berge, Haus, Boot, Auto, Blumen, Sonnenuntergang, Familie, Kind
+Strong signals that CONFIRM personal photo:
+- EXIF with camera make/model (e.g. Apple, Samsung, Canon, Nikon, DJI, Casio, Panasonic, Sony)
+- GPS coordinates present
+- File size > 500 KB with EXIF data
+- Natural/spontaneous scene, real-world photo
 
-## Entscheidungshilfe für type:
-- EXIF mit Kamera-Info oder GPS → stark persönlich
-- Dateigrösse >500 KB ohne EXIF → wahrscheinlich persönlich via Messenger
-- Dateigrösse <100 KB ohne EXIF → wahrscheinlich Meme/Internet Bild
-- Text-Overlay, Meme-Templates → sourceless
-- Wasserzeichen, Stock-Foto, Werbung → sourceless
-- Echte Statusleiste/App-UI sichtbar → screenshot
-- Natürlich/spontan → persönlich
+Strong signals for sourceless (override personal ONLY if no camera EXIF):
+- Text overlay, meme templates, watermarks
+- Stock photos, ads, infographics
+- Very small file size (< 100 KB) without EXIF
+- Obviously generated or downloaded content
 
-## Weitere Felder:
-- description: Auf DEUTSCH, sachlich, 1-2 Sätze
-- people_count: Anzahl sichtbarer Personen (0 wenn keine)
-- quality: Technische Bildqualität
-- confidence: Wie sicher bei der type-Klassifikation (0.0-1.0)"""
+Strong signals for screenshot (use Screenshot category!):
+- OS status bar, navigation bar, or app UI elements visible
+- Device frame or notification area
+- Chat conversations, messaging apps, social media interfaces (WhatsApp, Instagram, Facebook, Snapchat, TikTok, Twitter/X, Telegram, Signal)
+- Social media posts, profiles, stories, feeds — if you can see the app interface around the content, it IS a screenshot
+- App settings, menus, or dialog boxes
+- Browser windows showing web content
+- Any image that was clearly captured from a device screen
+- Note: screenshots often have NO EXIF data and come via messenger with UUID filenames
+- IMPORTANT: If the description mentions a social media post (Facebook, Instagram, etc.) or an app interface, classify as Screenshot, NOT as personal photo
+
+## 2) source — Origin / provenance
+Describes where the image came from. Capitalize first letter, human-readable, in GERMAN.
+Examples: Kamerafoto, Selfie, Drohnenfoto, Meme, Internetbild, Werbung, Infografik, Dokument, Quittung, Screenshot App, Screenshot Web, Sticker, Comic, Weitergeleitetes Bild
+You may define new fitting sources if none of the examples match.
+
+## 3) tags — Descriptive content tags
+3-8 tags describing the image content. In GERMAN, capitalize first letter, human-readable.
+Examples: Landschaft, Essen, Tier, Hund, Katze, Gruppe, Stadt, Natur, Sport, Feier, Strand, Berge, Haus, Boot, Auto, Blumen, Sonnenuntergang, Familie, Kind
+
+## Other fields:
+- description: In GERMAN, factual, 1-2 sentences
+- people_count: Number of visible people (0 if none)
+- quality: Technical image quality
+- confidence: How certain about the type classification (0.0-1.0)"""
 
 
 async def execute(job, session) -> dict:
@@ -116,7 +134,7 @@ async def execute(job, session) -> dict:
         sa_select(LibraryCategory).where(LibraryCategory.key != "error", LibraryCategory.key != "duplicate").order_by(LibraryCategory.position)
     )
     categories = cat_result.scalars().all()
-    cat_list = " | ".join(f"{c.key} ({c.label})" for c in categories)
+    cat_list = " | ".join(c.label for c in categories)
 
     # ── Alle Metadaten sammeln ──────────────────────────────────────
     step_results = job.step_result or {}
@@ -137,39 +155,39 @@ async def execute(job, session) -> dict:
 
     context_parts = []
 
-    # Verfügbare Kategorien
-    context_parts.append(f"Verfügbare Kategorien: {cat_list}")
+    # Available categories
+    context_parts.append(f"Available categories: {cat_list}")
 
-    # Vorklassifikation der statischen Regel
+    # Static rule pre-classification
     if rule_category:
-        context_parts.append(f"Vorklassifikation (statische Regel): {rule_category} ({rule_cat_label})")
+        context_parts.append(f"Pre-classification (static rule): {rule_cat_label}")
     else:
-        context_parts.append("Vorklassifikation (statische Regel): keine Regel hat gegriffen")
+        context_parts.append("Pre-classification (static rule): no rule matched")
 
-    # Dateiinfo (immer)
-    context_parts.append(f"Dateiname: {filename}")
-    context_parts.append(f"Dateigrösse: {file_size_kb:.0f} KB")
+    # File info (always)
+    context_parts.append(f"Filename: {filename}")
+    context_parts.append(f"File size: {file_size_kb:.0f} KB")
 
-    # EXIF-Daten
+    # EXIF data
     if exif.get("has_exif"):
         if exif.get("make"):
-            context_parts.append(f"Kamera: {exif['make']} {exif.get('model', '')}")
+            context_parts.append(f"Camera: {exif['make']} {exif.get('model', '')}")
         if exif.get("date"):
-            context_parts.append(f"Aufnahmedatum: {exif['date']}")
+            context_parts.append(f"Capture date: {exif['date']}")
         if exif.get("gps"):
             context_parts.append(f"GPS: {exif['gps_lat']}, {exif['gps_lon']}")
         if exif.get("width") and exif.get("height"):
-            context_parts.append(f"Auflösung: {exif['width']}x{exif['height']}")
+            context_parts.append(f"Resolution: {exif['width']}x{exif['height']}")
         if exif.get("software"):
             context_parts.append(f"Software: {exif['software']}")
     else:
-        context_parts.append("Keine EXIF-Daten vorhanden (typisch für Messenger-Bilder)")
+        context_parts.append("No EXIF data present (typical for messenger images)")
 
-    # Video-spezifische Metadaten
+    # Video-specific metadata
     if exif.get("duration"):
-        context_parts.append(f"Medientyp: Video")
+        context_parts.append(f"Media type: Video")
         if exif.get("duration_formatted"):
-            context_parts.append(f"Dauer: {exif['duration_formatted']}")
+            context_parts.append(f"Duration: {exif['duration_formatted']}")
         if exif.get("video_codec"):
             context_parts.append(f"Codec: {exif['video_codec']}")
         if exif.get("video_frame_rate"):
@@ -177,7 +195,7 @@ async def execute(job, session) -> dict:
         if exif.get("video_bitrate_kbps"):
             context_parts.append(f"Bitrate: {exif['video_bitrate_kbps']} kbps")
 
-    # Geocoding-Daten (IA-03 lief vor uns)
+    # Geocoding data
     if geo.get("country"):
         location_parts = []
         if geo.get("suburb"):
@@ -188,41 +206,41 @@ async def execute(job, session) -> dict:
             location_parts.append(geo["state"])
         if geo.get("country"):
             location_parts.append(geo["country"])
-        context_parts.append(f"Aufnahmeort: {', '.join(location_parts)}")
+        context_parts.append(f"Location: {', '.join(location_parts)}")
 
-    # Messenger-Hinweise aus Dateiname
+    # Messenger hints from filename
     if "-WA" in filename.upper():
-        context_parts.append("Herkunft: WhatsApp (Dateiname enthält -WA)")
+        context_parts.append("Origin: WhatsApp (filename contains -WA)")
     elif filename.startswith("signal-"):
-        context_parts.append("Herkunft: Signal")
+        context_parts.append("Origin: Signal")
     elif filename.startswith("telegram-"):
-        context_parts.append("Herkunft: Telegram")
+        context_parts.append("Origin: Telegram")
 
-    # UUID-Dateiname erkennen
+    # UUID filename detection
     import re
     uuid_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\w+$", re.IGNORECASE)
     if uuid_re.match(filename):
-        context_parts.append("Dateiname ist eine UUID (typisch für Messenger-Weiterleitungen)")
+        context_parts.append("Filename is a UUID (typical for messenger forwarded images)")
 
     metadata_context = "\n".join(context_parts)
 
     # ── API-Aufruf ──────────────────────────────────────────────────
     is_video = len(image_data_list) > 1
     if is_video:
-        user_message = f"""Analysiere dieses Video anhand von {len(image_data_list)} extrahierten Frames.
+        user_message = f"""Analyze this video based on {len(image_data_list)} extracted frames.
 
-Gesammelte Metadaten:
+Collected metadata:
 {metadata_context}
 
-Nutze diese Informationen zusammen mit den Frames für deine Klassifikation.
-Beachte: Die Frames sind gleichmässig über die Videodauer verteilt."""
+Use this information together with the frames for your classification.
+Note: Frames are evenly distributed across the video duration."""
     else:
-        user_message = f"""Analysiere dieses Bild.
+        user_message = f"""Analyze this image.
 
-Gesammelte Metadaten:
+Collected metadata:
 {metadata_context}
 
-Nutze diese Informationen zusammen mit dem Bildinhalt für deine Klassifikation."""
+Use this information together with the image content for your classification."""
 
     # Build content array with text + image(s)
     content_parts = [{"type": "text", "text": user_message}]
