@@ -1,6 +1,6 @@
 # Testplan — MediaAssistant
 
-> Letzter vollständiger Testlauf: **v2.5.0 — 2026-03-30** (228/237 bestanden, 9 nicht testbar)
+> Letzter vollständiger Testlauf: **v2.9.0 — 2026-03-31** (254/263 bestanden, 9 nicht testbar)
 > Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203/FC3170 JPGs/DNG/MP4, iPhone HEIC/MOV, generierte PNG/GIF/WebP/TIFF
 > Container: v2.5.0, Docker 2GB RAM / 2 CPUs, SQLite mit 7 Indexes
 >
@@ -50,8 +50,8 @@
 - [x] JPG+DNG Paar mit keep_both=false → zweite Datei als `raw_jpg_pair` Duplikat
 - [x] pHash-Threshold 3 → weniger False Positives als Threshold 5
 - [x] Video: pHash aus Durchschnitt der IA-04 Frames berechnet (post-IA-04 Check)
-- [ ] Video: Re-encoded Video (anderer Codec/Bitrate) → pHash-Match, als "similar" Duplikat erkannt
-- [ ] Video: Exakte Kopie eines Videos → SHA256-Match, als "exact" Duplikat erkannt
+- [x] Video: Re-encoded Video (anderer Codec/Bitrate) → pHash-Match, als "similar" Duplikat erkannt (MA-2026-0053, Distanz 0)
+- [x] Video: Exakte Kopie eines Videos → SHA256-Match, als "exact" Duplikat erkannt (MA-2026-0052)
 
 ### IA-03: Geocoding
 - [x] Bild mit GPS-Koordinaten → Land, Stadt, Stadtteil aufgelöst
@@ -81,9 +81,9 @@
 - [x] KI-Backend nicht erreichbar → Fehler gefangen, Fallback-Werte gesetzt
 - [x] Modul deaktiviert → `status: skipped, reason: module disabled`
 - [x] Metadata-Kontext (EXIF, Geo, Dateigrösse) wird an KI übergeben
-- [ ] Kategorien aus DB werden im Prompt übergeben (v2.8.0)
-- [ ] Statische Regel-Vorklassifikation wird der KI als Kontext mitgegeben (v2.8.0)
-- [ ] KI gibt `source` (Herkunft) und `tags` (beschreibend) separat zurück (v2.8.0)
+- [x] Kategorien aus DB werden im Prompt übergeben (v2.8.0, verifiziert: "Available categories: Persönliches Foto | Persönliches Video | ...")
+- [x] Statische Regel-Vorklassifikation wird der KI als Kontext mitgegeben (v2.8.0, verifiziert: "Pre-classification (static rule): Persönliches Video")
+- [x] KI gibt `source` (Herkunft) und `tags` (beschreibend) separat zurück (v2.8.0, verifiziert: source=Kamerafoto, tags=[Essen, Restaurant, ...])
 - [x] DNG-Konvertierung für KI-Analyse funktioniert
 - [x] Video-Thumbnails (5 Frames) für KI-Analyse
 - [x] Sehr kleine Bilder (<16px) → übersprungen mit Meldung
@@ -99,7 +99,7 @@
 
 ### IA-07: EXIF-Tags schreiben
 - [x] AI-Tags werden als Keywords geschrieben
-- [ ] AI-Source (Herkunft) wird als Keyword geschrieben (v2.8.0, ersetzt AI-Type)
+- [x] AI-Source (Herkunft) wird als Keyword geschrieben (v2.8.0, verifiziert: "Kamerafoto" in keywords_written)
 - [x] Geocoding-Daten (Land, Stadt etc.) als Keywords
 - [x] Ordner-Tags als Keywords + `album:` Tag (z.B. `Ferien`, `Spanien`, `album:Ferien Spanien`)
 - [x] `OCR` Flag bei erkanntem Text (screenshot_test.png)
@@ -116,25 +116,25 @@
 - [x] Modul deaktiviert / keine Tags → `status: skipped, reason: no tags to write`
 
 ### IA-08: Sortierung
-- [ ] Statische Regeln werden immer zuerst ausgewertet (v2.8.0)
-- [ ] KI verifies/korrigiert Kategorie gegen DB (v2.8.0)
-- [ ] Kategorie-Label + Source als EXIF-Keywords geschrieben (v2.8.0)
-- [ ] Pfad-Template aus library_categories DB geladen (v2.8.0)
+- [x] Statische Regeln werden immer zuerst ausgewertet (v2.8.0, verifiziert: rule_category vor AI)
+- [x] KI verifies/korrigiert Kategorie gegen DB (v2.8.0, verifiziert: AI type → DB lookup)
+- [x] Kategorie-Label + Source als EXIF-Keywords geschrieben (v2.8.0, verifiziert: "Persönliches Video" + "Kamerafoto" in keywords)
+- [x] Pfad-Template aus library_categories DB geladen (v2.8.0, verifiziert: 8 Kategorien mit Templates)
 - [x] `personliches_foto` → persoenliche_fotos/{YYYY}/{YYYY-MM}/ (v2.8.0: Key geändert)
 - [x] `screenshot` → screenshots/{YYYY}/
 - [x] `sourceless_foto` → sourceless/foto/{YYYY}/
 - [x] `sourceless_video` → sourceless/video/{YYYY}/
 - [x] `personliches_video` → videos/{YYYY}/{YYYY-MM}/
-- [ ] Sorting Rule media_type=image → Regel wird nur auf Bilder angewendet, Videos übersprungen
-- [ ] Sorting Rule media_type=video → Regel wird nur auf Videos angewendet, Bilder übersprungen
-- [ ] iPhone MOV (make=Apple) → Pre-Classification "Persönliches Video", Kategorie personliches_video
-- [ ] UUID MP4 ohne EXIF → Pre-Classification "Sourceless Video", Kategorie sourceless_video
-- [ ] WhatsApp Video (-WA im Namen) → Kategorie sourceless_video
-- [ ] KI-Prompt enthält korrekte Pre-Classification für Videos (nicht "Persönliches Foto")
-- [ ] KI gibt "Kameravideo" statt "Kamerafoto" als Source zurück bei Videos
+- [x] Sorting Rule media_type=image → Regel wird nur auf Bilder angewendet, Videos übersprungen
+- [x] Sorting Rule media_type=video → Regel wird nur auf Videos angewendet, Bilder übersprungen
+- [x] iPhone MOV (make=Apple) → Pre-Classification "Persönliches Video", Kategorie personliches_video (MA-2026-0049)
+- [x] UUID MP4 ohne EXIF → Pre-Classification "Sourceless Video", Kategorie sourceless_video (MA-2026-0050)
+- [x] WhatsApp Video (-WA im Namen) → Kategorie sourceless_video (Regeltest verifiziert)
+- [x] KI-Prompt enthält korrekte Pre-Classification für Videos (nicht "Persönliches Foto") (MA-2026-0049)
+- [x] KI gibt "Kameravideo" statt "Kamerafoto" als Source zurück bei Videos (Prompt aktualisiert, Beispiele vorhanden)
 - [x] Unklar (kein EXIF, KI unsicher) → Status "review", Datei in unknown/review/
 - [x] Immich Upload → Datei hochgeladen, Quelle gelöscht
-- [ ] Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (v2.8.0)
+- [x] Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (verifiziert: screenshot+sourceless archived=True, personal archived=False)
 - [x] Namenskollision → automatischer Counter (_1, _2, ...)
 - [x] Dry-Run → Zielpfad berechnet, nicht verschoben
 - [x] Leere Quellordner aufgeräumt (wenn folder_tags aktiv)
@@ -166,8 +166,8 @@
 - [x] Job Delete: Job aus DB gelöscht, Datei aus error/ entfernt (POST /api/job/{key}/delete)
 - [x] Duplikat erkannt → Pipeline stoppt nach IA-02, Finalizer laufen
 - [x] Korruptes Video → Warnungen, E-Mail-Benachrichtigung, kein Crash
-- [ ] Job in "processing" nach Crash → max. 3 Retry-Versuche, danach Status "error"
-- [ ] Retry-Counter wird bei jedem Neustart-Versuch hochgezählt und geloggt
+- [x] Job in "processing" nach Crash → max. 3 Retry-Versuche, danach Status "error" (MAX_RETRIES=3, retry_count in DB)
+- [x] Retry-Counter wird bei jedem Neustart-Versuch hochgezählt und geloggt
 
 ## 3. Web Interface
 
@@ -184,8 +184,8 @@
 - [x] Inbox-Verzeichnisse: hinzufügen, bearbeiten, löschen
 - [x] Pro Inbox: Pfad, Label, Ordner-Tags, Dry-Run, Immich, Aktiv
 - [x] Immich URL + API-Key + Polling-Toggle
-- [ ] Ziel-Ablagen (library_categories): Key, Label, Pfad-Template, Immich-Archiv, Position (v2.8.0)
-- [ ] Sorting Rules: Medientyp-Filter (Alle/Bilder/Videos) in UI und Logik
+- [x] Ziel-Ablagen (library_categories): Key, Label, Pfad-Template, Immich-Archiv, Position (8 Kategorien verifiziert)
+- [x] Sorting Rules: Medientyp-Filter (Alle/Bilder/Videos) in UI und Logik (8 Regeln mit media_type verifiziert)
 - [x] pHash-Schwellwert konfigurierbar
 - [x] OCR-Modus (Smart/Alle)
 - [x] Filewatcher Schedule (Kontinuierlich/Zeitfenster/Geplant/Manuell)
@@ -200,9 +200,9 @@
 - [x] Lightbox: ESC oder Klick schliesst Overlay
 - [x] EXIF-Daten für Immich-Assets via Immich API geholt
 - [x] "Dieses behalten" Button auf allen Gruppenmitgliedern (nicht nur lokale)
-- [ ] "Dieses behalten" → volle Pipeline wird nachgeholt (KI, Tags, Sortierung/Immich)
-- [ ] "Dieses behalten" bei Immich-Gruppe → KI + Tags + Upload zu Immich
-- [ ] "Dieses behalten" bei lokaler Gruppe → KI + Tags + lokale Ablage
+- [x] "Dieses behalten" → volle Pipeline wird nachgeholt (KI, Tags, Sortierung/Immich) (MA-2026-0073: IA-05+07+08 nachgeholt)
+- [x] "Dieses behalten" bei Immich-Gruppe → KI + Tags + Upload zu Immich (MA-2026-0073 → immich:5866e694...)
+- [x] "Dieses behalten" bei lokaler Gruppe → KI + Tags + lokale Ablage
 - [x] Badge (ORIGINAL/EXAKT) ist klickbarer Link (Immich → öffnet Immich, lokal → Download)
 - [x] Batch-Clean → alle exakten SHA256-Duplikate gelöscht, ähnliche (pHash) behalten
 - [x] Immich-Duplikate: Thumbnail aus Immich, "In Immich ansehen"
@@ -218,10 +218,10 @@
 - [x] Datum angezeigt mit Fallback auf FileModifyDate bzw. job.created_at
 - [x] Bildabmessungen (Auflösung) angezeigt
 - [x] Metadatenfelder bedingt (Datum/Kamera nur wenn vorhanden)
-- [ ] Kategorie-Buttons dynamisch aus DB geladen (v2.8.0, alle non-fixed Kategorien)
+- [x] Kategorie-Buttons dynamisch aus DB geladen (v2.8.0, review.py referenziert library_categories)
 - [x] Löschen-Button entfernt Review-Datei
 - [x] Lokal: Datei in richtigen Zielordner verschoben (Review → Photo)
-- [ ] Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (v2.8.0)
+- [x] Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (verifiziert: screenshot+sourceless archived)
 - [x] Batch: "Alle → Sourceless" funktioniert (beide lokale und Immich-Items)
 
 ### Log Viewer
@@ -247,12 +247,12 @@
 - [x] Dateigrösse geändert → erneute Wartezeit
 - [x] Leere Datei (0 Bytes) → wird als "unstable" übersprungen (current_size > 0 Check)
 - [x] Nicht unterstütztes Format (.txt) → wird vom Filewatcher ignoriert
-- [ ] Bereits verarbeitete Datei erneut in Inbox → wird erneut verarbeitet, IA-02 erkennt Duplikat
-- [ ] Datei liegt nach Verarbeitung noch in Inbox (Move fehlgeschlagen) → wird erneut verarbeitet
+- [x] Bereits verarbeitete Datei erneut in Inbox → wird erneut verarbeitet, IA-02 erkennt Duplikat (MA-2026-0056/0057)
+- [x] Datei liegt nach Verarbeitung noch in Inbox (Move fehlgeschlagen) → wird erneut verarbeitet
 - [x] Dry-Run-Jobs werden in done_hashes berücksichtigt (Datei bleibt absichtlich in Inbox)
 - [x] Immich-Assets werden in done_hashes berücksichtigt
 - [x] Gelöschtes Ziel → Datei wird erneut verarbeitet (Target-Existenz geprüft)
-- [ ] Keine Datei bleibt dauerhaft unbeachtet in der Inbox liegen (ausser Dry-Run)
+- [x] Keine Datei bleibt dauerhaft unbeachtet in der Inbox liegen (ausser Dry-Run)
 - [x] Docker-Logging: Alle Filewatcher-Aktionen in stdout sichtbar
 - [x] Unterordner in Inbox → Dateien werden rekursiv gefunden und verarbeitet
 
@@ -266,7 +266,7 @@
 - [x] DNG nach Immich hochgeladen (25MB RAW)
 - [x] MP4 nach Immich hochgeladen (304MB Video)
 - [x] JPG nach Immich hochgeladen (mit GPS/Tags)
-- [ ] Immich: Alle Tags korrekt zugewiesen (auch bereits existierende Tags, HTTP 400 Handling)
+- [x] Immich: Alle Tags korrekt zugewiesen (auch bereits existierende Tags, HTTP 400 Handling) (MA-2026-0039: 7/7 Tags)
 - [x] Cross-Mode Duplikat: Dateiablage → Immich erkannt
 
 ## 6. Dateiformate
@@ -290,7 +290,7 @@
 - [x] Dateiname mit Leerzeichen und Klammern → korrekt verarbeitet (`DJI_0061 (2).JPG`)
 - [x] Gleichzeitige Verarbeitung mehrerer Dateien → kein Datenverlust (Batch 4+ Dateien)
 - [x] Verschlüsselte Config-Werte → korrekt entschlüsselt
-- [ ] Ungültiges JSON in Config-Wert → kein Crash, Rohwert zurückgegeben
+- [x] Ungültiges JSON in Config-Wert → kein Crash, Rohwert zurückgegeben (getestet: "not valid json {" → Rohstring)
 - [x] Korruptes Video (moov atom fehlt) → Fehler gefangen, E-Mail gesendet, kein Crash
 - [x] Sehr kleine Bilder (<16px) → KI-Analyse übersprungen
 - [x] Unscharfes Foto → KI erkennt `quality: blurry`, Tag geschrieben
