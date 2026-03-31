@@ -114,22 +114,24 @@ async def _scan_and_process():
                 path, status, fhash, err, target, dry_run = r
                 if not fhash:
                     continue
-                # Dry-run jobs: always skip (file stays in inbox, don't re-process)
+
+                # Core rule: if the source file is still at its original
+                # inbox path, it was never moved — always re-process it
+                # (IA-02 will handle duplicate detection).
+                # Exception: dry-run jobs intentionally leave the file in place.
+                if not dry_run and os.path.exists(path):
+                    continue
+
+                # Dry-run jobs: always skip (file stays in inbox by design)
                 if dry_run and status in ("done", "duplicate"):
                     done_hashes.add((path, fhash))
                     continue
-                # Duplicate jobs: skip (already handled)
+                # Duplicate jobs: file was moved to duplicates/ → skip
                 if status == "duplicate" and fhash:
                     done_hashes.add((path, fhash))
                     continue
-                # Done jobs without errors: skip only if source was moved (no longer at original path)
-                # or target still exists. If file is still at original path, re-process it
-                # (it will land in duplicate check via IA-02).
+                # Done jobs without errors: skip if target exists
                 if status == "done" and not err:
-                    source_still_exists = os.path.exists(path)
-                    if source_still_exists:
-                        # File was NOT moved — don't skip, let it re-process
-                        continue
                     if target and target.startswith("immich:"):
                         done_hashes.add((path, fhash))
                     elif target and os.path.exists(target):
