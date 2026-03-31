@@ -219,16 +219,21 @@ async def retry_job(job_id: int):
         if not job or job.status != "error":
             return False
 
-        # If file was moved to error/, move it back
+        # If file was moved to error/, move it to internal reprocess dir (never back to inbox)
         if job.target_path and os.path.exists(job.target_path):
-            original_dir = os.path.dirname(job.original_path)
-            if os.path.exists(original_dir):
-                await asyncio.to_thread(safe_move, job.target_path, job.original_path, job.debug_key)
-                # Remove .log file
-                log_path = job.target_path + ".log"
-                if os.path.exists(log_path):
-                    os.remove(log_path)
-                job.target_path = None
+            reprocess_dir = os.path.join(os.path.dirname(os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")), "reprocess")
+            os.makedirs(reprocess_dir, exist_ok=True)
+            reprocess_path = os.path.join(reprocess_dir, os.path.basename(job.target_path))
+            if os.path.exists(reprocess_path):
+                name, ext = os.path.splitext(os.path.basename(job.target_path))
+                reprocess_path = os.path.join(reprocess_dir, f"{name}_{job.debug_key}{ext}")
+            await asyncio.to_thread(safe_move, job.target_path, reprocess_path, job.debug_key)
+            # Remove .log file
+            log_path = job.target_path + ".log"
+            if os.path.exists(log_path):
+                os.remove(log_path)
+            job.original_path = reprocess_path
+            job.target_path = None
 
         # Remove failed step results so pipeline resumes from there
         step_results = dict(job.step_result or {})
