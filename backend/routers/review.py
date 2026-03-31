@@ -191,9 +191,21 @@ async def review_page(request: Request):
         return RedirectResponse(url="/setup", status_code=302)
 
     items = await _build_review_items()
+
+    # Load categories for classify buttons
+    from models import LibraryCategory
+    async with async_session() as session:
+        cat_result = await session.execute(
+            select(LibraryCategory)
+            .where(LibraryCategory.fixed == False)
+            .order_by(LibraryCategory.position)
+        )
+        review_categories = cat_result.scalars().all()
+
     return await render(request, "review.html", {
         "items": items,
         "total": len(items),
+        "review_categories": review_categories,
     })
 
 
@@ -227,7 +239,16 @@ async def classify_file(request: Request):
     debug_key = form.get("debug_key")
     category = form.get("category")
 
-    if not debug_key or category not in ("photo", "video", "screenshot", "sourceless"):
+    if not debug_key or not category:
+        return RedirectResponse(url="/review", status_code=303)
+
+    # Validate category exists in DB
+    from models import LibraryCategory
+    async with async_session() as session_check:
+        valid = (await session_check.execute(
+            select(LibraryCategory).where(LibraryCategory.key == category)
+        )).scalar()
+    if not valid:
         return RedirectResponse(url="/review", status_code=303)
 
     async with async_session() as session:
@@ -249,11 +270,15 @@ async def classify_file(request: Request):
         if is_immich:
             asset_id = immich_asset_id or target.replace("immich:", "")
 
-            if category == "sourceless" and asset_id:
-                # Sourceless → in Immich archivieren
-                await archive_asset(asset_id)
+            # Check if category should be archived in Immich
+            from models import LibraryCategory
+            lib_cat = (await session.execute(
+                select(LibraryCategory).where(LibraryCategory.key == category)
+            )).scalar()
+            should_archive = lib_cat.immich_archive if lib_cat else False
 
-            # Foto/Video/Screenshot → bleibt in Timeline (nichts zu tun)
+            if should_archive and asset_id:
+                await archive_asset(asset_id)
 
             job.status = "done"
             job.completed_at = datetime.now()
@@ -261,7 +286,7 @@ async def classify_file(request: Request):
             sort_result = dict(step_results.get("IA-08", {}))
             sort_result["category"] = category
             sort_result["manual_review"] = True
-            sort_result["immich_archived"] = category == "sourceless"
+            sort_result["immich_archived"] = should_archive
             step_results["IA-08"] = sort_result
             job.step_result = step_results
             flag_modified(job, "step_result")
@@ -291,9 +316,7 @@ async def classify_file(request: Request):
         if lib_cat:
             path_template = lib_cat.path_template
         else:
-            fallback = {"photo": "photos/{YYYY}/{YYYY-MM}/", "sourceless": "sourceless/{YYYY}/",
-                        "screenshot": "screenshots/{YYYY}/", "video": "videos/{YYYY}/{YYYY-MM}/"}
-            path_template = await config_manager.get(f"library.path_{category}", fallback.get(category, "unknown/review/"))
+            path_template = "unknown/review/"
         base_path = await config_manager.get("library.base_path", "/bibliothek")
 
         # Parse date
@@ -439,11 +462,25 @@ async def classify_all(request: Request):
     form = await request.form()
     category = form.get("category")
 
-    if category not in ("sourceless",):
+    if not category:
+        return RedirectResponse(url="/review", status_code=303)
+    # Validate category exists
+    from models import LibraryCategory
+    async with async_session() as session_check:
+        valid = (await session_check.execute(
+            select(LibraryCategory).where(LibraryCategory.key == category)
+        )).scalar()
+    if not valid:
         return RedirectResponse(url="/review", status_code=303)
 
     count = 0
     async with async_session() as session:
+        # Load target category from DB
+        lib_cat = (await session.execute(
+            select(LibraryCategory).where(LibraryCategory.key == category)
+        )).scalar()
+        should_archive = lib_cat.immich_archive if lib_cat else False
+
         result = await session.execute(
             select(Job).where(Job.status == "review")
         )
@@ -453,10 +490,10 @@ async def classify_all(request: Request):
             target = job.target_path or ""
             is_immich = target.startswith("immich:") or bool(job.immich_asset_id)
 
-            # ── Immich: Archivieren ───────────────────────────
+            # ── Immich: Archivieren wenn konfiguriert ────────
             if is_immich:
                 asset_id = job.immich_asset_id or target.replace("immich:", "")
-                if asset_id:
+                if should_archive and asset_id:
                     try:
                         await archive_asset(asset_id)
                     except Exception:
@@ -475,12 +512,7 @@ async def classify_all(request: Request):
             exif = step_results.get("IA-01", {})
 
             base_path = await config_manager.get("library.base_path", "/bibliothek")
-            from models import LibraryCategory
-            cat_result = await session.execute(
-                select(LibraryCategory).where(LibraryCategory.key == "sourceless")
-            )
-            lib_cat = cat_result.scalar()
-            path_template = lib_cat.path_template if lib_cat else await config_manager.get("library.path_sourceless", "sourceless/{YYYY}/")
+            path_template = lib_cat.path_template if lib_cat else "unknown/review/"
 
             date = _parse_date(exif.get("date")) or datetime.now()
             relative_dir = path_template.replace("{YYYY}", date.strftime("%Y")).replace("{MM}", date.strftime("%m"))

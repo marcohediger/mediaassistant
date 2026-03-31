@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import subprocess
 from datetime import datetime
 from sqlalchemy import select
 from config import config_manager
@@ -190,50 +191,40 @@ async def execute(job, session) -> dict:
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
 
-    # Determine category: AI classification is primary, filename/EXIF are secondary signals
+    # Determine category: static rules first, then AI verifies and corrects
     ai_type = ai_result.get("type", "")
     ai_confidence = ai_result.get("confidence", 0.0)
     filename = os.path.basename(job.original_path)
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
-    has_no_exif = not exif.get("has_exif", False)
-    has_uuid_name = bool(_WHATSAPP_UUID_RE.match(filename))
-    is_messenger_file = has_uuid_name or "-WA" in filename.upper()
-    file_size_kb = os.path.getsize(job.original_path) / 1024
 
-    # First: check user-defined sorting rules (only if AI had no clear result)
-    rule_category = None
-    if not ai_type:
-        rule_category = await _match_sorting_rules(filename, exif, session)
+    # 1) Static sorting rules (always evaluated first)
+    rule_category = await _match_sorting_rules(filename, exif, session)
 
     if rule_category:
-        # Video override: if rule says "photo" but file is actually a video
         if rule_category == "photo" and is_video:
             category = "video"
         else:
             category = rule_category
-    # 1) Screenshots (KI oder Dateiname)
-    elif ai_type == "screenshot" or "screenshot" in filename.lower():
-        category = "screenshot"
-    # 2) Memes & Internet-Bilder → immer aussortieren
-    elif ai_type == "meme":
-        category = "sourceless"
-    elif ai_type == "internet_image":
-        category = "sourceless"
-    # 3) Dokumente → aussortieren
-    elif ai_type == "document":
-        category = "sourceless"
-    # 4) Persönliche Fotos/Videos → behalten (auch von Chat-Apps)
-    elif ai_type in ("personal", "personal_photo"):
-        category = "video" if is_video else "photo"
-    # 5) Messenger-Datei ohne EXIF und KI unsicher/leer → Review
-    elif is_messenger_file and has_no_exif:
-        category = "unknown"
-    # 6) Kein KI-Ergebnis, kein EXIF → Review
-    elif ai_type == "" and has_no_exif:
-        category = "unknown"
-    # 7) Alles andere mit EXIF → normal einsortieren
     else:
-        category = "video" if is_video else "photo"
+        # No rule matched → default based on EXIF
+        has_no_exif = not exif.get("has_exif", False)
+        if has_no_exif:
+            category = "unknown"
+        else:
+            category = "video" if is_video else "photo"
+
+    # 2) AI verifies ALL files — AI returns a category key directly
+    if ai_type:
+        # Validate AI category exists in DB (ignore invalid/unknown keys)
+        from models import LibraryCategory
+        ai_cat_result = await session.execute(
+            select(LibraryCategory).where(LibraryCategory.key == ai_type)
+        )
+        ai_cat = ai_cat_result.scalar()
+
+        # AI overrides static result when it returns a valid, different category
+        if ai_cat and ai_type != category and ai_type not in ("error", "duplicate", "unknown"):
+            category = ai_type
 
     # Unknown → Status "review" setzen für manuelle Klassifikation
     if category == "unknown":
@@ -288,6 +279,26 @@ async def execute(job, session) -> dict:
             target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
             counter += 1
 
+    # Write category tag into file (EXIF keywords) — AI tags + source are written by IA-07
+    cat_label = lib_cat.label if lib_cat else category.replace("_", " ").title()
+    tag_keywords = [cat_label]
+    ai_source = ai_result.get("source", "")
+    if ai_source:
+        tag_keywords.append(ai_source)
+
+    try:
+        tag_cmd = ["exiftool", "-overwrite_original", "-m"]
+        for kw in tag_keywords:
+            tag_cmd.append(f"-Keywords+={kw}")
+            tag_cmd.append(f"-Subject+={kw}")
+        tag_cmd.append(job.original_path)
+        await asyncio.to_thread(
+            subprocess.run, tag_cmd,
+            capture_output=True, text=True, timeout=15
+        )
+    except Exception:
+        pass  # non-critical
+
     # Dry-run: report where file would go, but don't move
     if job.dry_run:
         job.target_path = target_path
@@ -306,6 +317,13 @@ async def execute(job, session) -> dict:
     if job.immich_asset_id:
         immich_result = await replace_asset(job.immich_asset_id, job.original_path)
         job.target_path = f"immich:{job.immich_asset_id}"
+
+        # Tag the replaced asset in Immich
+        for tag_name in tag_keywords:
+            try:
+                await tag_asset(job.immich_asset_id, tag_name)
+            except Exception:
+                pass
 
         return {
             "category": category,
@@ -331,14 +349,15 @@ async def execute(job, session) -> dict:
 
         asset_id = immich_result.get("id", "")
 
-        # Tag asset with category label in Immich
+        # Tag asset in Immich: category label + AI type
         immich_tagged = False
-        if asset_id and lib_cat:
-            try:
-                await tag_asset(asset_id, lib_cat.label)
-                immich_tagged = True
-            except Exception:
-                pass  # non-critical — don't fail the pipeline
+        if asset_id:
+            for tag_name in tag_keywords:
+                try:
+                    await tag_asset(asset_id, tag_name)
+                    immich_tagged = True
+                except Exception:
+                    pass  # non-critical
 
         # Archive in Immich if configured for this category
         immich_archived = False

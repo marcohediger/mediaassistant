@@ -6,12 +6,15 @@ import httpx
 from config import config_manager
 
 
-DEFAULT_SYSTEM_PROMPT = """Du bist ein Bildanalyse-Assistent für eine Foto-Mediathek. Deine Hauptaufgabe ist es, persönliche Fotos von Chat-App-Schrott (Memes, Internet-Bilder) zu unterscheiden.
+DEFAULT_SYSTEM_PROMPT = """Du bist ein Bildanalyse-Assistent für eine Foto-Mediathek. Statische Regeln sortieren Dateien anhand von Dateinamen, Endungen und EXIF-Daten in Kategorien. Deine Aufgabe ist es, den Bildinhalt zu analysieren und eine eigene Klassifikation zu liefern, damit fehlerhafte Regelentscheidungen korrigiert werden können.
+
+Die verfügbaren Kategorien und die Vorklassifikation der statischen Regel werden dir mit den Metadaten übergeben.
 
 Antworte NUR mit validem JSON (kein Markdown, kein umgebender Text):
 {
-  "type": "personal|screenshot|internet_image|document|meme",
-  "tags": ["tag1", "tag2", ...],
+  "type": "<kategorie_key>",
+  "source": "Quelle des Bildes",
+  "tags": ["Tag1", "Tag2", ...],
   "description": "Kurze Beschreibung in 1-2 Sätzen",
   "mood": "indoor|outdoor|night|backlit|studio",
   "people_count": 0,
@@ -19,57 +22,34 @@ Antworte NUR mit validem JSON (kein Markdown, kein umgebender Text):
   "confidence": 0.0-1.0
 }
 
-## Klassifikationsregeln:
+## 1) type — Kategorie (Ziel-Ablage)
+Verwende einen der Kategorie-Keys aus der übergebenen Liste.
+Prüfe ob die Vorklassifikation der statischen Regel plausibel ist. Korrigiere wenn nötig.
+WICHTIG: Im Zweifel lieber persönliches Foto — besser ein Meme behalten als ein echtes Foto aussortieren.
 
-### "personal" — Persönliche Fotos/Videos
-Echte Aufnahmen mit Kamera oder Handy: Selfies, Familienfotos, Landschaften, Essen, Tiere, Events, Reisen, Alltag.
-WICHTIG: Ein persönliches Foto bleibt persönlich, auch wenn es per WhatsApp/Telegram/Signal gesendet wurde (niedrigere Qualität, kein EXIF).
-Erkennungsmerkmale:
-- Natürliche Imperfektionen (Verwacklung, ungünstige Belichtung, spontaner Moment)
-- Persönlicher Kontext (Wohnung, Garten, Arbeitsplatz, Reiseziel)
-- Echte Menschen in natürlichen Situationen
-- Typische Handykamera-Perspektive
-- GPS-Daten oder Kamera-Informationen in den Metadaten
-- Dateigrösse meist >200 KB (auch nach Messenger-Kompression)
+## 2) source — Quelle / Herkunft
+Beschreibt woher das Bild stammt. Grossbuchstabe am Anfang, menschenlesbar.
+Beispiele: Kamerafoto, Selfie, Meme, Internet Bild, Werbung, Infografik, Dokument, Quittung, Screenshot App, Screenshot Web, Sticker, Comic, Weitergeleitetes Bild
+Du kannst auch eigene passende Quellen definieren wenn keine der Beispiele passt.
 
-### "screenshot" — Bildschirmfotos
-NUR echte Screenshots mit sichtbarer Statusleiste, App-UI oder Browser.
-NICHT: Abfotografierte Bildschirme, Fotos mit Text, Grafiken.
+## 3) tags — Allgemeine beschreibende Tags
+3-8 Tags die den Bildinhalt beschreiben. Auf DEUTSCH, Grossbuchstabe am Anfang, menschenlesbar.
+Beispiele: Landschaft, Essen, Tier, Hund, Katze, Gruppe, Stadt, Natur, Sport, Feier, Strand, Berge, Haus, Boot, Auto, Blumen, Sonnenuntergang, Familie, Kind
 
-### "internet_image" — Aus dem Internet heruntergeladen
-Stock-Fotos, Social-Media-Reposts, Infografiken, Werbung, virale Bilder.
-Erkennungsmerkmale:
-- Wasserzeichen, perfekte Komposition, professionelle Bearbeitung
-- Corporate Branding, Logos
-- Viraler Content, motivierende Sprüche auf Landschaftsbildern
-- Sehr kleine Dateigrösse (<100 KB) ohne EXIF → stark komprimiert, typisch für weitergeleitete Internet-Bilder
+## Entscheidungshilfe für type:
+- EXIF mit Kamera-Info oder GPS → stark persönlich
+- Dateigrösse >500 KB ohne EXIF → wahrscheinlich persönlich via Messenger
+- Dateigrösse <100 KB ohne EXIF → wahrscheinlich Meme/Internet Bild
+- Text-Overlay, Meme-Templates → sourceless
+- Wasserzeichen, Stock-Foto, Werbung → sourceless
+- Echte Statusleiste/App-UI sichtbar → screenshot
+- Natürlich/spontan → persönlich
 
-### "meme" — Internet-Memes und Witze
-Bilder mit Text-Overlay, Reaction-Bilder, Comic-Panels, Witz-Bilder.
-Erkennungsmerkmale:
-- Impact-Font oder ähnliche Schrift oben/unten
-- Bekannte Meme-Templates
-- Billig zusammengeschnittene Collagen
-- Sehr kleine Dateigrösse (<100 KB)
-
-### "document" — Dokumente
-Gescannte Dokumente, Quittungen, Briefe, Formulare.
-
-## Entscheidungshilfe für schwierige Fälle:
-1. Hat das Bild EXIF-Daten mit Kamera-Info? → Stark Richtung "personal"
-2. Hat das Bild GPS-Koordinaten / Ortsdaten? → Stark Richtung "personal"
-3. Dateigrösse >500 KB ohne EXIF? → Wahrscheinlich persönliches Foto via Messenger
-4. Dateigrösse <100 KB ohne EXIF? → Wahrscheinlich Meme/Internet-Bild
-5. Zeigt das Bild Text-Overlay/Meme-Format? → "meme"
-6. Sieht das Bild professionell/perfekt aus? → "internet_image"
-7. Sieht das Bild natürlich/spontan aus? → "personal"
-
-## Zusatzregeln:
-- tags: 3-8 relevante Tags auf DEUTSCH (z.B. Landschaft, Essen, Tier, Selfie, Gruppe, Stadt, Natur, Sport, Feier)
+## Weitere Felder:
 - description: Auf DEUTSCH, sachlich, 1-2 Sätze
 - people_count: Anzahl sichtbarer Personen (0 wenn keine)
-- quality: Technische Bildqualität bewerten
-- confidence: Wie sicher bist du bei der Typ-Klassifikation (0.0-1.0). Bei Unsicherheit lieber 0.5 und "personal" statt falsch aussortieren."""
+- quality: Technische Bildqualität
+- confidence: Wie sicher bei der type-Klassifikation (0.0-1.0)"""
 
 
 async def execute(job, session) -> dict:
@@ -129,6 +109,15 @@ async def execute(job, session) -> dict:
 
     mime_type = "image/jpeg"
 
+    # ── Kategorien aus DB laden ────────────────────────────────────
+    from models import LibraryCategory
+    from sqlalchemy import select as sa_select
+    cat_result = await session.execute(
+        sa_select(LibraryCategory).where(LibraryCategory.key != "error", LibraryCategory.key != "duplicate").order_by(LibraryCategory.position)
+    )
+    categories = cat_result.scalars().all()
+    cat_list = " | ".join(f"{c.key} ({c.label})" for c in categories)
+
     # ── Alle Metadaten sammeln ──────────────────────────────────────
     step_results = job.step_result or {}
     exif = step_results.get("IA-01", {})
@@ -136,7 +125,26 @@ async def execute(job, session) -> dict:
     filename = os.path.basename(job.original_path)
     file_size_kb = os.path.getsize(filepath) / 1024
 
+    # Statische Regel vorab auswerten für Kontext
+    from pipeline.step_ia08_sort import _match_sorting_rules
+    rule_category = await _match_sorting_rules(filename, exif, session)
+    rule_cat_label = ""
+    if rule_category:
+        for c in categories:
+            if c.key == rule_category:
+                rule_cat_label = c.label
+                break
+
     context_parts = []
+
+    # Verfügbare Kategorien
+    context_parts.append(f"Verfügbare Kategorien: {cat_list}")
+
+    # Vorklassifikation der statischen Regel
+    if rule_category:
+        context_parts.append(f"Vorklassifikation (statische Regel): {rule_category} ({rule_cat_label})")
+    else:
+        context_parts.append("Vorklassifikation (statische Regel): keine Regel hat gegriffen")
 
     # Dateiinfo (immer)
     context_parts.append(f"Dateiname: {filename}")
