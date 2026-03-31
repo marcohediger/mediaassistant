@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.9.0 — 2026-03-31
+
+### Video-Kategorien & Medientyp-Filter
+- **Sorting Rules mit Medientyp-Filter**: Jede Regel kann auf Bilder, Videos oder Alle eingeschränkt werden — ermöglicht getrennte Regeln für Bilder und Videos
+- **Separate Video-Kategorien**: `sourceless_foto`/`sourceless_video` und `personliches_foto`/`personliches_video` statt gemeinsamer Kategorien
+- **Video Pre-Classification**: Videos erhalten korrekte Vorklassifikation (z.B. "Persönliches Video" statt "Persönliches Foto")
+- **AI-Prompt für Videos**: Separate Beispiele für Bild- und Video-Quellen (Kameravideo, Drohnenvideo etc.)
+
+### Video-Duplikaterkennung (pHash)
+- **pHash aus Video-Frames**: Durchschnitts-pHash wird aus den IA-04 Thumbnail-Frames berechnet (kein zusätzlicher Rechenaufwand)
+- **Re-encoded Videos erkannt**: Videos mit anderem Codec/Bitrate aber gleichem Inhalt werden als "similar" Duplikat erkannt
+- **Post-IA-04 Check**: pHash-Duplikatprüfung läuft nach Frame-Extraktion als zweiter Check
+
+### Duplikat-Review: Volle Pipeline beim Behalten
+- **"Behalten" startet Pipeline nach**: Behaltene Duplikate durchlaufen die volle Pipeline (KI-Analyse, Tags schreiben, Sortierung/Immich-Upload) statt direkt verschoben zu werden
+- **Funktioniert für alle Modi**: Lokale Ablage und Immich-Upload, Bilder und Videos
+
+### Inbox-Garantie
+- **Nichts bleibt unbeachtet**: Dateien die noch in der Inbox liegen werden immer verarbeitet — egal ob schon ein Done/Duplikat-Job existiert
+- **Pipeline entscheidet**: Der Filewatcher ignoriert keine Dateien mehr; IA-02 erkennt Duplikate korrekt
+
+### Stabilität
+- **Retry-Counter**: Jobs die beim Container-Neustart in "processing" hängen, werden max. 3× versucht — danach Status "error" statt Endlosschleife
+- **Config-Crash-Resilience**: Ungültiges JSON in Config-Werten führt nicht mehr zum Internal Server Error
+- **Immich Tag-Fix**: HTTP 400 (statt nur 409) wird korrekt als "Tag existiert bereits" behandelt — alle Tags werden zugewiesen
+
+### UI
+- **"Jetzt scannen" und "Dry-Run Report" Buttons** nach oben neben Seitentitel verschoben
+
 ## v2.8.0 — 2026-03-31
 
 ### Dynamische KI-Klassifikation & DB-gesteuerte Kategorien

@@ -1,13 +1,16 @@
 flowchart TD
     START([Neue Datei in Inbox]) --> EXIF[IA-01: EXIF extrahieren\nVideos: + ffprobe Metadaten\nDatum, GPS/ISO 6709, Dauer,\nAuflösung, Codec, Framerate,\nBitrate, Rotation]
-    EXIF --> DUPES[IA-02: Duplikate erkennen]
+    EXIF --> DUPES[IA-02: Duplikate erkennen\nSHA256 exakt + pHash ähnlich\nVideos: nur SHA256 hier]
     DUPES --> DUPECHECK{Duplikat?}
     DUPECHECK -->|Ja| STOP([Pipeline stopp])
     DUPECHECK -->|Nein| GEO[IA-03: Geocoding\nGPS → Ortsname]
 
-    GEO --> CONVERT[IA-04: Temp. Konvertierung für KI\nVideos: Thumbnail bei 10% Dauer\nvia ffmpeg]
+    GEO --> CONVERT[IA-04: Temp. Konvertierung für KI\nVideos: N Frames extrahiert\nvia ffmpeg]
+    CONVERT --> VPHASH{Video?\npHash aus Frames}
+    VPHASH -->|pHash-Match| STOP
+    VPHASH -->|OK| COLLECT
 
-    CONVERT --> COLLECT[Alle Metadaten sammeln]
+    COLLECT[Alle Metadaten sammeln]
     COLLECT --> M1[Kamera & Datum]
     COLLECT --> M2[GPS + Ortsname]
     COLLECT --> M3[Dateigrösse in KB]
@@ -20,9 +23,9 @@ flowchart TD
     OCR --> TAGS[IA-07: EXIF-Tags schreiben\nAI-Tags + Source + Geo + Ordner]
     TAGS --> SORT[IA-08: Sortierung]
 
-    SORT --> RULES{Statische Regeln\nauswerten}
+    SORT --> RULES{Statische Regeln\nauswerten\nmit media_type Filter}
     RULES -->|Regel matcht| RULE_CAT[Kategorie aus\nstatischer Regel]
-    RULES -->|Keine Regel| DEFAULT_CAT[Default-Kategorie\nbasierend auf EXIF/Video]
+    RULES -->|Keine Regel| DEFAULT_CAT[Default-Kategorie\nBild: personliches_foto\nVideo: personliches_video]
 
     RULE_CAT --> AI_CHECK{KI-Verifikation\nAI type valid + anders?}
     DEFAULT_CAT --> AI_CHECK

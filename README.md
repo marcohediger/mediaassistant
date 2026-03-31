@@ -13,7 +13,7 @@ New files in inbox directories are automatically detected and processed through 
 | Step | Name | Description |
 |------|------|-------------|
 | IA-01 | Read EXIF | Extract metadata via ExifTool; videos additionally via ffprobe (date, GPS with ISO 6709 parser, duration + formatted, resolution, megapixels, codec, framerate, bitrate, rotation) |
-| IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar), incl. Immich-uploaded files |
+| IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar) for images and videos, incl. Immich-uploaded files. Video pHash is computed as average from IA-04 frames (post-IA-04 check) |
 | IA-03 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
 | IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis; video thumbnail extraction via ffmpeg (configurable number of frames evenly distributed across video duration) |
 | IA-05 | AI Analysis | Classify image (type from DB categories, source, tags, description) with all collected metadata + static rule pre-classification |
@@ -117,7 +117,7 @@ All system log messages are always written in English, regardless of the UI lang
 - Per file: similarity score (SHA256 exact / pHash %)
 - Per file: badge (ORIGINAL/EXACT) is a clickable link — Immich assets open in Immich, local files download
 - **Immich duplicates**: Thumbnail fetched from Immich, "View in Immich" button, "Delete local copy" for the local file
-- Actions: "Keep this" on all group members (not just local files) — uploads to Immich when group is in Immich mode
+- Actions: "Keep this" on all group members — triggers full pipeline re-run (AI analysis, tag writing, sorting/Immich upload) so the kept file gets all metadata before being filed
 - Batch-Clean: auto-delete all exact SHA256 duplicates
 - Orphaned entries: if a referenced original file no longer exists on disk (or was deleted from Immich), the match is skipped and the new file is treated as a fresh original
 
@@ -149,8 +149,8 @@ The AI returns JSON with three main fields:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `type` | Category key from database | `personliches_foto`, `screenshot`, `sourceless` |
-| `source` | Origin/source of the image | `Kamerafoto`, `Meme`, `Internetbild`, `Screenshot` |
+| `type` | Category key from database | `personliches_foto`, `personliches_video`, `screenshot`, `sourceless_foto`, `sourceless_video` |
+| `source` | Origin/source of the image/video | Images: `Kamerafoto`, `Meme`, `Internetbild`. Videos: `Kameravideo`, `Drohnenvideo`, `Internetvideo` |
 | `tags` | Descriptive content tags | `Landschaft`, `Tier`, `Haus`, `Boot` |
 
 Additional fields: `description` (German), `mood`, `people_count`, `quality`, `confidence`.
@@ -200,13 +200,14 @@ Default structure (categories configurable in Settings → Library Categories):
 
 ```
 /bibliothek/
-├── persoenliche_fotos/{YYYY}/{YYYY-MM}/  ← personal photos, chronological
-├── sourceless/{YYYY}/                    ← images without source (messenger, memes)
-├── screenshots/{YYYY}/                   ← screenshots
-├── videos/{YYYY}/{YYYY-MM}/              ← videos
-├── unknown/review/                       ← AI uncertain, manual review
-├── error/                                ← failed files
-└── error/duplicates/                     ← detected duplicates
+├── photos/{YYYY}/{YYYY-MM}/          ← personal photos, chronological
+├── videos/{YYYY}/{YYYY-MM}/          ← personal videos, chronological
+├── sourceless/foto/{YYYY}/           ← images without source (messenger, memes)
+├── sourceless/video/{YYYY}/          ← videos without source (messenger, forwarded)
+├── screenshots/{YYYY}/               ← screenshots
+├── unknown/review/                   ← AI uncertain, manual review
+├── error/                            ← failed files
+└── error/duplicates/                 ← detected duplicates
 ```
 
 ## Features
@@ -232,7 +233,7 @@ Configurable sorting rules in **Settings → Sorting Rules**. Static rules are e
 | EXIF expression | `make != "" & date != ""` | Match with operators (`==`, `!=`, `~`, `!~`) and logic (`&` AND, `\|` OR) |
 | File extension | `.png` | Match by file extension |
 
-Each rule maps to a target category from the database (configurable in Settings → Library Categories). Rules can be reordered with up/down buttons and individually enabled/disabled.
+Each rule maps to a target category from the database and has a **media type filter** (All / Images / Videos). This allows separate rules for images and videos — e.g. UUID filenames route to `sourceless_foto` for images and `sourceless_video` for videos. Rules can be reordered with up/down buttons and individually enabled/disabled.
 
 ### Folder Tags
 Inbox subdirectory names can be automatically added as EXIF keywords. Configurable per inbox directory. Example: a file in `/inbox/manual/vacation/italy/` gets keywords `["vacation", "italy"]` and an `album:vacation italy` tag.
