@@ -56,7 +56,8 @@ Strong signals for screenshot (use Screenshot category!):
 
 ## 2) source — Origin / provenance
 Describes where the image came from. Capitalize first letter, human-readable, in GERMAN.
-Examples: Kamerafoto, Selfie, Drohnenfoto, Meme, Internetbild, Werbung, Infografik, Dokument, Quittung, Screenshot App, Screenshot Web, Sticker, Comic, Weitergeleitetes Bild
+Examples for images: Kamerafoto, Selfie, Drohnenfoto, Meme, Internetbild, Werbung, Infografik, Dokument, Quittung, Screenshot App, Screenshot Web, Sticker, Comic, Weitergeleitetes Bild
+Examples for videos: Kameravideo, Selfie-Video, Drohnenvideo, Internetvideo, Weitergeleitetes Video, Bildschirmaufnahme
 You may define new fitting sources if none of the examples match.
 
 ## 3) tags — Descriptive content tags
