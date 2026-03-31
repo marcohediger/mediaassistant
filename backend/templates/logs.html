@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ t.logs.title }} — MediaAssistant{% endblock %}
 {% block content %}
-<h1>{{ t.logs.title }}</h1>
+<div style="display: flex; justify-content: space-between; align-items: center;">
+    <h1 style="margin: 0;">{{ t.logs.title }}</h1>
+    <a href="/logs/dryrun-report" class="btn btn-small btn-secondary">{{ t.dryrun.report_button }}</a>
+</div>
 
 <div class="tabs">
     <a href="/logs?tab=system" class="tab {{ 'tab-active' if tab == 'system' else '' }}">{{ t.logs.system_log }}</a>
     <a href="/logs?tab=jobs" class="tab {{ 'tab-active' if tab == 'jobs' else '' }}">{{ t.logs.job_log }}</a>
-    <a href="/logs/dryrun-report" class="btn btn-small btn-secondary" style="margin-left: auto;">{{ t.dryrun.report_button }}</a>
 </div>
 
 {% if tab == 'system' %}
