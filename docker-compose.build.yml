@@ -1,6 +1,12 @@
+## Local build variant — use this instead of docker-compose.yml
+## if you want to build the image locally instead of pulling from ghcr.io
+##
+## Usage: docker compose -f docker-compose.build.yml up -d
+
 services:
   mediaassistant:
-    image: ghcr.io/marcohediger/mediaassistant:latest
+    build:
+      context: ./backend
     container_name: mediaassistant
     restart: unless-stopped
     mem_limit: 2g
