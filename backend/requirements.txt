@@ -8,5 +8,6 @@ cryptography>=43.0
 httpx>=0.27
 imagehash>=4.3
 Pillow>=10.0
+pillow-heif>=0.18
 authlib>=1.3
 itsdangerous>=2.1

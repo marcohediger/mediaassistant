@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.16.4 — 2026-04-01
+
+### Bugfix: pHash-Berechnung für HEIC/HEIF
+- HEIC/HEIF-Dateien erhalten jetzt einen pHash dank `pillow-heif` als Pillow-Plugin
+- Bisher lieferte `Image.open()` einen Fehler für HEIC, und der ExifTool-Fallback war nur für RAW-Formate aktiv
+- Neue Dependency: `pillow-heif>=0.18` in `requirements.txt`
+
 ## v2.16.3 — 2026-04-01
 
 ### EXIF: Zusätzliche XMP-Tag-Felder für Immich-Kompatibilität
