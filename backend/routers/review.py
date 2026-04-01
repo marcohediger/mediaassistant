@@ -139,8 +139,9 @@ async def _build_review_items() -> list[dict]:
                 file_size_kb = os.path.getsize(job.original_path) / 1024
             elif immich_asset_id:
                 try:
-                    from immich_client import get_asset_info
-                    info = await get_asset_info(immich_asset_id)
+                    from immich_client import get_asset_info, get_user_api_key
+                    _ukey = await get_user_api_key(job.immich_user_id) if job.immich_user_id else None
+                    info = await get_asset_info(immich_asset_id, api_key=_ukey)
                     if info:
                         exif_info = info.get("exifInfo", {})
                         file_size_kb = (exif_info.get("fileSizeInByte", 0) or 0) / 1024
@@ -278,7 +279,11 @@ async def classify_file(request: Request):
             should_archive = lib_cat.immich_archive if lib_cat else False
 
             if should_archive and asset_id:
-                await archive_asset(asset_id)
+                _ukey = None
+                if job.immich_user_id:
+                    from immich_client import get_user_api_key
+                    _ukey = await get_user_api_key(job.immich_user_id)
+                await archive_asset(asset_id, api_key=_ukey)
 
             job.status = "done"
             job.completed_at = datetime.now()
@@ -495,7 +500,11 @@ async def classify_all(request: Request):
                 asset_id = job.immich_asset_id or target.replace("immich:", "")
                 if should_archive and asset_id:
                     try:
-                        await archive_asset(asset_id)
+                        _ukey = None
+                        if job.immich_user_id:
+                            from immich_client import get_user_api_key
+                            _ukey = await get_user_api_key(job.immich_user_id)
+                        await archive_asset(asset_id, api_key=_ukey)
                     except Exception:
                         continue
                 job.status = "done"

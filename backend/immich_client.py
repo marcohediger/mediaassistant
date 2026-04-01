@@ -1,19 +1,44 @@
+import logging
 import os
 from datetime import datetime, timezone
 import httpx
 from config import config_manager
 
+logger = logging.getLogger("mediaassistant.immich")
+
 
 async def get_immich_config() -> tuple[str, str]:
-    """Return (base_url, api_key) from config."""
+    """Return (base_url, api_key) from global config."""
     url = await config_manager.get("immich.url", "")
     api_key = await config_manager.get("immich.api_key", "")
     return url.rstrip("/") if url else "", api_key
 
 
-async def upload_asset(file_path: str, album_names: list[str] | None = None) -> dict:
+async def _resolve_api_key(api_key_override: str | None = None) -> tuple[str, str]:
+    """Return (base_url, api_key). Uses override if provided, else global config."""
+    url = await config_manager.get("immich.url", "")
+    url = url.rstrip("/") if url else ""
+    if api_key_override:
+        return url, api_key_override
+    api_key = await config_manager.get("immich.api_key", "")
+    return url, api_key
+
+
+async def get_user_api_key(user_id: int) -> str | None:
+    """Load and decrypt an ImmichUser's API key by ID."""
+    from database import async_session
+    from models import ImmichUser
+    async with async_session() as session:
+        user = await session.get(ImmichUser, user_id)
+        if not user or not user.api_key:
+            return None
+        fernet = await config_manager._get_fernet()
+        return fernet.decrypt(user.api_key.encode()).decode()
+
+
+async def upload_asset(file_path: str, album_names: list[str] | None = None, *, api_key: str | None = None) -> dict:
     """Upload a file to Immich and optionally add it to albums (created from folder tags)."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
@@ -77,10 +102,9 @@ async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dic
     return None
 
 
-
-async def archive_asset(asset_id: str) -> dict:
+async def archive_asset(asset_id: str, *, api_key: str | None = None) -> dict:
     """Set an asset to archived in Immich. Supports both new (visibility) and legacy (isArchived) API."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
@@ -108,9 +132,9 @@ async def archive_asset(asset_id: str) -> dict:
     return {"status": "archived", "asset_id": asset_id}
 
 
-async def lock_asset(asset_id: str) -> dict:
+async def lock_asset(asset_id: str, *, api_key: str | None = None) -> dict:
     """Move an asset to the locked folder in Immich (visibility: locked)."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
@@ -129,9 +153,9 @@ async def lock_asset(asset_id: str) -> dict:
     return {"status": "locked", "asset_id": asset_id}
 
 
-async def tag_asset(asset_id: str, tag_name: str) -> dict:
+async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None) -> dict:
     """Add a tag to an asset in Immich. Creates the tag if it doesn't exist."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
@@ -167,9 +191,9 @@ async def tag_asset(asset_id: str, tag_name: str) -> dict:
     return {"status": "tagged", "tag_name": tag_name, "tag_id": tag_id, "asset_id": asset_id}
 
 
-async def get_asset_info(asset_id: str) -> dict | None:
+async def get_asset_info(asset_id: str, *, api_key: str | None = None) -> dict | None:
     """Get asset info from Immich (includes exifInfo with fileSizeInByte)."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key or not asset_id:
         return None
     try:
@@ -185,9 +209,9 @@ async def get_asset_info(asset_id: str) -> dict | None:
     return None
 
 
-async def asset_exists(asset_id: str) -> bool:
+async def asset_exists(asset_id: str, *, api_key: str | None = None) -> bool:
     """Check if an asset still exists in Immich."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key or not asset_id:
         return False
     try:
@@ -201,9 +225,9 @@ async def asset_exists(asset_id: str) -> bool:
         return False
 
 
-async def get_asset_thumbnail(asset_id: str, size: str = "thumbnail") -> bytes | None:
+async def get_asset_thumbnail(asset_id: str, size: str = "thumbnail", *, api_key: str | None = None) -> bytes | None:
     """Fetch thumbnail for an asset from Immich. size=thumbnail|preview"""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key or not asset_id:
         return None
     try:
@@ -231,9 +255,9 @@ def _sanitize_filename(filename: str, fallback: str = "asset.jpg") -> str:
     return filename if filename else fallback
 
 
-async def download_asset(asset_id: str, target_path: str) -> str:
+async def download_asset(asset_id: str, target_path: str, *, api_key: str | None = None) -> str:
     """Download the original file of an Immich asset to target_path. Returns the file path."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
@@ -264,9 +288,9 @@ async def download_asset(asset_id: str, target_path: str) -> str:
     return file_path
 
 
-async def replace_asset(asset_id: str, file_path: str) -> dict:
+async def replace_asset(asset_id: str, file_path: str, *, api_key: str | None = None) -> dict:
     """Replace the original file of an Immich asset with the tagged version."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
@@ -296,72 +320,63 @@ async def replace_asset(asset_id: str, file_path: str) -> dict:
     return resp.json()
 
 
-async def get_recent_assets(since: str | None = None) -> list[dict]:
+async def _search_assets_for_type(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    body: dict,
+) -> list[dict]:
+    """Paginate through search/metadata results for a single query body."""
+    assets = []
+    page = 1
+    while True:
+        body["page"] = page
+        resp = await client.post(
+            f"{url}/api/search/metadata",
+            headers=headers,
+            json=body,
+        )
+        if resp.status_code != 200:
+            break
+        data = resp.json()
+        items = data.get("assets", {}).get("items", [])
+        if not items:
+            break
+        assets.extend(items)
+        if not data.get("assets", {}).get("nextPage"):
+            break
+        page += 1
+    return assets
+
+
+async def get_recent_assets(since: str | None = None, *, api_key: str | None = None) -> list[dict]:
     """Fetch assets uploaded after `since` (ISO timestamp). Returns list of asset dicts."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         return []
 
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
 
-    body = {
-        "order": "asc",
-        "type": "IMAGE",
-        "withExif": True,
-    }
-    if since:
-        body["createdAfter"] = since
-
     assets = []
-    page = 1
     async with httpx.AsyncClient(timeout=30) as client:
-        while True:
-            body["page"] = page
-            resp = await client.post(
-                f"{url}/api/search/metadata",
-                headers=headers,
-                json=body,
-            )
-            if resp.status_code != 200:
-                break
-            data = resp.json()
-            items = data.get("assets", {}).get("items", [])
-            if not items:
-                break
-            assets.extend(items)
-            # Stop if no more pages
-            if not data.get("assets", {}).get("nextPage"):
-                break
-            page += 1
+        for media_type in ("IMAGE", "VIDEO"):
+            body: dict = {
+                "order": "asc",
+                "type": media_type,
+                "withExif": True,
+            }
+            if since:
+                body["createdAfter"] = since
 
-    # Also fetch videos
-    body["type"] = "VIDEO"
-    page = 1
-    async with httpx.AsyncClient(timeout=30) as client:
-        while True:
-            body["page"] = page
-            resp = await client.post(
-                f"{url}/api/search/metadata",
-                headers=headers,
-                json=body,
-            )
-            if resp.status_code != 200:
-                break
-            data = resp.json()
-            items = data.get("assets", {}).get("items", [])
-            if not items:
-                break
+            items = await _search_assets_for_type(client, url, headers, body)
             assets.extend(items)
-            if not data.get("assets", {}).get("nextPage"):
-                break
-            page += 1
 
     return assets
 
 
-async def check_connection() -> tuple[bool, str]:
+async def check_connection(*, api_key: str | None = None) -> tuple[bool, str]:
     """Test the Immich connection. Returns (ok, detail)."""
-    url, api_key = await get_immich_config()
+    url, api_key = await _resolve_api_key(api_key)
     if not url:
         return False, "no_url"
     if not api_key:
@@ -369,11 +384,14 @@ async def check_connection() -> tuple[bool, str]:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
-                f"{url}/api/server/ping",
+                f"{url}/api/users/me",
                 headers={"x-api-key": api_key},
             )
             if resp.status_code == 200:
-                return True, "connected"
+                data = resp.json()
+                name = data.get("name", "")
+                email = data.get("email", "")
+                return True, f"{name} ({email})" if email else "connected"
             if resp.status_code == 401:
                 return False, "auth_failed"
             return False, f"HTTP {resp.status_code}"

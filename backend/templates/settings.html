@@ -35,6 +35,22 @@
                 </div>
                 <div class="inbox-options">
                     <label class="switch-inline">
+                        <input type="checkbox" name="inbox_use_immich_{{ inbox.id }}" value="1" {{ 'checked' if inbox.use_immich else '' }}>
+                        <span class="switch-slider-sm"></span>
+                        <span>{{ t.settings.use_immich }}</span>
+                    </label>
+                    {% if immich_users %}
+                    <div class="form-group" style="min-width: 120px;">
+                        <label>{{ t.settings.immich_user }}</label>
+                        <select name="inbox_immich_user_id_{{ inbox.id }}">
+                            <option value="">{{ t.settings.immich_user_global }}</option>
+                            {% for iu in immich_users %}
+                            <option value="{{ iu.id }}" {{ 'selected' if inbox.immich_user_id == iu.id else '' }}>{{ iu.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+                    <label class="switch-inline">
                         <input type="checkbox" name="inbox_folder_tags_{{ inbox.id }}" value="1" {{ 'checked' if inbox.folder_tags else '' }}>
                         <span class="switch-slider-sm"></span>
                         <span>{{ t.settings.folder_tags }}</span>
@@ -43,11 +59,6 @@
                         <input type="checkbox" name="inbox_dry_run_{{ inbox.id }}" value="1" {{ 'checked' if inbox.dry_run else '' }}>
                         <span class="switch-slider-sm"></span>
                         <span>{{ t.settings.dry_run }}</span>
-                    </label>
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_use_immich_{{ inbox.id }}" value="1" {{ 'checked' if inbox.use_immich else '' }}>
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.use_immich }}</span>
                     </label>
                     <label class="switch-inline">
                         <input type="checkbox" name="inbox_active_{{ inbox.id }}" value="1" {{ 'checked' if inbox.active else '' }}>
@@ -83,6 +94,22 @@
                 </div>
                 <div class="inbox-options">
                     <label class="switch-inline">
+                        <input type="checkbox" name="inbox_use_immich" value="1">
+                        <span class="switch-slider-sm"></span>
+                        <span>{{ t.settings.use_immich }}</span>
+                    </label>
+                    {% if immich_users %}
+                    <div class="form-group" style="min-width: 120px;">
+                        <label>{{ t.settings.immich_user }}</label>
+                        <select name="inbox_immich_user_id">
+                            <option value="">{{ t.settings.immich_user_global }}</option>
+                            {% for iu in immich_users %}
+                            <option value="{{ iu.id }}">{{ iu.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+                    <label class="switch-inline">
                         <input type="checkbox" name="inbox_folder_tags" value="1">
                         <span class="switch-slider-sm"></span>
                         <span>{{ t.settings.folder_tags }}</span>
@@ -91,11 +118,6 @@
                         <input type="checkbox" name="inbox_dry_run" value="1">
                         <span class="switch-slider-sm"></span>
                         <span>{{ t.settings.dry_run }}</span>
-                    </label>
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_use_immich" value="1">
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.use_immich }}</span>
                     </label>
                     <div class="inbox-actions">
                         <button type="submit" class="btn btn-small btn-primary">{{ t.settings.add }}</button>
@@ -345,6 +367,58 @@
             <span class="switch-slider-sm"></span>
             <span>{{ t.settings.immich_poll_active }}</span>
         </label>
+        <hr style="border-color: var(--border); margin: 1.5rem 0;">
+        <h3>{{ t.settings.immich_users }}</h3>
+        <p class="section-note" style="margin-bottom: 1rem;">{{ t.settings.immich_users_desc }}</p>
+
+        {% if immich_users %}
+        <div class="inbox-list">
+            {% for iu in immich_users %}
+            <div class="inbox-item" id="iu-{{ iu.id }}">
+                <div class="inbox-row">
+                    <div class="form-group">
+                        <label>{{ t.settings.immich_user_label }}</label>
+                        <input type="text" data-iu="label" value="{{ iu.label }}">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ t.settings.immich_user_api_key }}</label>
+                        <input type="password" data-iu="api_key" placeholder="••••••••">
+                    </div>
+                </div>
+                <div class="inbox-options">
+                    <label class="switch-inline">
+                        <input type="checkbox" data-iu="active" value="1" {{ 'checked' if iu.active else '' }}>
+                        <span class="switch-slider-sm"></span>
+                        <span>{{ t.settings.active }}</span>
+                    </label>
+                    <div class="inbox-actions">
+                        <button type="button" class="btn btn-small btn-secondary" onclick="saveImmichUser({{ iu.id }})">{{ t.settings.save }}</button>
+                        <button type="button" class="btn btn-small btn-secondary" onclick="postAction('/settings/immich-user/{{ iu.id }}/test', {})">{{ t.settings.immich_user_test }}</button>
+                        <button type="button" class="btn btn-small btn-danger" onclick="if(confirm('{{ t.settings.immich_user_delete_confirm }}')) postAction('/settings/immich-user/{{ iu.id }}/delete', {})">{{ t.settings.delete }}</button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="section-note">{{ t.settings.no_immich_users }}</p>
+        {% endif %}
+
+        <div class="inbox-add" id="iu-add">
+            <h3>{{ t.settings.add_immich_user }}</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>{{ t.settings.immich_user_label }}</label>
+                    <input type="text" data-iu="label" placeholder="Marco">
+                </div>
+                <div class="form-group">
+                    <label>{{ t.settings.immich_user_api_key }}</label>
+                    <input type="password" data-iu="api_key" placeholder="API Key">
+                </div>
+            </div>
+            <small style="display: block; margin-bottom: 0.5rem;">{{ t.settings.immich_user_api_key_hint }}</small>
+            <button type="button" class="btn btn-small btn-primary" onclick="addImmichUser()">{{ t.settings.add }}</button>
+        </div>
     </div>
 </div>
 
@@ -673,6 +747,24 @@ function postAction(url, data) {
     }
     document.body.appendChild(f);
     f.submit();
+}
+function saveImmichUser(id) {
+    var box = document.getElementById('iu-' + id);
+    var data = {
+        iu_label: box.querySelector('[data-iu=label]').value,
+        iu_api_key: box.querySelector('[data-iu=api_key]').value
+    };
+    if (box.querySelector('[data-iu=active]').checked) {
+        data['iu_active_' + id] = '1';
+    }
+    postAction('/settings/immich-user/' + id + '/update', data);
+}
+function addImmichUser() {
+    var box = document.getElementById('iu-add');
+    postAction('/settings/immich-user/add', {
+        iu_label: box.querySelector('[data-iu=label]').value,
+        iu_api_key: box.querySelector('[data-iu=api_key]').value
+    });
 }
 function saveRule(id) {
     var box = document.getElementById('rule-' + id);
