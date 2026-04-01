@@ -1,11 +1,5 @@
 # Changelog
 
-## v2.15.2 — 2026-04-01
-
-### Bugfix: Immich Polling — +1 Datei nach replace_asset
-- **Storage Template Migration** wird nach `replace_asset()` getriggert (`PUT /api/jobs/storageTemplateMigration`) — behebt das Problem dass Immich die ersetzte Datei mit `+1` Suffix speichert und die alte in den Papierkorb verschiebt
-- Neue Funktion `trigger_storage_migration()` in `immich_client.py`
-
 ## v2.15.1 — 2026-04-01
 
 ### Bugfix: ExifTool auf Synology/btrfs
