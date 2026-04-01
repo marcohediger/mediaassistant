@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.16.0 — 2026-04-01
+
+### Immich: replace_asset durch Upload+Copy+Delete ersetzt
+- **Deprecated `replace_asset()` entfernt**: `PUT /api/assets/{id}/original` wurde in Immich v1.142.0 deprecated und erzeugte `+1` Dateien auf Synology/btrfs
+- **Neuer 3-Schritt-Workflow** für Polling-Mode (wie [lrc-immich-plugin PR #84](https://github.com/bmachek/lrc-immich-plugin/pull/84)):
+  1. `upload_asset()` — getaggte Datei als neues Asset hochladen
+  2. `copy_asset_metadata()` — Albums, Favoriten, Gesichter, Stacks vom alten auf neues Asset kopieren (`PUT /api/assets/copy`)
+  3. `delete_asset()` — altes Asset löschen (`DELETE /api/assets` mit `force: true`)
+- Kein `+1` Suffix mehr, keine verwaisten Dateien im Papierkorb
+
 ## v2.15.1 — 2026-04-01
 
 ### Bugfix: ExifTool auf Synology/btrfs
