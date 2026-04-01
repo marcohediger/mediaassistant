@@ -1,8 +1,11 @@
 import asyncio
+import logging
 import os
 import re
 import subprocess
 from datetime import datetime
+
+logger = logging.getLogger("mediaassistant.pipeline.ia08")
 from sqlalchemy import select
 from config import config_manager
 from safe_file import safe_move
@@ -331,11 +334,18 @@ async def execute(job, session) -> dict:
         job.target_path = f"immich:{job.immich_asset_id}"
 
         # Tag the replaced asset in Immich
+        tags_written = []
+        tags_failed = []
         for tag_name in tag_keywords:
             try:
                 await tag_asset(job.immich_asset_id, tag_name, api_key=user_api_key)
-            except Exception:
-                pass
+                tags_written.append(tag_name)
+            except Exception as exc:
+                tags_failed.append(tag_name)
+                logger.warning(
+                    "Failed to tag asset %s with '%s': %s",
+                    job.immich_asset_id, tag_name, exc,
+                )
 
         # NSFW: move to locked folder
         immich_locked = False
@@ -343,8 +353,11 @@ async def execute(job, session) -> dict:
             try:
                 await lock_asset(job.immich_asset_id, api_key=user_api_key)
                 immich_locked = True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to lock asset %s: %s",
+                    job.immich_asset_id, exc,
+                )
 
         # Archive if configured (skip if locked)
         immich_archived = False
@@ -353,8 +366,11 @@ async def execute(job, session) -> dict:
             try:
                 await archive_asset(job.immich_asset_id, api_key=user_api_key)
                 immich_archived = True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to archive asset %s: %s",
+                    job.immich_asset_id, exc,
+                )
 
         return {
             "category": category,
@@ -365,6 +381,8 @@ async def execute(job, session) -> dict:
             "immich_archived": immich_archived,
             "immich_locked": immich_locked,
             "immich_asset_id": job.immich_asset_id,
+            "immich_tags_written": tags_written,
+            "immich_tags_failed": tags_failed,
         }
 
     # Route: Immich upload or target directory
@@ -383,14 +401,19 @@ async def execute(job, session) -> dict:
         asset_id = immich_result.get("id", "")
 
         # Tag asset in Immich: category label + AI type
-        immich_tagged = False
+        tags_written = []
+        tags_failed = []
         if asset_id:
             for tag_name in tag_keywords:
                 try:
                     await tag_asset(asset_id, tag_name, api_key=user_api_key)
-                    immich_tagged = True
-                except Exception:
-                    pass  # non-critical
+                    tags_written.append(tag_name)
+                except Exception as exc:
+                    tags_failed.append(tag_name)
+                    logger.warning(
+                        "Failed to tag asset %s with '%s': %s",
+                        asset_id, tag_name, exc,
+                    )
 
         # NSFW: move to locked folder in Immich
         immich_locked = False
@@ -398,15 +421,24 @@ async def execute(job, session) -> dict:
             try:
                 await lock_asset(asset_id, api_key=user_api_key)
                 immich_locked = True
-            except Exception:
-                pass  # non-critical, older Immich versions may not support locked
+            except Exception as exc:
+                logger.warning(
+                    "Failed to lock asset %s: %s",
+                    asset_id, exc,
+                )
 
         # Archive in Immich if configured for this category (skip if already locked)
         immich_archived = False
         should_archive = lib_cat.immich_archive if lib_cat else category in ("sourceless", "screenshot")
         if should_archive and asset_id and not immich_locked:
-            await archive_asset(asset_id, api_key=user_api_key)
-            immich_archived = True
+            try:
+                await archive_asset(asset_id, api_key=user_api_key)
+                immich_archived = True
+            except Exception as exc:
+                logger.warning(
+                    "Failed to archive asset %s: %s",
+                    asset_id, exc,
+                )
 
         # Remove source file after successful upload
         await asyncio.to_thread(os.remove, job.original_path)
@@ -427,6 +459,8 @@ async def execute(job, session) -> dict:
             "immich_archived": immich_archived,
             "immich_locked": immich_locked,
             "immich_id": asset_id,
+            "immich_tags_written": tags_written,
+            "immich_tags_failed": tags_failed,
         }
 
     # Move file to library (safe: copy → verify → delete)

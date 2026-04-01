@@ -88,16 +88,27 @@ class ConfigManager:
             "LIBRARY_BASE_PATH": ("library.base_path", False),
             "IMMICH_URL": ("immich.url", False),
             "IMMICH_API_KEY": ("immich.api_key", True),
+            "UI_LANGUAGE": ("ui.language", False),
+            "UI_THEME": ("ui.theme", False),
+            "FILEWATCHER_INTERVAL": ("filewatcher.interval", False),
+            "FILEWATCHER_SCHEDULE_MODE": ("filewatcher.schedule_mode", False),
+            "OCR_MODE": ("ocr.mode", False),
+            "PHASH_THRESHOLD": ("duplikat.phash_threshold", False),
+            "SETUP_COMPLETE": ("setup_complete", False),
         }
         for env_key, (config_key, encrypted) in env_map.items():
             env_value = os.environ.get(env_key)
             if env_value is None or env_value == "":
                 continue
             # Convert types
-            if config_key == "smtp.port":
+            if config_key in ("smtp.port", "filewatcher.interval", "duplikat.phash_threshold"):
                 env_value = int(env_value)
-            elif config_key == "smtp.ssl":
+            elif config_key in ("smtp.ssl",):
                 env_value = env_value.lower() in ("true", "1", "yes")
+            elif config_key == "setup_complete":
+                env_value = env_value.lower() in ("true", "1", "yes")
+                if not env_value:
+                    continue
             # Only seed if not already in DB
             existing = await self.get(config_key)
             if existing is None:

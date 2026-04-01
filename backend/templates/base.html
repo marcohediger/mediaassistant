@@ -26,6 +26,14 @@
             <a href="/logs">{{ t.nav.logs | default('Logs') }}</a>
             <a href="/settings">{{ t.nav.settings | default('Einstellungen') }}</a>
         </div>
+        {% if sso_user %}
+        <div class="nav-user" title="{{ sso_user_email or sso_user }}">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:middle;margin-right:4px;opacity:.7">
+                <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 1c-3.3 0-6 1.8-6 4v1h12v-1c0-2.2-2.7-4-6-4z"/>
+            </svg>
+            <span>{{ sso_user_name or sso_user }}</span>
+        </div>
+        {% endif %}
     </nav>
     <main class="container">
         {% block content %}{% endblock %}

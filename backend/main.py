@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from config import config_manager
-from database import init_db
+from database import init_db, seed_inbox_from_env
 from filewatcher import start_filewatcher
 from routers import dashboard, setup, settings, logs, api, duplicates, review
 
@@ -22,6 +22,7 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     await init_db()
     await config_manager.seed_from_env()
+    await seed_inbox_from_env()
     shutdown_event = asyncio.Event()
     watcher_task = asyncio.create_task(start_filewatcher(shutdown_event))
     yield
@@ -34,8 +35,12 @@ async def lifespan(app: FastAPI):
 
 
 from version import VERSION
+from auth import SSOAuthMiddleware
 
 app = FastAPI(title="MediaAssistant", version=VERSION, lifespan=lifespan)
+
+# SSO authentication middleware (must be registered before routers)
+app.add_middleware(SSOAuthMiddleware)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

@@ -11,7 +11,7 @@
 {% endif %}
 
 <!-- Inboxes -->
-<div class="settings-section">
+<div class="settings-section" id="section-inboxes">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.inboxes }}</h2>
@@ -131,7 +131,7 @@
 <form method="post" action="/settings/save">
 
 <!-- AI Analysis -->
-<div class="settings-section">
+<div class="settings-section" id="section-ai">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.ai_analysis }}</h2>
@@ -168,7 +168,7 @@
 </div>
 
 <!-- Video Thumbnails -->
-<div class="settings-section">
+<div class="settings-section" id="section-video-thumbnails">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.video_thumbnails }}</h2>
@@ -205,7 +205,7 @@
 </div>
 
 <!-- Geocoding -->
-<div class="settings-section">
+<div class="settings-section" id="section-geocoding">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.geocoding }}</h2>
@@ -234,7 +234,7 @@
 </div>
 
 <!-- Duplicate Detection -->
-<div class="settings-section">
+<div class="settings-section" id="section-duplicates">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.duplicate_detection }}</h2>
@@ -263,7 +263,7 @@
 </div>
 
 <!-- OCR -->
-<div class="settings-section">
+<div class="settings-section" id="section-ocr">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.ocr }}</h2>
@@ -288,7 +288,7 @@
 </div>
 
 <!-- SMTP -->
-<div class="settings-section">
+<div class="settings-section" id="section-smtp">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.smtp }}</h2>
@@ -338,7 +338,7 @@
 </div>
 
 <!-- Immich -->
-<div class="settings-section">
+<div class="settings-section" id="section-immich">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.immich }}</h2>
@@ -423,7 +423,7 @@
 </div>
 
 <!-- Target Storage -->
-<div class="settings-section">
+<div class="settings-section" id="section-storage">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.target_storage }}</h2>
@@ -502,7 +502,7 @@
 </div>
 
 <!-- Sorting Rules -->
-<div class="settings-section">
+<div class="settings-section" id="section-sorting-rules">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.sorting_rules }}</h2>
@@ -617,7 +617,7 @@
 </div>
 
 <!-- File Watcher -->
-<div class="settings-section">
+<div class="settings-section" id="section-filewatcher">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.filewatcher }}</h2>
@@ -700,7 +700,7 @@
 </div>
 
 <!-- Appearance -->
-<div class="settings-section">
+<div class="settings-section" id="section-appearance">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.appearance }}</h2>
@@ -779,5 +779,25 @@ function saveRule(id) {
     }
     postAction('/settings/rule/' + id + '/update', data);
 }
+// Save scroll position before any form submit or postAction
+document.querySelectorAll('form').forEach(function(f) {
+    f.addEventListener('submit', function() {
+        sessionStorage.setItem('settings_scroll', window.scrollY);
+    });
+});
+// Patch postAction to also save scroll
+var _origPostAction = postAction;
+postAction = function(url, data) {
+    sessionStorage.setItem('settings_scroll', window.scrollY);
+    _origPostAction(url, data);
+};
+// Restore scroll position on page load
+(function() {
+    var saved = sessionStorage.getItem('settings_scroll');
+    if (saved) {
+        window.scrollTo(0, parseInt(saved));
+        sessionStorage.removeItem('settings_scroll');
+    }
+})();
 </script>
 {% endblock %}
