@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.15.1 — 2026-04-01
+
+### Bugfix: ExifTool auf Synology/btrfs
+- **`-overwrite_original_in_place`** statt `-overwrite_original`: Bewahrt die Inode auf btrfs-Dateisystemen — verhindert dass Immich die Datei als neu erkennt (DELETE+CREATE → nur MODIFY Event)
+- **`-P` Flag** hinzugefügt: Bewahrt Datei-Timestamps, reduziert unnötige Immich-Scan-Trigger
+- Behebt Duplikat-Problem beim Betrieb auf Synology NAS
+
 ## v2.10.0 — 2026-03-31
 
 ### NSFW-Erkennung
