@@ -343,12 +343,13 @@ async def execute(job, session) -> dict:
     if job.immich_asset_id:
         old_asset_id = job.immich_asset_id
         immich_replaced = False
+        new_asset_id = None
         try:
             # Step 1: Upload tagged file as new asset
             upload_result = await upload_asset(job.original_path, api_key=user_api_key)
             new_asset_id = upload_result.get("id")
 
-            if new_asset_id:
+            if new_asset_id and upload_result.get("status") != "duplicate":
                 # Step 2: Copy metadata (albums, favorites, faces, stacks) from old to new
                 await copy_asset_metadata(old_asset_id, new_asset_id, api_key=user_api_key)
 
@@ -359,7 +360,14 @@ async def execute(job, session) -> dict:
                 job.immich_asset_id = new_asset_id
                 immich_replaced = True
         except RuntimeError as e:
-            # No write access — skip replace, continue with tagging
+            # Rollback: delete newly uploaded asset to prevent duplicates/loops
+            if new_asset_id and new_asset_id != old_asset_id:
+                try:
+                    await delete_asset(new_asset_id, api_key=user_api_key)
+                    logger.info("Rolled back new asset %s after error", new_asset_id)
+                except Exception:
+                    logger.warning("Failed to rollback new asset %s", new_asset_id)
+            # No write access — skip, continue with tagging
             if "asset.update" in str(e) or "Not found" in str(e):
                 pass
             else:

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.16.2 — 2026-04-01
+
+### Bugfix: Rollback bei fehlgeschlagenem Copy/Delete
+- Wenn `copy_asset_metadata` oder `delete_asset` fehlschlägt, wird das neu hochgeladene Asset automatisch gelöscht — verhindert Duplikat-Loops im Polling-Mode
+- Duplikat-Status von `upload_asset` wird geprüft bevor Copy/Delete ausgeführt wird
+
 ## v2.16.1 — 2026-04-01
 
 ### Bugfix: copy_asset_metadata API Felder
