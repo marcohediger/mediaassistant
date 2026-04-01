@@ -83,10 +83,12 @@ async def execute(job, session) -> dict:
     # Build ExifTool command
     cmd = ["exiftool", "-overwrite_original_in_place", "-P", "-m"]
 
-    # Write keywords
+    # Write keywords to all standard tag fields
     for kw in keywords:
         cmd.append(f"-Keywords+={kw}")
         cmd.append(f"-Subject+={kw}")
+        cmd.append(f"-TagsList+={kw}")
+        cmd.append(f"-HierarchicalSubject+={kw}")
 
     # Write description
     if description:
