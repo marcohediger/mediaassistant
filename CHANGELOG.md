@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.16.1 — 2026-04-01
+
+### Bugfix: copy_asset_metadata API Felder
+- Fix: Immich erwartet `sourceId`/`targetId` statt `from`/`to` im Copy-Endpoint
+
 ## v2.16.0 — 2026-04-01
 
 ### Immich: replace_asset durch Upload+Copy+Delete ersetzt

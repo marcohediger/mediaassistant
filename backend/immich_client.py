@@ -300,7 +300,7 @@ async def copy_asset_metadata(from_id: str, to_id: str, *, api_key: str | None =
         resp = await client.put(
             f"{url}/api/assets/copy",
             headers=headers,
-            json={"from": from_id, "to": to_id},
+            json={"sourceId": from_id, "targetId": to_id},
         )
 
     if resp.status_code not in (200, 204):
