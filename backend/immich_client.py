@@ -320,6 +320,24 @@ async def replace_asset(asset_id: str, file_path: str, *, api_key: str | None = 
     return resp.json()
 
 
+async def trigger_storage_migration(*, api_key: str | None = None) -> None:
+    """Trigger Immich storage template migration to fix file paths after replace_asset."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"{url}/api/jobs/storageTemplateMigration",
+            headers=headers,
+            json={"command": "start", "force": False},
+        )
+
+    if resp.status_code not in (200, 201, 204):
+        raise RuntimeError(f"Immich storage migration failed: HTTP {resp.status_code} — {resp.text[:200]}")
+
+
 async def _search_assets_for_type(
     client: httpx.AsyncClient,
     url: str,
