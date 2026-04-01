@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.16.6 — 2026-04-01
+
+### Bugfix: Immich-Tags auf Synology verloren (Wait-Logik verbessert)
+- Wartet jetzt explizit bis Immich **Tags aus der Datei gelesen** hat (nicht nur Thumbnail/EXIF)
+- Polling alle 3s, max 60s Timeout — reicht für langsame Systeme (Synology NAS)
+- v2.16.5 wartete nur auf `thumbhash`+`make`, was auf Synology zu früh auslöste
+
 ## v2.16.5 — 2026-04-01
 
 ### Bugfix: Immich-Tags gehen nach Upload verloren

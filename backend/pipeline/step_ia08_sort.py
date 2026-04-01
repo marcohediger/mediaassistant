@@ -18,19 +18,26 @@ _WHATSAPP_UUID_RE = re.compile(
 )
 
 
-async def _wait_for_immich_processing(asset_id: str, *, api_key: str | None = None, max_wait: int = 30):
-    """Wait until Immich finishes processing an asset (thumbnail + EXIF parsing)."""
-    for _ in range(max_wait // 2):
-        await asyncio.sleep(2)
+async def _wait_for_immich_tags(asset_id: str, *, api_key: str | None = None, max_wait: int = 60):
+    """Wait until Immich finishes reading tags from the uploaded file.
+
+    Polls until tags appear on the asset (meaning Immich has parsed TagsList
+    from the file) or until max_wait seconds elapse. On slower systems (e.g.
+    Synology NAS) this can take 10-30s.
+    """
+    for i in range(max_wait // 3):
+        await asyncio.sleep(3)
         info = await get_asset_info(asset_id, api_key=api_key)
-        if info and info.get("thumbhash") and info.get("exifInfo", {}).get("make"):
+        if info and info.get("tags"):
+            logger.info("Immich processed asset %s tags after %ds", asset_id, (i + 1) * 3)
             return info
+    logger.warning("Immich did not populate tags for %s within %ds", asset_id, max_wait)
     return await get_asset_info(asset_id, api_key=api_key)
 
 
 async def _tag_immich_asset(asset_id: str, tag_keywords: list[str], *, api_key: str | None = None) -> tuple[list, list]:
     """Tag an Immich asset, skipping tags that Immich already read from the file."""
-    info = await _wait_for_immich_processing(asset_id, api_key=api_key)
+    info = await _wait_for_immich_tags(asset_id, api_key=api_key)
     existing_tags = set()
     if info:
         existing_tags = {t["value"] for t in info.get("tags", [])}
