@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from config import config_manager
 from database import async_session
-from models import Module, InboxDirectory, SortingRule, LibraryCategory
+from models import Module, InboxDirectory, SortingRule, LibraryCategory, ImmichUser
 from system_logger import log_warning, log_info
 from template_engine import render
 
@@ -70,6 +70,8 @@ async def settings_page(request: Request):
         sorting_rules = rules_result.scalars().all()
         cats_result = await session.execute(select(LibraryCategory).order_by(LibraryCategory.position))
         library_categories = cats_result.scalars().all()
+        iu_result = await session.execute(select(ImmichUser).order_by(ImmichUser.id))
+        immich_users = iu_result.scalars().all()
 
     # Translate message key from query params
     msg_key = request.query_params.get("msg")
@@ -81,6 +83,9 @@ async def settings_page(request: Request):
         lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
         i18n = load_lang(lang)
         translated = i18n.get("settings", {}).get(msg_key, msg_key)
+        msg_detail = request.query_params.get("msg_detail")
+        if msg_detail:
+            translated = f"{translated}: {msg_detail}"
         if msg_type == "error":
             error = translated
         else:
@@ -92,6 +97,7 @@ async def settings_page(request: Request):
         "inboxes": inboxes,
         "sorting_rules": sorting_rules,
         "library_categories": library_categories,
+        "immich_users": immich_users,
         "success": success,
         "error": error,
     })
@@ -237,12 +243,14 @@ async def add_inbox(
         if existing.scalar():
             return RedirectResponse(url="/settings?msg=inbox_exists&msg_type=error", status_code=302)
 
+        immich_uid = form.get("inbox_immich_user_id", "")
         session.add(InboxDirectory(
             path=path,
             label=label,
             folder_tags="inbox_folder_tags" in form,
             dry_run="inbox_dry_run" in form,
             use_immich="inbox_use_immich" in form,
+            immich_user_id=int(immich_uid) if immich_uid else None,
             active=True,
         ))
         await session.commit()
@@ -269,6 +277,8 @@ async def update_inbox(request: Request, inbox_id: int):
         inbox.folder_tags = f"inbox_folder_tags_{inbox_id}" in form
         inbox.dry_run = f"inbox_dry_run_{inbox_id}" in form
         inbox.use_immich = f"inbox_use_immich_{inbox_id}" in form
+        immich_uid = form.get(f"inbox_immich_user_id_{inbox_id}", "")
+        inbox.immich_user_id = int(immich_uid) if immich_uid else None
         inbox.active = f"inbox_active_{inbox_id}" in form
         path = inbox.path
         label = inbox.label
@@ -439,3 +449,73 @@ async def delete_category(request: Request, cat_id: int):
         await session.commit()
 
     return RedirectResponse(url="/settings?msg=cat_deleted", status_code=302)
+
+
+# --- Immich Users ---
+
+@router.post("/immich-user/add")
+async def add_immich_user(request: Request):
+    form = await request.form()
+    label = form.get("iu_label", "").strip()
+    api_key_raw = form.get("iu_api_key", "").strip()
+
+    if not label or not api_key_raw:
+        return RedirectResponse(url="/settings?msg=iu_fields_required&msg_type=error", status_code=302)
+
+    fernet = await config_manager._get_fernet()
+    encrypted_key = fernet.encrypt(api_key_raw.encode()).decode()
+
+    async with async_session() as session:
+        session.add(ImmichUser(label=label, api_key=encrypted_key, active=True))
+        await session.commit()
+
+    await log_info("settings", f"Immich user added: {label}")
+    return RedirectResponse(url="/settings?msg=iu_added", status_code=302)
+
+
+@router.post("/immich-user/{user_id}/update")
+async def update_immich_user(request: Request, user_id: int):
+    form = await request.form()
+
+    async with async_session() as session:
+        user = await session.get(ImmichUser, user_id)
+        if not user:
+            return RedirectResponse(url="/settings?msg=iu_not_found&msg_type=error", status_code=302)
+
+        user.label = form.get("iu_label", user.label).strip()
+        user.active = f"iu_active_{user_id}" in form
+
+        new_key = form.get("iu_api_key", "").strip()
+        if new_key:
+            fernet = await config_manager._get_fernet()
+            user.api_key = fernet.encrypt(new_key.encode()).decode()
+
+        await session.commit()
+
+    return RedirectResponse(url="/settings?msg=iu_updated", status_code=302)
+
+
+@router.post("/immich-user/{user_id}/delete")
+async def delete_immich_user(request: Request, user_id: int):
+    async with async_session() as session:
+        user = await session.get(ImmichUser, user_id)
+        if user:
+            label = user.label
+            await session.delete(user)
+            await session.commit()
+            await log_info("settings", f"Immich user deleted: {label}")
+
+    return RedirectResponse(url="/settings?msg=iu_deleted", status_code=302)
+
+
+@router.post("/immich-user/{user_id}/test")
+async def test_immich_user(request: Request, user_id: int):
+    from immich_client import check_connection, get_user_api_key
+    key = await get_user_api_key(user_id)
+    if not key:
+        return RedirectResponse(url="/settings?msg=iu_not_found&msg_type=error", status_code=302)
+    ok, detail = await check_connection(api_key=key)
+    if ok:
+        from urllib.parse import quote
+        return RedirectResponse(url=f"/settings?msg=iu_test_ok&msg_detail={quote(detail)}", status_code=302)
+    return RedirectResponse(url=f"/settings?msg=iu_test_failed&msg_type=error", status_code=302)

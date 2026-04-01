@@ -213,7 +213,9 @@ async def _build_member(job, session) -> dict:
     if exists:
         img_info = await asyncio.to_thread(_get_image_info, filepath)
     elif immich_asset_id:
-        img_info = await _img_info_from_immich(immich_asset_id)
+        from immich_client import get_user_api_key as _guk
+        _ukey = await _guk(job.immich_user_id) if job.immich_user_id else None
+        img_info = await _img_info_from_immich(immich_asset_id, api_key=_ukey)
     else:
         img_info = _empty_img_info()
 
@@ -241,12 +243,12 @@ def _empty_img_info() -> dict:
     }
 
 
-async def _img_info_from_immich(asset_id: str) -> dict:
+async def _img_info_from_immich(asset_id: str, *, api_key: str | None = None) -> dict:
     """Fetch EXIF data from Immich API for an asset."""
     info = _empty_img_info()
     try:
         from immich_client import get_asset_info
-        data = await get_asset_info(asset_id)
+        data = await get_asset_info(asset_id, api_key=api_key)
         if not data:
             return info
 

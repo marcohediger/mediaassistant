@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import select
 from config import config_manager
 from safe_file import safe_move
-from immich_client import upload_asset, replace_asset, archive_asset, lock_asset, tag_asset
+from immich_client import upload_asset, replace_asset, archive_asset, lock_asset, tag_asset, get_user_api_key
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -190,6 +190,11 @@ async def _match_sorting_rules(filename: str, exif: dict, session, is_video: boo
 
 async def execute(job, session) -> dict:
     """IA-08: Datei in Zielordner verschieben."""
+    # Resolve per-user Immich API key (None = fallback to global)
+    user_api_key = None
+    if job.immich_user_id:
+        user_api_key = await get_user_api_key(job.immich_user_id)
+
     step_results = job.step_result or {}
     exif = step_results.get("IA-01", {})
     ai_result = step_results.get("IA-05", {})
@@ -313,13 +318,22 @@ async def execute(job, session) -> dict:
 
     # Route: Immich webhook (replace existing asset with tagged file)
     if job.immich_asset_id:
-        immich_result = await replace_asset(job.immich_asset_id, job.original_path)
+        immich_replaced = False
+        try:
+            await replace_asset(job.immich_asset_id, job.original_path, api_key=user_api_key)
+            immich_replaced = True
+        except RuntimeError as e:
+            # No write access — skip replace, continue with tagging
+            if "asset.update" in str(e) or "Not found" in str(e):
+                pass
+            else:
+                raise
         job.target_path = f"immich:{job.immich_asset_id}"
 
         # Tag the replaced asset in Immich
         for tag_name in tag_keywords:
             try:
-                await tag_asset(job.immich_asset_id, tag_name)
+                await tag_asset(job.immich_asset_id, tag_name, api_key=user_api_key)
             except Exception:
                 pass
 
@@ -327,7 +341,7 @@ async def execute(job, session) -> dict:
         immich_locked = False
         if ai_result.get("nsfw"):
             try:
-                await lock_asset(job.immich_asset_id)
+                await lock_asset(job.immich_asset_id, api_key=user_api_key)
                 immich_locked = True
             except Exception:
                 pass
@@ -337,7 +351,7 @@ async def execute(job, session) -> dict:
         should_archive = lib_cat.immich_archive if lib_cat else category in ("sourceless", "screenshot")
         if should_archive and not immich_locked:
             try:
-                await archive_asset(job.immich_asset_id)
+                await archive_asset(job.immich_asset_id, api_key=user_api_key)
                 immich_archived = True
             except Exception:
                 pass
@@ -347,7 +361,7 @@ async def execute(job, session) -> dict:
             "target_path": job.target_path,
             "moved": False,
             "immich_upload": False,
-            "immich_replace": True,
+            "immich_replace": immich_replaced,
             "immich_archived": immich_archived,
             "immich_locked": immich_locked,
             "immich_asset_id": job.immich_asset_id,
@@ -364,7 +378,7 @@ async def execute(job, session) -> dict:
                 if parts:
                     album_names = [" ".join(parts)]
 
-        immich_result = await upload_asset(job.original_path, album_names=album_names)
+        immich_result = await upload_asset(job.original_path, album_names=album_names, api_key=user_api_key)
 
         asset_id = immich_result.get("id", "")
 
@@ -373,7 +387,7 @@ async def execute(job, session) -> dict:
         if asset_id:
             for tag_name in tag_keywords:
                 try:
-                    await tag_asset(asset_id, tag_name)
+                    await tag_asset(asset_id, tag_name, api_key=user_api_key)
                     immich_tagged = True
                 except Exception:
                     pass  # non-critical
@@ -382,7 +396,7 @@ async def execute(job, session) -> dict:
         immich_locked = False
         if ai_result.get("nsfw") and asset_id:
             try:
-                await lock_asset(asset_id)
+                await lock_asset(asset_id, api_key=user_api_key)
                 immich_locked = True
             except Exception:
                 pass  # non-critical, older Immich versions may not support locked
@@ -391,7 +405,7 @@ async def execute(job, session) -> dict:
         immich_archived = False
         should_archive = lib_cat.immich_archive if lib_cat else category in ("sourceless", "screenshot")
         if should_archive and asset_id and not immich_locked:
-            await archive_asset(asset_id)
+            await archive_asset(asset_id, api_key=user_api_key)
             immich_archived = True
 
         # Remove source file after successful upload

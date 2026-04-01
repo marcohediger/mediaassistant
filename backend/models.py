@@ -24,6 +24,7 @@ class Job(Base):
     dry_run = Column(Boolean, default=False)  # dry-run mode (don't move/write)
     use_immich = Column(Boolean, default=False)  # upload to Immich instead of target directory
     immich_asset_id = Column(Text)  # source asset ID when processing via Immich webhook
+    immich_user_id = Column(Integer)  # FK to immich_users.id (for per-user API key)
     file_hash = Column(Text)  # SHA256
     phash = Column(Text)  # perceptual hash
     retry_count = Column(Integer, default=0)  # number of pipeline restart attempts
@@ -88,6 +89,17 @@ class LibraryCategory(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
 
 
+class ImmichUser(Base):
+    __tablename__ = "immich_users"
+
+    id = Column(Integer, primary_key=True)
+    label = Column(Text, nullable=False)
+    api_key = Column(Text, nullable=False)  # encrypted
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
 class InboxDirectory(Base):
     __tablename__ = "inbox_directories"
 
@@ -97,6 +109,7 @@ class InboxDirectory(Base):
     folder_tags = Column(Boolean, default=False)
     dry_run = Column(Boolean, default=False)
     use_immich = Column(Boolean, default=False)
+    immich_user_id = Column(Integer)  # FK to immich_users.id
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())

@@ -182,6 +182,7 @@ async def _scan_and_process():
                     source_inbox_path=inbox.path if inbox.folder_tags else None,
                     dry_run=inbox.dry_run,
                     use_immich=inbox.use_immich,
+                    immich_user_id=inbox.immich_user_id,
                     file_hash=file_hash,
                 )
                 session.add(job)
@@ -200,7 +201,9 @@ async def _scan_and_process():
 
 async def _poll_immich():
     """Poll Immich for new assets and process them through the pipeline."""
-    from immich_client import get_recent_assets, download_asset
+    import shutil
+    from immich_client import get_recent_assets, download_asset, get_immich_config, get_user_api_key
+    from models import ImmichUser
 
     # Get last poll timestamp
     last_poll = await config_manager.get("immich.last_poll", None)
@@ -212,101 +215,104 @@ async def _poll_immich():
         await log_info("immich_poll", "First activation — skipping existing assets, polling starts from now")
         return
 
-    try:
-        assets = await get_recent_assets(since=last_poll)
-    except Exception as e:
-        await log_error("immich_poll", f"Failed to fetch assets from Immich", str(e))
-        return
-
-    if not assets:
-        await config_manager.set("immich.last_poll", now)
-        return
-
-    # Filter out assets already processed
-    # Check by immich_asset_id AND by file_hash (catches replaced assets with new IDs)
-    asset_ids = [a["id"] for a in assets]
+    # Build list of (user_id | None, label, api_key) to poll
     async with async_session() as session:
-        existing_by_id = await session.execute(
-            select(Job.immich_asset_id).where(
-                Job.immich_asset_id.in_(asset_ids)
-            )
+        result = await session.execute(
+            select(ImmichUser).where(ImmichUser.active == True)
         )
-        already_by_id = {row[0] for row in existing_by_id.all()}
+        immich_users = result.scalars().all()
 
-        # Get file hashes from all Immich-sourced done jobs
+    user_keys: list[tuple[int | None, str, str]] = []
+    # Always poll with global API key
+    _, global_key = await get_immich_config()
+    if global_key:
+        user_keys.append((None, "Global", global_key))
+    # Additionally poll each configured Immich user
+    for u in immich_users:
+        key = await get_user_api_key(u.id)
+        if key:
+            user_keys.append((u.id, u.label, key))
+
+    if not user_keys:
+        return
+
+    # Pre-load already processed asset IDs and file hashes
+    async with async_session() as session:
+        existing_by_id_result = await session.execute(
+            select(Job.immich_asset_id).where(Job.immich_asset_id.isnot(None))
+        )
+        already_by_id = {row[0] for row in existing_by_id_result.all()}
+
         existing_hashes = await session.execute(
-            select(Job.file_hash).where(
+            select(Job.file_hash, Job.immich_user_id).where(
                 Job.source_label == "Immich",
                 Job.file_hash.isnot(None),
-                Job.status.in_(("done", "duplicate")),
             )
         )
-        processed_hashes = {row[0] for row in existing_hashes.all()}
+        processed_hashes_by_user: dict[int | None, set[str]] = {}
+        for row in existing_hashes.all():
+            processed_hashes_by_user.setdefault(row[1], set()).add(row[0])
 
-        # Also get file hashes from inbox-uploaded jobs (uploaded via use_immich)
-        uploaded_hashes = await session.execute(
-            select(Job.file_hash).where(
-                Job.use_immich == True,
-                Job.file_hash.isnot(None),
-                Job.status.in_(("done", "duplicate")),
-            )
-        )
-        processed_hashes.update(row[0] for row in uploaded_hashes.all())
-
-    new_assets = [a for a in assets if a["id"] not in already_by_id]
-    if not new_assets:
-        await config_manager.set("immich.last_poll", now)
-        return
-
-    await log_info("immich_poll", f"{len(new_assets)} new assets found in Immich")
-
-    # Process each new asset
-    for asset in new_assets:
-        asset_id = asset["id"]
-        filename = asset.get("originalFileName", f"{asset_id}.jpg")
-
-        # Check file extension
-        ext = os.path.splitext(filename)[1].lower()
-        if ext not in SUPPORTED_EXTENSIONS:
-            continue
-
-        # Download to temp directory
-        tmp_dir = tempfile.mkdtemp(prefix="ma_immich_")
+    # Poll each user
+    for user_id, user_label, api_key in user_keys:
         try:
-            file_path = await download_asset(asset_id, tmp_dir)
+            assets = await get_recent_assets(since=last_poll, api_key=api_key)
         except Exception as e:
-            await log_error("immich_poll", f"Download failed: {filename}", str(e))
-            # Clean up temp dir including any partial downloads
-            import shutil
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            await log_error("immich_poll", f"Failed for user {user_label}", str(e))
             continue
 
-        file_hash = await asyncio.to_thread(_sha256, file_path)
-
-        # Skip if this file was already processed (catches replaced assets with new IDs)
-        if file_hash in processed_hashes:
-            import shutil
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+        new_assets = [a for a in assets if a["id"] not in already_by_id]
+        if not new_assets:
             continue
 
-        async with async_session() as session:
-            debug_key = await _generate_debug_key(session)
-            job = Job(
-                filename=filename,
-                original_path=file_path,
-                debug_key=debug_key,
-                status="queued",
-                source_label="Immich",
-                use_immich=True,
-                immich_asset_id=asset_id,
-                file_hash=file_hash,
-            )
-            session.add(job)
-            await session.commit()
-            job_id = job.id
+        await log_info("immich_poll", f"{len(new_assets)} new assets for {user_label}")
 
-        await log_info("immich_poll", f"Processing: {filename}", f"Asset: {asset_id}, Key: {debug_key}")
-        await run_pipeline(job_id)
+        for asset in new_assets:
+            asset_id = asset["id"]
+            filename = asset.get("originalFileName", f"{asset_id}.jpg")
+
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                continue
+
+            tmp_dir = tempfile.mkdtemp(prefix="ma_immich_")
+            try:
+                file_path = await download_asset(asset_id, tmp_dir, api_key=api_key)
+            except Exception as e:
+                await log_error("immich_poll", f"Download failed: {filename}", str(e))
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                continue
+
+            file_hash = await asyncio.to_thread(_sha256, file_path)
+
+            user_hashes = processed_hashes_by_user.get(user_id, set())
+            if file_hash in user_hashes:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                continue
+
+            # Track this asset to avoid duplicates within the same poll cycle
+            already_by_id.add(asset_id)
+            processed_hashes_by_user.setdefault(user_id, set()).add(file_hash)
+
+            async with async_session() as session:
+                debug_key = await _generate_debug_key(session)
+                job = Job(
+                    filename=filename,
+                    original_path=file_path,
+                    debug_key=debug_key,
+                    status="queued",
+                    source_label="Immich",
+                    use_immich=True,
+                    immich_asset_id=asset_id,
+                    immich_user_id=user_id,
+                    file_hash=file_hash,
+                )
+                session.add(job)
+                await session.commit()
+                job_id = job.id
+
+            await log_info("immich_poll", f"Processing: {filename}", f"User: {user_label}, Asset: {asset_id}, Key: {debug_key}")
+            await run_pipeline(job_id)
 
     await config_manager.set("immich.last_poll", now)
 
