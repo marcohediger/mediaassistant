@@ -22,7 +22,7 @@ async def execute(job, session) -> dict:
     keywords = []
 
     # From folder structure (if inbox has folder_tags enabled)
-    if job.source_inbox_path:
+    if job.folder_tags and job.source_inbox_path:
         rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
         if rel and rel != ".":
             folder_parts = [p for p in rel.split(os.sep) if p and p != "."]

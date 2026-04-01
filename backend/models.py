@@ -20,7 +20,8 @@ class Job(Base):
     step_result = Column(JSON, default=dict)
     error_message = Column(Text)
     source_label = Column(Text)  # which inbox this came from
-    source_inbox_path = Column(Text)  # inbox base path (for folder_tags)
+    source_inbox_path = Column(Text)  # inbox base path (always set for cleanup)
+    folder_tags = Column(Boolean, default=False)  # generate tags/albums from folder structure
     dry_run = Column(Boolean, default=False)  # dry-run mode (don't move/write)
     use_immich = Column(Boolean, default=False)  # upload to Immich instead of target directory
     immich_asset_id = Column(Text)  # source asset ID when processing via Immich webhook

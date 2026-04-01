@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.17.0 — 2026-04-01
+
+### Synology-Kompatibilität & neue Features
+
+**Issue #11: Inbox-Ordner werden auf Synology nicht gelöscht**
+- `@eaDir` (Synology Metadaten), `.DS_Store` (macOS), `Thumbs.db` (Windows) werden beim Aufräumen ignoriert
+- Ordner mit nur diesen Systemdateien gelten als leer und werden gelöscht
+- Auch nach Duplikat-Erkennung (IA-02) werden leere Inbox-Ordner jetzt aufgeräumt
+- Filewatcher überspringt `@eaDir`, `.synology`, `#recycle` Verzeichnisse beim Scannen
+
+**Issue #12: Ordnertag generiert kein Album in Immich**
+- Album-Erstellung aus Inbox-Ordnerstruktur funktioniert jetzt auch im Webhook/Polling-Route
+- Bisher wurde `upload_asset` im Webhook-Pfad ohne `album_names` aufgerufen
+
+**Issue #13: Filter für Dateien die nicht verarbeitet werden sollen**
+- Neuer Zieltyp "Überspringen" in den Sortier-Regeln
+- Dateien die einer Skip-Regel entsprechen werden nicht verarbeitet und bleiben in der Inbox
+- Übersprungene Dateien werden beim nächsten Scan nicht erneut aufgenommen
+- Im UI als "⛔ Überspringen (nicht verarbeiten)" auswählbar (DE/EN)
+
+**Issue #14: PNG-Bilder im Archiv nicht in Immich sichtbar**
+- Fallback-Archiv-Logik für Kategorien ohne DB-Eintrag korrigiert: erkennt jetzt `sourceless_foto`/`sourceless_video` korrekt (vorher nur `sourceless`)
+
 ## v2.16.6 — 2026-04-01
 
 ### Bugfix: Immich-Tags auf Synology verloren (Wait-Logik verbessert)

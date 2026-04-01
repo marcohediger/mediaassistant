@@ -50,9 +50,34 @@ async def run_pipeline(job_id: int):
 
         # Main pipeline steps (IA-01 to IA-08)
         duplicate_detected = False
+        early_skip = False
         for step_code, step_fn in MAIN_STEPS:
             if step_code in existing_results:
                 continue
+
+            # Early skip check: after IA-01, evaluate sorting rules to detect
+            # "skip" targets BEFORE IA-07 writes tags (which changes the hash
+            # and would cause infinite re-processing loops).
+            if step_code == "IA-02" and not early_skip:
+                try:
+                    from pipeline.step_ia08_sort import _match_sorting_rules
+                    exif = existing_results.get("IA-01", {})
+                    file_type = (exif.get("file_type") or "").upper()
+                    mime = exif.get("mime_type", "")
+                    is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
+                    rule_cat = await _match_sorting_rules(
+                        os.path.basename(job.original_path), exif, session, is_video=is_video
+                    )
+                    if rule_cat == "skip":
+                        job.status = "skipped"
+                        existing_results["IA-08"] = {"status": "skipped", "reason": "excluded by sorting rule (early check)"}
+                        job.step_result = existing_results
+                        flag_modified(job, "step_result")
+                        await session.commit()
+                        early_skip = True
+                        break
+                except Exception as e:
+                    logger.warning("Early skip check failed: %s", e)
 
             job.current_step = step_code
             await session.commit()
@@ -67,6 +92,10 @@ async def run_pipeline(job_id: int):
                 # IA-02: If duplicate detected, skip remaining main steps
                 if step_code == "IA-02" and isinstance(result, dict) and result.get("status") == "duplicate":
                     duplicate_detected = True
+                    break
+
+                # IA-08: If file excluded by sorting rule, skip remaining steps
+                if step_code == "IA-08" and job.status == "skipped":
                     break
 
                 # Post-IA-04: Video pHash duplicate check (frames now available)
@@ -138,7 +167,10 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
 
-        if not pipeline_failed and not duplicate_detected:
+        if job.status == "skipped":
+            job.completed_at = datetime.now()
+            await session.commit()
+        elif not pipeline_failed and not duplicate_detected:
             # Check if any non-critical steps had errors
             has_step_errors = any(
                 isinstance(r, dict) and r.get("status") == "error"

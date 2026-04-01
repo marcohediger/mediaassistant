@@ -540,6 +540,7 @@
                     <div class="field-group">
                         <span class="field-label">{{ t.settings.sorting_rules_target }}</span>
                         <select data-rule="target" style="width: auto; height: 2.4rem;">
+                            <option value="skip" {{ 'selected' if rule.target_category == 'skip' else '' }}>⛔ {{ t.settings.rule_skip | default('Überspringen') }}</option>
                             {% for cat in library_categories %}
                             <option value="{{ cat.key }}" {{ 'selected' if rule.target_category == cat.key else '' }}>{{ cat.label }}</option>
                             {% endfor %}
@@ -596,6 +597,7 @@
                     <div class="field-group">
                         <span class="field-label">{{ t.settings.sorting_rules_target }}</span>
                         <select id="new_rule_target" style="width: auto; height: 2.4rem;">
+                            <option value="skip">⛔ {{ t.settings.rule_skip | default('Überspringen') }}</option>
                             {% for cat in library_categories %}
                             <option value="{{ cat.key }}">{{ cat.label }}</option>
                             {% endfor %}

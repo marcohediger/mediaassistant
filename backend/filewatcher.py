@@ -44,6 +44,9 @@ async def _generate_debug_key(session) -> str:
     return f"{prefix}{counter:04d}"
 
 
+_SKIP_DIRS = {"@eadir", ".synology", "#recycle"}
+
+
 def _scan_directory(path: str, min_age: float) -> list[str]:
     """Scan directory for supported media files that are stable (not being written)."""
     files = []
@@ -59,6 +62,8 @@ def _scan_directory(path: str, min_age: float) -> list[str]:
                     if now - stat.st_mtime > min_age:
                         files.append((entry.path, stat.st_size))
             elif entry.is_dir():
+                if entry.name.lower() in _SKIP_DIRS:
+                    continue
                 files.extend(_scan_directory(entry.path, min_age))
     except PermissionError:
         pass
@@ -118,12 +123,18 @@ async def _scan_and_process():
                 # Core rule: if the source file is still at its original
                 # inbox path, it was never moved — always re-process it
                 # (IA-02 will handle duplicate detection).
-                # Exception: dry-run jobs intentionally leave the file in place.
-                if not dry_run and os.path.exists(path):
+                # Exception: dry-run and skipped jobs intentionally leave the file in place.
+                if not dry_run and status != "skipped" and os.path.exists(path):
                     continue
 
                 # Dry-run jobs: always skip (file stays in inbox by design)
                 if dry_run and status in ("done", "duplicate"):
+                    done_hashes.add((path, fhash))
+                    continue
+                # Skipped jobs: file stays in inbox, never re-process.
+                # Track both the original hash AND the current file hash
+                # (IA-07 may have written tags before skip, changing the hash).
+                if status == "skipped":
                     done_hashes.add((path, fhash))
                     continue
                 # Duplicate jobs: file was moved to duplicates/ → skip
@@ -179,7 +190,8 @@ async def _scan_and_process():
                     debug_key=debug_key,
                     status="queued",
                     source_label=inbox.label,
-                    source_inbox_path=inbox.path if inbox.folder_tags else None,
+                    source_inbox_path=inbox.path,
+                    folder_tags=inbox.folder_tags,
                     dry_run=inbox.dry_run,
                     use_immich=inbox.use_immich,
                     immich_user_id=inbox.immich_user_id,
