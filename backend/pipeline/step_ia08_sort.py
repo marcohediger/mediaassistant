@@ -9,13 +9,46 @@ logger = logging.getLogger("mediaassistant.pipeline.ia08")
 from sqlalchemy import select
 from config import config_manager
 from safe_file import safe_move
-from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, get_user_api_key
+from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, get_asset_info, get_user_api_key
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\w+$",
     re.IGNORECASE,
 )
+
+
+async def _wait_for_immich_processing(asset_id: str, *, api_key: str | None = None, max_wait: int = 30):
+    """Wait until Immich finishes processing an asset (thumbnail + EXIF parsing)."""
+    for _ in range(max_wait // 2):
+        await asyncio.sleep(2)
+        info = await get_asset_info(asset_id, api_key=api_key)
+        if info and info.get("thumbhash") and info.get("exifInfo", {}).get("make"):
+            return info
+    return await get_asset_info(asset_id, api_key=api_key)
+
+
+async def _tag_immich_asset(asset_id: str, tag_keywords: list[str], *, api_key: str | None = None) -> tuple[list, list]:
+    """Tag an Immich asset, skipping tags that Immich already read from the file."""
+    info = await _wait_for_immich_processing(asset_id, api_key=api_key)
+    existing_tags = set()
+    if info:
+        existing_tags = {t["value"] for t in info.get("tags", [])}
+
+    missing = [t for t in tag_keywords if t not in existing_tags]
+    tags_written = []
+    tags_failed = []
+    for tag_name in missing:
+        try:
+            await tag_asset(asset_id, tag_name, api_key=api_key)
+            tags_written.append(tag_name)
+        except Exception as exc:
+            tags_failed.append(tag_name)
+            logger.warning("Failed to tag asset %s with '%s': %s", asset_id, tag_name, exc)
+
+    # Include pre-existing tags in written list for reporting
+    already = [t for t in tag_keywords if t in existing_tags]
+    return already + tags_written, tags_failed
 
 
 def _parse_date(date_str: str) -> datetime | None:
@@ -374,19 +407,10 @@ async def execute(job, session) -> dict:
                 raise
         job.target_path = f"immich:{job.immich_asset_id}"
 
-        # Tag the replaced asset in Immich
-        tags_written = []
-        tags_failed = []
-        for tag_name in tag_keywords:
-            try:
-                await tag_asset(job.immich_asset_id, tag_name, api_key=user_api_key)
-                tags_written.append(tag_name)
-            except Exception as exc:
-                tags_failed.append(tag_name)
-                logger.warning(
-                    "Failed to tag asset %s with '%s': %s",
-                    job.immich_asset_id, tag_name, exc,
-                )
+        # Tag the replaced asset in Immich (wait for processing, skip existing)
+        tags_written, tags_failed = await _tag_immich_asset(
+            job.immich_asset_id, tag_keywords, api_key=user_api_key
+        )
 
         # NSFW: move to locked folder
         immich_locked = False
@@ -441,20 +465,13 @@ async def execute(job, session) -> dict:
 
         asset_id = immich_result.get("id", "")
 
-        # Tag asset in Immich: category label + AI type
+        # Tag asset in Immich (wait for processing, skip existing)
         tags_written = []
         tags_failed = []
         if asset_id:
-            for tag_name in tag_keywords:
-                try:
-                    await tag_asset(asset_id, tag_name, api_key=user_api_key)
-                    tags_written.append(tag_name)
-                except Exception as exc:
-                    tags_failed.append(tag_name)
-                    logger.warning(
-                        "Failed to tag asset %s with '%s': %s",
-                        asset_id, tag_name, exc,
-                    )
+            tags_written, tags_failed = await _tag_immich_asset(
+                asset_id, tag_keywords, api_key=user_api_key
+            )
 
         # NSFW: move to locked folder in Immich
         immich_locked = False

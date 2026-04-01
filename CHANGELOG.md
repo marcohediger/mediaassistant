@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.16.5 — 2026-04-01
+
+### Bugfix: Immich-Tags gehen nach Upload verloren
+- IA-08 wartet jetzt bis Immich das Asset fertig verarbeitet hat (Thumbnail + EXIF), bevor Tags per API gesetzt werden
+- Tags die Immich bereits aus der Datei (`TagsList`) gelesen hat, werden nicht nochmal per API gesetzt — keine Duplikate
+- Ursache: Immich's Hintergrund-Verarbeitung überschrieb Tag-Zuordnungen die zu früh nach dem Upload gesetzt wurden
+
 ## v2.16.4 — 2026-04-01
 
 ### Bugfix: pHash-Berechnung für HEIC/HEIF
