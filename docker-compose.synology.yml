@@ -26,6 +26,8 @@ services:
       - mediaassistant-data:/app/data
       - ${INBOX_PATH}:/inbox
       - ${UPLOAD_LOCATION}:/library
+    env_file:
+      - .env
     environment:
       - DATABASE_PATH=/app/data/mediaassistant.db
       - INBOX_PATH=/inbox

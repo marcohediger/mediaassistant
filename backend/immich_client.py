@@ -176,10 +176,10 @@ async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None)
             tags = list_resp.json() if list_resp.status_code == 200 else []
             tag_id = next((t["id"] for t in tags if t.get("name") == tag_name), None)
         else:
-            return {"status": "error", "detail": f"Create tag failed: HTTP {resp.status_code}"}
+            raise RuntimeError(f"Create tag '{tag_name}' failed: HTTP {resp.status_code} — {resp.text[:200]}")
 
         if not tag_id:
-            return {"status": "error", "detail": f"Tag '{tag_name}' not found after creation"}
+            raise RuntimeError(f"Tag '{tag_name}' not found after creation")
 
         # Assign tag to asset
         resp = await client.put(

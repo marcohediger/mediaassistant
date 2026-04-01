@@ -4,8 +4,15 @@ import os
 import subprocess
 
 
+WRITABLE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".webp", ".heic", ".heif", ".dng"}
+
+
 async def execute(job, session) -> dict:
     """IA-07: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben."""
+    ext = os.path.splitext(job.original_path)[1].lower()
+    if ext not in WRITABLE_EXTENSIONS:
+        return {"status": "skipped", "reason": f"format {ext} not supported for in-place tag writing"}
+
     step_results = job.step_result or {}
     ai_result = step_results.get("IA-05", {})
     ocr_result = step_results.get("IA-06", {})

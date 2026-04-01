@@ -288,13 +288,33 @@ async def execute(job, session) -> dict:
     filename = os.path.basename(job.original_path)
     target_path = os.path.join(target_dir, filename)
 
-    # If file already exists, append counter
+    # If file already exists, decide: overwrite (same photo) or rename (different photo)
+    overwrite_existing = False
     if os.path.exists(target_path):
-        name, ext = os.path.splitext(filename)
-        counter = 1
-        while os.path.exists(target_path):
-            target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
-            counter += 1
+        from safe_file import _sha256
+        existing_size = os.path.getsize(target_path)
+        source_size = os.path.getsize(job.original_path)
+
+        # Same name + same size → likely same photo with updated tags → overwrite
+        if source_size == existing_size:
+            overwrite_existing = True
+            logger.info("File exists with same size, overwriting with updated metadata: %s", filename)
+        else:
+            # Check if it's the same base image (size may differ due to metadata changes)
+            # Same name in same folder → probably same photo re-processed → overwrite
+            existing_hash = await asyncio.to_thread(_sha256, target_path)
+            source_hash = await asyncio.to_thread(_sha256, job.original_path)
+            if existing_hash == source_hash:
+                overwrite_existing = True
+                logger.info("File exists with same hash, overwriting: %s", filename)
+            else:
+                # Different content → append counter
+                name, ext = os.path.splitext(filename)
+                counter = 1
+                while os.path.exists(target_path):
+                    target_path = os.path.join(target_dir, f"{name}+{counter}{ext}")
+                    counter += 1
+                logger.info("File exists with different content, saving as: %s", os.path.basename(target_path))
 
     # All EXIF keywords are written by IA-07 (type, tags, source, geo, folder tags).
     # Build tag list for Immich tagging (category label + all IA-07 keywords).
@@ -465,6 +485,10 @@ async def execute(job, session) -> dict:
 
     # Move file to library (safe: copy → verify → delete)
     await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
+    if overwrite_existing:
+        # Remove old file first, then move the updated one in
+        await asyncio.to_thread(os.remove, target_path)
+        logger.info("Removed old file for overwrite: %s", target_path)
     await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
 
     # Clean up empty parent directories in inbox (up to inbox root)
