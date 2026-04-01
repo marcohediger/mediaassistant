@@ -73,9 +73,7 @@ SMTP_RECIPIENT=user@example.com
 TZ=Europe/Zurich
 ```
 
-Environment variables are imported into the database on first start. After that, all settings can be changed via the web interface.
-
-**All supported environment variables:**
+The following environment variables are imported into the database on first start. After that, all settings can be changed via the web interface.
 
 | Variable | Description |
 |----------|-------------|
@@ -103,7 +101,12 @@ Environment variables are imported into the database on first start. After that,
 | `OCR_MODE` | OCR mode (smart/all) |
 | `PHASH_THRESHOLD` | Duplicate detection pHash threshold |
 | `SETUP_COMPLETE` | Skip setup wizard (true/false) |
-| `AUTH_MODE` | Authentication mode: `disabled` or `oidc` (see [Authentication](#authentication-sso)) |
+
+Die folgenden Variablen werden **nicht** in die Datenbank importiert, sondern direkt beim Start gelesen (siehe [Authentication](#authentication-sso)):
+
+| Variable | Description |
+|----------|-------------|
+| `AUTH_MODE` | Authentication mode: `disabled` (default) or `oidc` |
 | `OIDC_ISSUER` | SSO server URL |
 | `OIDC_CLIENT_ID` | Application/Client ID |
 | `OIDC_CLIENT_SECRET` | Client secret |
