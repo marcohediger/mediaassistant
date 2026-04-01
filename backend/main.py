@@ -35,15 +35,22 @@ async def lifespan(app: FastAPI):
 
 
 from version import VERSION
-from auth import SSOAuthMiddleware
+from auth import AuthMiddleware, AUTH_MODE, get_session_secret
+from routers import auth_oidc
 
 app = FastAPI(title="MediaAssistant", version=VERSION, lifespan=lifespan)
 
-# SSO authentication middleware (must be registered before routers)
-app.add_middleware(SSOAuthMiddleware)
+# Middleware order: last added = runs first
+# 1) Auth middleware checks session/headers (runs second)
+app.add_middleware(AuthMiddleware)
+# 2) Session middleware provides request.session (runs first, needed by auth)
+if AUTH_MODE == "oidc":
+    from starlette.middleware.sessions import SessionMiddleware
+    app.add_middleware(SessionMiddleware, secret_key=get_session_secret())
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+app.include_router(auth_oidc.router)
 app.include_router(dashboard.router)
 app.include_router(setup.router)
 app.include_router(settings.router)

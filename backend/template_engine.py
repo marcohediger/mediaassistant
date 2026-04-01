@@ -5,6 +5,7 @@ from fastapi.templating import Jinja2Templates
 from i18n import load_lang, get_section, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE
 from config import config_manager
 from version import VERSION, VERSION_DATE
+from auth import AUTH_MODE
 
 templates = Jinja2Templates(directory="templates")
 
@@ -40,6 +41,7 @@ async def render(request: Request, template: str, context: dict = None) -> templ
         "sso_user": sso_user,
         "sso_user_name": sso_user_name,
         "sso_user_email": sso_user_email,
+        "auth_mode": AUTH_MODE,
     }
     if context:
         ctx.update(context)
