@@ -9,7 +9,7 @@ logger = logging.getLogger("mediaassistant.pipeline.ia08")
 from sqlalchemy import select
 from config import config_manager
 from safe_file import safe_move
-from immich_client import upload_asset, replace_asset, trigger_storage_migration, archive_asset, lock_asset, tag_asset, get_user_api_key
+from immich_client import upload_asset, replace_asset, archive_asset, lock_asset, tag_asset, get_user_api_key
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -345,11 +345,6 @@ async def execute(job, session) -> dict:
         try:
             await replace_asset(job.immich_asset_id, job.original_path, api_key=user_api_key)
             immich_replaced = True
-            # Trigger storage migration to fix file path (+1 suffix) after replace
-            try:
-                await trigger_storage_migration(api_key=user_api_key)
-            except Exception as exc:
-                logger.warning("Failed to trigger storage migration for %s: %s", job.immich_asset_id, exc)
         except RuntimeError as e:
             # No write access — skip replace, continue with tagging
             if "asset.update" in str(e) or "Not found" in str(e):
