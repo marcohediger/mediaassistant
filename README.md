@@ -112,6 +112,7 @@ Die folgenden Variablen werden **nicht** in die Datenbank importiert, sondern di
 | `OIDC_CLIENT_SECRET` | Client secret |
 | `OIDC_REDIRECT_URI` | Callback URL (auto-derived if omitted) |
 | `OIDC_SCOPES` | OIDC scopes (default: openid profile email) |
+| `OIDC_ALLOWED_USERS` | Comma-separated list of allowed usernames/emails (empty = all SSO users allowed) |
 | `SESSION_SECRET` | Cookie signing secret (auto-generated if omitted) |
 | `SESSION_LIFETIME_HOURS` | Session duration in hours (default: 8) |
 
@@ -384,6 +385,7 @@ MediaAssistant redirects to your SSO server for login and receives identity clai
 | `OIDC_CLIENT_SECRET` | *(required)* | Client secret from SSO provider |
 | `OIDC_REDIRECT_URI` | *(auto)* | Callback URL (e.g. `https://media.example.com/auth/callback`) |
 | `OIDC_SCOPES` | `openid profile email` | OIDC scopes to request |
+| `OIDC_ALLOWED_USERS` | *(empty)* | Comma-separated list of allowed usernames/emails. If empty, all authenticated SSO users are allowed |
 | `SESSION_SECRET` | *(auto-generated)* | Secret for signing session cookies |
 | `SESSION_LIFETIME_HOURS` | `8` | Session duration in hours |
 
@@ -409,6 +411,7 @@ services:
       - OIDC_CLIENT_ID=mediaassistant
       - OIDC_CLIENT_SECRET=your-secret-here
       - OIDC_REDIRECT_URI=https://media.example.com/auth/callback
+      - OIDC_ALLOWED_USERS=user@example.com,admin@example.com
 ```
 
 #### Example: Keycloak
@@ -425,12 +428,14 @@ environment:
 ### Login Flow
 
 1. User opens MediaAssistant → redirected to `/auth/login`
-2. `/auth/login` redirects to SSO provider login page
-3. User authenticates at SSO provider
-4. SSO provider redirects back to `/auth/callback` with auth code
-5. MediaAssistant exchanges code for tokens, extracts username/email
-6. Session cookie is set, user is redirected to the app
-7. Logout via ✕ button in navbar → clears session, redirects to SSO logout
+2. User sees a branded login page with a **"Mit SSO anmelden"** button (not an immediate redirect)
+3. User clicks the button → redirected to SSO provider login page
+4. User authenticates at SSO provider
+5. SSO provider redirects back to `/auth/callback` with auth code
+6. MediaAssistant exchanges code for tokens, extracts username/email
+7. If `OIDC_ALLOWED_USERS` is set, the username/email is checked against the allowlist — unauthorized users see an error
+8. Session cookie is set, user is redirected to the app
+9. Logout via ✕ button in navbar → clears session, redirects to SSO logout
 
 ### Exempt paths
 

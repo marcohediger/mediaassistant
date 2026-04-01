@@ -27,6 +27,9 @@ OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "")
 OIDC_CLIENT_SECRET = os.environ.get("OIDC_CLIENT_SECRET", "")
 OIDC_REDIRECT_URI = os.environ.get("OIDC_REDIRECT_URI", "")
 OIDC_SCOPES = os.environ.get("OIDC_SCOPES", "openid profile email")
+OIDC_ALLOWED_USERS = [
+    u.strip() for u in os.environ.get("OIDC_ALLOWED_USERS", "").split(",") if u.strip()
+]
 SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", "8"))
 
 # Session secret (for cookie signing)
