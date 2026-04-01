@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -288,36 +289,45 @@ async def download_asset(asset_id: str, target_path: str, *, api_key: str | None
     return file_path
 
 
-async def replace_asset(asset_id: str, file_path: str, *, api_key: str | None = None) -> dict:
-    """Replace the original file of an Immich asset with the tagged version."""
+async def copy_asset_metadata(from_id: str, to_id: str, *, api_key: str | None = None) -> dict:
+    """Copy metadata (albums, favorites, faces, stacks, shared links) from one asset to another."""
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
-    filename = os.path.basename(file_path)
-    stat = os.stat(file_path)
-    headers = {"x-api-key": api_key}
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"{url}/api/assets/copy",
+            headers=headers,
+            json={"from": from_id, "to": to_id},
+        )
 
-    # Stream file directly from disk — avoids loading entire file into RAM
-    timeout = httpx.Timeout(connect=10, read=120, write=300, pool=10)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        with open(file_path, "rb") as f:
-            resp = await client.put(
-                f"{url}/api/assets/{asset_id}/original",
-                headers=headers,
-                data={
-                    "deviceAssetId": f"mediaassistant-{asset_id}",
-                    "deviceId": "MediaAssistant",
-                    "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                    "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                },
-                files={"assetData": (filename, f)},
-            )
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"Immich copy metadata failed: HTTP {resp.status_code} — {resp.text[:200]}")
 
-    if resp.status_code not in (200, 201):
-        raise RuntimeError(f"Immich replace failed: HTTP {resp.status_code} — {resp.text[:200]}")
+    return {"status": "copied", "from": from_id, "to": to_id}
 
-    return resp.json()
+
+async def delete_asset(asset_id: str, *, force: bool = True, api_key: str | None = None) -> dict:
+    """Delete an asset from Immich. force=True skips trash."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.request(
+            "DELETE",
+            f"{url}/api/assets",
+            headers=headers,
+            content=json.dumps({"ids": [asset_id], "force": force}),
+        )
+
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"Immich delete failed: HTTP {resp.status_code} — {resp.text[:200]}")
+
+    return {"status": "deleted", "asset_id": asset_id}
 
 
 async def _search_assets_for_type(
