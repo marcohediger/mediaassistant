@@ -103,18 +103,14 @@ Environment variables are imported into the database on first start. After that,
 | `OCR_MODE` | OCR mode (smart/all) |
 | `PHASH_THRESHOLD` | Duplicate detection pHash threshold |
 | `SETUP_COMPLETE` | Skip setup wizard (true/false) |
-| `AUTH_MODE` | Authentication mode: `disabled`, `header`, `oidc` (see [Authentication](#authentication-sso)) |
-| `AUTH_ENABLED` | Legacy: `true` = header mode (use `AUTH_MODE` instead) |
-| `AUTH_HEADER` | Header mode: header name (default: Remote-User) |
-| `AUTH_HEADER_NAME` | Header mode: optional display name header |
-| `AUTH_HEADER_EMAIL` | Header mode: optional email header |
-| `OIDC_ISSUER` | OIDC mode: SSO server URL |
-| `OIDC_CLIENT_ID` | OIDC mode: Application/Client ID |
-| `OIDC_CLIENT_SECRET` | OIDC mode: Client secret |
-| `OIDC_REDIRECT_URI` | OIDC mode: Callback URL (auto-derived if omitted) |
-| `OIDC_SCOPES` | OIDC mode: Scopes (default: openid profile email) |
-| `SESSION_SECRET` | OIDC mode: Cookie signing secret (auto-generated if omitted) |
-| `SESSION_LIFETIME_HOURS` | OIDC mode: Session duration (default: 8) |
+| `AUTH_MODE` | Authentication mode: `disabled` or `oidc` (see [Authentication](#authentication-sso)) |
+| `OIDC_ISSUER` | SSO server URL |
+| `OIDC_CLIENT_ID` | Application/Client ID |
+| `OIDC_CLIENT_SECRET` | Client secret |
+| `OIDC_REDIRECT_URI` | Callback URL (auto-derived if omitted) |
+| `OIDC_SCOPES` | OIDC scopes (default: openid profile email) |
+| `SESSION_SECRET` | Cookie signing secret (auto-generated if omitted) |
+| `SESSION_LIFETIME_HOURS` | Session duration in hours (default: 8) |
 
 ### Start (Production)
 
@@ -364,23 +360,18 @@ After moving a file from an inbox, empty parent directories are automatically cl
 
 ## Authentication (SSO)
 
-MediaAssistant supports two authentication modes, configured via the `AUTH_MODE` environment variable:
+MediaAssistant supports OIDC/OAuth2 authentication via SSO server, configured via the `AUTH_MODE` environment variable:
 
 | `AUTH_MODE` | Description |
 |-------------|-------------|
 | `disabled` | No authentication (default) |
-| `header` | Reverse-proxy header-based SSO |
 | `oidc` | Full OIDC/OAuth2 login via SSO server |
 
-> **Backward compatible:** Setting `AUTH_ENABLED=true` without `AUTH_MODE` defaults to `header` mode.
-
-### Mode 1: OIDC (recommended)
-
-Full OAuth2/OIDC Authorization Code flow. MediaAssistant redirects to your SSO server for login and receives identity claims via secure token exchange.
+MediaAssistant redirects to your SSO server for login and receives identity claims via secure token exchange.
 
 **Supported providers:** Authentik, Keycloak, Authelia, any OIDC-compliant provider.
 
-#### Configuration
+### Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -428,7 +419,7 @@ environment:
   - OIDC_REDIRECT_URI=https://media.example.com/auth/callback
 ```
 
-#### Login Flow
+### Login Flow
 
 1. User opens MediaAssistant → redirected to `/auth/login`
 2. `/auth/login` redirects to SSO provider login page
@@ -437,29 +428,6 @@ environment:
 5. MediaAssistant exchanges code for tokens, extracts username/email
 6. Session cookie is set, user is redirected to the app
 7. Logout via ✕ button in navbar → clears session, redirects to SSO logout
-
-### Mode 2: Header-based (reverse proxy)
-
-For setups where a reverse proxy (Authelia, Authentik proxy, Traefik Forward Auth) handles authentication and forwards user identity via HTTP headers.
-
-#### Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AUTH_MODE` | `disabled` | Set to `header` (or `AUTH_ENABLED=true`) |
-| `AUTH_HEADER` | `Remote-User` | Header containing the username |
-| `AUTH_HEADER_NAME` | *(empty)* | Optional display name header |
-| `AUTH_HEADER_EMAIL` | *(empty)* | Optional email header |
-
-#### Example
-
-```yaml
-environment:
-  - AUTH_MODE=header
-  - AUTH_HEADER=Remote-User
-  - AUTH_HEADER_NAME=X-Forwarded-Name
-  - AUTH_HEADER_EMAIL=X-Forwarded-Email
-```
 
 ### Exempt paths
 
