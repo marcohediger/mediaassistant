@@ -6,7 +6,10 @@ from datetime import datetime
 
 import imagehash
 from PIL import Image
+from pillow_heif import register_heif_opener
 from sqlalchemy import select
+
+register_heif_opener()
 
 from config import config_manager
 from models import Job
@@ -24,8 +27,8 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp"}
 def _compute_phash(filepath: str) -> str | None:
     """Compute perceptual hash for an image file.
 
-    For RAW formats (DNG, CR2, NEF, ARW) that Pillow cannot open natively,
-    the embedded PreviewImage is extracted via ExifTool and used instead.
+    HEIC/HEIF is supported via pillow-heif. For RAW formats (DNG, CR2, NEF, ARW)
+    the embedded PreviewImage is extracted via ExifTool as fallback.
     """
     ext = os.path.splitext(filepath)[1].lower()
     if ext not in IMAGE_EXTENSIONS:
