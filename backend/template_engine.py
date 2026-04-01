@@ -24,6 +24,11 @@ async def render(request: Request, template: str, context: dict = None) -> templ
     lang = ui["lang"]
     i18n = load_lang(lang)
 
+    # Extract SSO user from request.state (set by SSOAuthMiddleware)
+    sso_user = getattr(request.state, "user", None)
+    sso_user_name = getattr(request.state, "user_name", "") or ""
+    sso_user_email = getattr(request.state, "user_email", "") or ""
+
     ctx = {
         "request": request,
         "t": i18n,
@@ -32,6 +37,9 @@ async def render(request: Request, template: str, context: dict = None) -> templ
         "supported_languages": SUPPORTED_LANGUAGES,
         "version": VERSION,
         "version_date": VERSION_DATE,
+        "sso_user": sso_user,
+        "sso_user_name": sso_user_name,
+        "sso_user_email": sso_user_email,
     }
     if context:
         ctx.update(context)

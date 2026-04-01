@@ -1,7 +1,10 @@
 import httpx
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse
+from sqlalchemy import select
 from config import config_manager
+from database import async_session
+from models import InboxDirectory
 from template_engine import render
 
 router = APIRouter(prefix="/setup")
@@ -106,7 +109,22 @@ async def setup_step2_save(
 
 
 @router.post("/step/3")
-async def setup_step3_save(request: Request):
+async def setup_step3_save(
+    request: Request,
+    library_path: str = Form(...),
+    inbox_path: str = Form(...),
+):
+    await config_manager.set("library.base_path", library_path)
+
+    async with async_session() as session:
+        existing = await session.execute(select(InboxDirectory))
+        if not existing.scalar():
+            session.add(InboxDirectory(
+                path=inbox_path,
+                label="Default Inbox",
+            ))
+            await session.commit()
+
     return RedirectResponse(url="/setup/step/4", status_code=302)
 
 
