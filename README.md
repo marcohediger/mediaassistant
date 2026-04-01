@@ -103,10 +103,18 @@ Environment variables are imported into the database on first start. After that,
 | `OCR_MODE` | OCR mode (smart/all) |
 | `PHASH_THRESHOLD` | Duplicate detection pHash threshold |
 | `SETUP_COMPLETE` | Skip setup wizard (true/false) |
-| `AUTH_ENABLED` | Enable SSO authentication (see [Authentication](#authentication-sso)) |
-| `AUTH_HEADER` | SSO header name (default: Remote-User) |
-| `AUTH_HEADER_NAME` | Optional display name header |
-| `AUTH_HEADER_EMAIL` | Optional email header |
+| `AUTH_MODE` | Authentication mode: `disabled`, `header`, `oidc` (see [Authentication](#authentication-sso)) |
+| `AUTH_ENABLED` | Legacy: `true` = header mode (use `AUTH_MODE` instead) |
+| `AUTH_HEADER` | Header mode: header name (default: Remote-User) |
+| `AUTH_HEADER_NAME` | Header mode: optional display name header |
+| `AUTH_HEADER_EMAIL` | Header mode: optional email header |
+| `OIDC_ISSUER` | OIDC mode: SSO server URL |
+| `OIDC_CLIENT_ID` | OIDC mode: Application/Client ID |
+| `OIDC_CLIENT_SECRET` | OIDC mode: Client secret |
+| `OIDC_REDIRECT_URI` | OIDC mode: Callback URL (auto-derived if omitted) |
+| `OIDC_SCOPES` | OIDC mode: Scopes (default: openid profile email) |
+| `SESSION_SECRET` | OIDC mode: Cookie signing secret (auto-generated if omitted) |
+| `SESSION_LIFETIME_HOURS` | OIDC mode: Session duration (default: 8) |
 
 ### Start (Production)
 
@@ -356,61 +364,114 @@ After moving a file from an inbox, empty parent directories are automatically cl
 
 ## Authentication (SSO)
 
-MediaAssistant supports header-based SSO authentication for reverse proxy setups (Authelia, Authentik, Traefik Forward Auth, Synology Reverse Proxy, etc.).
+MediaAssistant supports two authentication modes, configured via the `AUTH_MODE` environment variable:
 
-### Configuration
+| `AUTH_MODE` | Description |
+|-------------|-------------|
+| `disabled` | No authentication (default) |
+| `header` | Reverse-proxy header-based SSO |
+| `oidc` | Full OIDC/OAuth2 login via SSO server |
 
-SSO is configured via environment variables (add to `.env` or `docker-compose.yml`):
+> **Backward compatible:** Setting `AUTH_ENABLED=true` without `AUTH_MODE` defaults to `header` mode.
+
+### Mode 1: OIDC (recommended)
+
+Full OAuth2/OIDC Authorization Code flow. MediaAssistant redirects to your SSO server for login and receives identity claims via secure token exchange.
+
+**Supported providers:** Authentik, Keycloak, Authelia, any OIDC-compliant provider.
+
+#### Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AUTH_ENABLED` | `false` | Enable SSO authentication (`true` / `false`) |
-| `AUTH_HEADER` | `Remote-User` | HTTP header containing the username (set by reverse proxy) |
-| `AUTH_HEADER_NAME` | *(empty)* | Optional header for display name (e.g. `X-Forwarded-Name`) |
-| `AUTH_HEADER_EMAIL` | *(empty)* | Optional header for email (e.g. `X-Forwarded-Email`) |
+| `AUTH_MODE` | `disabled` | Set to `oidc` |
+| `OIDC_ISSUER` | *(required)* | SSO server URL (e.g. `https://auth.example.com/application/o/mediaassistant/`) |
+| `OIDC_CLIENT_ID` | *(required)* | Application/Client ID from SSO provider |
+| `OIDC_CLIENT_SECRET` | *(required)* | Client secret from SSO provider |
+| `OIDC_REDIRECT_URI` | *(auto)* | Callback URL (e.g. `https://media.example.com/auth/callback`) |
+| `OIDC_SCOPES` | `openid profile email` | OIDC scopes to request |
+| `SESSION_SECRET` | *(auto-generated)* | Secret for signing session cookies |
+| `SESSION_LIFETIME_HOURS` | `8` | Session duration in hours |
 
-### Example: docker-compose.yml
+#### Example: Authentik
+
+1. In Authentik, create a new **OAuth2/OpenID Provider**:
+   - Name: `MediaAssistant`
+   - Client ID: `mediaassistant` (or auto-generated)
+   - Redirect URI: `https://media.example.com/auth/callback`
+   - Scopes: `openid`, `profile`, `email`
+
+2. Create an **Application** linked to the provider
+
+3. Configure MediaAssistant:
 
 ```yaml
 services:
   mediaassistant:
     image: ghcr.io/marcohediger/mediaassistant:latest
     environment:
-      - AUTH_ENABLED=true
-      - AUTH_HEADER=Remote-User
-      - AUTH_HEADER_NAME=X-Forwarded-Name
-      - AUTH_HEADER_EMAIL=X-Forwarded-Email
+      - AUTH_MODE=oidc
+      - OIDC_ISSUER=https://auth.example.com/application/o/mediaassistant/
+      - OIDC_CLIENT_ID=mediaassistant
+      - OIDC_CLIENT_SECRET=your-secret-here
+      - OIDC_REDIRECT_URI=https://media.example.com/auth/callback
 ```
 
-### Example: Authelia / Authentik with Traefik
+#### Example: Keycloak
 
-Your reverse proxy authenticates the user and forwards these headers:
-
+```yaml
+environment:
+  - AUTH_MODE=oidc
+  - OIDC_ISSUER=https://keycloak.example.com/realms/myrealm
+  - OIDC_CLIENT_ID=mediaassistant
+  - OIDC_CLIENT_SECRET=your-secret-here
+  - OIDC_REDIRECT_URI=https://media.example.com/auth/callback
 ```
-Remote-User: marco
-X-Forwarded-Name: Marco Hediger
-X-Forwarded-Email: marco@example.com
+
+#### Login Flow
+
+1. User opens MediaAssistant → redirected to `/auth/login`
+2. `/auth/login` redirects to SSO provider login page
+3. User authenticates at SSO provider
+4. SSO provider redirects back to `/auth/callback` with auth code
+5. MediaAssistant exchanges code for tokens, extracts username/email
+6. Session cookie is set, user is redirected to the app
+7. Logout via ✕ button in navbar → clears session, redirects to SSO logout
+
+### Mode 2: Header-based (reverse proxy)
+
+For setups where a reverse proxy (Authelia, Authentik proxy, Traefik Forward Auth) handles authentication and forwards user identity via HTTP headers.
+
+#### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_MODE` | `disabled` | Set to `header` (or `AUTH_ENABLED=true`) |
+| `AUTH_HEADER` | `Remote-User` | Header containing the username |
+| `AUTH_HEADER_NAME` | *(empty)* | Optional display name header |
+| `AUTH_HEADER_EMAIL` | *(empty)* | Optional email header |
+
+#### Example
+
+```yaml
+environment:
+  - AUTH_MODE=header
+  - AUTH_HEADER=Remote-User
+  - AUTH_HEADER_NAME=X-Forwarded-Name
+  - AUTH_HEADER_EMAIL=X-Forwarded-Email
 ```
-
-MediaAssistant reads the `Remote-User` header and displays the username in the navbar. If the header is missing, a 401 page is shown.
-
-### Example: Synology Reverse Proxy
-
-On Synology DSM, configure a reverse proxy under **Control Panel → Application Portal → Reverse Proxy**:
-1. Create a proxy entry pointing to MediaAssistant (e.g. `https://media.example.com` → `http://localhost:8000`)
-2. Use an authentication proxy (e.g. Authelia running as a Docker container) in front
-3. Set `AUTH_HEADER` to match the header your auth proxy sends
 
 ### Exempt paths
 
 The following paths are accessible without authentication:
 - `/static/*` — CSS, JS, images
+- `/auth/*` — Login, callback, logout endpoints
 - `/api/health` — Health check endpoint
 - `/setup` — Setup wizard (first-time configuration)
 
-### Disabling SSO
+### Disabling authentication
 
-Set `AUTH_ENABLED=false` (default) or remove the variable entirely. All routes are then publicly accessible — only use this behind a trusted network or VPN.
+Set `AUTH_MODE=disabled` (default) or remove all AUTH variables. All routes are then publicly accessible — only use this behind a trusted network or VPN.
 
 ## Encrypted Configuration
 

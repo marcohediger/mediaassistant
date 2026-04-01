@@ -32,6 +32,9 @@
                 <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 1c-3.3 0-6 1.8-6 4v1h12v-1c0-2.2-2.7-4-6-4z"/>
             </svg>
             <span>{{ sso_user_name or sso_user }}</span>
+            {% if auth_mode == 'oidc' %}
+            <a href="/auth/logout" style="margin-left:8px;color:var(--text-muted);font-size:0.8rem;text-decoration:none;" title="Logout">&#x2715;</a>
+            {% endif %}
         </div>
         {% endif %}
     </nav>
