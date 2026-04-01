@@ -278,6 +278,7 @@
     "rule_media_all": "Alle",
     "rule_media_image": "Bilder",
     "rule_media_video": "Videos",
+    "rule_skip": "Überspringen (nicht verarbeiten)",
     "rule_value": "Wert",
     "no_rules": "Keine Sortier-Regeln konfiguriert.",
     "add_rule": "Neue Regel hinzufügen",

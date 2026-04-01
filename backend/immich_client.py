@@ -70,15 +70,24 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *, 
 
     # Add asset to albums based on folder tags
     if album_names and asset_id:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             for album_name in album_names:
-                album_id = await _get_or_create_album(client, url, headers, album_name)
-                if album_id:
-                    await client.put(
-                        f"{url}/api/albums/{album_id}/assets",
-                        headers={**headers, "Content-Type": "application/json"},
-                        json={"ids": [asset_id]},
-                    )
+                try:
+                    album_id = await _get_or_create_album(client, url, headers, album_name)
+                    if album_id:
+                        resp = await client.put(
+                            f"{url}/api/albums/{album_id}/assets",
+                            headers={**headers, "Content-Type": "application/json"},
+                            json={"ids": [asset_id]},
+                        )
+                        if resp.status_code in (200, 201):
+                            logger.info("Added asset %s to album '%s'", asset_id, album_name)
+                        else:
+                            logger.warning("Failed to add asset %s to album '%s': HTTP %s", asset_id, album_name, resp.status_code)
+                    else:
+                        logger.warning("Could not create/find album '%s' for asset %s", album_name, asset_id)
+                except Exception as exc:
+                    logger.warning("Album operation failed for '%s': %s", album_name, exc)
 
     return result
 
@@ -104,14 +113,18 @@ async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dic
 
 
 async def archive_asset(asset_id: str, *, api_key: str | None = None) -> dict:
-    """Set an asset to archived in Immich. Supports both new (visibility) and legacy (isArchived) API."""
+    """Set an asset to archived in Immich. Supports both new (visibility) and legacy (isArchived) API.
+
+    Verifies the result and falls back to the legacy API if the new one silently ignored
+    the visibility field (some Immich versions return 200 but don't actually archive).
+    """
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         # Try new API first (v1.133.0+): visibility enum
         resp = await client.put(
             f"{url}/api/assets",
@@ -119,17 +132,35 @@ async def archive_asset(asset_id: str, *, api_key: str | None = None) -> dict:
             json={"ids": [asset_id], "visibility": "archive"},
         )
 
-        # Fallback: legacy API (pre-v1.133.0): isArchived boolean
         if resp.status_code not in (200, 204):
+            # New API not supported → try legacy
             resp = await client.put(
                 f"{url}/api/assets",
                 headers=headers,
                 json={"ids": [asset_id], "isArchived": True},
             )
+        else:
+            # New API returned 200, but verify it actually worked
+            info = await get_asset_info(asset_id, api_key=api_key)
+            actually_archived = False
+            if info:
+                # Check both new (visibility) and legacy (isArchived) fields
+                actually_archived = (
+                    info.get("visibility") == "archive"
+                    or info.get("isArchived") is True
+                )
+            if not actually_archived:
+                logger.warning("Visibility API returned 200 but asset %s not archived, trying legacy API", asset_id)
+                resp = await client.put(
+                    f"{url}/api/assets",
+                    headers=headers,
+                    json={"ids": [asset_id], "isArchived": True},
+                )
 
     if resp.status_code not in (200, 204):
         raise RuntimeError(f"Immich archive failed: HTTP {resp.status_code} — {resp.text[:200]}")
 
+    logger.info("Archived asset %s in Immich", asset_id)
     return {"status": "archived", "asset_id": asset_id}
 
 

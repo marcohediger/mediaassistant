@@ -18,12 +18,12 @@ _WHATSAPP_UUID_RE = re.compile(
 )
 
 
-async def _wait_for_immich_tags(asset_id: str, *, api_key: str | None = None, max_wait: int = 60):
+async def _wait_for_immich_tags(asset_id: str, *, api_key: str | None = None, max_wait: int = 120):
     """Wait until Immich finishes reading tags from the uploaded file.
 
     Polls until tags appear on the asset (meaning Immich has parsed TagsList
     from the file) or until max_wait seconds elapse. On slower systems (e.g.
-    Synology NAS) this can take 10-30s.
+    Synology NAS) this can take 30-90s, especially for PNG files.
     """
     for i in range(max_wait // 3):
         await asyncio.sleep(3)
@@ -133,16 +133,47 @@ def _resolve_path(template: str, exif: dict, date: datetime | None) -> str:
     return result
 
 
+_IGNORABLE_FILES = {".ds_store", "thumbs.db", ".thumbs", "desktop.ini"}
+_IGNORABLE_DIRS = {"@eadir", ".synology"}
+
+
+def _is_dir_empty(path: str) -> bool:
+    """Check if directory only contains ignorable system files (Synology, macOS, Windows)."""
+    for entry in os.scandir(path):
+        if entry.is_dir():
+            if entry.name.lower() not in _IGNORABLE_DIRS:
+                return False
+        else:
+            if entry.name.lower() not in _IGNORABLE_FILES:
+                return False
+    return True
+
+
+def _force_remove_dir(path: str):
+    """Remove directory including ignorable system files/subdirs."""
+    import shutil
+    for entry in os.scandir(path):
+        if entry.is_dir() and entry.name.lower() in _IGNORABLE_DIRS:
+            shutil.rmtree(entry.path, ignore_errors=True)
+        elif entry.is_file() and entry.name.lower() in _IGNORABLE_FILES:
+            os.remove(entry.path)
+    os.rmdir(path)
+
+
 def _cleanup_empty_dirs(start_dir: str, stop_at: str):
-    """Remove empty directories from start_dir up to (but not including) stop_at."""
+    """Remove empty directories from start_dir up to (but not including) stop_at.
+
+    Treats Synology metadata dirs (@eaDir) and OS junk files (.DS_Store, Thumbs.db)
+    as ignorable — directories containing only these are considered empty.
+    """
     stop_at = os.path.realpath(stop_at)
     current = os.path.realpath(start_dir)
     while current != stop_at and len(current) > len(stop_at):
         try:
-            if not os.listdir(current):
-                os.rmdir(current)
+            if _is_dir_empty(current):
+                _force_remove_dir(current)
             else:
-                break  # directory not empty, stop
+                break  # directory has real content, stop
         except OSError:
             break
         current = os.path.dirname(current)
@@ -253,6 +284,10 @@ async def execute(job, session) -> dict:
 
     # 1) Static sorting rules (always evaluated first)
     rule_category = await _match_sorting_rules(filename, exif, session, is_video=is_video)
+
+    if rule_category == "skip":
+        job.status = "skipped"
+        return {"status": "skipped", "reason": "excluded by sorting rule"}
 
     if rule_category:
         category = rule_category
@@ -384,9 +419,19 @@ async def execute(job, session) -> dict:
         old_asset_id = job.immich_asset_id
         immich_replaced = False
         new_asset_id = None
+
+        # Extract album name from inbox folder structure (if folder_tags enabled)
+        webhook_album_names = None
+        if job.folder_tags and job.source_inbox_path:
+            rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
+            if rel and rel != ".":
+                parts = [p for p in rel.split(os.sep) if p and p != "."]
+                if parts:
+                    webhook_album_names = [" ".join(parts)]
+
         try:
             # Step 1: Upload tagged file as new asset
-            upload_result = await upload_asset(job.original_path, api_key=user_api_key)
+            upload_result = await upload_asset(job.original_path, album_names=webhook_album_names, api_key=user_api_key)
             new_asset_id = upload_result.get("id")
 
             if new_asset_id and upload_result.get("status") != "duplicate":
@@ -433,7 +478,7 @@ async def execute(job, session) -> dict:
 
         # Archive if configured (skip if locked)
         immich_archived = False
-        should_archive = lib_cat.immich_archive if lib_cat else category in ("sourceless", "screenshot")
+        should_archive = lib_cat.immich_archive if lib_cat else (category.startswith("sourceless") or category == "screenshot")
         if should_archive and not immich_locked:
             try:
                 await archive_asset(job.immich_asset_id, api_key=user_api_key)
@@ -459,9 +504,9 @@ async def execute(job, session) -> dict:
 
     # Route: Immich upload or target directory
     if job.use_immich:
-        # Extract folder tags as single combined album name
+        # Extract folder tags as single combined album name (only if folder_tags enabled)
         album_names = None
-        if job.source_inbox_path:
+        if job.folder_tags and job.source_inbox_path:
             rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
             if rel and rel != ".":
                 parts = [p for p in rel.split(os.sep) if p and p != "."]
@@ -494,7 +539,7 @@ async def execute(job, session) -> dict:
 
         # Archive in Immich if configured for this category (skip if already locked)
         immich_archived = False
-        should_archive = lib_cat.immich_archive if lib_cat else category in ("sourceless", "screenshot")
+        should_archive = lib_cat.immich_archive if lib_cat else (category.startswith("sourceless") or category == "screenshot")
         if should_archive and asset_id and not immich_locked:
             try:
                 await archive_asset(asset_id, api_key=user_api_key)
