@@ -75,6 +75,39 @@ TZ=Europe/Zurich
 
 Environment variables are imported into the database on first start. After that, all settings can be changed via the web interface.
 
+**All supported environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `AI_BACKEND_URL` | AI backend URL (LM Studio, Ollama etc.) |
+| `AI_MODEL` | AI model name |
+| `AI_API_KEY` | AI backend API key (if required) |
+| `IMMICH_URL` | Immich server URL |
+| `IMMICH_API_KEY` | Immich API key |
+| `GEOCODING_PROVIDER` | Geocoding provider (nominatim/photon/google) |
+| `GEOCODING_URL` | Custom geocoding URL |
+| `GOOGLE_MAPS_API_KEY` | Google Maps API key |
+| `SMTP_SERVER` | SMTP server hostname |
+| `SMTP_PORT` | SMTP port |
+| `SMTP_SSL` | SMTP SSL (true/false) |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASSWORD` | SMTP password |
+| `SMTP_RECIPIENT` | Notification email recipient |
+| `LIBRARY_BASE_PATH` | Library base path |
+| `INBOX_PATH` | Default inbox path (creates inbox on first start) |
+| `INBOX_LABEL` | Default inbox label (default: "Default Inbox") |
+| `UI_LANGUAGE` | Interface language (de/en) |
+| `UI_THEME` | Theme (dark/light) |
+| `FILEWATCHER_INTERVAL` | File watcher interval in seconds |
+| `FILEWATCHER_SCHEDULE_MODE` | Schedule mode (continuous/window/scheduled/manual) |
+| `OCR_MODE` | OCR mode (smart/all) |
+| `PHASH_THRESHOLD` | Duplicate detection pHash threshold |
+| `SETUP_COMPLETE` | Skip setup wizard (true/false) |
+| `AUTH_ENABLED` | Enable SSO authentication (see [Authentication](#authentication-sso)) |
+| `AUTH_HEADER` | SSO header name (default: Remote-User) |
+| `AUTH_HEADER_NAME` | Optional display name header |
+| `AUTH_HEADER_EMAIL` | Optional email header |
+
 ### Start (Production)
 
 ```bash
@@ -320,6 +353,64 @@ After moving a file from an inbox, empty parent directories are automatically cl
 - **Geocoding:** Nominatim, Photon, or Google Maps API
 - **i18n:** JSON language files (DE/EN), centralized template rendering
 - **Theme:** Dark (default) / Light, conditional CSS loading
+
+## Authentication (SSO)
+
+MediaAssistant supports header-based SSO authentication for reverse proxy setups (Authelia, Authentik, Traefik Forward Auth, Synology Reverse Proxy, etc.).
+
+### Configuration
+
+SSO is configured via environment variables (add to `.env` or `docker-compose.yml`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_ENABLED` | `false` | Enable SSO authentication (`true` / `false`) |
+| `AUTH_HEADER` | `Remote-User` | HTTP header containing the username (set by reverse proxy) |
+| `AUTH_HEADER_NAME` | *(empty)* | Optional header for display name (e.g. `X-Forwarded-Name`) |
+| `AUTH_HEADER_EMAIL` | *(empty)* | Optional header for email (e.g. `X-Forwarded-Email`) |
+
+### Example: docker-compose.yml
+
+```yaml
+services:
+  mediaassistant:
+    image: ghcr.io/marcohediger/mediaassistant:latest
+    environment:
+      - AUTH_ENABLED=true
+      - AUTH_HEADER=Remote-User
+      - AUTH_HEADER_NAME=X-Forwarded-Name
+      - AUTH_HEADER_EMAIL=X-Forwarded-Email
+```
+
+### Example: Authelia / Authentik with Traefik
+
+Your reverse proxy authenticates the user and forwards these headers:
+
+```
+Remote-User: marco
+X-Forwarded-Name: Marco Hediger
+X-Forwarded-Email: marco@example.com
+```
+
+MediaAssistant reads the `Remote-User` header and displays the username in the navbar. If the header is missing, a 401 page is shown.
+
+### Example: Synology Reverse Proxy
+
+On Synology DSM, configure a reverse proxy under **Control Panel → Application Portal → Reverse Proxy**:
+1. Create a proxy entry pointing to MediaAssistant (e.g. `https://media.example.com` → `http://localhost:8000`)
+2. Use an authentication proxy (e.g. Authelia running as a Docker container) in front
+3. Set `AUTH_HEADER` to match the header your auth proxy sends
+
+### Exempt paths
+
+The following paths are accessible without authentication:
+- `/static/*` — CSS, JS, images
+- `/api/health` — Health check endpoint
+- `/setup` — Setup wizard (first-time configuration)
+
+### Disabling SSO
+
+Set `AUTH_ENABLED=false` (default) or remove the variable entirely. All routes are then publicly accessible — only use this behind a trusted network or VPN.
 
 ## Encrypted Configuration
 
