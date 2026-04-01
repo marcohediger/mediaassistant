@@ -8,7 +8,8 @@ from starlette.responses import RedirectResponse
 
 from auth import (
     AUTH_MODE, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET,
-    OIDC_REDIRECT_URI, OIDC_SCOPES, SESSION_LIFETIME_HOURS,
+    OIDC_REDIRECT_URI, OIDC_SCOPES, OIDC_ALLOWED_USERS,
+    SESSION_LIFETIME_HOURS,
 )
 
 logger = logging.getLogger("mediaassistant.auth.oidc")
@@ -53,7 +54,28 @@ def _get_redirect_uri(request: Request) -> str:
 
 
 @router.get("/login")
-async def login(request: Request, next: str = "/"):
+async def login(request: Request, next: str = "/", logged_out: str = "", error: str = ""):
+    """Show login screen."""
+    if AUTH_MODE != "oidc" or oauth is None:
+        return RedirectResponse(url="/")
+
+    from version import VERSION
+    from template_engine import templates
+
+    error_msg = ""
+    if error == "denied":
+        error_msg = "Zugriff verweigert. Dein Konto ist nicht berechtigt."
+
+    return templates.TemplateResponse(request, "login.html", {
+        "next_url": next,
+        "logged_out": bool(logged_out),
+        "error": error_msg,
+        "version": VERSION,
+    })
+
+
+@router.get("/sso")
+async def sso_redirect(request: Request, next: str = "/"):
     """Redirect to OIDC provider for authentication."""
     if AUTH_MODE != "oidc" or oauth is None:
         return RedirectResponse(url="/")
@@ -103,6 +125,15 @@ async def callback(request: Request):
     display_name = userinfo.get("name", "")
     email = userinfo.get("email", "")
 
+    # Check allowed users list (if configured)
+    if OIDC_ALLOWED_USERS:
+        allowed = [u.lower() for u in OIDC_ALLOWED_USERS]
+        if (username.lower() not in allowed
+                and email.lower() not in allowed
+                and userinfo.get("sub", "").lower() not in allowed):
+            logger.warning("OIDC access denied for user: %s (%s)", username, email)
+            return RedirectResponse(url="/auth/login?error=denied")
+
     # Store in session
     request.session["user"] = username
     request.session["user_name"] = display_name
@@ -118,13 +149,13 @@ async def callback(request: Request):
 
 @router.get("/logout")
 async def logout(request: Request):
-    """Clear session and optionally redirect to OIDC end_session_endpoint."""
+    """Clear session and redirect to login screen."""
     username = request.session.get("user", "unknown")
     request.session.clear()
     logger.info("User logged out: %s", username)
 
     # Try RP-initiated logout if the provider supports it
-    if AUTH_MODE == "oidc" and oauth is not None:
+    if oauth is not None:
         try:
             metadata = await oauth.sso.load_server_metadata()
             end_session_url = metadata.get("end_session_endpoint")
@@ -136,4 +167,4 @@ async def logout(request: Request):
         except Exception:
             pass
 
-    return RedirectResponse(url="/auth/login")
+    return RedirectResponse(url="/auth/login?logged_out=1")

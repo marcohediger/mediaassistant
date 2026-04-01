@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="{{ lang | default('de') }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login – MediaAssistant</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg">
+    <style>
+        :root {
+            --bg: #0f1117;
+            --bg-card: #1a1d27;
+            --border: #2e3140;
+            --text: #e1e4ed;
+            --text-muted: #8b8fa3;
+            --primary: #4f8ff7;
+            --primary-hover: #3a7be0;
+            --success: #34d399;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            text-align: center;
+            max-width: 480px;
+            width: 100%;
+            padding: 2rem;
+        }
+        .login-logo {
+            width: 100%;
+            max-width: 480px;
+            height: auto;
+            margin-bottom: 2.5rem;
+        }
+        .login-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2.5rem 2rem;
+        }
+        .login-card h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .login-card p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+        .login-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            width: 100%;
+            padding: 0.85rem 1.5rem;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .login-btn:hover {
+            background: var(--primary-hover);
+        }
+        .login-btn svg {
+            flex-shrink: 0;
+        }
+        .login-message {
+            margin-bottom: 1.5rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+        }
+        .login-message.info {
+            background: rgba(79, 143, 247, 0.1);
+            border: 1px solid rgba(79, 143, 247, 0.3);
+            color: var(--primary);
+        }
+        .login-message.success {
+            background: rgba(52, 211, 153, 0.1);
+            border: 1px solid rgba(52, 211, 153, 0.3);
+            color: var(--success);
+        }
+        .login-footer {
+            margin-top: 2rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <img src="/static/img/logo_dark.svg" alt="MediaAssistant" class="login-logo">
+        <div class="login-card">
+            <h1>Anmeldung</h1>
+            <p>Melde dich mit deinem SSO-Konto an, um auf MediaAssistant zuzugreifen.</p>
+
+            {% if logged_out %}
+            <div class="login-message success">Du wurdest erfolgreich abgemeldet.</div>
+            {% endif %}
+
+            {% if error %}
+            <div class="login-message info">{{ error }}</div>
+            {% endif %}
+
+            <a href="/auth/sso?next={{ next_url | default('/') }}" class="login-btn">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="16" height="14" rx="2"/>
+                    <path d="M2 7h16"/>
+                    <circle cx="5" cy="5" r="0.5" fill="currentColor"/>
+                    <circle cx="7.5" cy="5" r="0.5" fill="currentColor"/>
+                    <circle cx="10" cy="5" r="0.5" fill="currentColor"/>
+                </svg>
+                Mit SSO anmelden
+            </a>
+        </div>
+        <div class="login-footer">
+            MediaAssistant v{{ version }}
+        </div>
+    </div>
+</body>
+</html>
