@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.16.3 — 2026-04-01
+
+### EXIF: Zusätzliche XMP-Tag-Felder für Immich-Kompatibilität
+- IA-07 schreibt Tags jetzt in **vier Felder**: `Keywords` (IPTC), `Subject` (XMP), `TagsList` (digiKam/Immich), `HierarchicalSubject` (Lightroom)
+- Immich liest primär `TagsList` und `HierarchicalSubject` — diese fehlten bisher
+
 ## v2.16.2 — 2026-04-01
 
 ### Bugfix: Rollback bei fehlgeschlagenem Copy/Delete
