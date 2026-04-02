@@ -25,6 +25,13 @@ async def execute(job, session) -> dict:
         os.remove(sidecar_path)
         removed.append(sidecar_path)
 
+    # Remove Google Takeout JSON sidecar (if used and file was moved/processed)
+    ia01_result = step_results.get("IA-01", {})
+    google_json_path = ia01_result.get("google_json_path")
+    if google_json_path and os.path.exists(google_json_path):
+        os.remove(google_json_path)
+        removed.append(google_json_path)
+
     # Remove downloaded file and temp dir from Immich webhook
     if job.immich_asset_id and job.original_path and os.path.exists(job.original_path):
         os.remove(job.original_path)
