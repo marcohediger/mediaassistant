@@ -12,6 +12,7 @@ DEFAULT_MODULES = [
     ("geocoding", False),
     ("duplikat_erkennung", False),
     ("ocr", False),
+    ("ordner_tags", False),
     ("smtp", False),
     ("filewatcher", False),
     ("immich", False),

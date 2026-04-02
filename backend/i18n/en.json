@@ -180,6 +180,8 @@
     "ocr_always": "All images (including photos with signs, menus etc.)",
     "ocr_hint": "\"Smart\" skips OCR for regular photos, \"All images\" also detects text on signs, posters etc.",
     "ocr_hint2": "Note: OCR requires an active AI backend (AI Analysis must be enabled).",
+    "ordner_tags_desc": "Generate tags and albums from inbox folder structure",
+    "ordner_tags_hint": "When enabled, tags and Immich albums are created from the inbox folder structure (e.g. Vacation/Mallorca/). The per-inbox folder tags checkbox must also be enabled.",
     "smtp": "SMTP Notifications",
     "smtp_desc": "Error notifications via email",
     "server": "Server",

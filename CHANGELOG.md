@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.17.2 — 2026-04-02
+
+### Ordner-Tags als globales Modul
+
+- Ordner-Tags fehlte als Modul im Dashboard und in den Einstellungen
+- Neues Modul `ordner_tags` in `DEFAULT_MODULES`, Dashboard, Settings und Filewatcher
+- Globaler Modul-Toggle deaktiviert Ordner-Tags auch wenn pro Inbox aktiviert
+- Toggle in Einstellungen zwischen OCR und SMTP hinzugefügt
+- i18n-Übersetzungen (DE/EN) für Modul-Beschreibung und Hinweistext
+
 ## v2.17.1 — 2026-04-02
 
 ### Bugfixes aus exotischen Tests

@@ -288,6 +288,23 @@
     </div>
 </div>
 
+<!-- Ordner-Tags -->
+<div class="settings-section" id="section-ordner-tags">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.modules.ordner_tags }}</h2>
+            <span class="section-desc">{{ t.settings.ordner_tags_desc | default('Tags und Alben aus Inbox-Ordnerstruktur generieren') }}</span>
+        </div>
+        <label class="switch">
+            <input type="checkbox" name="mod_ordner_tags" value="1" {{ 'checked' if modules.ordner_tags else '' }}>
+            <span class="switch-slider"></span>
+        </label>
+    </div>
+    <div class="section-body">
+        <small>{{ t.settings.ordner_tags_hint | default('Wenn aktiviert, werden aus der Ordnerstruktur der Inbox (z.B. Ferien/Mallorca/) Tags und Immich-Alben erstellt. Die Einstellung pro Inbox (Ordner-Tags Checkbox) muss zusätzlich aktiviert sein.') }}</small>
+    </div>
+</div>
+
 <!-- SMTP -->
 <div class="settings-section" id="section-smtp">
     <div class="section-header">
