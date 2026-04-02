@@ -6,6 +6,11 @@ import subprocess
 
 WRITABLE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".webp", ".heic", ".heif", ".dng"}
 
+# Formats that support IPTC Keywords natively
+_IPTC_FORMATS = {".jpg", ".jpeg", ".tiff", ".tif", ".dng"}
+# Formats that only support XMP (no IPTC) — use Subject (dc:subject)
+_XMP_ONLY_FORMATS = {".heic", ".heif", ".png", ".webp"}
+
 
 async def execute(job, session) -> dict:
     """IA-07: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben."""
@@ -100,9 +105,15 @@ async def execute(job, session) -> dict:
     # Build ExifTool command
     cmd = ["exiftool", "-overwrite_original_in_place", "-P", "-m"]
 
-    # Write keywords (IPTC Keywords — read by Immich, Lightroom, digiKam)
-    for kw in keywords:
-        cmd.append(f"-Keywords+={kw}")
+    # Write keywords — format-aware tag field selection
+    if ext in _IPTC_FORMATS:
+        # IPTC Keywords: supported by JPEG, TIFF, DNG — read by Immich, Lightroom, digiKam
+        for kw in keywords:
+            cmd.append(f"-Keywords+={kw}")
+    else:
+        # XMP Subject (dc:subject): for HEIC, PNG, WebP — these formats don't support IPTC
+        for kw in keywords:
+            cmd.append(f"-Subject+={kw}")
 
     # Write description
     if description:

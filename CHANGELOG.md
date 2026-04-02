@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.17.4 — 2026-04-02
+
+### HEIC-Tag-Schreibung repariert
+
+- HEIC/HEIF/PNG/WebP unterstützen kein IPTC — `Keywords+=` hat bei diesen Formaten nichts geschrieben
+- IA-07 erkennt jetzt das Format und wählt das passende Tag-Feld:
+  - JPEG/TIFF/DNG → `Keywords` (IPTC)
+  - HEIC/HEIF/PNG/WebP → `Subject` (XMP dc:subject)
+- Immich liest beide Felder korrekt aus und erstellt Tags
+
 ## v2.17.3 — 2026-04-02
 
 ### EXIF-Tags: nur Keywords schreiben
