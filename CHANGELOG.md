@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.18.0 — 2026-04-02
+
+### XMP-Sidecar-Modus + Einstellungen neu geordnet
+
+- **Neuer Metadaten-Schreibmodus: XMP-Sidecar** — optionale Alternative zum direkten Schreiben in die Datei
+  - Originaldatei bleibt komplett unverändert (Datei-Hash ändert sich nicht)
+  - Separate `.xmp`-Sidecar-Datei wird neben dem Original erstellt (z.B. `foto.jpg` → `foto.jpg.xmp`)
+  - Bei neuen Immich-Uploads wird die Sidecar-Datei als `sidecarData` mitgesendet
+  - Bei bestehenden Immich-Assets (Polling/Webhook) wird **kein Re-Upload** durchgeführt — Tags werden nur via Immich-API gesetzt
+  - Bei lokaler Dateiablage wird die Sidecar-Datei neben die Bilddatei in die Bibliothek verschoben
+  - Ideal für Handy-App-Synchronisierung, da sich der Datei-Hash nicht ändert
+  - Bestehender Modus (direkt in Datei schreiben) bleibt Standard und unverändert
+- **Einstellungsseite neu geordnet** — logischer Aufbau entlang der Pipeline:
+  - Eingang: Eingangsverzeichnisse → Filewatcher
+  - Klassifikation: Sortier-Regeln → Ziel-Ablage
+  - Verarbeitung: Duplikate → Geocoding → KI → Video-Thumbnails → OCR → Ordner-Tags
+  - Ausgabe: Metadaten-Schreibmodus → Immich
+  - System: SMTP → Darstellung
+- **Detailliertere Beschreibungen** für alle Einstellungs-Sektionen — jede Option erklärt jetzt klar was sie bewirkt, wie sie wirkt und welche Abhängigkeiten bestehen
+- Betroffene Dateien: `step_ia07_exif_write.py`, `immich_client.py`, `step_ia08_sort.py`, `step_ia10_cleanup.py`, `config.py`, `routers/settings.py`, `settings.html`, `de.json`, `en.json`
+
 ## v2.17.5 — 2026-04-02
 
 ### Video-Tags + vollständige Format-Kompatibilität

@@ -18,6 +18,13 @@ async def execute(job, session) -> dict:
             os.remove(temp_path)
             removed.append(temp_path)
 
+    # Remove XMP sidecar file from IA-07 (if sidecar mode was used and file still exists)
+    ia07_result = step_results.get("IA-07", {})
+    sidecar_path = ia07_result.get("sidecar_path")
+    if sidecar_path and os.path.exists(sidecar_path):
+        os.remove(sidecar_path)
+        removed.append(sidecar_path)
+
     # Remove downloaded file and temp dir from Immich webhook
     if job.immich_asset_id and job.original_path and os.path.exists(job.original_path):
         os.remove(job.original_path)
