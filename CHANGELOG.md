@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.17.3 — 2026-04-02
+
+### EXIF-Tags: nur Keywords schreiben
+
+- IA-07 schreibt Tags nur noch in `Keywords` (IPTC) statt in 4 Felder (Keywords, Subject, TagsList, HierarchicalSubject)
+- Die zusätzlichen Felder wurden als vermeintlicher Immich-Fix in v2.16.4 hinzugefügt, der echte Fix war aber die Tag-Wait-Logik (v2.16.5)
+- Reduziert Dateigrösse und vermeidet doppelte/vierfache Tag-Einträge in EXIF-Metadaten
+
 ## v2.17.2 — 2026-04-02
 
 ### Ordner-Tags als globales Modul
