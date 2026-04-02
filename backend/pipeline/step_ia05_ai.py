@@ -288,6 +288,7 @@ Use this information together with the image content for your classification."""
         )
 
     # Free large base64 data immediately after API call
+    num_images = len(image_data_list)
     del image_data_list, content_parts, payload
 
     if resp.status_code != 200:
@@ -310,7 +311,7 @@ Use this information together with the image content for your classification."""
 
     # KI-Kontext für Anzeige im Log-Detail speichern
     result["_context"] = metadata_context
-    result["_images"] = len(image_data_list)
+    result["_images"] = num_images
     result["_model"] = model
 
     return result
