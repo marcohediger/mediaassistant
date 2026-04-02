@@ -84,7 +84,7 @@
                 <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
                 <td>{{ job.current_step or '—' }}</td>
                 <td class="cell-error">{{ job.error_message or '' }}</td>
-                <td>{{ job.updated_at.strftime('%d.%m. %H:%M') if job.updated_at else '—' }}</td>
+                <td>{{ job.updated_at.strftime('%d.%m. %H:%M:%S') if job.updated_at else '—' }}</td>
             </tr>
             {% endfor %}
         </tbody>
