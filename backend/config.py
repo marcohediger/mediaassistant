@@ -95,6 +95,7 @@ class ConfigManager:
             "OCR_MODE": ("ocr.mode", False),
             "PHASH_THRESHOLD": ("duplikat.phash_threshold", False),
             "METADATA_WRITE_MODE": ("metadata.write_mode", False),
+            "METADATA_GOOGLE_JSON": ("metadata.google_json", False),
             "SETUP_COMPLETE": ("setup_complete", False),
         }
         for env_key, (config_key, encrypted) in env_map.items():
@@ -104,7 +105,7 @@ class ConfigManager:
             # Convert types
             if config_key in ("smtp.port", "filewatcher.interval", "duplikat.phash_threshold"):
                 env_value = int(env_value)
-            elif config_key in ("smtp.ssl",):
+            elif config_key in ("smtp.ssl", "metadata.google_json"):
                 env_value = env_value.lower() in ("true", "1", "yes")
             elif config_key == "setup_complete":
                 env_value = env_value.lower() in ("true", "1", "yes")

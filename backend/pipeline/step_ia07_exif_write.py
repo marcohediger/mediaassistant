@@ -91,6 +91,9 @@ async def execute(job, session) -> dict:
     description_parts = []
     if ai_result.get("description"):
         description_parts.append(ai_result["description"])
+    # Google Takeout JSON description as fallback (only if no AI description)
+    if not ai_result.get("description") and exif_data.get("google_json_description"):
+        description_parts.append(exif_data["google_json_description"])
     if geo_result.get("city") and geo_result.get("country"):
         location = geo_result["city"]
         if geo_result.get("suburb"):

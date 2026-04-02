@@ -608,6 +608,23 @@
     </div>
 </div>
 
+<!-- Google Takeout JSON -->
+<div class="settings-section" id="section-google-json">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.google_json }}</h2>
+            <span class="section-desc">{{ t.settings.google_json_desc }}</span>
+        </div>
+        <label class="switch">
+            <input type="checkbox" name="google_json" value="1" {{ 'checked' if cfg.google_json else '' }}>
+            <span class="switch-slider"></span>
+        </label>
+    </div>
+    <div class="section-body">
+        <small>{{ t.settings.google_json_hint }}</small>
+    </div>
+</div>
+
 <!-- Immich -->
 <div class="settings-section" id="section-immich">
     <div class="section-header">

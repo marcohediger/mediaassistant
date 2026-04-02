@@ -307,7 +307,10 @@
     "cat_added": "Category added",
     "cat_deleted": "Category deleted",
     "cat_not_found": "Category not found",
-    "cat_is_fixed": "Fixed categories cannot be deleted"
+    "cat_is_fixed": "Fixed categories cannot be deleted",
+    "google_json": "Google Takeout JSON",
+    "google_json_desc": "Imports metadata from Google Takeout JSON sidecar files (photo.jpg.json). Missing capture dates, GPS coordinates and descriptions are automatically filled from the JSON file. The JSON file is deleted after successful processing.",
+    "google_json_hint": "Google Photos exports a JSON file per image/video with metadata (capture date, GPS, description). When enabled, MediaAssistant reads these files in step IA-01 and fills missing EXIF data. The JSON files are automatically cleaned up after processing (IA-10)."
   },
   "modules": {
     "ki_analyse": "AI Analysis",

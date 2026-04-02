@@ -61,6 +61,7 @@ async def _get_cfg() -> dict:
         "video_thumbnail_frames": await config_manager.get("video.thumbnail_frames", 8),
         "video_thumbnail_scale": await config_manager.get("video.thumbnail_scale", 50),
         "metadata_write_mode": await config_manager.get("metadata.write_mode", "direct"),
+        "google_json": await config_manager.get("metadata.google_json", False),
     }
 
 
@@ -210,6 +211,9 @@ async def save_settings(request: Request):
 
     # Metadata write mode
     await config_manager.set("metadata.write_mode", form.get("metadata_write_mode", "direct"))
+
+    # Google Takeout JSON import
+    await config_manager.set("metadata.google_json", "google_json" in form)
 
     # Immich
     await config_manager.set("immich.url", _sanitize(form.get("immich_url", "")))

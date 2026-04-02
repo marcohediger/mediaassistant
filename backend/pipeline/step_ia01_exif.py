@@ -1,9 +1,15 @@
 import asyncio
 import json
+import logging
 import os
 import subprocess
+from datetime import datetime, timezone
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp"}
+from config import config_manager
+
+logger = logging.getLogger("mediaassistant.pipeline.ia01")
+
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".mpg", ".mpeg", ".vob", ".asf"}
 
 
 async def execute(job, session) -> dict:
@@ -59,6 +65,33 @@ async def execute(job, session) -> dict:
         ffprobe_data = await _run_ffprobe(job.original_path)
         if ffprobe_data:
             exif.update(ffprobe_data)
+
+    # Google Takeout JSON Sidecar: fehlende Metadaten ergänzen
+    google_json_enabled = await config_manager.get("metadata.google_json", False)
+    if google_json_enabled:
+        json_result = await asyncio.to_thread(_read_google_json, job.original_path)
+        if json_result:
+            exif["google_json"] = True
+            exif["google_json_path"] = json_result.get("_json_path")
+
+            # Datum: nur ergänzen wenn EXIF kein echtes Aufnahmedatum hat
+            # (FileModifyDate zählt nicht als echtes Datum)
+            has_real_date = bool(meta.get("DateTimeOriginal") or meta.get("CreateDate"))
+            if not has_real_date and json_result.get("date"):
+                exif["date"] = json_result["date"]
+                logger.info(f"Google JSON: date → {json_result['date']}")
+
+            # GPS: nur ergänzen wenn EXIF keine GPS-Daten hat
+            if not exif["gps"] and json_result.get("gps_lat") is not None:
+                exif["gps_lat"] = json_result["gps_lat"]
+                exif["gps_lon"] = json_result["gps_lon"]
+                exif["gps"] = True
+                logger.info(f"Google JSON: GPS → {json_result['gps_lat']}, {json_result['gps_lon']}")
+
+            # Beschreibung: nur ergänzen wenn keine vorhanden
+            if json_result.get("description") and not meta.get("ImageDescription") and not meta.get("Description"):
+                exif["google_json_description"] = json_result["description"]
+                logger.info(f"Google JSON: description → {json_result['description'][:50]}...")
 
     return exif
 
@@ -192,3 +225,53 @@ def _parse_iso6709(loc: str) -> tuple:
     except Exception:
         pass
     return None, None
+
+
+def _read_google_json(filepath: str) -> dict | None:
+    """Read Google Takeout JSON sidecar file for a media file.
+
+    Google Takeout creates JSON files alongside each media file:
+      foto.jpg → foto.jpg.json
+
+    The JSON contains photoTakenTime, geoData, description etc.
+    """
+    json_path = filepath + ".json"
+    if not os.path.exists(json_path):
+        return None
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    result = {"_json_path": json_path}
+
+    # photoTakenTime → date (Unix timestamp → EXIF format)
+    taken_time = data.get("photoTakenTime", {})
+    timestamp = taken_time.get("timestamp")
+    if timestamp:
+        try:
+            ts = int(timestamp)
+            if ts > 0:
+                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                result["date"] = dt.strftime("%Y:%m:%d %H:%M:%S")
+        except (ValueError, OSError):
+            pass
+
+    # geoData → GPS coordinates
+    geo = data.get("geoData", {})
+    lat = geo.get("latitude")
+    lon = geo.get("longitude")
+    if lat is not None and lon is not None:
+        # Google sets 0.0/0.0 when no GPS data is available
+        if not (lat == 0.0 and lon == 0.0):
+            result["gps_lat"] = float(lat)
+            result["gps_lon"] = float(lon)
+
+    # description
+    desc = data.get("description", "")
+    if desc and desc.strip():
+        result["description"] = desc.strip()
+
+    return result
