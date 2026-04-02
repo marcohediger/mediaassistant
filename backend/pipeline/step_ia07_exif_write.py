@@ -4,12 +4,18 @@ import os
 import subprocess
 
 
-WRITABLE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".webp", ".heic", ".heif", ".dng"}
+WRITABLE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".webp",
+    ".heic", ".heif", ".dng",
+    ".mp4", ".mov",
+}
 
 # Formats that support IPTC Keywords natively
-_IPTC_FORMATS = {".jpg", ".jpeg", ".tiff", ".tif", ".dng"}
+_IPTC_FORMATS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".dng"}
 # Formats that only support XMP (no IPTC) — use Subject (dc:subject)
-_XMP_ONLY_FORMATS = {".heic", ".heif", ".png", ".webp"}
+_XMP_ONLY_FORMATS = {".heic", ".heif", ".webp", ".mp4", ".mov"}
+# Formats that don't support XPComment
+_NO_XPCOMMENT = {".mp4", ".mov"}
 
 
 async def execute(job, session) -> dict:
@@ -28,6 +34,7 @@ async def execute(job, session) -> dict:
         ".tiff": {"TIFF"}, ".tif": {"TIFF"},
         ".heic": {"HEIC"}, ".heif": {"HEIF"},
         ".dng": {"DNG"},
+        ".mp4": {"MP4"}, ".mov": {"MOV", "MP4"},
     }
     expected_types = _EXT_TO_TYPES.get(ext, set())
     if actual_type and expected_types and actual_type not in expected_types:
@@ -118,7 +125,8 @@ async def execute(job, session) -> dict:
     # Write description
     if description:
         cmd.append(f"-ImageDescription={description}")
-        cmd.append(f"-XPComment={description}")
+        if ext not in _NO_XPCOMMENT:
+            cmd.append(f"-XPComment={description}")
 
     # Write OCR text
     ocr_text = ""
