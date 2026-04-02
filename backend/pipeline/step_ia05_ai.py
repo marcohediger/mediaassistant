@@ -280,7 +280,8 @@ Use this information together with the image content for your classification."""
     if api_key and api_key != "not-needed":
         headers["Authorization"] = f"Bearer {api_key}"
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    ai_timeout = int(await config_manager.get("ai.timeout", 120))
+    async with httpx.AsyncClient(timeout=ai_timeout) as client:
         resp = await client.post(
             f"{url.rstrip('/')}/chat/completions",
             json=payload,
