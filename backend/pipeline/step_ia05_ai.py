@@ -1,9 +1,11 @@
 import asyncio
 import base64
+import io
 import json
 import os
 import httpx
 from config import config_manager
+from PIL import Image
 
 
 DEFAULT_SYSTEM_PROMPT = """You are an image analysis assistant for a photo media library. Static rules pre-classify files based on filename, extension, and EXIF metadata. Your job is to verify the pre-classification and correct it ONLY when the image content clearly contradicts it.
@@ -122,11 +124,19 @@ async def execute(job, session) -> dict:
     if not image_paths:
         image_paths = [filepath]
 
-    # Encode all images
+    # Optionally resize images before sending to AI
+    ai_resize_enabled = await config_manager.get("ai.image_resize", False)
     image_data_list = []
-    for img_path in image_paths:
-        with open(img_path, "rb") as f:
-            image_data_list.append(base64.b64encode(f.read()).decode("utf-8"))
+    if ai_resize_enabled:
+        ai_max_px = int(await config_manager.get("ai.image_max_px", 1024))
+        ai_max_px = max(256, ai_max_px)
+        for img_path in image_paths:
+            resized = await asyncio.to_thread(_resize_for_ai, img_path, ai_max_px)
+            image_data_list.append(base64.b64encode(resized).decode("utf-8"))
+    else:
+        for img_path in image_paths:
+            with open(img_path, "rb") as f:
+                image_data_list.append(base64.b64encode(f.read()).decode("utf-8"))
 
     mime_type = "image/jpeg"
 
@@ -301,3 +311,32 @@ Use this information together with the image content for your classification."""
     result["_model"] = model
 
     return result
+
+
+def _resize_for_ai(image_path: str, max_size: int = 768) -> bytes:
+    """Resize image so longest side <= max_size, return JPEG bytes.
+
+    Dramatically reduces payload for local AI models (e.g. 3MB → 40KB).
+    Falls back to raw file bytes if PIL cannot open the image.
+    """
+    try:
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            w, h = img.size
+            if w <= max_size and h <= max_size:
+                # Already small enough — just re-encode as JPEG
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85)
+                return buf.getvalue()
+            if w >= h:
+                new_w, new_h = max_size, int(h * max_size / w)
+            else:
+                new_w, new_h = int(w * max_size / h), max_size
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=80)
+            return buf.getvalue()
+    except Exception:
+        # Fallback: send raw file
+        with open(image_path, "rb") as f:
+            return f.read()

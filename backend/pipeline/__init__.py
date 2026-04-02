@@ -44,6 +44,7 @@ async def run_pipeline(job_id: int):
             return
 
         job.status = "processing"
+        job.started_at = datetime.now()
         existing_results = dict(job.step_result or {})
         pipeline_failed = False
         await session.commit()

@@ -38,6 +38,8 @@ async def _get_cfg() -> dict:
         "ai_url": await config_manager.get("ai.backend_url", ""),
         "ai_model": await config_manager.get("ai.model", ""),
         "ai_prompt": await config_manager.get("ai.prompt", "") or _DEFAULT_AI_PROMPT,
+        "ai_image_resize": await config_manager.get("ai.image_resize", False),
+        "ai_image_max_px": await config_manager.get("ai.image_max_px", 1024),
         "geo_provider": await config_manager.get("geo.provider", "nominatim"),
         "geo_url": await config_manager.get("geo.url", "https://nominatim.openstreetmap.org"),
         "phash_threshold": await config_manager.get("duplikat.phash_threshold", 5),
@@ -137,6 +139,9 @@ async def save_settings(request: Request):
     # KI
     await config_manager.set("ai.backend_url", _sanitize(form.get("ai_url", "")))
     await config_manager.set("ai.model", _sanitize(form.get("ai_model", "")))
+    await config_manager.set("ai.image_resize", "ai_image_resize" in form)
+    ai_max_px = int(form.get("ai_image_max_px", 1024))
+    await config_manager.set("ai.image_max_px", max(256, ai_max_px))
     if form.get("ai_api_key"):
         await config_manager.set("ai.api_key", form["ai_api_key"], encrypted=True)
     ai_prompt = form.get("ai_prompt", "").strip()
