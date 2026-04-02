@@ -227,6 +227,33 @@ def _parse_iso6709(loc: str) -> tuple:
     return None, None
 
 
+def _find_google_json(filepath: str) -> str | None:
+    """Find the Google Takeout JSON sidecar for a media file.
+
+    Google Takeout naming patterns:
+      foto.jpg       → foto.jpg.json          (normal)
+      foto(1).jpg    → foto.jpg(1).json       (duplicate — Google's quirky naming)
+      foto(2).jpg    → foto.jpg(2).json
+    """
+    import re
+
+    # 1. Normal: foto.jpg.json
+    json_path = filepath + ".json"
+    if os.path.exists(json_path):
+        return json_path
+
+    # 2. Google duplicate pattern: foto(1).jpg → foto.jpg(1).json
+    basename = os.path.basename(filepath)
+    match = re.match(r'^(.+?)(\(\d+\))(\.[^.]+)$', basename)
+    if match:
+        name, number, ext = match.groups()
+        alt_json = os.path.join(os.path.dirname(filepath), f"{name}{ext}{number}.json")
+        if os.path.exists(alt_json):
+            return alt_json
+
+    return None
+
+
 def _read_google_json(filepath: str) -> dict | None:
     """Read Google Takeout JSON sidecar file for a media file.
 
@@ -235,8 +262,8 @@ def _read_google_json(filepath: str) -> dict | None:
 
     The JSON contains photoTakenTime, geoData, description etc.
     """
-    json_path = filepath + ".json"
-    if not os.path.exists(json_path):
+    json_path = _find_google_json(filepath)
+    if not json_path:
         return None
 
     try:
