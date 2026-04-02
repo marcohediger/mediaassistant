@@ -126,7 +126,9 @@
     "no": "Nein",
     "immich_exists": "In Immich vorhanden",
     "view_in_immich": "In Immich ansehen",
-    "delete_local": "Lokale Kopie löschen"
+    "delete_local": "Lokale Kopie löschen",
+    "not_duplicate": "Kein Duplikat",
+    "not_duplicate_confirm": "{name} ist kein Duplikat? Die Datei wird erneut verarbeitet."
   },
   "settings": {
     "title": "Einstellungen",

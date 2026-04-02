@@ -287,6 +287,9 @@ Use this information together with the image content for your classification."""
             headers=headers,
         )
 
+    # Free large base64 data immediately after API call
+    del image_data_list, content_parts, payload
+
     if resp.status_code != 200:
         raise RuntimeError(f"KI-API Fehler: HTTP {resp.status_code} — {resp.text[:200]}")
 

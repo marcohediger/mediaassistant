@@ -126,7 +126,9 @@
     "no": "No",
     "immich_exists": "Exists in Immich",
     "view_in_immich": "View in Immich",
-    "delete_local": "Delete local copy"
+    "delete_local": "Delete local copy",
+    "not_duplicate": "Not a duplicate",
+    "not_duplicate_confirm": "{name} is not a duplicate? The file will be re-processed."
   },
   "settings": {
     "title": "Settings",
