@@ -13,7 +13,24 @@ async def execute(job, session) -> dict:
     if ext not in WRITABLE_EXTENSIONS:
         return {"status": "skipped", "reason": f"format {ext} not supported for in-place tag writing"}
 
+    # Detect format/extension mismatch (e.g. JPG named as .png)
     step_results = job.step_result or {}
+    exif_data = step_results.get("IA-01", {})
+    actual_type = (exif_data.get("file_type") or "").upper()
+    _EXT_TO_TYPES = {
+        ".jpg": {"JPEG"}, ".jpeg": {"JPEG"},
+        ".png": {"PNG"}, ".webp": {"WEBP"},
+        ".tiff": {"TIFF"}, ".tif": {"TIFF"},
+        ".heic": {"HEIC"}, ".heif": {"HEIF"},
+        ".dng": {"DNG"},
+    }
+    expected_types = _EXT_TO_TYPES.get(ext, set())
+    if actual_type and expected_types and actual_type not in expected_types:
+        return {
+            "status": "skipped",
+            "reason": f"format mismatch: file is {actual_type} but extension is {ext} — ExifTool cannot write safely",
+        }
+
     ai_result = step_results.get("IA-05", {})
     ocr_result = step_results.get("IA-06", {})
     geo_result = step_results.get("IA-03", {})

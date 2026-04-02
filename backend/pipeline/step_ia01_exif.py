@@ -36,7 +36,7 @@ async def execute(job, session) -> dict:
         "date": meta.get("DateTimeOriginal") or meta.get("CreateDate") or meta.get("FileModifyDate"),
         "gps_lat": meta.get("GPSLatitude"),
         "gps_lon": meta.get("GPSLongitude"),
-        "gps": bool(meta.get("GPSLatitude")),
+        "gps": meta.get("GPSLatitude") is not None and meta.get("GPSLongitude") is not None,
         "software": meta.get("Software"),
         "width": meta.get("ImageWidth"),
         "height": meta.get("ImageHeight"),
