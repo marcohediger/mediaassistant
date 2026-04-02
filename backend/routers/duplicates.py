@@ -621,6 +621,66 @@ async def keep_file(request: Request):
     return RedirectResponse(url="/duplicates", status_code=303)
 
 
+@router.post("/api/duplicates/not-duplicate")
+async def not_duplicate(request: Request):
+    """Mark a single file as 'not a duplicate' and re-process it through the pipeline."""
+    form = await request.form()
+    debug_key = form.get("debug_key")
+
+    if not debug_key:
+        return RedirectResponse(url="/duplicates", status_code=303)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.debug_key == debug_key, Job.status == "duplicate")
+        )
+        job = result.scalars().first()
+        if not job:
+            return RedirectResponse(url="/duplicates", status_code=303)
+
+        filepath = job.target_path or job.original_path
+        if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
+            # Move file from duplicates dir to internal reprocess dir
+            reprocess_dir = os.path.join("/app/data", "reprocess")
+            await asyncio.to_thread(os.makedirs, reprocess_dir, exist_ok=True)
+            reprocess_path = os.path.join(reprocess_dir, job.filename)
+            if os.path.exists(reprocess_path):
+                name, ext = os.path.splitext(job.filename)
+                reprocess_path = os.path.join(reprocess_dir, f"{name}_{job.debug_key}{ext}")
+            await asyncio.to_thread(safe_move, filepath, reprocess_path, job.debug_key)
+            # Remove .log file
+            log_path = filepath + ".log"
+            if os.path.exists(log_path):
+                await asyncio.to_thread(os.remove, log_path)
+
+            job.original_path = reprocess_path
+        elif not filepath or not os.path.exists(filepath):
+            # File doesn't exist locally — can't reprocess
+            return RedirectResponse(url="/duplicates", status_code=303)
+
+        # Reset job: keep IA-01, mark IA-02 to skip duplicate check
+        step_results = dict(job.step_result or {})
+        ia01 = step_results.get("IA-01")
+        new_results = {}
+        if ia01:
+            new_results["IA-01"] = ia01
+        # Mark IA-02 as already done (skip duplicate detection on re-run)
+        new_results["IA-02"] = {"status": "skipped", "reason": "manually marked as not a duplicate"}
+        job.step_result = new_results
+        flag_modified(job, "step_result")
+        job.status = "queued"
+        job.target_path = None
+        job.error_message = None
+        await session.commit()
+
+        # Re-run pipeline in background
+        from pipeline import run_pipeline
+        asyncio.create_task(run_pipeline(job.id))
+
+    await log_info("duplicates", f"Not a duplicate: {debug_key} → re-processing")
+    return RedirectResponse(url="/duplicates", status_code=303)
+
+
 @router.post("/api/duplicates/delete-all")
 async def delete_duplicate(request: Request):
     """Delete a single duplicate file."""

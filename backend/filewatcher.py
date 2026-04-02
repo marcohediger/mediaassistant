@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import gc
 import hashlib
 import logging
 import os
@@ -7,6 +8,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from config import config_manager
 from database import async_session
 from models import Job, InboxDirectory
@@ -43,6 +45,38 @@ async def _generate_debug_key(session) -> str:
     else:
         counter = 1
     return f"{prefix}{counter:04d}"
+
+
+async def _create_job_safe(*, filename, original_path, source_label, source_inbox_path=None,
+                           folder_tags=False, dry_run=False, use_immich=False,
+                           immich_asset_id=None, immich_user_id=None, file_hash=None) -> Job | None:
+    """Create a Job with retry on debug_key collision (race condition safe)."""
+    for attempt in range(5):
+        try:
+            async with async_session() as session:
+                debug_key = await _generate_debug_key(session)
+                job = Job(
+                    filename=filename,
+                    original_path=original_path,
+                    debug_key=debug_key,
+                    status="queued",
+                    source_label=source_label,
+                    source_inbox_path=source_inbox_path,
+                    folder_tags=folder_tags,
+                    dry_run=dry_run,
+                    use_immich=use_immich,
+                    immich_asset_id=immich_asset_id,
+                    immich_user_id=immich_user_id,
+                    file_hash=file_hash,
+                )
+                session.add(job)
+                await session.commit()
+                return job
+        except IntegrityError:
+            logger.warning(f"debug_key collision (attempt {attempt + 1}), retrying...")
+            await asyncio.sleep(0.1 * (attempt + 1))
+    logger.error(f"Failed to create job for {filename} after 5 attempts")
+    return None
 
 
 _SKIP_DIRS = {"@eadir", ".synology", "#recycle"}
@@ -174,20 +208,17 @@ async def _scan_inbox():
 
         tasks = [_hash_one(fp, fs) for fp, fs in candidates]
         for coro in asyncio.as_completed(tasks):
-            filepath, file_size, file_hash = await coro
-            if file_hash is None:
-                continue
-            if (filepath, file_hash) in done_hashes:
-                continue
+            try:
+                filepath, file_size, file_hash = await coro
+                if file_hash is None:
+                    continue
+                if (filepath, file_hash) in done_hashes:
+                    continue
 
-            filename = os.path.basename(filepath)
-            async with async_session() as session:
-                debug_key = await _generate_debug_key(session)
-                job = Job(
+                filename = os.path.basename(filepath)
+                job = await _create_job_safe(
                     filename=filename,
                     original_path=filepath,
-                    debug_key=debug_key,
-                    status="queued",
                     source_label=inbox.label,
                     source_inbox_path=inbox.path,
                     folder_tags=use_folder_tags,
@@ -196,11 +227,11 @@ async def _scan_inbox():
                     immich_user_id=inbox.immich_user_id,
                     file_hash=file_hash,
                 )
-                session.add(job)
-                await session.commit()
-                total_queued += 1
-
-            logger.info(f"New file: {filename} → {debug_key} (Inbox: {inbox.label})")
+                if job:
+                    total_queued += 1
+                    logger.info(f"New file: {filename} → {job.debug_key} (Inbox: {inbox.label})")
+            except Exception as e:
+                logger.error(f"Error queuing file: {e}")
 
         if total_queued:
             await log_info("filewatcher", f"{total_queued} new files queued from {inbox.label}")
@@ -315,25 +346,21 @@ async def _poll_immich():
             already_by_id.add(asset_id)
             processed_hashes_by_user.setdefault(user_id, set()).add(file_hash)
 
-            async with async_session() as session:
-                debug_key = await _generate_debug_key(session)
-                job = Job(
-                    filename=filename,
-                    original_path=file_path,
-                    debug_key=debug_key,
-                    status="queued",
-                    source_label="Immich",
-                    use_immich=True,
-                    immich_asset_id=asset_id,
-                    immich_user_id=user_id,
-                    file_hash=file_hash,
-                )
-                session.add(job)
-                await session.commit()
-                job_id = job.id
+            job = await _create_job_safe(
+                filename=filename,
+                original_path=file_path,
+                source_label="Immich",
+                use_immich=True,
+                immich_asset_id=asset_id,
+                immich_user_id=user_id,
+                file_hash=file_hash,
+            )
+            if not job:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                continue
 
-            await log_info("immich_poll", f"Processing: {filename}", f"User: {user_label}, Asset: {asset_id}, Key: {debug_key}")
-            await run_pipeline(job_id)
+            await log_info("immich_poll", f"Processing: {filename}", f"User: {user_label}, Asset: {asset_id}, Key: {job.debug_key}")
+            await run_pipeline(job.id)
 
     await config_manager.set("immich.last_poll", now)
 
@@ -503,9 +530,15 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
 async def _pipeline_worker(shutdown_event: asyncio.Event):
     """Background worker: continuously picks up queued jobs and runs pipelines."""
     logger.info("Pipeline worker started")
+    jobs_since_gc = 0
     while not shutdown_event.is_set():
         try:
             await _process_queue()
+            jobs_since_gc += 1
+            # Force garbage collection every 10 jobs to prevent memory buildup
+            if jobs_since_gc >= 10:
+                gc.collect()
+                jobs_since_gc = 0
         except Exception as e:
             await log_error("pipeline_worker", f"Pipeline error: {e}")
             logger.error(f"Pipeline worker error: {e}")

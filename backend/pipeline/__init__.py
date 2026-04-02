@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import logging
 import os
 import traceback
@@ -196,6 +197,10 @@ async def run_pipeline(job_id: int):
         elif duplicate_detected:
             job.completed_at = datetime.now()
             await session.commit()
+
+        # Free step results from memory (already persisted in DB)
+        existing_results = None
+        gc.collect()
 
 
 async def _move_to_error(job, session):

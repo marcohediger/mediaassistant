@@ -150,6 +150,13 @@
                     <input type="hidden" name="group_key" value="{{ group.original_key }}">
                     <button type="submit" class="btn btn-small btn-primary">{{ t.duplicates.keep_this }}</button>
                 </form>
+                {% if not member.is_original %}
+                <form method="post" action="/api/duplicates/not-duplicate" class="inline-form"
+                      onsubmit="return confirm('{{ t.duplicates.not_duplicate_confirm | replace('{name}', member.filename) }}')">
+                    <input type="hidden" name="debug_key" value="{{ member.debug_key }}">
+                    <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.not_duplicate }}</button>
+                </form>
+                {% endif %}
                 {% endif %}
             </div>
         </div>
