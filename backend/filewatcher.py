@@ -51,7 +51,8 @@ async def _create_job_safe(*, filename, original_path, source_label, source_inbo
                            folder_tags=False, dry_run=False, use_immich=False,
                            immich_asset_id=None, immich_user_id=None, file_hash=None) -> Job | None:
     """Create a Job with retry on debug_key collision (race condition safe)."""
-    for attempt in range(5):
+    import random
+    for attempt in range(10):
         try:
             async with async_session() as session:
                 debug_key = await _generate_debug_key(session)
@@ -74,8 +75,8 @@ async def _create_job_safe(*, filename, original_path, source_label, source_inbo
                 return job
         except IntegrityError:
             logger.warning(f"debug_key collision (attempt {attempt + 1}), retrying...")
-            await asyncio.sleep(0.1 * (attempt + 1))
-    logger.error(f"Failed to create job for {filename} after 5 attempts")
+            await asyncio.sleep(0.05 + random.random() * 0.1 * (attempt + 1))
+    logger.error(f"Failed to create job for {filename} after 10 attempts")
     return None
 
 
