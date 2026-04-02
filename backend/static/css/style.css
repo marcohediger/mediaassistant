@@ -307,6 +307,31 @@ h2 { margin: 2rem 0 1rem; font-size: 1.25rem; color: var(--text-muted); }
     color: var(--text-muted);
 }
 
+.subsection-divider {
+    border-color: var(--border);
+    margin: 1.5rem 0;
+}
+
+.subsection-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0 0 0.25rem;
+}
+
+.subsection-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin: 0 0 0.75rem;
+}
+
+.form-hint {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+}
+
 .section-body {
     padding: 1.25rem;
 }
@@ -470,16 +495,18 @@ select:focus {
 
 /* Inline Switch (small, for options rows) */
 .switch-inline {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 1rem;
     cursor: pointer;
     font-size: 0.85rem;
+    line-height: 1;
 }
 
-.switch-inline input { display: none; }
+.switch-inline input { position: absolute; opacity: 0; width: 0; height: 0; }
 
 .switch-slider-sm {
+    min-width: 36px;
     width: 36px;
     height: 20px;
     background: var(--bg-input);
@@ -488,6 +515,7 @@ select:focus {
     position: relative;
     transition: background 0.3s, border-color 0.3s;
     flex-shrink: 0;
+    display: inline-block;
 }
 
 .switch-slider-sm::before {

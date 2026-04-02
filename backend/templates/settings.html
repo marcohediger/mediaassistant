@@ -211,15 +211,14 @@
         });
         toggleScheduleFields();
         </script>
-        <hr style="border-color: var(--border); margin: 1.5rem 0;">
-        <h3>{{ t.settings.google_json }}</h3>
-        <p style="color: var(--text-muted); margin: 0.25rem 0 0.75rem;">{{ t.settings.google_json_desc }}</p>
-        <label class="switch-inline">
+        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
+        <label style="font-weight: 600; display: block; margin-bottom: 0.25rem;">{{ t.settings.google_json }}</label>
+        <small style="display: block; color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem;">{{ t.settings.google_json_desc }}</small>
+        <label class="switch-inline" style="margin-bottom: 1rem;">
             <input type="checkbox" name="google_json" value="1" {{ 'checked' if cfg.google_json else '' }}>
             <span class="switch-slider-sm"></span>
             <span>{{ t.settings.google_json_enabled }}</span>
         </label>
-        <small style="display: block; margin-top: 0.5rem;">{{ t.settings.google_json_hint }}</small>
     </div>
 </div>
 
@@ -232,11 +231,11 @@
         </div>
     </div>
     <div class="section-body">
-        <div style="margin-bottom: 1.25rem; font-size: 0.82rem; color: var(--text-muted); line-height: 1.6;">
+        <div style="margin-bottom: 1.25rem; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
             {{ t.settings.sorting_rules_hint }}
             <details style="margin-top: 0.5rem;">
-                <summary style="cursor: pointer; color: var(--primary); font-size: 0.82rem;">{{ t.settings.sorting_rules_help_title }}</summary>
-                <div style="margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-input); border-radius: 6px; font-size: 0.8rem; line-height: 1.7;">
+                <summary style="cursor: pointer; color: var(--primary);">{{ t.settings.sorting_rules_help_title }}</summary>
+                <div style="margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-input); border-radius: 6px; line-height: 1.7;">
                     {{ t.settings.sorting_rules_help | safe }}
                 </div>
             </details>
@@ -385,9 +384,9 @@
             {% for cat in library_categories if cat.fixed %}
             <div class="inbox-item" style="padding: 0.65rem 1rem; opacity: 0.7;">
                 <div style="display: flex; align-items: center; gap: 0.75rem;">
-                    <span style="font-size: 0.85rem; color: var(--text-muted);">{{ cat.label }}</span>
+                    <span style="color: var(--text-muted);">{{ cat.label }}</span>
                     <span style="color: var(--text-muted);">→</span>
-                    <span style="font-size: 0.85rem; color: var(--text-muted);">{{ cat.path_template }}</span>
+                    <span style="color: var(--text-muted);">{{ cat.path_template }}</span>
                 </div>
             </div>
             {% endfor %}
@@ -510,6 +509,18 @@
             <textarea id="ai_prompt" name="ai_prompt" rows="16" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4;">{{ cfg.ai_prompt }}</textarea>
             <small>{{ t.settings.prompt_hint }}
             <br>{{ t.settings.prompt_hint2 }}</small>
+        </div>
+        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
+        <label style="font-weight: 600; display: block; margin-bottom: 0.25rem;">{{ t.settings.ai_image_resize }}</label>
+        <small style="display: block; color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem;">{{ t.settings.ai_image_resize_desc }}</small>
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+            <label class="switch-inline" style="margin: 0;">
+                <input type="checkbox" name="ai_image_resize" value="1" {{ 'checked' if cfg.ai_image_resize else '' }} onchange="document.getElementById('ai_image_max_px').disabled = !this.checked">
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.settings.ai_image_resize_enabled }}</span>
+            </label>
+            <input type="number" id="ai_image_max_px" name="ai_image_max_px" value="{{ cfg.ai_image_max_px }}" min="256" max="4096" step="128" {{ 'disabled' if not cfg.ai_image_resize else '' }} style="width: 5rem;">
+            <small style="display: inline; margin: 0;">px</small>
         </div>
     </div>
 </div>
@@ -639,7 +650,7 @@
             <input type="password" id="immich_api_key" name="immich_api_key" placeholder="••••••••">
             <small>{{ t.settings.immich_api_key_hint }}</small>
         </div>
-        <hr style="border-color: var(--border); margin: 1.5rem 0;">
+        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
         <h3>{{ t.settings.immich_poll }}</h3>
         <p class="section-note" style="margin-bottom: 1rem;">{{ t.settings.immich_poll_desc }}</p>
         <label class="switch-inline" style="margin-bottom: 1rem;">
@@ -647,7 +658,7 @@
             <span class="switch-slider-sm"></span>
             <span>{{ t.settings.immich_poll_active }}</span>
         </label>
-        <hr style="border-color: var(--border); margin: 1.5rem 0;">
+        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
         <h3>{{ t.settings.immich_users }}</h3>
         <p class="section-note" style="margin-bottom: 1rem;">{{ t.settings.immich_users_desc }}</p>
 

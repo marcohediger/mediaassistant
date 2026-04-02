@@ -30,6 +30,7 @@ class Job(Base):
     phash = Column(Text)  # perceptual hash
     retry_count = Column(Integer, default=0)  # number of pipeline restart attempts
     created_at = Column(DateTime, default=lambda: datetime.now())
+    started_at = Column(DateTime)  # pipeline processing start
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
     completed_at = Column(DateTime)
 

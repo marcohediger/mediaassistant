@@ -48,6 +48,7 @@ async def _migrate_columns(conn):
         ("jobs", "immich_user_id", "ALTER TABLE jobs ADD COLUMN immich_user_id INTEGER"),
         ("inbox_directories", "immich_user_id", "ALTER TABLE inbox_directories ADD COLUMN immich_user_id INTEGER"),
         ("jobs", "folder_tags", "ALTER TABLE jobs ADD COLUMN folder_tags BOOLEAN DEFAULT 0"),
+        ("jobs", "started_at", "ALTER TABLE jobs ADD COLUMN started_at DATETIME"),
     ]
     for table, column, sql in migrations:
         try:
