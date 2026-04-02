@@ -211,6 +211,15 @@
         });
         toggleScheduleFields();
         </script>
+        <hr style="border-color: var(--border); margin: 1.5rem 0;">
+        <div class="form-group">
+            <label class="switch-inline">
+                <input type="checkbox" name="google_json" value="1" {{ 'checked' if cfg.google_json else '' }}>
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.settings.google_json }}</span>
+            </label>
+            <small>{{ t.settings.google_json_hint }}</small>
+        </div>
     </div>
 </div>
 
@@ -604,15 +613,6 @@
                 <span>{{ t.settings.metadata_write_sidecar }}</span>
             </label>
             <small style="margin-left: 1.5rem;">{{ t.settings.metadata_write_sidecar_hint }}</small>
-        </div>
-        <hr style="border-color: var(--border); margin: 1.5rem 0;">
-        <div class="form-group">
-            <label class="switch-inline">
-                <input type="checkbox" name="google_json" value="1" {{ 'checked' if cfg.google_json else '' }}>
-                <span class="switch-slider-sm"></span>
-                <span>{{ t.settings.google_json }}</span>
-            </label>
-            <small>{{ t.settings.google_json_hint }}</small>
         </div>
     </div>
 </div>
