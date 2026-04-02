@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.17.1 — 2026-04-02
+
+### Bugfixes aus exotischen Tests
+
+**GPS-Koordinaten bei Longitude/Latitude 0 ignoriert**
+- `step_ia01_exif.py`: `bool(0)` war `False` → GPS am Äquator/Greenwich-Meridian wurde als "kein GPS" behandelt
+- `step_ia03_geocoding.py`: `if not lat or not lon:` war falsy bei 0 → jetzt `if lat is None or lon is None:`
+- GPS-Koordinaten werden jetzt validiert (lat: -90 bis 90, lon: -180 bis 180)
+
+**Format/Extension-Mismatch verursacht Pipeline-Fehler**
+- `step_ia07_exif_write.py`: Dateien mit falscher Extension (z.B. JPG als .png) werden jetzt erkannt
+- ExifTool Write wird übersprungen statt mit Fehler abzubrechen
+- Mismatch wird als "skipped" mit erklärender Meldung geloggt
+
+**Settings-Save akzeptiert partielle/bösartige Formulardaten (kritisch)**
+- Partielle POST-Requests konnten alle Module deaktivieren und Konfiguration löschen
+- Neuer `_form_token` Guard: nur vollständige Formular-Submits werden verarbeitet
+- Input-Sanitisierung gegen XSS (HTML-Escaping) für alle Text-Felder
+
 ## v2.17.0 — 2026-04-01
 
 ### Synology-Kompatibilität & neue Features

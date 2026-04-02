@@ -1,3 +1,4 @@
+import html
 import os
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
@@ -7,6 +8,13 @@ from database import async_session
 from models import Module, InboxDirectory, SortingRule, LibraryCategory, ImmichUser
 from system_logger import log_warning, log_info
 from template_engine import render
+
+
+def _sanitize(value: str) -> str:
+    """Sanitize user input: strip and escape HTML to prevent XSS."""
+    if not value:
+        return value
+    return html.escape(value.strip())
 
 router = APIRouter(prefix="/settings")
 
@@ -107,6 +115,14 @@ async def settings_page(request: Request):
 async def save_settings(request: Request):
     form = await request.form()
 
+    # Guard: reject partial/malformed submissions that lack the full form.
+    # The settings template always includes a hidden field '_form_token'.
+    # Without it, module checkboxes would all appear unchecked (wiping config).
+    if "_form_token" not in form:
+        return RedirectResponse(
+            url="/settings?msg=invalid_form&msg_type=error", status_code=302
+        )
+
     # Appearance
     await config_manager.set("ui.language", form.get("ui_language", "de"))
     await config_manager.set("ui.theme", form.get("ui_theme", "dark"))
@@ -117,8 +133,8 @@ async def save_settings(request: Request):
         await config_manager.set_module_enabled(name, enabled)
 
     # KI
-    await config_manager.set("ai.backend_url", form.get("ai_url", ""))
-    await config_manager.set("ai.model", form.get("ai_model", ""))
+    await config_manager.set("ai.backend_url", _sanitize(form.get("ai_url", "")))
+    await config_manager.set("ai.model", _sanitize(form.get("ai_model", "")))
     if form.get("ai_api_key"):
         await config_manager.set("ai.api_key", form["ai_api_key"], encrypted=True)
     ai_prompt = form.get("ai_prompt", "").strip()
@@ -130,7 +146,7 @@ async def save_settings(request: Request):
 
     # Geocoding
     await config_manager.set("geo.provider", form.get("geo_provider", "nominatim"))
-    await config_manager.set("geo.url", form.get("geo_url", ""))
+    await config_manager.set("geo.url", _sanitize(form.get("geo_url", "")))
     if form.get("geo_api_key"):
         await config_manager.set("geo.api_key", form["geo_api_key"], encrypted=True)
 
@@ -146,16 +162,16 @@ async def save_settings(request: Request):
     await config_manager.set("ocr.mode", form.get("ocr_mode", "smart"))
 
     # SMTP
-    await config_manager.set("smtp.server", form.get("smtp_server", ""))
+    await config_manager.set("smtp.server", _sanitize(form.get("smtp_server", "")))
     try:
         port = int(form.get("smtp_port", 587))
     except ValueError:
         port = 587
     await config_manager.set("smtp.port", port)
-    await config_manager.set("smtp.user", form.get("smtp_user", ""))
+    await config_manager.set("smtp.user", _sanitize(form.get("smtp_user", "")))
     if form.get("smtp_password"):
         await config_manager.set("smtp.password", form["smtp_password"], encrypted=True)
-    await config_manager.set("smtp.recipient", form.get("smtp_recipient", ""))
+    await config_manager.set("smtp.recipient", _sanitize(form.get("smtp_recipient", "")))
     await config_manager.set("smtp.ssl", "smtp_ssl" in form)
 
     # Ziel-Ablage (base path only — categories are managed separately)
@@ -192,7 +208,7 @@ async def save_settings(request: Request):
         await session.commit()
 
     # Immich
-    await config_manager.set("immich.url", form.get("immich_url", ""))
+    await config_manager.set("immich.url", _sanitize(form.get("immich_url", "")))
     if form.get("immich_api_key"):
         await config_manager.set("immich.api_key", form["immich_api_key"], encrypted=True)
     await config_manager.set("immich.poll_enabled", "immich_poll_enabled" in form)

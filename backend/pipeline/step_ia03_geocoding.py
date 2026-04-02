@@ -81,8 +81,12 @@ async def execute(job, session) -> dict:
     lat = exif.get("gps_lat")
     lon = exif.get("gps_lon")
 
-    if not lat or not lon:
+    if lat is None or lon is None:
         return {"status": "skipped", "reason": "no GPS data"}
+
+    # Validate GPS coordinate ranges
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        return {"status": "skipped", "reason": f"invalid GPS coordinates: lat={lat}, lon={lon}"}
 
     provider = await config_manager.get("geo.provider", "nominatim")
     url = await config_manager.get("geo.url", "https://nominatim.openstreetmap.org")

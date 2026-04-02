@@ -1,6 +1,8 @@
 # Testplan — MediaAssistant
 
-> Letzter vollständiger Testlauf: **v2.9.0 — 2026-03-31** (254/263 bestanden, 9 nicht testbar)
+> Letzter vollständiger Testlauf: **v2.17.1 — 2026-04-02** (296/305 bestanden, 9 nicht testbar)
+> Exotische Tests: 42 Zusatztests, 3 Bugs gefunden und behoben
+> Slow-System Test: 0.5 CPU / 512MB RAM (Synology-Simulation) bestanden
 > Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203 JPGs, iPhone 12 Pro HEIC/MOV, Casio EX-S600 JPGs, generierte PNG/GIF/WebP/TIFF, UUID Messenger-Dateien
 > Container: v2.9.0, Docker 2GB RAM / 2 CPUs, SQLite mit 7 Indexes
 > Testlauf: 19 Jobs verarbeitet (16 done, 3 duplicate, 0 error, 0 review), Inbox leer nach Abschluss
@@ -510,6 +512,89 @@
     └── duplicates/    T01_panasonic.JPG (SHA256 exact duplicate)
 ```
 
+## 12. Exotische Tests (v2.17.1)
+
+> Testlauf: **v2.17.1 — 2026-04-02**, Container 0.5 CPU / 512MB RAM (Synology-Simulation)
+
+### Format/Extension-Mismatch
+
+- [x] JPG mit .png Extension → IA-01 erkennt `file_type=JPEG`, IA-07 überspringt mit "format mismatch" statt Crash
+- [x] PNG mit .jpg Extension → IA-07 überspringt mit "format mismatch"
+- [x] MP4 als .mov umbenannt → Pipeline verarbeitet korrekt (ffprobe erkennt Format)
+- [x] Zufällige Binärdaten als .jpg → IA-01 Fehler "konnte Datei nicht lesen", kein Crash
+
+### Extreme Dateinamen
+
+- [x] 200+ Zeichen Dateiname → korrekt verarbeitet
+- [x] Emoji im Dateinamen (🏔️_Berge_🌅.jpg) → korrekt verarbeitet, Immich-Upload OK
+- [x] Chinesisch/Japanisch (测试照片_テスト.jpg) → korrekt verarbeitet, Immich-Upload OK
+- [x] Nur Punkte (`...jpg`) → korrekt ignoriert (kein Extension-Match)
+- [x] Leerzeichen-Name (`   .jpg`) → korrekt verarbeitet
+- [x] Doppelte Extension (`photo.jpg.jpg`) → korrekt verarbeitet
+- [x] Uppercase Extension (`PHOTO.JPEG`) → `.lower()` normalisiert korrekt
+
+### Extreme Bilddimensionen
+
+- [x] 1x1 Pixel Bild → pHash berechnet, korrekt verarbeitet
+- [x] 10000x100 Panorama → korrekt verarbeitet
+- [x] 16x16 Pixel (an KI-Schwelle) → korrekt verarbeitet
+- [x] 15x15 Pixel (unter KI-Schwelle) → KI übersprungen "Bild zu klein"
+- [x] Solid Black / Solid White → pHash `0000...` / `8000...`, korrekt verarbeitet
+
+### EXIF Edge Cases
+
+- [x] Zukunftsdatum (2030-01-01) → Datum korrekt gelesen, Sortierung in 2030/
+- [x] Sehr altes Datum (1900-01-01) → korrekt verarbeitet
+- [x] GPS Longitude=0 (Greenwich-Meridian) → Geocoding korrekt "Vereinigtes Königreich / Groß-London" (Bug in v2.17.0 behoben)
+- [x] GPS Latitude=0 (Äquator) → gps=true, Geocoding ausgeführt (Bug in v2.17.0 behoben)
+- [x] Ungültige GPS (999,999) → "skipped, invalid GPS coordinates" (Validierung in v2.17.1 hinzugefügt)
+- [x] GPS Null Island (0,0) → Geocoding wird ausgeführt (Bug in v2.17.0 behoben)
+- [x] 10KB EXIF Description → ExifTool verarbeitet ohne Probleme
+- [x] XSS in EXIF Keywords (`<script>alert(1)</script>`) → wird nicht in KI-Tags übernommen
+
+### Synology-spezifisch
+
+- [x] `@eaDir` Verzeichnis → korrekt ignoriert (`_SKIP_DIRS` in filewatcher.py)
+- [x] `.DS_Store` Datei → ignoriert (keine unterstützte Extension)
+- [x] `Thumbs.db` Datei → ignoriert (keine unterstützte Extension)
+- [x] Versteckte Datei (`.hidden_photo.jpg`) → wird verarbeitet (korrekt, versteckte Dateien mit gültiger Extension sind gültige Eingaben)
+
+### Stress / Concurrent
+
+- [x] 10 Dateien gleichzeitig → alle korrekt verarbeitet, sequentielle Abarbeitung
+- [x] Gleiche Datei 5x mit verschiedenen Namen → 1 done + 4 SHA256-Duplikate
+- [x] Datei vor Filewatcher-Pickup gelöscht → kein Crash, kein Job erstellt
+- [x] 15 Dateien in Queue auf langsamem System → alle verarbeitet, kein OOM
+
+### Grosse Dateien auf langsamem System
+
+- [x] 97MB DNG → korrekt verarbeitet, Memory ~260MB
+- [x] 273MB MP4 Video → korrekt verarbeitet, Memory unter 260MB
+- [x] 8MB PNG → korrekt verarbeitet
+
+### API Edge Cases
+
+- [x] Ungültiger Job-Key für Retry → `{"status":"error","message":"Job nicht gefunden"}`
+- [x] Nicht-existenter Job löschen → Redirect ohne Fehlerseite
+- [x] Dashboard mit 0 Jobs → korrekte Antwort, alle Werte 0
+
+### Settings Security (v2.17.1)
+
+- [x] Partieller POST ohne `_form_token` → abgelehnt mit "invalid_form" Fehler
+- [x] Vollständiger POST mit `_form_token` → akzeptiert
+- [x] XSS-Payload in Textfeldern → HTML-escaped gespeichert (`&lt;script&gt;`)
+- [x] Module-Checkboxen nur aktualisiert wenn `_form_token` vorhanden
+
+### Gefundene und behobene Bugs (v2.17.1)
+
+| Bug | Beschreibung | Fix |
+|-----|-------------|-----|
+| GPS lon=0 / lat=0 | `bool(0)` ist False → GPS am Äquator/Greenwich ignoriert | `is not None` Check |
+| GPS Validierung | GPS lat=999, lon=999 akzeptiert | Range-Check -90..90 / -180..180 |
+| Format-Mismatch | JPG als .png → ExifTool Write crasht | Mismatch-Erkennung vor Write |
+| Settings partieller POST | Wiped alle Module + Config | `_form_token` Guard |
+| Settings XSS | Ungefilterte Eingabe in Config gespeichert | `html.escape()` Sanitisierung |
+
 ### Bekannte Einschränkungen
 | Thema | Beschreibung |
 |-------|-------------|
@@ -517,3 +602,5 @@
 | Video < 1s | Thumbnail-Extraktion scheitert (Seek-Position > Videolänge) |
 | Leere Ordner | Werden nur aufgeräumt wenn `folder_tags` aktiv ist |
 | SMTP leerer Wert | JSON-encoded leerer String `""` wird nicht als "nicht konfiguriert" erkannt |
+| `...jpg` Dateiname | `os.path.splitext("...jpg")` gibt keine Extension → still ignoriert |
+| Max-Retry nur bei Start | `retry_count > MAX_RETRIES` Check nur beim Container-Start, nicht im laufenden Betrieb |
