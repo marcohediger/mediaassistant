@@ -75,17 +75,22 @@ def _scan_directory(path: str, min_age: float) -> list[str]:
 MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
 
 
-def _is_file_stable(filepath: str, expected_size: int, wait: float = 2.0) -> bool:
+def _is_file_stable(filepath: str, expected_size: int) -> bool:
     """Check if file size is stable (not still being copied)."""
     try:
-        time.sleep(wait)
+        current_size = os.path.getsize(filepath)
+        if current_size == expected_size and current_size > 0:
+            return True
+        # Size mismatch — file may still be copying, wait briefly and re-check
+        time.sleep(1.0)
         current_size = os.path.getsize(filepath)
         return current_size == expected_size and current_size > 0
     except OSError:
         return False
 
 
-async def _scan_and_process():
+async def _scan_inbox():
+    """Scan inboxes, hash files, create queued jobs. Does NOT run pipelines."""
     async with async_session() as session:
         result = await session.execute(
             select(InboxDirectory).where(InboxDirectory.active == True)
@@ -110,39 +115,23 @@ async def _scan_and_process():
                 )
             )
             rows = existing.all()
-            # Active jobs: never re-process
             active_paths = {r[0] for r in rows if r[1] in ("queued", "processing")}
-            # Successful jobs (done + no errors) OR duplicate jobs: skip same file
-            # Bug 1 fix: Include dry_run jobs to prevent endless re-processing
-            # Bug 2 fix: Only skip if target file still exists
             done_hashes = set()
             for r in rows:
                 path, status, fhash, err, target, dry_run = r
                 if not fhash:
                     continue
-
-                # Core rule: if the source file is still at its original
-                # inbox path, it was never moved — always re-process it
-                # (IA-02 will handle duplicate detection).
-                # Exception: dry-run and skipped jobs intentionally leave the file in place.
                 if not dry_run and status != "skipped" and os.path.exists(path):
                     continue
-
-                # Dry-run jobs: always skip (file stays in inbox by design)
                 if dry_run and status in ("done", "duplicate"):
                     done_hashes.add((path, fhash))
                     continue
-                # Skipped jobs: file stays in inbox, never re-process.
-                # Track both the original hash AND the current file hash
-                # (IA-07 may have written tags before skip, changing the hash).
                 if status == "skipped":
                     done_hashes.add((path, fhash))
                     continue
-                # Duplicate jobs: file was moved to duplicates/ → skip
                 if status == "duplicate" and fhash:
                     done_hashes.add((path, fhash))
                     continue
-                # Done jobs without errors: skip if target exists
                 if status == "done" and not err:
                     if target and target.startswith("immich:"):
                         done_hashes.add((path, fhash))
@@ -150,9 +139,8 @@ async def _scan_and_process():
                         done_hashes.add((path, fhash))
                     elif not target:
                         done_hashes.add((path, fhash))
-                    # else: target file missing → allow re-import
 
-        # Scan for new files (returns list of (path, size) tuples)
+        # Scan for new files
         found_files = await asyncio.to_thread(_scan_directory, inbox.path, min_age)
 
         # Filter candidates
@@ -169,76 +157,67 @@ async def _scan_and_process():
         if not candidates:
             continue
 
-        # Hash + stability check function
+        # Hash + stability check (runs in thread)
         def _hash_and_check(filepath, file_size):
             if not _is_file_stable(filepath, file_size):
                 return filepath, file_size, None
             return filepath, file_size, _sha256(filepath)
 
-        # Stream: hash in batches of 20, create job + start pipeline immediately
+        # Process all candidates: hash in parallel (4 threads), create jobs as each completes
         use_folder_tags = inbox.folder_tags and await config_manager.is_module_enabled("ordner_tags")
-        pipeline_tasks = []
         total_queued = 0
-        batch_size = 20
-        loop = asyncio.get_event_loop()
+        sem = asyncio.Semaphore(4)
 
-        for batch_start in range(0, len(candidates), batch_size):
-            batch = candidates[batch_start:batch_start + batch_size]
+        async def _hash_one(fp, fs):
+            async with sem:
+                return await asyncio.to_thread(_hash_and_check, fp, fs)
 
-            # Hash batch in parallel (4 threads)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-                futures = [loop.run_in_executor(pool, _hash_and_check, fp, fs) for fp, fs in batch]
-                hash_results = await asyncio.gather(*futures)
+        tasks = [_hash_one(fp, fs) for fp, fs in candidates]
+        for coro in asyncio.as_completed(tasks):
+            filepath, file_size, file_hash = await coro
+            if file_hash is None:
+                continue
+            if (filepath, file_hash) in done_hashes:
+                continue
 
-            # Create jobs and start pipelines for this batch
-            for filepath, file_size, file_hash in hash_results:
-                if file_hash is None:
-                    continue
-                if (filepath, file_hash) in done_hashes:
-                    continue
+            filename = os.path.basename(filepath)
+            async with async_session() as session:
+                debug_key = await _generate_debug_key(session)
+                job = Job(
+                    filename=filename,
+                    original_path=filepath,
+                    debug_key=debug_key,
+                    status="queued",
+                    source_label=inbox.label,
+                    source_inbox_path=inbox.path,
+                    folder_tags=use_folder_tags,
+                    dry_run=inbox.dry_run,
+                    use_immich=inbox.use_immich,
+                    immich_user_id=inbox.immich_user_id,
+                    file_hash=file_hash,
+                )
+                session.add(job)
+                await session.commit()
+                total_queued += 1
 
-                filename = os.path.basename(filepath)
-                async with async_session() as session:
-                    debug_key = await _generate_debug_key(session)
-                    job = Job(
-                        filename=filename,
-                        original_path=filepath,
-                        debug_key=debug_key,
-                        status="queued",
-                        source_label=inbox.label,
-                        source_inbox_path=inbox.path,
-                        folder_tags=use_folder_tags,
-                        dry_run=inbox.dry_run,
-                        use_immich=inbox.use_immich,
-                        immich_user_id=inbox.immich_user_id,
-                        file_hash=file_hash,
-                    )
-                    session.add(job)
-                    await session.commit()
-                    total_queued += 1
-
-                logger.info(f"New file: {filename} → {debug_key} (Inbox: {inbox.label})")
-
-                # Wait for previous pipeline to finish, then start next
-                if pipeline_tasks:
-                    await pipeline_tasks[-1]
-                pipeline_tasks.append(asyncio.create_task(run_pipeline(job.id)))
-
-        # Wait for remaining pipelines
-        if pipeline_tasks:
-            await pipeline_tasks[-1]
+            logger.info(f"New file: {filename} → {debug_key} (Inbox: {inbox.label})")
 
         if total_queued:
-            await log_info("filewatcher", f"{total_queued} files processed from {inbox.label}")
+            await log_info("filewatcher", f"{total_queued} new files queued from {inbox.label}")
 
-        # Skip Phase 2 — pipelines already started above
-        new_job_ids = []
 
-        # Phase 2: Process queued jobs one by one (only for non-streamed jobs)
-        for job_id, filename, debug_key in new_job_ids:
-            logger.info(f"Pipeline start: {debug_key} ({filename})")
-            await run_pipeline(job_id)
-            logger.info(f"Pipeline done: {debug_key} ({filename})")
+async def _process_queue():
+    """Pick up the next queued job and run its pipeline."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.status == "queued").order_by(Job.created_at).limit(1)
+        )
+        job = result.scalars().first()
+
+    if job:
+        logger.info(f"Pipeline start: {job.debug_key} ({job.filename})")
+        await run_pipeline(job.id)
+        logger.info(f"Pipeline done: {job.debug_key} ({job.filename})")
 
 
 async def _poll_immich():
@@ -480,18 +459,20 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
             logger.info(f"Resuming {job.debug_key} (attempt {retry}/{MAX_RETRIES})")
             await run_pipeline(job.id)
 
+    # Start pipeline worker as separate background task
+    worker_task = asyncio.create_task(_pipeline_worker(shutdown_event))
+
     while not shutdown_event.is_set():
         try:
             if await config_manager.is_module_enabled("filewatcher"):
                 should_scan = await _is_within_schedule()
-                # Manual trigger overrides schedule
                 if _manual_trigger.is_set():
                     _manual_trigger.clear()
                     should_scan = True
                     await log_info("filewatcher", "Manual scan triggered")
 
                 if should_scan:
-                    await _scan_and_process()
+                    await _scan_inbox()
         except Exception as e:
             await log_error("filewatcher", f"Scan error: {e}")
             logger.error(f"Scan error: {e}")
@@ -500,7 +481,6 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
             if await config_manager.is_module_enabled("immich"):
                 poll_enabled = await config_manager.get("immich.poll_enabled", False)
                 if poll_enabled:
-                    # Immich polling follows same schedule
                     if await _is_within_schedule() or _manual_trigger.is_set():
                         await _poll_immich()
         except Exception as e:
@@ -512,3 +492,22 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
             await asyncio.wait_for(shutdown_event.wait(), timeout=float(interval))
         except asyncio.TimeoutError:
             pass
+
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+
+
+async def _pipeline_worker(shutdown_event: asyncio.Event):
+    """Background worker: continuously picks up queued jobs and runs pipelines."""
+    logger.info("Pipeline worker started")
+    while not shutdown_event.is_set():
+        try:
+            await _process_queue()
+        except Exception as e:
+            await log_error("pipeline_worker", f"Pipeline error: {e}")
+            logger.error(f"Pipeline worker error: {e}")
+        # Short sleep to avoid busy-loop when queue is empty
+        await asyncio.sleep(1)
