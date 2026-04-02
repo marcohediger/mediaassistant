@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.17.5 — 2026-04-02
+
+### Video-Tags + vollständige Format-Kompatibilität
+
+- MP4/MOV-Videos können jetzt auch Tags erhalten (XMP Subject)
+- Format-aware Tag-Schreibung für alle unterstützten Formate:
+  - JPEG/PNG/TIFF/DNG → `Keywords` (IPTC)
+  - HEIC/HEIF/WebP/MP4/MOV → `Subject` (XMP dc:subject)
+- XPComment wird bei MP4/MOV übersprungen (nicht unterstützt)
+- Format-Mismatch-Erkennung um MP4/MOV erweitert
+- Alle 8 Formate getestet: Tags + Description in Immich verifiziert ✓
+
 ## v2.17.4 — 2026-04-02
 
 ### HEIC-Tag-Schreibung repariert
