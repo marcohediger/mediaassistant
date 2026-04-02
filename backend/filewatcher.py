@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import hashlib
 import logging
 import os
@@ -154,57 +155,86 @@ async def _scan_and_process():
         # Scan for new files (returns list of (path, size) tuples)
         found_files = await asyncio.to_thread(_scan_directory, inbox.path, min_age)
 
-        # Phase 1: Create all jobs as "queued" first
-        new_job_ids = []
+        # Filter candidates
+        candidates = []
         for filepath, file_size in found_files:
             if filepath in active_paths:
                 continue
-
-            # Stability check
-            stable = await asyncio.to_thread(_is_file_stable, filepath, file_size)
-            if not stable:
-                size_mb = file_size / (1024 * 1024)
-                await log_info("filewatcher", f"Skipped (unstable): {os.path.basename(filepath)}", f"Size: {size_mb:.1f} MB")
-                logger.info(f"Skipped (unstable): {os.path.basename(filepath)} ({size_mb:.1f} MB)")
-                continue
-
-            # File size limit — prevent OOM from excessively large files
             if file_size > MAX_FILE_SIZE:
                 size_gb = file_size / (1024 ** 3)
                 await log_warning("filewatcher", f"Skipped (too large): {os.path.basename(filepath)}", f"Size: {size_gb:.1f} GB, limit: {MAX_FILE_SIZE / (1024 ** 3):.0f} GB")
-                logger.warning(f"Skipped (too large): {os.path.basename(filepath)} ({size_gb:.1f} GB)")
                 continue
+            candidates.append((filepath, file_size))
 
-            filename = os.path.basename(filepath)
-            file_hash = await asyncio.to_thread(_sha256, filepath)
+        if not candidates:
+            continue
 
-            # Skip if same file (same path + hash) was already processed successfully
-            if (filepath, file_hash) in done_hashes:
-                continue
+        # Hash + stability check function
+        def _hash_and_check(filepath, file_size):
+            if not _is_file_stable(filepath, file_size):
+                return filepath, file_size, None
+            return filepath, file_size, _sha256(filepath)
 
-            async with async_session() as session:
-                debug_key = await _generate_debug_key(session)
-                job = Job(
-                    filename=filename,
-                    original_path=filepath,
-                    debug_key=debug_key,
-                    status="queued",
-                    source_label=inbox.label,
-                    source_inbox_path=inbox.path,
-                    folder_tags=inbox.folder_tags and await config_manager.is_module_enabled("ordner_tags"),
-                    dry_run=inbox.dry_run,
-                    use_immich=inbox.use_immich,
-                    immich_user_id=inbox.immich_user_id,
-                    file_hash=file_hash,
-                )
-                session.add(job)
-                await session.commit()
-                new_job_ids.append((job.id, filename, debug_key))
+        # Stream: hash in batches of 20, create job + start pipeline immediately
+        use_folder_tags = inbox.folder_tags and await config_manager.is_module_enabled("ordner_tags")
+        pipeline_tasks = []
+        total_queued = 0
+        batch_size = 20
+        loop = asyncio.get_event_loop()
 
-            await log_info("filewatcher", f"New file detected: {filename}", f"Inbox: {inbox.label}, Key: {debug_key}")
-            logger.info(f"New file: {filename} → {debug_key} (Inbox: {inbox.label})")
+        for batch_start in range(0, len(candidates), batch_size):
+            batch = candidates[batch_start:batch_start + batch_size]
 
-        # Phase 2: Process queued jobs one by one
+            # Hash batch in parallel (4 threads)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [loop.run_in_executor(pool, _hash_and_check, fp, fs) for fp, fs in batch]
+                hash_results = await asyncio.gather(*futures)
+
+            # Create jobs and start pipelines for this batch
+            for filepath, file_size, file_hash in hash_results:
+                if file_hash is None:
+                    continue
+                if (filepath, file_hash) in done_hashes:
+                    continue
+
+                filename = os.path.basename(filepath)
+                async with async_session() as session:
+                    debug_key = await _generate_debug_key(session)
+                    job = Job(
+                        filename=filename,
+                        original_path=filepath,
+                        debug_key=debug_key,
+                        status="queued",
+                        source_label=inbox.label,
+                        source_inbox_path=inbox.path,
+                        folder_tags=use_folder_tags,
+                        dry_run=inbox.dry_run,
+                        use_immich=inbox.use_immich,
+                        immich_user_id=inbox.immich_user_id,
+                        file_hash=file_hash,
+                    )
+                    session.add(job)
+                    await session.commit()
+                    total_queued += 1
+
+                logger.info(f"New file: {filename} → {debug_key} (Inbox: {inbox.label})")
+
+                # Wait for previous pipeline to finish, then start next
+                if pipeline_tasks:
+                    await pipeline_tasks[-1]
+                pipeline_tasks.append(asyncio.create_task(run_pipeline(job.id)))
+
+        # Wait for remaining pipelines
+        if pipeline_tasks:
+            await pipeline_tasks[-1]
+
+        if total_queued:
+            await log_info("filewatcher", f"{total_queued} files processed from {inbox.label}")
+
+        # Skip Phase 2 — pipelines already started above
+        new_job_ids = []
+
+        # Phase 2: Process queued jobs one by one (only for non-streamed jobs)
         for job_id, filename, debug_key in new_job_ids:
             logger.info(f"Pipeline start: {debug_key} ({filename})")
             await run_pipeline(job_id)
