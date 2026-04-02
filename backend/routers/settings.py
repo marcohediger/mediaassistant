@@ -18,7 +18,7 @@ def _sanitize(value: str) -> str:
 
 router = APIRouter(prefix="/settings")
 
-MODULE_NAMES = ["ki_analyse", "geocoding", "duplikat_erkennung", "ocr", "smtp", "filewatcher", "immich"]
+MODULE_NAMES = ["ki_analyse", "geocoding", "duplikat_erkennung", "ocr", "ordner_tags", "smtp", "filewatcher", "immich"]
 
 
 async def _get_modules_dict() -> dict:

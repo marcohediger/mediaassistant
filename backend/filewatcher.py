@@ -191,7 +191,7 @@ async def _scan_and_process():
                     status="queued",
                     source_label=inbox.label,
                     source_inbox_path=inbox.path,
-                    folder_tags=inbox.folder_tags,
+                    folder_tags=inbox.folder_tags and await config_manager.is_module_enabled("ordner_tags"),
                     dry_run=inbox.dry_run,
                     use_immich=inbox.use_immich,
                     immich_user_id=inbox.immich_user_id,

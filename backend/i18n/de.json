@@ -180,6 +180,8 @@
     "ocr_always": "Alle Bilder (auch Fotos mit Schildern, Speisekarten etc.)",
     "ocr_hint": "«Smart» überspringt OCR bei normalen Fotos, «Alle Bilder» erkennt auch Text auf Schildern, Plakaten etc.",
     "ocr_hint2": "Hinweis: OCR benötigt ein aktives KI-Backend (KI-Analyse muss aktiviert sein).",
+    "ordner_tags_desc": "Tags und Alben aus Inbox-Ordnerstruktur generieren",
+    "ordner_tags_hint": "Wenn aktiviert, werden aus der Ordnerstruktur der Inbox (z.B. Ferien/Mallorca/) Tags und Immich-Alben erstellt. Die Einstellung pro Inbox (Ordner-Tags Checkbox) muss zusätzlich aktiviert sein.",
     "smtp": "SMTP Benachrichtigung",
     "smtp_desc": "Fehlerbenachrichtigung per E-Mail",
     "server": "Server",
