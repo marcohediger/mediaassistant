@@ -3,6 +3,8 @@ import hashlib
 import os
 import subprocess
 
+from config import config_manager
+
 
 WRITABLE_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".webp",
@@ -100,6 +102,8 @@ async def execute(job, session) -> dict:
     if not keywords and not description:
         return {"status": "skipped", "reason": "no tags to write"}
 
+    write_mode = await config_manager.get("metadata.write_mode", "direct")
+
     # Dry-run: report what would be written, but don't modify file
     if job.dry_run:
         return {
@@ -107,31 +111,38 @@ async def execute(job, session) -> dict:
             "keywords_planned": keywords,
             "description_planned": description,
             "tags_count": len(keywords),
+            "write_mode": write_mode,
         }
 
-    # Build ExifTool command
+    # Collect OCR text early (used by both modes)
+    ocr_text = ""
+    if ocr_result.get("has_text") and ocr_result.get("text"):
+        ocr_text = ocr_result["text"].strip()
+
+    if write_mode == "sidecar":
+        return await _write_sidecar(job, keywords, description, ocr_text, ext)
+
+    return await _write_direct(job, keywords, description, ocr_text, ext)
+
+
+async def _write_direct(job, keywords, description, ocr_text, ext):
+    """Write metadata directly into the file (original behavior)."""
     cmd = ["exiftool", "-overwrite_original_in_place", "-P", "-m"]
 
     # Write keywords — format-aware tag field selection
     if ext in _IPTC_FORMATS:
-        # IPTC Keywords: supported by JPEG, TIFF, DNG — read by Immich, Lightroom, digiKam
         for kw in keywords:
             cmd.append(f"-Keywords+={kw}")
     else:
-        # XMP Subject (dc:subject): for HEIC, PNG, WebP — these formats don't support IPTC
         for kw in keywords:
             cmd.append(f"-Subject+={kw}")
 
-    # Write description
     if description:
         cmd.append(f"-ImageDescription={description}")
         if ext not in _NO_XPCOMMENT:
             cmd.append(f"-XPComment={description}")
 
-    # Write OCR text
-    ocr_text = ""
-    if ocr_result.get("has_text") and ocr_result.get("text"):
-        ocr_text = ocr_result["text"].strip()
+    if ocr_text:
         cmd.append(f"-UserComment=OCR: {ocr_text}")
 
     cmd.append(job.original_path)
@@ -145,8 +156,6 @@ async def execute(job, session) -> dict:
     if result.returncode != 0:
         raise RuntimeError(f"ExifTool Write Fehler: {result.stderr.strip()}")
 
-    # Compute new hash for result (don't overwrite job.file_hash — it must
-    # stay as the original hash so IA-02 duplicate detection works correctly)
     new_hash = await asyncio.to_thread(_sha256, job.original_path)
     new_size = os.path.getsize(job.original_path)
 
@@ -157,6 +166,46 @@ async def execute(job, session) -> dict:
         "tags_count": len(keywords),
         "file_size": new_size,
         "file_hash": new_hash,
+        "write_mode": "direct",
+    }
+
+
+async def _write_sidecar(job, keywords, description, ocr_text, ext):
+    """Write metadata to an XMP sidecar file, leaving the original untouched."""
+    sidecar_path = job.original_path + ".xmp"
+
+    # ExifTool -o file.xmp creates an XMP sidecar from the source file
+    cmd = ["exiftool", "-o", sidecar_path, "-P", "-m"]
+
+    # Always use XMP Subject for sidecar files (universal XMP format)
+    for kw in keywords:
+        cmd.append(f"-Subject+={kw}")
+
+    if description:
+        cmd.append(f"-ImageDescription={description}")
+        cmd.append(f"-XPComment={description}")
+
+    if ocr_text:
+        cmd.append(f"-UserComment=OCR: {ocr_text}")
+
+    cmd.append(job.original_path)
+
+    result = await asyncio.to_thread(
+        subprocess.run,
+        cmd,
+        capture_output=True, text=True, timeout=30
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"ExifTool Sidecar Fehler: {result.stderr.strip()}")
+
+    return {
+        "keywords_written": keywords,
+        "description_written": description,
+        "ocr_text_written": ocr_text,
+        "tags_count": len(keywords),
+        "sidecar_path": sidecar_path,
+        "write_mode": "sidecar",
     }
 
 

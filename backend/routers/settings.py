@@ -60,6 +60,7 @@ async def _get_cfg() -> dict:
         "video_thumbnail_enabled": await config_manager.get("video.thumbnail_enabled", False),
         "video_thumbnail_frames": await config_manager.get("video.thumbnail_frames", 8),
         "video_thumbnail_scale": await config_manager.get("video.thumbnail_scale", 50),
+        "metadata_write_mode": await config_manager.get("metadata.write_mode", "direct"),
     }
 
 
@@ -206,6 +207,9 @@ async def save_settings(request: Request):
                         .values(target_category=new_key)
                     )
         await session.commit()
+
+    # Metadata write mode
+    await config_manager.set("metadata.write_mode", form.get("metadata_write_mode", "direct"))
 
     # Immich
     await config_manager.set("immich.url", _sanitize(form.get("immich_url", "")))

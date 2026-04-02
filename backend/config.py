@@ -94,6 +94,7 @@ class ConfigManager:
             "FILEWATCHER_SCHEDULE_MODE": ("filewatcher.schedule_mode", False),
             "OCR_MODE": ("ocr.mode", False),
             "PHASH_THRESHOLD": ("duplikat.phash_threshold", False),
+            "METADATA_WRITE_MODE": ("metadata.write_mode", False),
             "SETUP_COMPLETE": ("setup_complete", False),
         }
         for env_key, (config_key, encrypted) in env_map.items():

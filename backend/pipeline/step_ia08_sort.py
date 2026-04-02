@@ -414,52 +414,62 @@ async def execute(job, session) -> dict:
 
     source_dir = os.path.dirname(job.original_path)
 
+    # Sidecar mode detection
+    sidecar_mode = ia07_result.get("write_mode") == "sidecar"
+    sidecar_path = ia07_result.get("sidecar_path")
+
     # Route: Immich webhook (upload tagged file, copy metadata, delete old)
     if job.immich_asset_id:
         old_asset_id = job.immich_asset_id
         immich_replaced = False
         new_asset_id = None
 
-        # Extract album name from inbox folder structure (if folder_tags enabled)
-        webhook_album_names = None
-        if job.folder_tags and job.source_inbox_path:
-            rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
-            if rel and rel != ".":
-                parts = [p for p in rel.split(os.sep) if p and p != "."]
-                if parts:
-                    webhook_album_names = [" ".join(parts)]
+        if sidecar_mode:
+            # Sidecar mode: original file unchanged → no re-upload needed.
+            # Just tag the existing asset via API.
+            job.target_path = f"immich:{job.immich_asset_id}"
+        else:
+            # Direct mode: file was modified → upload new version, replace old
+            # Extract album name from inbox folder structure (if folder_tags enabled)
+            webhook_album_names = None
+            if job.folder_tags and job.source_inbox_path:
+                rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
+                if rel and rel != ".":
+                    parts = [p for p in rel.split(os.sep) if p and p != "."]
+                    if parts:
+                        webhook_album_names = [" ".join(parts)]
 
-        try:
-            # Step 1: Upload tagged file as new asset
-            upload_result = await upload_asset(job.original_path, album_names=webhook_album_names, api_key=user_api_key)
-            new_asset_id = upload_result.get("id")
+            try:
+                # Step 1: Upload tagged file as new asset
+                upload_result = await upload_asset(job.original_path, album_names=webhook_album_names, api_key=user_api_key)
+                new_asset_id = upload_result.get("id")
 
-            if new_asset_id and upload_result.get("status") != "duplicate":
-                # Step 2: Copy metadata (albums, favorites, faces, stacks) from old to new
-                await copy_asset_metadata(old_asset_id, new_asset_id, api_key=user_api_key)
+                if new_asset_id and upload_result.get("status") != "duplicate":
+                    # Step 2: Copy metadata (albums, favorites, faces, stacks) from old to new
+                    await copy_asset_metadata(old_asset_id, new_asset_id, api_key=user_api_key)
 
-                # Step 3: Delete old asset (force = skip trash)
-                await delete_asset(old_asset_id, api_key=user_api_key)
+                    # Step 3: Delete old asset (force = skip trash)
+                    await delete_asset(old_asset_id, api_key=user_api_key)
 
-                # Update job to reference new asset
-                job.immich_asset_id = new_asset_id
-                immich_replaced = True
-        except RuntimeError as e:
-            # Rollback: delete newly uploaded asset to prevent duplicates/loops
-            if new_asset_id and new_asset_id != old_asset_id:
-                try:
-                    await delete_asset(new_asset_id, api_key=user_api_key)
-                    logger.info("Rolled back new asset %s after error", new_asset_id)
-                except Exception:
-                    logger.warning("Failed to rollback new asset %s", new_asset_id)
-            # No write access — skip, continue with tagging
-            if "asset.update" in str(e) or "Not found" in str(e):
-                pass
-            else:
-                raise
-        job.target_path = f"immich:{job.immich_asset_id}"
+                    # Update job to reference new asset
+                    job.immich_asset_id = new_asset_id
+                    immich_replaced = True
+            except RuntimeError as e:
+                # Rollback: delete newly uploaded asset to prevent duplicates/loops
+                if new_asset_id and new_asset_id != old_asset_id:
+                    try:
+                        await delete_asset(new_asset_id, api_key=user_api_key)
+                        logger.info("Rolled back new asset %s after error", new_asset_id)
+                    except Exception:
+                        logger.warning("Failed to rollback new asset %s", new_asset_id)
+                # No write access — skip, continue with tagging
+                if "asset.update" in str(e) or "Not found" in str(e):
+                    pass
+                else:
+                    raise
+            job.target_path = f"immich:{job.immich_asset_id}"
 
-        # Tag the replaced asset in Immich (wait for processing, skip existing)
+        # Tag the asset in Immich (wait for processing, skip existing)
         tags_written, tags_failed = await _tag_immich_asset(
             job.immich_asset_id, tag_keywords, api_key=user_api_key
         )
@@ -513,7 +523,8 @@ async def execute(job, session) -> dict:
                 if parts:
                     album_names = [" ".join(parts)]
 
-        immich_result = await upload_asset(job.original_path, album_names=album_names, api_key=user_api_key)
+        immich_result = await upload_asset(job.original_path, album_names=album_names,
+                                          sidecar_path=sidecar_path, api_key=user_api_key)
 
         asset_id = immich_result.get("id", "")
 
@@ -580,6 +591,11 @@ async def execute(job, session) -> dict:
         await asyncio.to_thread(os.remove, target_path)
         logger.info("Removed old file for overwrite: %s", target_path)
     await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
+
+    # Move sidecar file alongside the image (if sidecar mode)
+    if sidecar_path and os.path.exists(sidecar_path):
+        sidecar_target = target_path + ".xmp"
+        await asyncio.to_thread(safe_move, sidecar_path, sidecar_target, job.debug_key)
 
     # Clean up empty parent directories in inbox (up to inbox root)
     if job.source_inbox_path:

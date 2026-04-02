@@ -37,8 +37,13 @@ async def get_user_api_key(user_id: int) -> str | None:
         return fernet.decrypt(user.api_key.encode()).decode()
 
 
-async def upload_asset(file_path: str, album_names: list[str] | None = None, *, api_key: str | None = None) -> dict:
-    """Upload a file to Immich and optionally add it to albums (created from folder tags)."""
+async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
+                       sidecar_path: str | None = None, api_key: str | None = None) -> dict:
+    """Upload a file to Immich and optionally add it to albums (created from folder tags).
+
+    If sidecar_path is provided and the file exists, it is uploaded alongside the
+    asset as sidecarData so Immich reads metadata from the XMP sidecar.
+    """
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
@@ -52,15 +57,24 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *, 
     timeout = httpx.Timeout(connect=10, read=120, write=300, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client:
         with open(file_path, "rb") as f:
-            resp = await client.post(
-                f"{url}/api/assets",
-                headers=headers,
-                data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
-                      "deviceId": "MediaAssistant",
-                      "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                      "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
-                files={"assetData": (filename, f)},
-            )
+            files = {"assetData": (filename, f)}
+            sidecar_fh = None
+            try:
+                if sidecar_path and os.path.exists(sidecar_path):
+                    sidecar_fh = open(sidecar_path, "rb")
+                    files["sidecarData"] = (os.path.basename(sidecar_path), sidecar_fh)
+                resp = await client.post(
+                    f"{url}/api/assets",
+                    headers=headers,
+                    data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
+                          "deviceId": "MediaAssistant",
+                          "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                          "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
+                    files=files,
+                )
+            finally:
+                if sidecar_fh:
+                    sidecar_fh.close()
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Immich upload failed: HTTP {resp.status_code} — {resp.text[:200]}")
