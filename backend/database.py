@@ -1,11 +1,25 @@
 import os
+import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from models import Base, Module, SortingRule, LibraryCategory, InboxDirectory
 
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")
 
-engine = create_async_engine(f"sqlite+aiosqlite:///{DATABASE_PATH}", echo=False)
+engine = create_async_engine(
+    f"sqlite+aiosqlite:///{DATABASE_PATH}",
+    echo=False,
+    connect_args={"timeout": 30},
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@sqlalchemy.event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn, connection_record):
+    """Set SQLite pragmas on every new connection for concurrency."""
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.close()
 
 DEFAULT_MODULES = [
     ("ki_analyse", False),
@@ -59,6 +73,9 @@ async def init_db():
     os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
 
     async with engine.begin() as conn:
+        # Enable WAL mode for better concurrent read/write performance
+        await conn.execute(sqlalchemy.text("PRAGMA journal_mode=WAL"))
+        await conn.execute(sqlalchemy.text("PRAGMA busy_timeout=30000"))
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_columns(conn)
 
