@@ -605,23 +605,15 @@
             </label>
             <small style="margin-left: 1.5rem;">{{ t.settings.metadata_write_sidecar_hint }}</small>
         </div>
-    </div>
-</div>
-
-<!-- Google Takeout JSON -->
-<div class="settings-section" id="section-google-json">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.settings.google_json }}</h2>
-            <span class="section-desc">{{ t.settings.google_json_desc }}</span>
+        <hr style="border-color: var(--border); margin: 1.5rem 0;">
+        <div class="form-group">
+            <label class="switch-inline">
+                <input type="checkbox" name="google_json" value="1" {{ 'checked' if cfg.google_json else '' }}>
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.settings.google_json }}</span>
+            </label>
+            <small>{{ t.settings.google_json_hint }}</small>
         </div>
-        <label class="switch">
-            <input type="checkbox" name="google_json" value="1" {{ 'checked' if cfg.google_json else '' }}>
-            <span class="switch-slider"></span>
-        </label>
-    </div>
-    <div class="section-body">
-        <small>{{ t.settings.google_json_hint }}</small>
     </div>
 </div>
 
