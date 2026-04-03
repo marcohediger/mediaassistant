@@ -18,7 +18,7 @@ def _sanitize(value: str) -> str:
 
 router = APIRouter(prefix="/settings")
 
-MODULE_NAMES = ["ki_analyse", "geocoding", "duplikat_erkennung", "ocr", "ordner_tags", "smtp", "filewatcher", "immich"]
+MODULE_NAMES = ["ki_analyse", "ki_analyse_2", "geocoding", "duplikat_erkennung", "ocr", "ordner_tags", "smtp", "filewatcher", "immich"]
 
 
 async def _get_modules_dict() -> dict:
@@ -40,6 +40,10 @@ async def _get_cfg() -> dict:
         "ai_prompt": await config_manager.get("ai.prompt", "") or _DEFAULT_AI_PROMPT,
         "ai_image_resize": await config_manager.get("ai.image_resize", False),
         "ai_image_max_px": await config_manager.get("ai.image_max_px", 1024),
+        "ai_slots": await config_manager.get("ai.slots", 1),
+        "ai2_url": await config_manager.get("ai2.backend_url", ""),
+        "ai2_model": await config_manager.get("ai2.model", ""),
+        "ai2_slots": await config_manager.get("ai2.slots", 1),
         "geo_provider": await config_manager.get("geo.provider", "nominatim"),
         "geo_url": await config_manager.get("geo.url", "https://nominatim.openstreetmap.org"),
         "phash_threshold": await config_manager.get("duplikat.phash_threshold", 5),
@@ -144,6 +148,23 @@ async def save_settings(request: Request):
     await config_manager.set("ai.image_max_px", max(256, ai_max_px))
     if form.get("ai_api_key"):
         await config_manager.set("ai.api_key", form["ai_api_key"], encrypted=True)
+    try:
+        ai_slots = max(1, int(form.get("ai_slots", 1)))
+    except ValueError:
+        ai_slots = 1
+    await config_manager.set("ai.slots", ai_slots)
+
+    # KI 2 (optional second backend)
+    await config_manager.set("ai2.backend_url", _sanitize(form.get("ai2_url", "")))
+    await config_manager.set("ai2.model", _sanitize(form.get("ai2_model", "")))
+    if form.get("ai2_api_key"):
+        await config_manager.set("ai2.api_key", form["ai2_api_key"], encrypted=True)
+    try:
+        ai2_slots = max(1, int(form.get("ai2_slots", 1)))
+    except ValueError:
+        ai2_slots = 1
+    await config_manager.set("ai2.slots", ai2_slots)
+
     ai_prompt = form.get("ai_prompt", "").strip()
     if ai_prompt:
         await config_manager.set("ai.prompt", ai_prompt)

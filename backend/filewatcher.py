@@ -235,21 +235,44 @@ async def _scan_inbox():
                 logger.error(f"Error queuing file: {e}")
 
         if total_queued:
-            await log_info("filewatcher", f"{total_queued} new files queued from {inbox.label}")
+            try:
+                await log_info("filewatcher", f"{total_queued} new files queued from {inbox.label}")
+            except Exception:
+                logger.info(f"{total_queued} new files queued from {inbox.label} (log_info failed, DB busy)")
 
 
 async def _process_queue():
-    """Pick up the next queued job and run its pipeline."""
+    """Pick up queued jobs and run pipelines.
+
+    Runs up to N jobs concurrently based on the total AI backend slots.
+    """
+    from ai_backends import get_total_slots
+    max_concurrent = await get_total_slots()
+
     async with async_session() as session:
         result = await session.execute(
-            select(Job).where(Job.status == "queued").order_by(Job.created_at).limit(1)
+            select(Job).where(Job.status == "queued").order_by(Job.created_at).limit(max_concurrent)
         )
-        job = result.scalars().first()
+        jobs = result.scalars().all()
 
-    if job:
+    if not jobs:
+        return
+
+    async def _run_one(job):
         logger.info(f"Pipeline start: {job.debug_key} ({job.filename})")
         await run_pipeline(job.id)
         logger.info(f"Pipeline done: {job.debug_key} ({job.filename})")
+
+    if len(jobs) == 1:
+        await _run_one(jobs[0])
+    else:
+        # Staggered start: launch jobs 2 seconds apart to avoid resource spikes
+        tasks = []
+        for i, job in enumerate(jobs):
+            if i > 0:
+                await asyncio.sleep(2)
+            tasks.append(asyncio.create_task(_run_one(job)))
+        await asyncio.gather(*tasks)
 
 
 async def _poll_immich():
@@ -497,7 +520,10 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
                 if _manual_trigger.is_set():
                     _manual_trigger.clear()
                     should_scan = True
-                    await log_info("filewatcher", "Manual scan triggered")
+                    try:
+                        await log_info("filewatcher", "Manual scan triggered")
+                    except Exception:
+                        logger.info("Manual scan triggered (log_info failed, DB busy)")
 
                 if should_scan:
                     await _scan_inbox()

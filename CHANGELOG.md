@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.25.2 — 2026-04-03
+
+### Stabilität & zeitversetzter Start
+
+- **Zeitversetzter Job-Start** — parallele Jobs starten 2s versetzt statt alle gleichzeitig, reduziert Lastspitzen auf KI-Backend und SQLite
+- **DB-Lock Recovery** — Filewatcher bleibt nicht mehr hängen wenn SQLite bei paralleler Verarbeitung kurzzeitig gesperrt ist
+- **Immich Upload Fehlerbehandlung** — ungültige Upload-Ergebnisse werden sauber als Fehler gemeldet statt die Pipeline zu blockieren
+
+## v2.25.1 — 2026-04-03
+
+### Dashboard: KI-Status zusammengefasst
+
+- **Dashboard zeigt einen einzelnen KI-Kasten** mit Verbindungsstatus `(X/Y)` statt zwei separate Module
+  - `(0/0)` = keine KI aktiviert, `(1/1)` = 1 von 1 verbunden, `(1/2)` = 1 von 2 verbunden, etc.
+- **Konfigurierbare Slots pro Backend** — `ai.slots` / `ai2.slots` (1–16) für parallele Verarbeitung
+- **Pipeline verarbeitet mehrere Bilder gleichzeitig** entsprechend der verfügbaren Slots
+
+## v2.25.0 — 2026-04-03
+
+### Zweites KI-Backend für parallele Verarbeitung
+
+- **Multi-Backend Load Balancing** — optional ein zweites OpenAI-kompatibles KI-Backend konfigurierbar
+  - Bilder werden automatisch dem gerade freien Backend zugewiesen
+  - Wenn beide Backends beschäftigt sind, wird auf das nächste freie gewartet
+  - Funktioniert für KI-Analyse (IA-05) und OCR (IA-06)
+  - Kein zweites Backend konfiguriert = Verhalten wie bisher (single backend)
+- **Konfiguration über Setup-Wizard und Einstellungsseite** — URL, Modell und API Key für Backend 2
+- **Umgebungsvariablen** — `AI2_BACKEND_URL`, `AI2_MODEL`, `AI2_API_KEY`
+
 ## v2.18.0 — 2026-04-02
 
 ### XMP-Sidecar-Modus + Einstellungen neu geordnet

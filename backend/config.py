@@ -77,6 +77,11 @@ class ConfigManager:
             "AI_MODEL": ("ai.model", False),
             "AI_IMAGE_MAX_PX": ("ai.image_max_px", 1024),
             "AI_API_KEY": ("ai.api_key", True),
+            "AI_SLOTS": ("ai.slots", False),
+            "AI2_BACKEND_URL": ("ai2.backend_url", False),
+            "AI2_MODEL": ("ai2.model", False),
+            "AI2_API_KEY": ("ai2.api_key", True),
+            "AI2_SLOTS": ("ai2.slots", False),
             "SMTP_SERVER": ("smtp.server", False),
             "SMTP_PORT": ("smtp.port", False),
             "SMTP_SSL": ("smtp.ssl", False),
@@ -104,7 +109,7 @@ class ConfigManager:
             if env_value is None or env_value == "":
                 continue
             # Convert types
-            if config_key in ("smtp.port", "filewatcher.interval", "duplikat.phash_threshold"):
+            if config_key in ("smtp.port", "filewatcher.interval", "duplikat.phash_threshold", "ai.slots", "ai2.slots"):
                 env_value = int(env_value)
             elif config_key in ("smtp.ssl", "metadata.google_json", "ai.image_resize"):
                 env_value = env_value.lower() in ("true", "1", "yes")

@@ -34,6 +34,22 @@
             <input type="text" id="ai_model" name="ai_model" value="{{ ai_model or '' }}" required>
             <small>z.B. qwen2-vl, llava, gpt-4o</small>
         </div>
+        <div style="border-top: 1px solid var(--border); margin: 1.5rem 0; padding-top: 1rem;">
+            <h3 style="margin: 0 0 0.25rem;">2. KI Backend (optional)</h3>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0 0 1rem;">Zweites Backend für parallele Verarbeitung — es wird automatisch das gerade freie Backend verwendet.</p>
+        </div>
+        <div class="form-group">
+            <label for="ai2_url">Backend URL 2</label>
+            <input type="url" id="ai2_url" name="ai2_url" value="{{ ai2_url or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="ai2_api_key">API Key 2 (optional)</label>
+            <input type="password" id="ai2_api_key" name="ai2_api_key" value="{{ ai2_api_key or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="ai2_model">Modell 2</label>
+            <input type="text" id="ai2_model" name="ai2_model" value="{{ ai2_model or '' }}">
+        </div>
         <div class="form-actions">
             <button type="submit" formaction="/setup/step/1/test" class="btn btn-secondary">Verbindung testen</button>
             <button type="submit" class="btn btn-primary">Weiter</button>

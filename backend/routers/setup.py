@@ -28,6 +28,9 @@ async def setup_step(request: Request, step: int):
         context["ai_url"] = await config_manager.get("ai.backend_url", config_manager.get_env("AI_BACKEND_URL", "http://localhost:1234/v1"))
         context["ai_api_key"] = await config_manager.get("ai.api_key", config_manager.get_env("AI_API_KEY", ""))
         context["ai_model"] = await config_manager.get("ai.model", config_manager.get_env("AI_MODEL", ""))
+        context["ai2_url"] = await config_manager.get("ai2.backend_url", config_manager.get_env("AI2_BACKEND_URL", ""))
+        context["ai2_api_key"] = await config_manager.get("ai2.api_key", config_manager.get_env("AI2_API_KEY", ""))
+        context["ai2_model"] = await config_manager.get("ai2.model", config_manager.get_env("AI2_MODEL", ""))
         return await render(request, "setup/step1_ai.html", context)
     elif step == 2:
         context["smtp_server"] = await config_manager.get("smtp.server", "")
@@ -52,11 +55,19 @@ async def setup_step1_save(
     ai_url: str = Form(...),
     ai_api_key: str = Form(""),
     ai_model: str = Form(...),
+    ai2_url: str = Form(""),
+    ai2_api_key: str = Form(""),
+    ai2_model: str = Form(""),
 ):
     await config_manager.set("ai.backend_url", ai_url)
     if ai_api_key:
         await config_manager.set("ai.api_key", ai_api_key, encrypted=True)
     await config_manager.set("ai.model", ai_model)
+    # Second AI backend (optional)
+    await config_manager.set("ai2.backend_url", ai2_url)
+    if ai2_api_key:
+        await config_manager.set("ai2.api_key", ai2_api_key, encrypted=True)
+    await config_manager.set("ai2.model", ai2_model)
     return RedirectResponse(url="/setup/step/2", status_code=302)
 
 
@@ -66,15 +77,23 @@ async def setup_step1_test(
     ai_url: str = Form(...),
     ai_api_key: str = Form(""),
     ai_model: str = Form(...),
+    ai2_url: str = Form(""),
+    ai2_api_key: str = Form(""),
+    ai2_model: str = Form(""),
 ):
     context = {
         "step": 1,
         "ai_url": ai_url,
         "ai_api_key": ai_api_key,
         "ai_model": ai_model,
+        "ai2_url": ai2_url,
+        "ai2_api_key": ai2_api_key,
+        "ai2_model": ai2_model,
         "error": None,
         "success": None,
     }
+    results = []
+    # Test primary backend
     try:
         headers = {"Content-Type": "application/json"}
         if ai_api_key:
@@ -82,9 +101,26 @@ async def setup_step1_test(
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(f"{ai_url.rstrip('/')}/models", headers=headers)
             resp.raise_for_status()
-        context["success"] = "Verbindung erfolgreich!"
+        results.append("KI 1: OK")
     except Exception as e:
-        context["error"] = f"Verbindung fehlgeschlagen: {e}"
+        context["error"] = f"KI 1 fehlgeschlagen: {e}"
+        return await render(request, "setup/step1_ai.html", context)
+
+    # Test secondary backend (if configured)
+    if ai2_url and ai2_model:
+        try:
+            headers2 = {"Content-Type": "application/json"}
+            if ai2_api_key:
+                headers2["Authorization"] = f"Bearer {ai2_api_key}"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp2 = await client.get(f"{ai2_url.rstrip('/')}/models", headers=headers2)
+                resp2.raise_for_status()
+            results.append("KI 2: OK")
+        except Exception as e:
+            context["error"] = f"KI 2 fehlgeschlagen: {e}"
+            return await render(request, "setup/step1_ai.html", context)
+
+    context["success"] = " — ".join(results) if results else "Verbindung erfolgreich!"
     return await render(request, "setup/step1_ai.html", context)
 
 
