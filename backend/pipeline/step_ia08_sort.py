@@ -523,8 +523,14 @@ async def execute(job, session) -> dict:
                 if parts:
                     album_names = [" ".join(parts)]
 
-        immich_result = await upload_asset(job.original_path, album_names=album_names,
-                                          sidecar_path=sidecar_path, api_key=user_api_key)
+        try:
+            immich_result = await upload_asset(job.original_path, album_names=album_names,
+                                              sidecar_path=sidecar_path, api_key=user_api_key)
+        except Exception as exc:
+            raise RuntimeError(f"Immich upload failed for {job.filename}: {exc}") from exc
+
+        if not immich_result or not isinstance(immich_result, dict):
+            raise RuntimeError(f"Immich upload returned invalid response for {job.filename}: {immich_result}")
 
         asset_id = immich_result.get("id", "")
 

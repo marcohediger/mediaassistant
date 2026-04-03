@@ -4,6 +4,7 @@ import io
 import json
 import os
 import httpx
+from ai_backends import acquire_ai_backend
 from config import config_manager
 from PIL import Image
 
@@ -81,15 +82,6 @@ async def execute(job, session) -> dict:
     Nutzt alle bisher gesammelten Metadaten (EXIF, Geocoding, Dateigrösse)
     für eine bestmögliche Klassifikation.
     """
-    if not await config_manager.is_module_enabled("ki_analyse"):
-        return {"status": "skipped", "reason": "module disabled"}
-
-    url = await config_manager.get("ai.backend_url")
-    model = await config_manager.get("ai.model")
-    if not url or not model:
-        return {"status": "skipped", "reason": "not configured"}
-
-    api_key = await config_manager.get("ai.api_key", "not-needed")
     system_prompt = await config_manager.get("ai.prompt", DEFAULT_SYSTEM_PROMPT)
 
     # Mindestgrösse prüfen — zu kleine Bilder erzeugen AI-Halluzinationen
@@ -282,42 +274,51 @@ Use this information together with the image content for your classification."""
             "image_url": {"url": f"data:{mime_type};base64,{img_data}"}
         })
 
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": content_parts}
-        ],
-        "temperature": 0.3,
-        "max_tokens": 500,
-    }
+    # ── Acquire idle AI backend and make API call ───────────────────
+    async with acquire_ai_backend() as backend:
+        if not backend:
+            return {"status": "skipped", "reason": "not configured"}
 
-    headers = {"Content-Type": "application/json"}
-    if api_key and api_key != "not-needed":
-        headers["Authorization"] = f"Bearer {api_key}"
+        url = backend["url"]
+        model = backend["model"]
+        api_key = backend["api_key"]
 
-    ai_timeout = int(await config_manager.get("ai.timeout", 120))
-    max_retries = 2
-    resp = None
-    last_exc = None
-    for attempt in range(max_retries + 1):
-        try:
-            async with httpx.AsyncClient(timeout=ai_timeout) as client:
-                resp = await client.post(
-                    f"{url.rstrip('/')}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                )
-            if resp.status_code < 500:
-                break
-            # Server error — retry
-            last_exc = RuntimeError(f"KI-API Fehler: HTTP {resp.status_code} — {resp.text[:200]}")
-        except httpx.ReadTimeout as e:
-            last_exc = e
-        if attempt < max_retries:
-            await asyncio.sleep(5 * (attempt + 1))
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content_parts}
+            ],
+            "temperature": 0.3,
+            "max_tokens": 500,
+        }
 
-    # Free large base64 data immediately after API call
+        headers = {"Content-Type": "application/json"}
+        if api_key and api_key != "not-needed":
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        ai_timeout = int(await config_manager.get("ai.timeout", 120))
+        max_retries = 2
+        resp = None
+        last_exc = None
+        for attempt in range(max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=ai_timeout) as client:
+                    resp = await client.post(
+                        f"{url.rstrip('/')}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                if resp.status_code < 500:
+                    break
+                # Server error — retry
+                last_exc = RuntimeError(f"KI-API Fehler: HTTP {resp.status_code} — {resp.text[:200]}")
+            except httpx.ReadTimeout as e:
+                last_exc = e
+            if attempt < max_retries:
+                await asyncio.sleep(5 * (attempt + 1))
+
+    # Backend released — free large base64 data
     num_images = len(image_data_list)
     del image_data_list, content_parts, payload
 

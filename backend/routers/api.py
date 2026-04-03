@@ -44,7 +44,10 @@ async def trigger_scan():
     """Manual trigger: run one scan cycle regardless of schedule mode."""
     from filewatcher import trigger_manual_scan
     trigger_manual_scan()
-    await log_info("api", "Manual scan triggered via API")
+    try:
+        await log_info("api", "Manual scan triggered via API")
+    except Exception:
+        pass  # DB may be busy during parallel processing
     return RedirectResponse(url="/", status_code=303)
 
 

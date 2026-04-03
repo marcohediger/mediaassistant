@@ -37,6 +37,7 @@ def _t(key: str, i18n: dict) -> str:
 
 MODULE_REQUIREMENTS = {
     "ki_analyse": ["ai.backend_url", "ai.model"],
+    "ki_analyse_2": ["ai2.backend_url", "ai2.model"],
     "geocoding": ["geo.provider", "geo.url"],
     "duplikat_erkennung": [],
     "ocr": ["ai.backend_url", "ai.model"],
@@ -49,6 +50,24 @@ MODULE_REQUIREMENTS = {
 
 async def _check_ai_backend(i18n: dict) -> tuple[bool, str]:
     url = await config_manager.get("ai.backend_url")
+    if not url:
+        return False, _t("status_no_url", i18n)
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{url.rstrip('/')}/models")
+            if resp.status_code == 200:
+                return True, _t("status_connected", i18n)
+            return False, f"HTTP {resp.status_code}"
+    except httpx.ConnectError:
+        return False, f"{_t('status_connection_failed', i18n)}: {url}"
+    except httpx.TimeoutException:
+        return False, f"{_t('status_timeout', i18n)}: {url}"
+    except Exception as e:
+        return False, str(e)
+
+
+async def _check_ai_backend_2(i18n: dict) -> tuple[bool, str]:
+    url = await config_manager.get("ai2.backend_url")
     if not url:
         return False, _t("status_no_url", i18n)
     try:
@@ -172,6 +191,7 @@ async def _check_immich(i18n: dict) -> tuple[bool, str]:
 
 MODULE_HEALTH_CHECKS = {
     "ki_analyse": _check_ai_backend,
+    "ki_analyse_2": _check_ai_backend_2,
     "geocoding": _check_geocoding,
     "ocr": _check_ai_backend,
     "smtp": _check_smtp,
@@ -238,6 +258,50 @@ async def _get_module_status(i18n: dict) -> list[dict]:
             "status": status,
             "detail": detail,
         })
+
+    # Merge ki_analyse + ki_analyse_2 into a single "KI" card with (connected/total)
+    ki_modules = [s for s in statuses if s["name"] in ("ki_analyse", "ki_analyse_2")]
+
+    enabled_kis = [k for k in ki_modules if k["enabled"]]
+    connected_kis = [k for k in ki_modules if k["status"] == "ready"]
+    total_enabled = len(enabled_kis)
+    total_connected = len(connected_kis)
+
+    if total_enabled == 0:
+        ki_status = "disabled"
+        ki_detail = f"({total_connected}/{total_enabled})"
+    elif total_connected == total_enabled:
+        ki_status = "ready"
+        ki_detail = f"({total_connected}/{total_enabled})"
+    elif total_connected > 0:
+        ki_status = "ready"
+        ki_detail = f"({total_connected}/{total_enabled})"
+    else:
+        # All enabled but none connected
+        ki_status = "error"
+        error_details = [k["detail"] for k in enabled_kis if k["status"] in ("error", "misconfigured")]
+        ki_detail = f"({total_connected}/{total_enabled})" + (f" — {error_details[0]}" if error_details else "")
+
+    ki_card = {
+        "name": "ki_analyse",
+        "label": _get_module_label("ki_analyse", i18n),
+        "enabled": total_enabled > 0,
+        "status": ki_status,
+        "detail": ki_detail,
+    }
+
+    # Insert KI card at the position of the first KI module
+    merged = []
+    ki_inserted = False
+    for s in statuses:
+        if s["name"] in ("ki_analyse", "ki_analyse_2"):
+            if not ki_inserted:
+                merged.append(ki_card)
+                ki_inserted = True
+        else:
+            merged.append(s)
+
+    statuses = merged
 
     _module_cache = statuses
     _module_cache_time = time.monotonic()

@@ -483,12 +483,15 @@
             <h2>{{ t.settings.ai_analysis }}</h2>
             <span class="section-desc">{{ t.settings.ai_desc }}</span>
         </div>
-        <label class="switch">
-            <input type="checkbox" name="mod_ki_analyse" value="1" {{ 'checked' if modules.ki_analyse else '' }}>
-            <span class="switch-slider"></span>
-        </label>
     </div>
     <div class="section-body">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+            <label style="font-weight: 600; margin: 0;">{{ t.settings.ai1_title }}</label>
+            <label class="switch" style="margin: 0;">
+                <input type="checkbox" name="mod_ki_analyse" value="1" {{ 'checked' if modules.ki_analyse else '' }}>
+                <span class="switch-slider"></span>
+            </label>
+        </div>
         <div class="form-row">
             <div class="form-group">
                 <label for="ai_url">{{ t.settings.backend_url }}</label>
@@ -498,12 +501,45 @@
                 <label for="ai_model">{{ t.settings.model }}</label>
                 <input type="text" id="ai_model" name="ai_model" value="{{ cfg.ai_model }}">
             </div>
+            <div class="form-group" style="max-width: 5rem;">
+                <label for="ai_slots">{{ t.settings.slots }}</label>
+                <input type="number" id="ai_slots" name="ai_slots" value="{{ cfg.ai_slots }}" min="1" max="16" step="1">
+            </div>
         </div>
         <div class="form-group">
             <label for="ai_api_key">{{ t.settings.api_key }}</label>
             <input type="password" id="ai_api_key" name="ai_api_key" placeholder="••••••••">
             <small>{{ t.settings.api_key_hint }}</small>
         </div>
+        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem;">
+            <label style="font-weight: 600; margin: 0;">{{ t.settings.ai2_title }}</label>
+            <label class="switch" style="margin: 0;">
+                <input type="checkbox" name="mod_ki_analyse_2" value="1" {{ 'checked' if modules.ki_analyse_2 else '' }}>
+                <span class="switch-slider"></span>
+            </label>
+        </div>
+        <small style="display: block; color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem;">{{ t.settings.ai2_desc }}</small>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="ai2_url">{{ t.settings.backend_url }}</label>
+                <input type="url" id="ai2_url" name="ai2_url" value="{{ cfg.ai2_url }}">
+            </div>
+            <div class="form-group">
+                <label for="ai2_model">{{ t.settings.model }}</label>
+                <input type="text" id="ai2_model" name="ai2_model" value="{{ cfg.ai2_model }}">
+            </div>
+            <div class="form-group" style="max-width: 5rem;">
+                <label for="ai2_slots">{{ t.settings.slots }}</label>
+                <input type="number" id="ai2_slots" name="ai2_slots" value="{{ cfg.ai2_slots }}" min="1" max="16" step="1">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="ai2_api_key">{{ t.settings.api_key }}</label>
+            <input type="password" id="ai2_api_key" name="ai2_api_key" placeholder="••••••••">
+            <small>{{ t.settings.api_key_hint }}</small>
+        </div>
+        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
         <div class="form-group">
             <label for="ai_prompt">{{ t.settings.system_prompt }}</label>
             <textarea id="ai_prompt" name="ai_prompt" rows="16" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4;">{{ cfg.ai_prompt }}</textarea>

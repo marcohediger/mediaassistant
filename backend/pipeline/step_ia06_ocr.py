@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import httpx
+from ai_backends import acquire_ai_backend
 from config import config_manager
 
 
@@ -26,15 +27,6 @@ async def execute(job, session) -> dict:
     if not await config_manager.is_module_enabled("ocr"):
         return {"status": "skipped", "reason": "module disabled"}
 
-    # OCR benötigt das KI-Backend
-    if not await config_manager.is_module_enabled("ki_analyse"):
-        return {"status": "skipped", "reason": "KI-Analyse deaktiviert (OCR benötigt KI-Backend)"}
-
-    url = await config_manager.get("ai.backend_url")
-    model = await config_manager.get("ai.model")
-    if not url or not model:
-        return {"status": "skipped", "reason": "not configured"}
-
     # Check OCR mode: "smart" = only screenshots/documents, "always" = all images
     ocr_mode = await config_manager.get("ocr.mode", "smart")
     if ocr_mode == "smart":
@@ -44,8 +36,6 @@ async def execute(job, session) -> dict:
         is_ocr_relevant = ai_type.lower() == "screenshot" or "dokument" in ai_source or "document" in ai_source or "quittung" in ai_source
         if ai_type and not is_ocr_relevant and not ai_result.get("parse_error"):
             return {"status": "skipped", "reason": f"type={ai_type}, OCR nicht nötig (Modus: smart)"}
-
-    api_key = await config_manager.get("ai.api_key", "not-needed")
 
     # Use pre-converted temp file from IA-04 if available
     filepath = job.original_path
@@ -58,43 +48,53 @@ async def execute(job, session) -> dict:
     mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
     mime_type = mime_map.get(os.path.splitext(image_path)[1].lower(), "image/jpeg")
 
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": OCR_PROMPT},
-            {"role": "user", "content": [
-                {"type": "text", "text": "Erkenne allen sichtbaren Text in diesem Bild."},
-                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
-            ]}
-        ],
-        "temperature": 0.1,
-        "max_tokens": 1000,
-    }
+    # ── Acquire idle AI backend and make API call ───────────────────
+    async with acquire_ai_backend() as backend:
+        if not backend:
+            return {"status": "skipped", "reason": "not configured"}
 
-    headers = {"Content-Type": "application/json"}
-    if api_key and api_key != "not-needed":
-        headers["Authorization"] = f"Bearer {api_key}"
+        url = backend["url"]
+        model = backend["model"]
+        api_key = backend["api_key"]
 
-    ai_timeout = int(await config_manager.get("ai.timeout", 120))
-    max_retries = 2
-    resp = None
-    last_exc = None
-    for attempt in range(max_retries + 1):
-        try:
-            async with httpx.AsyncClient(timeout=ai_timeout) as client:
-                resp = await client.post(
-                    f"{url.rstrip('/')}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                )
-            if resp.status_code < 500:
-                break
-            last_exc = RuntimeError(f"OCR API Fehler: HTTP {resp.status_code}")
-        except httpx.ReadTimeout as e:
-            last_exc = e
-        if attempt < max_retries:
-            await asyncio.sleep(5 * (attempt + 1))
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": OCR_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Erkenne allen sichtbaren Text in diesem Bild."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
+                ]}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 1000,
+        }
 
+        headers = {"Content-Type": "application/json"}
+        if api_key and api_key != "not-needed":
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        ai_timeout = int(await config_manager.get("ai.timeout", 120))
+        max_retries = 2
+        resp = None
+        last_exc = None
+        for attempt in range(max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=ai_timeout) as client:
+                    resp = await client.post(
+                        f"{url.rstrip('/')}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                if resp.status_code < 500:
+                    break
+                last_exc = RuntimeError(f"OCR API Fehler: HTTP {resp.status_code}")
+            except httpx.ReadTimeout as e:
+                last_exc = e
+            if attempt < max_retries:
+                await asyncio.sleep(5 * (attempt + 1))
+
+    # Backend released
     if resp is None:
         raise RuntimeError(f"OCR API Timeout nach {max_retries + 1} Versuchen") from last_exc
     if resp.status_code != 200:

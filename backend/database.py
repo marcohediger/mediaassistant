@@ -23,6 +23,7 @@ def _set_sqlite_pragmas(dbapi_conn, connection_record):
 
 DEFAULT_MODULES = [
     ("ki_analyse", False),
+    ("ki_analyse_2", False),
     ("geocoding", False),
     ("duplikat_erkennung", False),
     ("ocr", False),
