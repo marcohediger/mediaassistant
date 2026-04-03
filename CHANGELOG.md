@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.25.4 — 2026-04-03
+
+### Kontinuierlicher Worker-Pool
+
+- **Gleichmässige Lastverteilung** — Jobs werden sofort nachgefüllt wenn ein Slot frei wird, statt auf den ganzen Batch zu warten
+- Vorher: Start N → warte auf alle → Start N (Burst-Idle-Muster)
+- Nachher: Slot frei → nächster Job startet sofort (kontinuierlich)
+
 ## v2.25.3 — 2026-04-03
 
 ### Fix: Multi-Slot Semaphore

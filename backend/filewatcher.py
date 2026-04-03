@@ -241,38 +241,14 @@ async def _scan_inbox():
                 logger.info(f"{total_queued} new files queued from {inbox.label} (log_info failed, DB busy)")
 
 
-async def _process_queue():
-    """Pick up queued jobs and run pipelines.
-
-    Runs up to N jobs concurrently based on the total AI backend slots.
-    """
-    from ai_backends import get_total_slots
-    max_concurrent = await get_total_slots()
-
-    async with async_session() as session:
-        result = await session.execute(
-            select(Job).where(Job.status == "queued").order_by(Job.created_at).limit(max_concurrent)
-        )
-        jobs = result.scalars().all()
-
-    if not jobs:
-        return
-
-    async def _run_one(job):
-        logger.info(f"Pipeline start: {job.debug_key} ({job.filename})")
-        await run_pipeline(job.id)
-        logger.info(f"Pipeline done: {job.debug_key} ({job.filename})")
-
-    if len(jobs) == 1:
-        await _run_one(jobs[0])
-    else:
-        # Staggered start: launch jobs 2 seconds apart to avoid resource spikes
-        tasks = []
-        for i, job in enumerate(jobs):
-            if i > 0:
-                await asyncio.sleep(2)
-            tasks.append(asyncio.create_task(_run_one(job)))
-        await asyncio.gather(*tasks)
+async def _run_job(job_id: int, filename: str, debug_key: str):
+    """Run a single pipeline job (used as asyncio task)."""
+    logger.info(f"Pipeline start: {debug_key} ({filename})")
+    try:
+        await run_pipeline(job_id)
+    except Exception as e:
+        logger.error(f"Pipeline error {debug_key}: {e}")
+    logger.info(f"Pipeline done: {debug_key} ({filename})")
 
 
 async def _poll_immich():
@@ -555,19 +531,63 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
 
 
 async def _pipeline_worker(shutdown_event: asyncio.Event):
-    """Background worker: continuously picks up queued jobs and runs pipelines."""
+    """Background worker: continuously fills free slots with queued jobs.
+
+    Instead of batch processing (start N, wait for all, repeat), this
+    worker checks every second for free slots and immediately starts
+    new jobs — keeping all slots busy with even load distribution.
+    """
+    from ai_backends import get_total_slots
+
     logger.info("Pipeline worker started")
+    running: set[asyncio.Task] = set()
     jobs_since_gc = 0
+
     while not shutdown_event.is_set():
         try:
-            await _process_queue()
-            jobs_since_gc += 1
-            # Force garbage collection every 10 jobs to prevent memory buildup
+            # Clean up finished tasks
+            done = {t for t in running if t.done()}
+            for t in done:
+                running.discard(t)
+                exc = t.exception() if not t.cancelled() else None
+                if exc:
+                    logger.error(f"Pipeline task failed: {exc}")
+                jobs_since_gc += 1
+
             if jobs_since_gc >= 10:
                 gc.collect()
                 jobs_since_gc = 0
+
+            # Fill free slots with queued jobs
+            max_concurrent = await get_total_slots()
+            free_slots = max_concurrent - len(running)
+
+            if free_slots > 0:
+                async with async_session() as session:
+                    result = await session.execute(
+                        select(Job).where(Job.status == "queued")
+                        .order_by(Job.created_at).limit(free_slots)
+                    )
+                    new_jobs = result.scalars().all()
+
+                for job in new_jobs:
+                    task = asyncio.create_task(
+                        _run_job(job.id, job.filename, job.debug_key)
+                    )
+                    running.add(task)
+                    # Staggered start: 2s apart to spread load
+                    if len(new_jobs) > 1:
+                        await asyncio.sleep(2)
+
         except Exception as e:
-            await log_error("pipeline_worker", f"Pipeline error: {e}")
+            try:
+                await log_error("pipeline_worker", f"Pipeline error: {e}")
+            except Exception:
+                pass
             logger.error(f"Pipeline worker error: {e}")
-        # Short sleep to avoid busy-loop when queue is empty
+
         await asyncio.sleep(1)
+
+    # Graceful shutdown: wait for running tasks
+    if running:
+        await asyncio.gather(*running, return_exceptions=True)
