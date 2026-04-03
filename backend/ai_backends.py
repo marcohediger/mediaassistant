@@ -52,14 +52,18 @@ async def _load_backends() -> list[dict]:
 
 
 def _get_semaphore(backend_id: int, slots: int) -> asyncio.Semaphore:
-    """Get or create semaphore for a backend, resizing if slots changed."""
+    """Get or create semaphore for a backend, recreating if slots changed."""
     existing = _semaphores.get(backend_id)
-    if existing is None or existing._value + (slots - existing._value) != slots:
-        # Create new semaphore with correct slot count
-        # Only recreate if not yet created
-        if existing is None:
+    if existing is None:
+        _semaphores[backend_id] = asyncio.Semaphore(slots)
+    elif getattr(existing, '_initial_slots', None) != slots:
+        # Slot count changed — only recreate if no slots are currently in use
+        if not existing.locked():
             _semaphores[backend_id] = asyncio.Semaphore(slots)
-    return _semaphores[backend_id]
+            _semaphores[backend_id]._initial_slots = slots
+    sem = _semaphores[backend_id]
+    sem._initial_slots = slots
+    return sem
 
 
 async def get_total_slots() -> int:
