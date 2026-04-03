@@ -568,7 +568,10 @@ async def execute(job, session) -> dict:
                 )
 
         # Remove source file after successful upload
-        await asyncio.to_thread(os.remove, job.original_path)
+        try:
+            await asyncio.to_thread(os.remove, job.original_path)
+        except FileNotFoundError:
+            logger.info("Source file already removed: %s", job.original_path)
 
         # Clean up empty parent directories in inbox
         if job.source_inbox_path:
