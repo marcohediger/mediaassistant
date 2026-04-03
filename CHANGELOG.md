@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.25.3 — 2026-04-03
+
+### Fix: Multi-Slot Semaphore
+
+- **Slot-Anzahl wird jetzt korrekt angewendet** — Semaphore wird bei Änderung der Slot-Konfiguration neu erstellt
+- Zuvor blieb der Semaphore auf dem initialen Wert (1) stecken, unabhängig von der Einstellung
+
 ## v2.25.2 — 2026-04-03
 
 ### Stabilität & zeitversetzter Start
