@@ -112,6 +112,22 @@ async def execute(job, session) -> dict:
     # Use pre-converted temp file(s) from IA-04 if available
     filepath = job.original_path
     convert_result = (job.step_result or {}).get("IA-04", {})
+    ext = os.path.splitext(filepath)[1].lower()
+
+    # Skip AI if format not supported and conversion failed
+    ai_native_formats = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    if ext not in ai_native_formats and not convert_result.get("converted"):
+        return {
+            "type": "unknown",
+            "tags": [],
+            "description": f"Format {ext} nicht konvertierbar, KI-Analyse übersprungen",
+            "mood": "",
+            "people_count": 0,
+            "quality": "unbekannt",
+            "confidence": 0.0,
+            "_skipped": True,
+            "_reason": f"IA-04 conversion failed for {ext}",
+        }
 
     # Multi-frame support for videos
     image_paths = convert_result.get("temp_paths") or []
