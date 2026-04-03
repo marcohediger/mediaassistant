@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import os
@@ -74,13 +75,28 @@ async def execute(job, session) -> dict:
     if api_key and api_key != "not-needed":
         headers["Authorization"] = f"Bearer {api_key}"
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            f"{url.rstrip('/')}/chat/completions",
-            json=payload,
-            headers=headers,
-        )
+    ai_timeout = int(await config_manager.get("ai.timeout", 120))
+    max_retries = 2
+    resp = None
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=ai_timeout) as client:
+                resp = await client.post(
+                    f"{url.rstrip('/')}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
+            if resp.status_code < 500:
+                break
+            last_exc = RuntimeError(f"OCR API Fehler: HTTP {resp.status_code}")
+        except httpx.ReadTimeout as e:
+            last_exc = e
+        if attempt < max_retries:
+            await asyncio.sleep(5 * (attempt + 1))
 
+    if resp is None:
+        raise RuntimeError(f"OCR API Timeout nach {max_retries + 1} Versuchen") from last_exc
     if resp.status_code != 200:
         raise RuntimeError(f"OCR API Fehler: HTTP {resp.status_code}")
 

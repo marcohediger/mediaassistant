@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     exiftool \
     libheif-examples \
     ffmpeg \
+    imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
