@@ -165,17 +165,22 @@ def _cleanup_empty_dirs(start_dir: str, stop_at: str):
 
     Treats Synology metadata dirs (@eaDir) and OS junk files (.DS_Store, Thumbs.db)
     as ignorable — directories containing only these are considered empty.
+
+    Safe for concurrent use: silently skips if directory was already removed
+    by another parallel pipeline job.
     """
     stop_at = os.path.realpath(stop_at)
     current = os.path.realpath(start_dir)
     while current != stop_at and len(current) > len(stop_at):
         try:
+            if not os.path.isdir(current):
+                break  # already removed by another job
             if _is_dir_empty(current):
                 _force_remove_dir(current)
             else:
                 break  # directory has real content, stop
-        except OSError:
-            break
+        except (OSError, FileNotFoundError):
+            break  # race condition with parallel job — safe to skip
         current = os.path.dirname(current)
 
 

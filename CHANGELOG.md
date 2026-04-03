@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.25.6 — 2026-04-03
+
+### Fix: Race Condition bei paralleler Verzeichnis-Bereinigung
+
+- **_cleanup_empty_dirs absturzsicher** — wenn parallele Jobs Dateien im gleichen Verzeichnis verarbeiten, konnte ein Job das Verzeichnis löschen während ein anderer noch darauf zugriff
+- Prüft jetzt ob das Verzeichnis noch existiert bevor es gelöscht wird
+- FileNotFoundError wird sauber abgefangen statt die Pipeline zu unterbrechen
+
+## v2.25.5 — 2026-04-03
+
+### Fix: FileNotFoundError nach Immich-Upload
+
+- **Quelldatei-Löschung absturzsicher** — wenn die Quelldatei bereits entfernt wurde (z.B. durch parallelen Job), wird dies sauber protokolliert statt einen Fehler auszulösen
+
 ## v2.25.4 — 2026-04-03
 
 ### Kontinuierlicher Worker-Pool
