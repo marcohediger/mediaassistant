@@ -22,11 +22,19 @@ async def execute(job, session) -> dict:
 
     try:
         if ext in (".heic", ".heif"):
-            await asyncio.to_thread(
-                subprocess.run,
-                ["heif-convert", filepath, temp_path],
-                capture_output=True, timeout=30, check=True
-            )
+            try:
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["heif-convert", filepath, temp_path],
+                    capture_output=True, timeout=30, check=True
+                )
+            except subprocess.CalledProcessError:
+                # Fallback: ImageMagick convert
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["convert", filepath, temp_path],
+                    capture_output=True, timeout=30, check=True
+                )
         elif ext in (".dng", ".cr2", ".nef", ".arw", ".tiff", ".tif"):
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -69,7 +77,11 @@ async def execute(job, session) -> dict:
                 os.remove(f)
             except OSError:
                 pass
-        raise RuntimeError(f"Formatkonvertierung fehlgeschlagen: {e}")
+        import logging
+        logging.getLogger("mediaassistant.pipeline.ia04").warning(
+            "%s HEIC/convert fallback fehlgeschlagen: %s", job.debug_key, e
+        )
+        return {"converted": False, "reason": f"conversion failed: {e}"}
 
     return {"converted": False, "reason": "conversion produced no output"}
 
