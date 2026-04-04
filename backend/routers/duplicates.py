@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import os
 import subprocess
@@ -7,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from PIL import Image
 from sqlalchemy import select, func
 from sqlalchemy.orm.attributes import flag_modified
@@ -86,16 +87,45 @@ def _generate_thumbnail(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
     return buf.getvalue()
 
 
-def _get_image_info(filepath: str) -> dict:
-    """Get image dimensions, file size, EXIF details and keywords via exiftool."""
-    info = {
-        "file_size": 0, "width": 0, "height": 0, "megapixel": 0.0,
-        "exif_date": "", "exif_camera": "", "exif_iso": "", "exif_aperture": "",
-        "exif_shutter": "", "exif_focal": "", "exif_keywords": [], "exif_description": "",
-        "exif_has_gps": False, "exif_has_exif": False,
-    }
+def _parse_exiftool_entry(data: dict, filepath: str) -> dict:
+    """Parse a single exiftool JSON entry into our info dict."""
+    info = _empty_img_info()
     try:
         info["file_size"] = os.path.getsize(filepath)
+    except OSError:
+        pass
+
+    w = data.get("ImageWidth", 0)
+    h = data.get("ImageHeight", 0)
+    if w and h:
+        info["width"] = int(w)
+        info["height"] = int(h)
+        info["megapixel"] = round(int(w) * int(h) / 1_000_000, 1)
+
+    date = data.get("DateTimeOriginal") or data.get("CreateDate") or ""
+    info["exif_date"] = date
+    make = data.get("Make", "")
+    model = data.get("Model", "")
+    info["exif_camera"] = f"{make} {model}".strip() if (make or model) else ""
+    info["exif_iso"] = str(data.get("ISO", ""))
+    info["exif_aperture"] = str(data.get("FNumber", ""))
+    info["exif_shutter"] = str(data.get("ExposureTime", ""))
+    info["exif_focal"] = str(data.get("FocalLength", ""))
+
+    kw = data.get("Keywords") or data.get("Subject") or []
+    if isinstance(kw, str):
+        kw = [kw]
+    info["exif_keywords"] = kw
+
+    info["exif_description"] = data.get("ImageDescription", "")
+    info["exif_has_gps"] = bool(data.get("GPSLatitude"))
+    info["exif_has_exif"] = bool(date or make or model)
+    return info
+
+
+def _get_image_info(filepath: str) -> dict:
+    """Get image dimensions, file size, EXIF details and keywords via exiftool."""
+    try:
         result = subprocess.run(
             ["exiftool", "-j",
              "-ImageWidth", "-ImageHeight",
@@ -110,36 +140,40 @@ def _get_image_info(filepath: str) -> dict:
         )
         import json as _json
         data = _json.loads(result.stdout)[0] if result.stdout.strip() else {}
+        return _parse_exiftool_entry(data, filepath)
+    except Exception:
+        return _empty_img_info()
 
-        w = data.get("ImageWidth", 0)
-        h = data.get("ImageHeight", 0)
-        if w and h:
-            info["width"] = int(w)
-            info["height"] = int(h)
-            info["megapixel"] = round(int(w) * int(h) / 1_000_000, 1)
 
-        date = data.get("DateTimeOriginal") or data.get("CreateDate") or ""
-        info["exif_date"] = date
-        make = data.get("Make", "")
-        model = data.get("Model", "")
-        info["exif_camera"] = f"{make} {model}".strip() if (make or model) else ""
-        info["exif_iso"] = str(data.get("ISO", ""))
-        info["exif_aperture"] = str(data.get("FNumber", ""))
-        info["exif_shutter"] = str(data.get("ExposureTime", ""))
-        info["exif_focal"] = str(data.get("FocalLength", ""))
+def _get_image_info_batch(filepaths: list[str]) -> dict[str, dict]:
+    """Get image info for multiple files in a single exiftool call."""
+    existing = [fp for fp in filepaths if os.path.exists(fp)]
+    if not existing:
+        return {fp: _empty_img_info() for fp in filepaths}
 
-        # Keywords can be string or list
-        kw = data.get("Keywords") or data.get("Subject") or []
-        if isinstance(kw, str):
-            kw = [kw]
-        info["exif_keywords"] = kw
-
-        info["exif_description"] = data.get("ImageDescription", "")
-        info["exif_has_gps"] = bool(data.get("GPSLatitude"))
-        info["exif_has_exif"] = bool(date or make or model)
+    result_map = {fp: _empty_img_info() for fp in filepaths}
+    try:
+        result = subprocess.run(
+            ["exiftool", "-j",
+             "-ImageWidth", "-ImageHeight",
+             "-DateTimeOriginal", "-CreateDate",
+             "-Make", "-Model",
+             "-ISO", "-FNumber", "-ExposureTime", "-FocalLength",
+             "-Keywords", "-Subject",
+             "-ImageDescription",
+             "-GPSLatitude", "-GPSLongitude",
+             ] + existing,
+            capture_output=True, text=True, timeout=30,
+        )
+        import json as _json
+        entries = _json.loads(result.stdout) if result.stdout.strip() else []
+        for entry in entries:
+            src = entry.get("SourceFile", "")
+            if src in result_map:
+                result_map[src] = _parse_exiftool_entry(entry, src)
     except Exception:
         pass
-    return info
+    return result_map
 
 
 def _union_find_groups(links: list[tuple[str, str]]) -> dict[str, set[str]]:
@@ -191,7 +225,7 @@ def _display_path(job) -> str:
     return job.original_path or "—"
 
 
-async def _build_member(job, session) -> dict:
+async def _build_member(job, session, *, prefetched_info: dict | None = None) -> dict:
     """Build a member dict for a single job — all info read directly from the file."""
     filepath = _resolve_filepath(job)
     dup_info = (job.step_result or {}).get("IA-02", {})
@@ -210,7 +244,9 @@ async def _build_member(job, session) -> dict:
         if immich_url:
             immich_link = f"{immich_url}/photos/{immich_asset_id}"
 
-    if exists:
+    if prefetched_info is not None:
+        img_info = prefetched_info
+    elif exists:
         img_info = await asyncio.to_thread(_get_image_info, filepath)
     elif immich_asset_id:
         from immich_client import get_user_api_key as _guk
@@ -284,8 +320,8 @@ async def _img_info_from_immich(asset_id: str, *, api_key: str | None = None) ->
     return info
 
 
-async def _build_duplicate_groups() -> list[dict]:
-    """Build transitively merged groups of duplicate files."""
+async def _build_group_index() -> tuple[list[dict], dict[str, "Job"]]:
+    """Build lightweight group index without EXIF data (fast)."""
     async with async_session() as session:
         result = await session.execute(
             select(Job).where(Job.status == "duplicate")
@@ -293,9 +329,8 @@ async def _build_duplicate_groups() -> list[dict]:
         dup_jobs = result.scalars().all()
 
         if not dup_jobs:
-            return []
+            return [], {}
 
-        # Build links: each duplicate is linked to its original
         links = []
         for job in dup_jobs:
             dup_info = (job.step_result or {}).get("IA-02", {})
@@ -303,57 +338,172 @@ async def _build_duplicate_groups() -> list[dict]:
             if original_key:
                 links.append((job.debug_key, original_key))
 
-        # Transitively merge into groups
         merged = _union_find_groups(links)
 
-        # Collect all debug_keys we need
         all_keys = set()
         for members in merged.values():
             all_keys.update(members)
 
-        # Fetch all relevant jobs
         result = await session.execute(
             select(Job).where(Job.debug_key.in_(all_keys))
         )
         jobs_by_key = {j.debug_key: j for j in result.scalars().all()}
 
-        # Build groups
         groups = []
         for root_key, member_keys in merged.items():
-            members = []
             sorted_keys = sorted(member_keys, key=lambda k: (
                 1 if jobs_by_key.get(k) and jobs_by_key[k].status == "duplicate" else 0,
                 k,
             ))
-
-            for key in sorted_keys:
-                job = jobs_by_key.get(key)
-                if not job:
-                    continue
-                members.append(await _build_member(job, session))
-
-            if len(members) < 2:
+            valid_keys = [k for k in sorted_keys if k in jobs_by_key]
+            if len(valid_keys) < 2:
                 continue
 
-            # Check if original is in Immich
-            has_immich = any(m.get("immich_asset_id") for m in members)
-
             group_key = next(
-                (m["debug_key"] for m in members if m["is_original"]),
-                members[0]["debug_key"],
+                (k for k in valid_keys if jobs_by_key[k].status != "duplicate"),
+                valid_keys[0],
+            )
+
+            # Determine group flags from job data (no EXIF needed)
+            has_immich = any(
+                jobs_by_key[k].immich_asset_id or (jobs_by_key[k].target_path or "").startswith("immich:")
+                for k in valid_keys
+            )
+            all_exact = all(
+                (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("match_type") in ("exact", "raw_jpg_pair", None)
+                for k in valid_keys
             )
 
             groups.append({
                 "original_key": group_key,
-                "members": members,
-                "count": len(members),
-                "all_exact": all(
-                    m["match_type"] in ("exact", "original", "raw_jpg_pair") for m in members
-                ),
+                "member_keys": valid_keys,
+                "count": len(valid_keys),
+                "all_exact": all_exact,
                 "is_immich_duplicate": has_immich,
             })
 
+    return groups, jobs_by_key
+
+
+async def _build_group_detail(member_keys: list[str], jobs_by_key: dict) -> list[dict]:
+    """Build full member details for one group, using batch exiftool."""
+    # Collect local file paths for batch exiftool
+    local_files = {}
+    immich_jobs = {}
+    for key in member_keys:
+        job = jobs_by_key.get(key)
+        if not job:
+            continue
+        filepath = _resolve_filepath(job)
+        asset_id = job.immich_asset_id or ""
+        target = job.target_path or ""
+        if target.startswith("immich:"):
+            asset_id = asset_id or target[7:]
+        if os.path.exists(filepath):
+            local_files[key] = filepath
+        elif asset_id:
+            immich_jobs[key] = (job, asset_id)
+
+    # Batch exiftool for all local files at once
+    batch_info = {}
+    if local_files:
+        batch_info = await asyncio.to_thread(
+            _get_image_info_batch, list(local_files.values())
+        )
+
+    # Fetch Immich info concurrently
+    immich_info = {}
+    if immich_jobs:
+        async def _fetch_immich(key, job, asset_id):
+            from immich_client import get_user_api_key as _guk
+            _ukey = await _guk(job.immich_user_id) if job.immich_user_id else None
+            return key, await _img_info_from_immich(asset_id, api_key=_ukey)
+
+        tasks = [_fetch_immich(k, j, aid) for k, (j, aid) in immich_jobs.items()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, tuple):
+                immich_info[r[0]] = r[1]
+
+    # Build members
+    members = []
+    async with async_session() as session:
+        for key in member_keys:
+            job = jobs_by_key.get(key)
+            if not job:
+                continue
+            prefetched = None
+            if key in local_files:
+                prefetched = batch_info.get(local_files[key])
+            elif key in immich_info:
+                prefetched = immich_info[key]
+            members.append(await _build_member(job, session, prefetched_info=prefetched))
+
+    return members
+
+
+async def _build_duplicate_groups() -> list[dict]:
+    """Build transitively merged groups of duplicate files with full EXIF data."""
+    group_index, jobs_by_key = await _build_group_index()
+    if not group_index:
+        return []
+
+    groups = []
+    for g in group_index:
+        members = await _build_group_detail(g["member_keys"], jobs_by_key)
+        if len(members) < 2:
+            continue
+        groups.append({
+            "original_key": g["original_key"],
+            "members": members,
+            "count": g["count"],
+            "all_exact": g["all_exact"],
+            "is_immich_duplicate": g["is_immich_duplicate"],
+        })
+
     return groups
+
+
+@router.get("/api/duplicates/groups")
+async def api_duplicate_groups(request: Request):
+    """Paginated API: return duplicate groups with full EXIF, loaded in batches."""
+    try:
+        page = int(request.query_params.get("page", 1))
+    except ValueError:
+        page = 1
+    try:
+        per_page = min(int(request.query_params.get("per_page", 10)), 50)
+    except ValueError:
+        per_page = 10
+
+    group_index, jobs_by_key = await _build_group_index()
+    total = len(group_index)
+    exact_count = sum(1 for g in group_index if g["all_exact"])
+
+    start = (page - 1) * per_page
+    page_groups = group_index[start:start + per_page]
+
+    groups = []
+    for g in page_groups:
+        members = await _build_group_detail(g["member_keys"], jobs_by_key)
+        if len(members) < 2:
+            continue
+        groups.append({
+            "original_key": g["original_key"],
+            "members": members,
+            "count": g["count"],
+            "all_exact": g["all_exact"],
+            "is_immich_duplicate": g["is_immich_duplicate"],
+        })
+
+    return JSONResponse({
+        "groups": groups,
+        "total_groups": total,
+        "exact_groups": exact_count,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": (total + per_page - 1) // per_page if total else 0,
+    })
 
 
 @router.get("/duplicates")
@@ -361,11 +511,34 @@ async def duplicates_page(request: Request):
     if not await config_manager.is_setup_complete():
         return RedirectResponse(url="/setup", status_code=302)
 
-    groups = await _build_duplicate_groups()
+    skip_confirm = await config_manager.get("duplikat.skip_confirm", False)
+
+    # Load first page via API logic for initial render
+    group_index, jobs_by_key = await _build_group_index()
+    total = len(group_index)
+    exact_count = sum(1 for g in group_index if g["all_exact"])
+
+    first_page = group_index[:10]
+    groups = []
+    for g in first_page:
+        members = await _build_group_detail(g["member_keys"], jobs_by_key)
+        if len(members) < 2:
+            continue
+        groups.append({
+            "original_key": g["original_key"],
+            "members": members,
+            "count": g["count"],
+            "all_exact": g["all_exact"],
+            "is_immich_duplicate": g["is_immich_duplicate"],
+        })
+
     return await render(request, "duplicates.html", {
         "groups": groups,
-        "total_groups": len(groups),
-        "exact_groups": sum(1 for g in groups if g["all_exact"]),
+        "total_groups": total,
+        "exact_groups": exact_count,
+        "skip_confirm": skip_confirm,
+        "has_more": total > 10,
+        "current_page": 1,
     })
 
 
@@ -709,6 +882,129 @@ async def delete_duplicate(request: Request):
 
     await log_info("duplicates", f"Duplicate deleted: {debug_key}")
     return RedirectResponse(url="/duplicates", status_code=303)
+
+
+@router.post("/api/duplicates/merge-metadata")
+async def merge_metadata(request: Request):
+    """Merge missing metadata from source file(s) into target file via ExifTool."""
+    form = await request.form()
+    target_key = form.get("target_key")
+    source_key = form.get("source_key")
+
+    if not target_key or not source_key:
+        return JSONResponse({"error": "missing keys"}, status_code=400)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.debug_key.in_([target_key, source_key]))
+        )
+        jobs = {j.debug_key: j for j in result.scalars().all()}
+        target_job = jobs.get(target_key)
+        source_job = jobs.get(source_key)
+
+        if not target_job or not source_job:
+            return JSONResponse({"error": "job not found"}, status_code=404)
+
+        target_path = _resolve_filepath(target_job)
+        source_path = _resolve_filepath(source_job)
+
+        if not os.path.exists(target_path):
+            return JSONResponse({"error": "target file not found"}, status_code=404)
+        if not os.path.exists(source_path):
+            return JSONResponse({"error": "source file not found"}, status_code=404)
+
+        # Read EXIF from both files
+        target_info = await asyncio.to_thread(_get_image_info, target_path)
+        source_info = await asyncio.to_thread(_get_image_info, source_path)
+
+        # Determine which fields to merge (only fill missing fields)
+        from pipeline.step_ia07_exif_write import _IPTC_FORMATS, _NO_XPCOMMENT
+        ext = os.path.splitext(target_path)[1].lower()
+
+        cmd = ["exiftool", "-overwrite_original_in_place", "-P", "-m"]
+        merged_fields = []
+
+        # GPS
+        if not target_info["exif_has_gps"] and source_info["exif_has_gps"]:
+            cmd.append("-TagsFromFile")
+            cmd.append(source_path)
+            cmd.append("-GPSLatitude")
+            cmd.append("-GPSLongitude")
+            cmd.append("-GPSLatitudeRef")
+            cmd.append("-GPSLongitudeRef")
+            merged_fields.append("GPS")
+
+        # Date
+        if not target_info["exif_date"] and source_info["exif_date"]:
+            cmd.append(f"-DateTimeOriginal={source_info['exif_date']}")
+            merged_fields.append("DateTimeOriginal")
+
+        # Camera
+        if not target_info["exif_camera"] and source_info["exif_camera"]:
+            # Read raw Make/Model from source
+            src_exif = subprocess.run(
+                ["exiftool", "-j", "-Make", "-Model", source_path],
+                capture_output=True, text=True, timeout=10,
+            )
+            import json as _json
+            src_data = _json.loads(src_exif.stdout)[0] if src_exif.stdout.strip() else {}
+            if src_data.get("Make"):
+                cmd.append(f"-Make={src_data['Make']}")
+            if src_data.get("Model"):
+                cmd.append(f"-Model={src_data['Model']}")
+            merged_fields.append("Camera")
+
+        # Description
+        if not target_info["exif_description"] and source_info["exif_description"]:
+            cmd.append(f"-ImageDescription={source_info['exif_description']}")
+            if ext not in _NO_XPCOMMENT:
+                cmd.append(f"-XPComment={source_info['exif_description']}")
+            merged_fields.append("Description")
+
+        # Keywords (union — add missing ones)
+        target_kw = set(target_info["exif_keywords"])
+        source_kw = set(source_info["exif_keywords"])
+        new_kw = source_kw - target_kw
+        if new_kw:
+            if ext in _IPTC_FORMATS:
+                for kw in new_kw:
+                    cmd.append(f"-Keywords+={kw}")
+            else:
+                for kw in new_kw:
+                    cmd.append(f"-Subject+={kw}")
+            merged_fields.append(f"Keywords (+{len(new_kw)})")
+
+        if not merged_fields:
+            return JSONResponse({"status": "nothing_to_merge", "merged": []})
+
+        cmd.append(target_path)
+
+        result = await asyncio.to_thread(
+            subprocess.run, cmd,
+            capture_output=True, text=True, timeout=30,
+        )
+
+        if result.returncode != 0:
+            return JSONResponse(
+                {"error": f"ExifTool error: {result.stderr.strip()}"},
+                status_code=500,
+            )
+
+        # Update file hash in job
+        def _sha256(path):
+            h = hashlib.sha256()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+
+        new_hash = await asyncio.to_thread(_sha256, target_path)
+        target_job.file_hash = new_hash
+        flag_modified(target_job, "step_result")
+        await session.commit()
+
+    await log_info("duplicates", f"Metadata merged: {source_key} → {target_key} ({', '.join(merged_fields)})")
+    return JSONResponse({"status": "ok", "merged": merged_fields})
 
 
 @router.post("/api/duplicates/batch-clean")

@@ -450,6 +450,12 @@
             <span>{{ t.settings.dup_raw_jpg_pair }}</span>
         </label>
         <small style="display: block; margin-top: 0.25rem;">{{ t.settings.dup_raw_jpg_pair_hint }}</small>
+        <label class="switch-inline" style="margin-top: 1rem;">
+            <input type="checkbox" name="dup_skip_confirm" value="1" {{ 'checked' if cfg.dup_skip_confirm else '' }}>
+            <span class="switch-slider-sm"></span>
+            <span>{{ t.settings.dup_skip_confirm }}</span>
+        </label>
+        <small style="display: block; margin-top: 0.25rem;">{{ t.settings.dup_skip_confirm_hint }}</small>
     </div>
 </div>
 

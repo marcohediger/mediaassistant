@@ -128,7 +128,15 @@
     "view_in_immich": "In Immich ansehen",
     "delete_local": "Lokale Kopie löschen",
     "not_duplicate": "Kein Duplikat",
-    "not_duplicate_confirm": "{name} ist kein Duplikat? Die Datei wird erneut verarbeitet."
+    "not_duplicate_confirm": "{name} ist kein Duplikat? Die Datei wird erneut verarbeitet.",
+    "merge_metadata": "Metadaten übernehmen",
+    "merge_confirm": "Fehlende Metadaten von {source} auf {target} übertragen?",
+    "merge_success": "Metadaten übernommen",
+    "merge_nothing": "Keine fehlenden Metadaten gefunden",
+    "merge_error": "Fehler beim Übernehmen der Metadaten",
+    "has_more_metadata": "Mehr Metadaten",
+    "load_more": "Weitere Gruppen laden",
+    "loading": "Lade..."
   },
   "settings": {
     "title": "Einstellungen",
@@ -328,7 +336,9 @@
     "google_json": "Google Takeout JSON",
     "google_json_desc": "Importiert Metadaten aus Google Takeout JSON-Sidecar-Dateien (foto.jpg.json). Fehlende Aufnahmedaten, GPS-Koordinaten und Beschreibungen werden automatisch ergänzt.",
     "google_json_enabled": "Google Takeout JSON-Import aktiviert",
-    "google_json_hint": "Ergänzt fehlende EXIF-Daten (Datum, GPS, Beschreibung) aus den JSON-Dateien von Google Fotos. Die JSON-Dateien werden nach der Verarbeitung automatisch gelöscht. Erkennt auch Google-Duplikate wie foto.jpg(1).json."
+    "google_json_hint": "Ergänzt fehlende EXIF-Daten (Datum, GPS, Beschreibung) aus den JSON-Dateien von Google Fotos. Die JSON-Dateien werden nach der Verarbeitung automatisch gelöscht. Erkennt auch Google-Duplikate wie foto.jpg(1).json.",
+    "dup_skip_confirm": "Bestätigungsdialog überspringen",
+    "dup_skip_confirm_hint": "Deaktiviert die Sicherheitsabfrage beim Behalten, Löschen und \"Kein Duplikat\" in der Duplikat-Ansicht"
   },
   "modules": {
     "ki_analyse": "KI-Analyse",

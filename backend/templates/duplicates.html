@@ -7,7 +7,7 @@
         <span class="dup-count">{{ total_groups }} {{ t.duplicates.groups if total_groups != 1 else t.duplicates.group }}</span>
         {% if exact_groups > 0 %}
         <form method="post" action="/api/duplicates/batch-clean" class="inline-form"
-              onsubmit="return confirm('{{ t.duplicates.batch_confirm | replace('{n}', exact_groups|string) }}')">
+              onsubmit="return dupConfirm('{{ t.duplicates.batch_confirm | replace('{n}', exact_groups|string) }}')">
             <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.batch_clean }} ({{ exact_groups }} {{ t.duplicates.exact }})</button>
         </form>
         {% endif %}
@@ -15,156 +15,81 @@
 </div>
 
 {% if groups %}
+<div id="dup-groups-container">
 {% for group in groups %}
-<div class="dup-group">
-    <div class="dup-group-header">
-        <span class="dup-group-title">{{ group.original_key }}</span>
-        {% if group.is_immich_duplicate %}
-            <span class="match-badge match-immich">Immich</span>
-        {% elif group.all_exact %}
-            <span class="match-badge match-exact">{{ t.duplicates.sha256_exact }}</span>
-        {% else %}
-            <span class="match-badge match-similar">pHash</span>
-        {% endif %}
-        <span class="dup-group-count">{{ group.count }} {{ t.duplicates.files }}</span>
-    </div>
-
-    <div class="dup-compare">
-        {% for member in group.members %}
-        <div class="dup-card {{ 'dup-card-original' if member.is_original }}">
-            <div class="dup-thumb">
-                {% if member.immich_asset_id %}
-                <img src="/api/thumbnail/immich/{{ member.immich_asset_id }}" alt="{{ member.filename }}" loading="lazy"
-                     class="lightbox-trigger" data-fullsize="/api/original/immich/{{ member.immich_asset_id }}">
-                {% elif member.exists %}
-                <img src="/api/thumbnail/{{ member.job_id }}" alt="{{ member.filename }}" loading="lazy"
-                     class="lightbox-trigger" data-fullsize="/api/original/local/{{ member.job_id }}">
-                {% else %}
-                <div class="dup-thumb-missing">{{ t.duplicates.not_found }}</div>
-                {% endif %}
-            </div>
-
-            <div class="dup-card-body">
-                <div class="dup-filename" title="{{ member.filename }}">{{ member.filename }}</div>
-
-                <div class="dup-badges">
-                    {% if member.match_type == 'immich' %}
-                        {% if member.immich_link %}
-                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-immich dup-badge-link">{{ t.duplicates.immich_exists }}</a>
-                        {% else %}
-                        <span class="match-badge match-immich">{{ t.duplicates.immich_exists }}</span>
-                        {% endif %}
-                    {% elif member.is_original %}
-                        {% if member.immich_link %}
-                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-original dup-badge-link">{{ t.duplicates.original }}</a>
-                        {% elif member.exists %}
-                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-original dup-badge-link">{{ t.duplicates.original }}</a>
-                        {% else %}
-                        <span class="match-badge match-original">{{ t.duplicates.original }}</span>
-                        {% endif %}
-                    {% elif member.match_type == 'exact' %}
-                        {% if member.immich_link %}
-                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-exact dup-badge-link">{{ t.duplicates.exact | title }}</a>
-                        {% elif member.exists %}
-                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-exact dup-badge-link">{{ t.duplicates.exact | title }}</a>
-                        {% else %}
-                        <span class="match-badge match-exact">{{ t.duplicates.exact | title }}</span>
-                        {% endif %}
-                    {% elif member.match_type == 'raw_jpg_pair' %}
-                        {% if member.immich_link %}
-                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-exact dup-badge-link">JPG+RAW</a>
-                        {% elif member.exists %}
-                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-exact dup-badge-link">JPG+RAW</a>
-                        {% else %}
-                        <span class="match-badge match-exact">JPG+RAW</span>
-                        {% endif %}
-                    {% else %}
-                        <span class="match-badge match-similar">{{ ((64 - member.phash_distance) / 64 * 100) | round(0) | int }}%</span>
-                    {% endif %}
-                </div>
-
-                <div class="dup-props">
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.size }}</span>
-                        <span>{% if member.file_size %}{{ (member.file_size / 1024 / 1024) | round(1) }} MB{% else %}—{% endif %}</span>
-                    </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.resolution }}</span>
-                        <span>{% if member.width %}{{ member.width }}x{{ member.height }}{% else %}—{% endif %}</span>
-                    </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.megapixel }}</span>
-                        <span>{% if member.megapixel %}{{ member.megapixel }} MP{% else %}—{% endif %}</span>
-                    </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.date }}</span>
-                        <span>{{ member.exif_date or '—' }}</span>
-                    </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.camera }}</span>
-                        <span>{{ member.exif_camera or '—' }}</span>
-                    </div>
-                    {% if member.exif_iso or member.exif_aperture or member.exif_shutter %}
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.settings_label }}</span>
-                        <span>{% if member.exif_iso %}ISO {{ member.exif_iso }}{% endif %}{% if member.exif_aperture %} f/{{ member.exif_aperture }}{% endif %}{% if member.exif_shutter %} {{ member.exif_shutter }}s{% endif %}</span>
-                    </div>
-                    {% endif %}
-                    {% if member.exif_focal %}
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.focal_length }}</span>
-                        <span>{{ member.exif_focal }}</span>
-                    </div>
-                    {% endif %}
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.exif }}</span>
-                        <span>{% if member.exif_has_exif %}{{ t.duplicates.yes }}{% else %}{{ t.duplicates.no }}{% endif %}</span>
-                    </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.gps }}</span>
-                        <span>{% if member.exif_has_gps %}{{ t.duplicates.yes }}{% else %}{{ t.duplicates.no }}{% endif %}</span>
-                    </div>
-                </div>
-
-                {% if member.exif_keywords %}
-                <div class="dup-tags">
-                    {% for tag in member.exif_keywords %}
-                    <span class="dup-tag">{{ tag }}</span>
-                    {% endfor %}
-                </div>
-                {% endif %}
-
-                {% if member.exif_description %}
-                <div class="dup-description">{{ member.exif_description }}</div>
-                {% endif %}
-
-                <div class="dup-path" title="{{ member.filepath }}">{{ member.filepath }}</div>
-                <div class="dup-key"><code>{{ member.debug_key }}</code></div>
-            </div>
-
-            <div class="dup-card-actions">
-                {% if group.members | length > 1 %}
-                <form method="post" action="/api/duplicates/keep" class="inline-form"
-                      onsubmit="return confirm('{{ t.duplicates.keep_confirm | replace('{name}', member.filename) }}')">
-                    <input type="hidden" name="keep_key" value="{{ member.debug_key }}">
-                    <input type="hidden" name="group_key" value="{{ group.original_key }}">
-                    <button type="submit" class="btn btn-small btn-primary">{{ t.duplicates.keep_this }}</button>
-                </form>
-                {% if not member.is_original %}
-                <form method="post" action="/api/duplicates/not-duplicate" class="inline-form"
-                      onsubmit="return confirm('{{ t.duplicates.not_duplicate_confirm | replace('{name}', member.filename) }}')">
-                    <input type="hidden" name="debug_key" value="{{ member.debug_key }}">
-                    <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.not_duplicate }}</button>
-                </form>
-                {% endif %}
-                {% endif %}
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
+{% include "_dup_group.html" %}
 {% endfor %}
+</div>
+
+{% if has_more %}
+<div id="dup-load-more" style="text-align: center; margin: 2rem 0;">
+    <button class="btn btn-secondary" onclick="loadMoreGroups()">{{ t.duplicates.load_more }}</button>
+</div>
+{% endif %}
+
 {% else %}
 <p class="section-note">{{ t.duplicates.no_duplicates }}</p>
 {% endif %}
+
+<script>
+const SKIP_CONFIRM = {{ 'true' if skip_confirm else 'false' }};
+function dupConfirm(msg) {
+    if (SKIP_CONFIRM) return true;
+    return confirm(msg);
+}
+
+let currentPage = 1;
+let loading = false;
+function loadMoreGroups() {
+    if (loading) return;
+    loading = true;
+    currentPage++;
+    const btn = document.querySelector('#dup-load-more button');
+    btn.textContent = '{{ t.duplicates.loading }}';
+    btn.disabled = true;
+    fetch('/api/duplicates/groups?page=' + currentPage + '&per_page=10')
+        .then(r => r.json())
+        .then(data => {
+            if (data.groups && data.groups.length > 0) {
+                // Reload page with server-rendered groups
+                window.location.reload();
+            }
+            if (currentPage >= data.total_pages) {
+                document.getElementById('dup-load-more').remove();
+            } else {
+                btn.textContent = '{{ t.duplicates.load_more }}';
+                btn.disabled = false;
+            }
+            loading = false;
+        })
+        .catch(() => {
+            btn.textContent = '{{ t.duplicates.load_more }}';
+            btn.disabled = false;
+            loading = false;
+        });
+}
+
+function mergeMetadata(sourceKey, targetKey, sourceName, targetName) {
+    const msg = '{{ t.duplicates.merge_confirm }}'.replace('{source}', sourceName).replace('{target}', targetName);
+    if (!SKIP_CONFIRM && !confirm(msg)) return;
+
+    const formData = new FormData();
+    formData.append('target_key', targetKey);
+    formData.append('source_key', sourceKey);
+
+    fetch('/api/duplicates/merge-metadata', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                alert('{{ t.duplicates.merge_success }}: ' + data.merged.join(', '));
+                window.location.reload();
+            } else if (data.status === 'nothing_to_merge') {
+                alert('{{ t.duplicates.merge_nothing }}');
+            } else {
+                alert('{{ t.duplicates.merge_error }}: ' + (data.error || ''));
+            }
+        })
+        .catch(() => alert('{{ t.duplicates.merge_error }}'));
+}
+</script>
 {% endblock %}

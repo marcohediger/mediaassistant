@@ -128,7 +128,15 @@
     "view_in_immich": "View in Immich",
     "delete_local": "Delete local copy",
     "not_duplicate": "Not a duplicate",
-    "not_duplicate_confirm": "{name} is not a duplicate? The file will be re-processed."
+    "not_duplicate_confirm": "{name} is not a duplicate? The file will be re-processed.",
+    "merge_metadata": "Merge metadata",
+    "merge_confirm": "Transfer missing metadata from {source} to {target}?",
+    "merge_success": "Metadata merged",
+    "merge_nothing": "No missing metadata found",
+    "merge_error": "Error merging metadata",
+    "has_more_metadata": "More metadata",
+    "load_more": "Load more groups",
+    "loading": "Loading..."
   },
   "settings": {
     "title": "Settings",
@@ -328,7 +336,9 @@
     "google_json": "Google Takeout JSON",
     "google_json_desc": "Imports metadata from Google Takeout JSON sidecar files (photo.jpg.json). Missing capture dates, GPS coordinates and descriptions are automatically filled.",
     "google_json_enabled": "Google Takeout JSON import enabled",
-    "google_json_hint": "Fills missing EXIF data (date, GPS, description) from Google Photos JSON files. JSON files are automatically deleted after processing. Also detects Google duplicates like photo.jpg(1).json."
+    "google_json_hint": "Fills missing EXIF data (date, GPS, description) from Google Photos JSON files. JSON files are automatically deleted after processing. Also detects Google duplicates like photo.jpg(1).json.",
+    "dup_skip_confirm": "Skip confirmation dialog",
+    "dup_skip_confirm_hint": "Disables the confirmation prompt for Keep, Delete, and \"Not a duplicate\" actions in the duplicate review"
   },
   "modules": {
     "ki_analyse": "AI Analysis",

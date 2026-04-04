@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.26.0 — 2026-04-04
+
+### Duplikat-Ansicht: Performance, Metadaten-Merge & Bestätigungsdialog (#25, #27)
+
+- **Performance:** Batch-ExifTool — alle Dateien einer Gruppe werden in einem einzigen ExifTool-Aufruf gelesen statt einzeln (deutlich schneller bei vielen Duplikaten)
+- **Performance:** Paginierte API (`GET /api/duplicates/groups?page=1&per_page=10`) — nur die ersten 10 Gruppen werden beim Laden der Seite abgefragt, weitere per "Mehr laden"-Button
+- **Metadaten-Merge** — neuer Endpoint `POST /api/duplicates/merge-metadata` überträgt fehlende Metadaten (GPS, Datum, Kamera, Keywords, Beschreibung) vom Duplikat auf die behaltene Datei
+- **Metadaten-Differenz** — in der Duplikat-Ansicht werden Felder visuell hervorgehoben (grün), die bei einem Mitglied vorhanden sind, beim anderen aber fehlen. Badge "+Mehr Metadaten" zeigt auf einen Blick, welche Datei reichere Daten hat
+- **Merge-Button** — pro Karte ein "Metadaten übernehmen ← Dateiname"-Button, wenn die andere Datei fehlende Felder ergänzen kann
+- **Bestätigungsdialog ausschaltbar** — neues Setting `duplikat.skip_confirm` in den Duplikat-Einstellungen: deaktiviert die Sicherheitsabfrage für Behalten, Löschen und "Kein Duplikat"
+- Duplikat-Gruppen-Template als Partial (`_dup_group.html`) extrahiert
+- i18n: DE + EN für alle neuen Texte
+
 ## v2.25.10 — 2026-04-04
 
 ### Optionen-Übersicht im Eingangsverzeichnisse-Bereich
