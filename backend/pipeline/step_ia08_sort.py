@@ -8,8 +8,24 @@ from datetime import datetime
 logger = logging.getLogger("mediaassistant.pipeline.ia08")
 from sqlalchemy import select
 from config import config_manager
+from database import async_session as _async_session
 from safe_file import safe_move
 from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, get_asset_info, get_user_api_key
+
+
+async def _is_folder_tags_active(job) -> bool:
+    """Check if folder tags should be applied — re-reads module AND inbox setting at runtime."""
+    if not await config_manager.is_module_enabled("ordner_tags"):
+        return False
+    if not job.source_inbox_path:
+        return False
+    from models import InboxDirectory
+    async with _async_session() as session:
+        result = await session.execute(
+            select(InboxDirectory.folder_tags).where(InboxDirectory.path == job.source_inbox_path)
+        )
+        inbox_folder_tags = result.scalar()
+    return bool(inbox_folder_tags)
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -435,9 +451,9 @@ async def execute(job, session) -> dict:
             job.target_path = f"immich:{job.immich_asset_id}"
         else:
             # Direct mode: file was modified → upload new version, replace old
-            # Extract album name from inbox folder structure (if folder_tags enabled AND module active)
+            # Extract album name from inbox folder structure (re-check module + inbox at runtime)
             webhook_album_names = None
-            folder_tags_active = job.folder_tags and await config_manager.is_module_enabled("ordner_tags")
+            folder_tags_active = await _is_folder_tags_active(job)
             if folder_tags_active and job.source_inbox_path:
                 rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
                 if rel and rel != ".":
@@ -521,9 +537,9 @@ async def execute(job, session) -> dict:
 
     # Route: Immich upload or target directory
     if job.use_immich:
-        # Extract folder tags as single combined album name (only if folder_tags enabled AND module active)
+        # Extract folder tags as single combined album name (re-check module + inbox at runtime)
         album_names = None
-        folder_tags_active = job.folder_tags and await config_manager.is_module_enabled("ordner_tags")
+        folder_tags_active = await _is_folder_tags_active(job)
         if folder_tags_active and job.source_inbox_path:
             rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
             if rel and rel != ".":

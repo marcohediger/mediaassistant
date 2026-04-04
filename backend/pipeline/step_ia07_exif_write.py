@@ -4,6 +4,24 @@ import os
 import subprocess
 
 from config import config_manager
+from database import async_session
+
+
+async def _is_folder_tags_active(job) -> bool:
+    """Check if folder tags should be applied — re-reads module AND inbox setting at runtime."""
+    if not await config_manager.is_module_enabled("ordner_tags"):
+        return False
+    if not job.source_inbox_path:
+        return False
+    # Re-read current inbox setting from DB (not the stale job.folder_tags)
+    from models import InboxDirectory
+    from sqlalchemy import select
+    async with async_session() as session:
+        result = await session.execute(
+            select(InboxDirectory.folder_tags).where(InboxDirectory.path == job.source_inbox_path)
+        )
+        inbox_folder_tags = result.scalar()
+    return bool(inbox_folder_tags)
 
 
 WRITABLE_EXTENSIONS = {
@@ -52,8 +70,8 @@ async def execute(job, session) -> dict:
     # Collect keywords
     keywords = []
 
-    # From folder structure (if inbox has folder_tags enabled AND module still active)
-    folder_tags_active = job.folder_tags and await config_manager.is_module_enabled("ordner_tags")
+    # From folder structure (re-check module + inbox setting at runtime)
+    folder_tags_active = await _is_folder_tags_active(job)
     if folder_tags_active and job.source_inbox_path:
         rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
         if rel and rel != ".":
