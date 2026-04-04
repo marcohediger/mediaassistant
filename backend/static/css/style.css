@@ -1108,8 +1108,26 @@ a.dup-badge-link:hover { opacity: 0.75; }
 
 .dup-card-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     align-items: center;
+}
+
+.match-meta-extra { background: rgba(251, 191, 36, 0.2); color: var(--warning); font-size: 0.65rem; }
+
+.dup-prop-extra { color: var(--success); font-weight: 600; }
+.dup-tags-extra { border-left: 2px solid var(--success); padding-left: 0.35rem; }
+.dup-desc-extra { border-left: 2px solid var(--success); padding-left: 0.35rem; }
+
+.btn-merge {
+    background: rgba(251, 191, 36, 0.15);
+    color: var(--warning);
+    border: 1px solid var(--warning);
+    font-size: 0.7rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 250px;
 }
 
 .dup-kept-label {
