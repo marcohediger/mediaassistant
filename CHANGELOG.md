@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.25.8 — 2026-04-04
+
+### Album-Logging im IA-08 Ergebnis
+
+- **`immich_albums_added`** — neues Feld im IA-08 Step-Result zeigt welche Alben bei der Verarbeitung erstellt/zugewiesen wurden
+- `upload_asset()` gibt jetzt die Namen der hinzugefügten Alben im Response zurück
+- Betrifft beide Upload-Pfade: Webhook (Replace) und normaler Immich-Upload
+
 ## v2.25.7 — 2026-04-04
 
 ### Fix: Ordner-Tags werden trotz deaktiviertem Modul erstellt

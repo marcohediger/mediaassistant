@@ -514,6 +514,7 @@ async def execute(job, session) -> dict:
             "immich_archived": immich_archived,
             "immich_locked": immich_locked,
             "immich_asset_id": job.immich_asset_id,
+            "immich_albums_added": upload_result.get("albums_added", []) if immich_replaced else [],
             "immich_tags_written": tags_written,
             "immich_tags_failed": tags_failed,
         }
@@ -596,6 +597,7 @@ async def execute(job, session) -> dict:
             "immich_archived": immich_archived,
             "immich_locked": immich_locked,
             "immich_id": asset_id,
+            "immich_albums_added": immich_result.get("albums_added", []),
             "immich_tags_written": tags_written,
             "immich_tags_failed": tags_failed,
         }
