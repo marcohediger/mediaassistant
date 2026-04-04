@@ -435,9 +435,10 @@ async def execute(job, session) -> dict:
             job.target_path = f"immich:{job.immich_asset_id}"
         else:
             # Direct mode: file was modified → upload new version, replace old
-            # Extract album name from inbox folder structure (if folder_tags enabled)
+            # Extract album name from inbox folder structure (if folder_tags enabled AND module active)
             webhook_album_names = None
-            if job.folder_tags and job.source_inbox_path:
+            folder_tags_active = job.folder_tags and await config_manager.is_module_enabled("ordner_tags")
+            if folder_tags_active and job.source_inbox_path:
                 rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
                 if rel and rel != ".":
                     parts = [p for p in rel.split(os.sep) if p and p != "."]
@@ -519,9 +520,10 @@ async def execute(job, session) -> dict:
 
     # Route: Immich upload or target directory
     if job.use_immich:
-        # Extract folder tags as single combined album name (only if folder_tags enabled)
+        # Extract folder tags as single combined album name (only if folder_tags enabled AND module active)
         album_names = None
-        if job.folder_tags and job.source_inbox_path:
+        folder_tags_active = job.folder_tags and await config_manager.is_module_enabled("ordner_tags")
+        if folder_tags_active and job.source_inbox_path:
             rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
             if rel and rel != ".":
                 parts = [p for p in rel.split(os.sep) if p and p != "."]
