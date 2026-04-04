@@ -547,6 +547,13 @@ async def execute(job, session) -> dict:
                 if parts:
                     album_names = [" ".join(parts)]
 
+        # Verify file still exists before upload (can disappear between scan and upload)
+        if not os.path.exists(job.original_path):
+            raise RuntimeError(
+                f"File disappeared before upload: {job.original_path} — "
+                f"file may still be copying or was moved by another process"
+            )
+
         try:
             immich_result = await upload_asset(job.original_path, album_names=album_names,
                                               sidecar_path=sidecar_path, api_key=user_api_key)
@@ -619,6 +626,11 @@ async def execute(job, session) -> dict:
         }
 
     # Move file to library (safe: copy → verify → delete)
+    if not os.path.exists(job.original_path):
+        raise RuntimeError(
+            f"File disappeared before move: {job.original_path} — "
+            f"file may still be copying or was moved by another process"
+        )
     await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
     if overwrite_existing:
         # Remove old file first, then move the updated one in
