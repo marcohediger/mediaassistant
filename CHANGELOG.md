@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.26.3 — 2026-04-04
+
+### Fix: debug_key Kollision trotz Lock bei hoher Last
+
+- **Ursache:** `asyncio.Lock` schützte die MAX-Query + INSERT Sequenz, aber bei hoher DB-Last (200 GB Import + Immich-Poll gleichzeitig) konnte SQLite die Session nicht schnell genug committen. Die nächste Query sah den gleichen MAX-Wert.
+- **Fix:** In-Memory-Counter ersetzt die DB-Query. Counter wird einmalig aus der DB initialisiert, danach nur noch im Speicher inkrementiert. Keine zwei Coroutines können jemals den gleichen Wert bekommen.
+- Bei IntegrityError (z.B. nach Container-Restart mit veraltetem Counter) wird der Counter automatisch aus der DB re-initialisiert.
+
 ## v2.26.2 — 2026-04-04
 
 ### Fix: debug_key Kollision bei vielen gleichzeitigen Dateien
