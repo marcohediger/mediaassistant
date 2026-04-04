@@ -83,6 +83,7 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
     asset_id = result.get("id")
 
     # Add asset to albums based on folder tags
+    albums_added = []
     if album_names and asset_id:
         async with httpx.AsyncClient(timeout=60) as client:
             for album_name in album_names:
@@ -96,6 +97,7 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
                         )
                         if resp.status_code in (200, 201):
                             logger.info("Added asset %s to album '%s'", asset_id, album_name)
+                            albums_added.append(album_name)
                         else:
                             logger.warning("Failed to add asset %s to album '%s': HTTP %s", asset_id, album_name, resp.status_code)
                     else:
@@ -103,6 +105,8 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
                 except Exception as exc:
                     logger.warning("Album operation failed for '%s': %s", album_name, exc)
 
+    if albums_added:
+        result["albums_added"] = albums_added
     return result
 
 
