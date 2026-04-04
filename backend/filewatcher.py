@@ -46,13 +46,19 @@ async def _next_debug_key() -> str:
         year = datetime.now().year
         prefix = f"MA-{year}-"
         if _key_counter is None:
-            # Initialize from DB once
+            # Initialize from DB — use CAST to numeric for correct MAX with 5+ digit keys
+            # (string MAX fails: "9999" > "10000" alphabetically)
+            from sqlalchemy import literal_column
             async with async_session() as session:
                 result = await session.execute(
-                    select(func.max(Job.debug_key)).where(Job.debug_key.like(f"{prefix}%"))
+                    select(
+                        func.max(
+                            literal_column("CAST(SUBSTR(debug_key, " + str(len(prefix) + 1) + ") AS INTEGER)")
+                        )
+                    ).where(Job.debug_key.like(f"{prefix}%"))
                 )
-                max_key = result.scalar()
-                _key_counter = int(max_key.split("-")[-1]) if max_key else 0
+                max_num = result.scalar()
+                _key_counter = int(max_num) if max_num else 0
         _key_counter += 1
         return f"{prefix}{_key_counter:04d}"
 
