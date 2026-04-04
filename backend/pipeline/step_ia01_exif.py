@@ -14,10 +14,17 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".mpg", ".mp
 
 async def execute(job, session) -> dict:
     """IA-01: EXIF-Metadaten lesen via ExifTool, für Videos zusätzlich ffprobe."""
+    # Dynamic timeout: 30s base + 1s per 10MB (large RAW/video files need more time)
+    try:
+        file_size_mb = os.path.getsize(job.original_path) / (1024 * 1024)
+    except OSError:
+        file_size_mb = 0
+    exif_timeout = max(30, int(30 + file_size_mb / 10))
+
     result = await asyncio.to_thread(
         subprocess.run,
         ["exiftool", "-json", "-n", job.original_path],
-        capture_output=True, text=True, timeout=30
+        capture_output=True, text=True, timeout=exif_timeout
     )
 
     if result.returncode != 0:

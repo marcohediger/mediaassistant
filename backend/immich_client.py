@@ -56,25 +56,22 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
     # Stream file directly from disk — avoids loading entire file into RAM
     timeout = httpx.Timeout(connect=10, read=120, write=300, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        with open(file_path, "rb") as f:
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            f = stack.enter_context(open(file_path, "rb"))
             files = {"assetData": (filename, f)}
-            sidecar_fh = None
-            try:
-                if sidecar_path and os.path.exists(sidecar_path):
-                    sidecar_fh = open(sidecar_path, "rb")
-                    files["sidecarData"] = (os.path.basename(sidecar_path), sidecar_fh)
-                resp = await client.post(
-                    f"{url}/api/assets",
-                    headers=headers,
-                    data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
-                          "deviceId": "MediaAssistant",
-                          "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                          "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
-                    files=files,
-                )
-            finally:
-                if sidecar_fh:
-                    sidecar_fh.close()
+            if sidecar_path and os.path.exists(sidecar_path):
+                sidecar_fh = stack.enter_context(open(sidecar_path, "rb"))
+                files["sidecarData"] = (os.path.basename(sidecar_path), sidecar_fh)
+            resp = await client.post(
+                f"{url}/api/assets",
+                headers=headers,
+                data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
+                      "deviceId": "MediaAssistant",
+                      "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                      "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
+                files=files,
+            )
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Immich upload failed: HTTP {resp.status_code} — {resp.text[:200]}")
@@ -313,7 +310,8 @@ async def download_asset(asset_id: str, target_path: str, *, api_key: str | None
 
     headers = {"x-api-key": api_key}
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    timeout = httpx.Timeout(connect=10, read=300, write=10, pool=10)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         # Get asset info for filename
         info_resp = await client.get(f"{url}/api/assets/{asset_id}", headers=headers)
         if info_resp.status_code != 200:
@@ -322,18 +320,19 @@ async def download_asset(asset_id: str, target_path: str, *, api_key: str | None
         raw_filename = asset_info.get("originalFileName", f"{asset_id}.jpg")
         filename = _sanitize_filename(raw_filename, f"{asset_id}.jpg")
 
-        # Download original file
-        resp = await client.get(
+        # Streaming download — write chunks to disk instead of loading entire file into RAM
+        file_path = os.path.join(target_path, filename)
+        async with client.stream(
+            "GET",
             f"{url}/api/assets/{asset_id}/original",
             headers=headers,
             follow_redirects=True,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"Immich download failed: HTTP {resp.status_code}")
-
-    file_path = os.path.join(target_path, filename)
-    with open(file_path, "wb") as f:
-        f.write(resp.content)
+        ) as resp:
+            if resp.status_code != 200:
+                raise RuntimeError(f"Immich download failed: HTTP {resp.status_code}")
+            with open(file_path, "wb") as f:
+                async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
+                    f.write(chunk)
 
     return file_path
 

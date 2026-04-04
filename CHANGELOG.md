@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.27.0 — 2026-04-04
+
+### Stabilität & Performance bei grossen Imports (#28-#35)
+
+- **Immich Streaming Download** (#28/#21) — Downloads werden jetzt in 1 MB Chunks auf Disk geschrieben statt komplett in den RAM geladen. Verhindert OOM bei grossen Videos (1-4 GB).
+- **SQLite Timeout 120s** (#29/#22) — Timeout von 30s auf 120s erhöht (connect_args + busy_timeout). Verhindert "Database is locked" bei vielen parallelen Pipeline-Workers.
+- **Batch-ExifTool mit 100er-Limit** (#30/#23) — ExifTool-Aufrufe werden in Batches von max. 100 Dateien aufgeteilt. Verhindert Command-Line-Overflow bei 1000+ Dateien. Dynamischer Timeout (2s pro Datei).
+- **ExifTool Timeout dynamisch** (#31/#24) — IA-01 ExifTool-Timeout basiert jetzt auf Dateigrösse (30s Base + 1s pro 10 MB). Grosse RAW-Dateien (>500 MB) scheitern nicht mehr.
+- **Immich Temp-Dirs Cleanup** (#32/#25) — IA-10 Cleanup räumt leere `ma_immich_*` Temp-Verzeichnisse auf (war bereits teilweise implementiert, jetzt mit Error-Handling).
+- **Composite-Indexes** (#33/#26) — Neue Indexes `(file_hash, status)`, `(phash, status)`, `(status, created_at)` für schnellere Queries bei 150k+ Jobs.
+- **Cleanup Error-Handling** (#34/#27) — IA-10 Cleanup crasht nicht mehr bei gesperrten Dateien (try/except pro Datei, Warnung statt Fehler).
+- **Sidecar File-Handle-Leak** (#35/#28) — `upload_asset()` nutzt jetzt `contextlib.ExitStack` für garantiertes Schliessen aller File-Handles bei Netzwerk-Timeouts.
+
 ## v2.26.3 — 2026-04-04
 
 ### Fix: debug_key Kollision trotz Lock bei hoher Last
