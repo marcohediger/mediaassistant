@@ -10,7 +10,7 @@
 {% set is_immich = filepath and filepath.startswith('immich:') %}
 {% set immich_asset_id = filepath[7:] if is_immich else '' %}
 {% set ext = filepath.rsplit('.', 1)[-1].lower() if filepath and '.' in filepath and not is_immich else '' %}
-{% if is_immich or ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif') %}
+{% if is_immich or ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'mts') %}
 <div class="detail-section">
     <div class="detail-preview">
         {% if is_immich %}
