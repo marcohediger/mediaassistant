@@ -150,16 +150,19 @@
                     <button type="submit" class="btn btn-small btn-primary">{{ t.duplicates.keep_this }}</button>
                 </form>
 
-                {# Merge metadata: collect all sources that have data this member lacks #}
+                {# Merge metadata: collect all sources that have data this member lacks.
+                   Target must exist locally (we write via ExifTool).
+                   Sources can be local OR have EXIF data loaded from Immich. #}
                 {% set merge_ns = namespace(source_keys=[], source_names=[], any_can_merge=false) %}
+                {% if member.exists %}
                 {% for other in group.members %}
-                    {% if other.debug_key != member.debug_key and member.exists and other.exists %}
+                    {% if other.debug_key != member.debug_key and (other.exists or other.exif_has_exif or other.exif_keywords) %}
                         {% set ons = namespace(can_merge=false) %}
                         {% if other.exif_has_gps and not member.exif_has_gps %}{% set ons.can_merge = true %}{% endif %}
                         {% if other.exif_date and not member.exif_date %}{% set ons.can_merge = true %}{% endif %}
                         {% if other.exif_camera and not member.exif_camera %}{% set ons.can_merge = true %}{% endif %}
                         {% if other.exif_description and not member.exif_description %}{% set ons.can_merge = true %}{% endif %}
-                        {% if other.exif_keywords | length > member.exif_keywords | length %}{% set ons.can_merge = true %}{% endif %}
+                        {% if other.exif_keywords and (other.exif_keywords | length > member.exif_keywords | length) %}{% set ons.can_merge = true %}{% endif %}
                         {% if ons.can_merge %}
                             {% set merge_ns.source_keys = merge_ns.source_keys + [other.debug_key] %}
                             {% set merge_ns.source_names = merge_ns.source_names + [other.filename] %}
@@ -167,6 +170,7 @@
                         {% endif %}
                     {% endif %}
                 {% endfor %}
+                {% endif %}
 
                 {% if merge_ns.any_can_merge %}
                     {# Single "merge all" button when multiple sources, individual buttons otherwise #}
