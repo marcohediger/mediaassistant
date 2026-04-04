@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.27.2 — 2026-04-04
+
+### Fix: XMP Sidecar "already exists" bei Retry
+
+- Bestehende `.xmp` Sidecar-Datei wird vor dem Schreiben gelöscht (z.B. von einem früheren fehlgeschlagenen Lauf)
+
 ## v2.27.1 — 2026-04-04
 
 ### Fix: debug_key Kollision ab 10000 Jobs
