@@ -52,8 +52,9 @@ async def execute(job, session) -> dict:
     # Collect keywords
     keywords = []
 
-    # From folder structure (if inbox has folder_tags enabled)
-    if job.folder_tags and job.source_inbox_path:
+    # From folder structure (if inbox has folder_tags enabled AND module still active)
+    folder_tags_active = job.folder_tags and await config_manager.is_module_enabled("ordner_tags")
+    if folder_tags_active and job.source_inbox_path:
         rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
         if rel and rel != ".":
             folder_parts = [p for p in rel.split(os.sep) if p and p != "."]

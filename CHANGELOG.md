@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.25.7 — 2026-04-04
+
+### Fix: Ordner-Tags werden trotz deaktiviertem Modul erstellt
+
+- **Modul-Prüfung zur Laufzeit** — IA-07 (EXIF-Tags) und IA-08 (Immich-Alben) prüfen jetzt zusätzlich ob das Modul `ordner_tags` zur Pipeline-Laufzeit noch aktiv ist
+- Zuvor wurde nur `job.folder_tags` geprüft (zum Zeitpunkt der Job-Erstellung gesetzt), sodass bei nachträglicher Deaktivierung des Moduls trotzdem Ordner-Tags und Immich-Alben erstellt wurden
+- Betrifft: EXIF/XMP-Keywords aus Ordnernamen und Immich-Album-Erstellung aus Ordnerstruktur
+
 ## v2.25.6 — 2026-04-03
 
 ### Fix: Race Condition bei paralleler Verzeichnis-Bereinigung
