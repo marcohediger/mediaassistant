@@ -136,7 +136,9 @@
     "merge_error": "Fehler beim Übernehmen der Metadaten",
     "has_more_metadata": "Mehr Metadaten",
     "load_more": "Weitere Gruppen laden",
-    "loading": "Lade..."
+    "loading": "Lade...",
+    "merge_metadata_all": "Alle Metadaten zusammenführen",
+    "merge_all_confirm": "Fehlende Metadaten von {n} Dateien auf {target} übertragen?"
   },
   "settings": {
     "title": "Einstellungen",

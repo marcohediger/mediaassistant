@@ -886,91 +886,120 @@ async def delete_duplicate(request: Request):
 
 @router.post("/api/duplicates/merge-metadata")
 async def merge_metadata(request: Request):
-    """Merge missing metadata from source file(s) into target file via ExifTool."""
+    """Merge missing metadata from one or more source files into target file.
+
+    Accepts either a single ``source_key`` or a comma-separated
+    ``source_keys`` parameter so that metadata from an entire duplicate
+    group can be merged in one request.
+    """
     form = await request.form()
     target_key = form.get("target_key")
-    source_key = form.get("source_key")
+    # Support single source_key or comma-separated source_keys
+    source_keys_raw = form.get("source_keys") or form.get("source_key") or ""
+    source_keys = [k.strip() for k in source_keys_raw.split(",") if k.strip()]
 
-    if not target_key or not source_key:
+    if not target_key or not source_keys:
         return JSONResponse({"error": "missing keys"}, status_code=400)
 
+    all_keys = [target_key] + source_keys
     async with async_session() as session:
         result = await session.execute(
-            select(Job).where(Job.debug_key.in_([target_key, source_key]))
+            select(Job).where(Job.debug_key.in_(all_keys))
         )
         jobs = {j.debug_key: j for j in result.scalars().all()}
         target_job = jobs.get(target_key)
-        source_job = jobs.get(source_key)
-
-        if not target_job or not source_job:
-            return JSONResponse({"error": "job not found"}, status_code=404)
+        if not target_job:
+            return JSONResponse({"error": "target job not found"}, status_code=404)
 
         target_path = _resolve_filepath(target_job)
-        source_path = _resolve_filepath(source_job)
-
         if not os.path.exists(target_path):
             return JSONResponse({"error": "target file not found"}, status_code=404)
-        if not os.path.exists(source_path):
-            return JSONResponse({"error": "source file not found"}, status_code=404)
 
-        # Read EXIF from both files
-        target_info = await asyncio.to_thread(_get_image_info, target_path)
-        source_info = await asyncio.to_thread(_get_image_info, source_path)
+        # Resolve source paths (skip missing)
+        source_paths = []
+        for sk in source_keys:
+            sj = jobs.get(sk)
+            if not sj:
+                continue
+            sp = _resolve_filepath(sj)
+            if os.path.exists(sp):
+                source_paths.append(sp)
+        if not source_paths:
+            return JSONResponse({"error": "no source files found"}, status_code=404)
 
-        # Determine which fields to merge (only fill missing fields)
+        # Read EXIF from target + all sources in one batch call
+        all_paths = [target_path] + source_paths
+        batch = await asyncio.to_thread(_get_image_info_batch, all_paths)
+        target_info = batch.get(target_path, _empty_img_info())
+
         from pipeline.step_ia07_exif_write import _IPTC_FORMATS, _NO_XPCOMMENT
         ext = os.path.splitext(target_path)[1].lower()
 
         cmd = ["exiftool", "-overwrite_original_in_place", "-P", "-m"]
         merged_fields = []
 
-        # GPS
-        if not target_info["exif_has_gps"] and source_info["exif_has_gps"]:
-            cmd.append("-TagsFromFile")
-            cmd.append(source_path)
-            cmd.append("-GPSLatitude")
-            cmd.append("-GPSLongitude")
-            cmd.append("-GPSLatitudeRef")
-            cmd.append("-GPSLongitudeRef")
-            merged_fields.append("GPS")
+        # GPS — take from first source that has it
+        if not target_info["exif_has_gps"]:
+            for sp in source_paths:
+                si = batch.get(sp, _empty_img_info())
+                if si["exif_has_gps"]:
+                    cmd += ["-TagsFromFile", sp,
+                            "-GPSLatitude", "-GPSLongitude",
+                            "-GPSLatitudeRef", "-GPSLongitudeRef"]
+                    merged_fields.append("GPS")
+                    break
 
-        # Date
-        if not target_info["exif_date"] and source_info["exif_date"]:
-            cmd.append(f"-DateTimeOriginal={source_info['exif_date']}")
-            merged_fields.append("DateTimeOriginal")
+        # Date — take from first source that has it
+        if not target_info["exif_date"]:
+            for sp in source_paths:
+                si = batch.get(sp, _empty_img_info())
+                if si["exif_date"]:
+                    cmd.append(f"-DateTimeOriginal={si['exif_date']}")
+                    merged_fields.append("DateTimeOriginal")
+                    break
 
-        # Camera
-        if not target_info["exif_camera"] and source_info["exif_camera"]:
-            # Read raw Make/Model from source
-            src_exif = subprocess.run(
-                ["exiftool", "-j", "-Make", "-Model", source_path],
-                capture_output=True, text=True, timeout=10,
-            )
-            import json as _json
-            src_data = _json.loads(src_exif.stdout)[0] if src_exif.stdout.strip() else {}
-            if src_data.get("Make"):
-                cmd.append(f"-Make={src_data['Make']}")
-            if src_data.get("Model"):
-                cmd.append(f"-Model={src_data['Model']}")
-            merged_fields.append("Camera")
+        # Camera — take from first source that has it
+        if not target_info["exif_camera"]:
+            for sp in source_paths:
+                si = batch.get(sp, _empty_img_info())
+                if si["exif_camera"]:
+                    import json as _json
+                    src_exif = subprocess.run(
+                        ["exiftool", "-j", "-Make", "-Model", sp],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    src_data = _json.loads(src_exif.stdout)[0] if src_exif.stdout.strip() else {}
+                    if src_data.get("Make"):
+                        cmd.append(f"-Make={src_data['Make']}")
+                    if src_data.get("Model"):
+                        cmd.append(f"-Model={src_data['Model']}")
+                    merged_fields.append("Camera")
+                    break
 
-        # Description
-        if not target_info["exif_description"] and source_info["exif_description"]:
-            cmd.append(f"-ImageDescription={source_info['exif_description']}")
-            if ext not in _NO_XPCOMMENT:
-                cmd.append(f"-XPComment={source_info['exif_description']}")
-            merged_fields.append("Description")
+        # Description — take from first source that has it
+        if not target_info["exif_description"]:
+            for sp in source_paths:
+                si = batch.get(sp, _empty_img_info())
+                if si["exif_description"]:
+                    cmd.append(f"-ImageDescription={si['exif_description']}")
+                    if ext not in _NO_XPCOMMENT:
+                        cmd.append(f"-XPComment={si['exif_description']}")
+                    merged_fields.append("Description")
+                    break
 
-        # Keywords (union — add missing ones)
+        # Keywords — union from ALL sources
         target_kw = set(target_info["exif_keywords"])
-        source_kw = set(source_info["exif_keywords"])
-        new_kw = source_kw - target_kw
+        new_kw = set()
+        for sp in source_paths:
+            si = batch.get(sp, _empty_img_info())
+            new_kw |= set(si["exif_keywords"])
+        new_kw -= target_kw
         if new_kw:
             if ext in _IPTC_FORMATS:
-                for kw in new_kw:
+                for kw in sorted(new_kw):
                     cmd.append(f"-Keywords+={kw}")
             else:
-                for kw in new_kw:
+                for kw in sorted(new_kw):
                     cmd.append(f"-Subject+={kw}")
             merged_fields.append(f"Keywords (+{len(new_kw)})")
 
@@ -1003,7 +1032,8 @@ async def merge_metadata(request: Request):
         flag_modified(target_job, "step_result")
         await session.commit()
 
-    await log_info("duplicates", f"Metadata merged: {source_key} → {target_key} ({', '.join(merged_fields)})")
+    src_label = ", ".join(source_keys)
+    await log_info("duplicates", f"Metadata merged: [{src_label}] → {target_key} ({', '.join(merged_fields)})")
     return JSONResponse({"status": "ok", "merged": merged_fields})
 
 

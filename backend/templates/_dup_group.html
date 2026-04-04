@@ -150,10 +150,10 @@
                     <button type="submit" class="btn btn-small btn-primary">{{ t.duplicates.keep_this }}</button>
                 </form>
 
-                {# Merge metadata button: show when OTHER members have extra data that THIS member lacks #}
+                {# Merge metadata: collect all sources that have data this member lacks #}
+                {% set merge_ns = namespace(source_keys=[], source_names=[], any_can_merge=false) %}
                 {% for other in group.members %}
                     {% if other.debug_key != member.debug_key and member.exists and other.exists %}
-                        {# Check if other has metadata this member lacks #}
                         {% set ons = namespace(can_merge=false) %}
                         {% if other.exif_has_gps and not member.exif_has_gps %}{% set ons.can_merge = true %}{% endif %}
                         {% if other.exif_date and not member.exif_date %}{% set ons.can_merge = true %}{% endif %}
@@ -161,13 +161,27 @@
                         {% if other.exif_description and not member.exif_description %}{% set ons.can_merge = true %}{% endif %}
                         {% if other.exif_keywords | length > member.exif_keywords | length %}{% set ons.can_merge = true %}{% endif %}
                         {% if ons.can_merge %}
-                        <button type="button" class="btn btn-small btn-merge"
-                                onclick="mergeMetadata('{{ other.debug_key }}', '{{ member.debug_key }}', '{{ other.filename }}', '{{ member.filename }}')">
-                            {{ t.duplicates.merge_metadata }} ← {{ other.filename }}
-                        </button>
+                            {% set merge_ns.source_keys = merge_ns.source_keys + [other.debug_key] %}
+                            {% set merge_ns.source_names = merge_ns.source_names + [other.filename] %}
+                            {% set merge_ns.any_can_merge = true %}
                         {% endif %}
                     {% endif %}
                 {% endfor %}
+
+                {% if merge_ns.any_can_merge %}
+                    {# Single "merge all" button when multiple sources, individual buttons otherwise #}
+                    {% if merge_ns.source_keys | length == 1 %}
+                    <button type="button" class="btn btn-small btn-merge"
+                            onclick="mergeMetadata('{{ merge_ns.source_keys[0] }}', '{{ member.debug_key }}', '{{ merge_ns.source_names[0] }}', '{{ member.filename }}')">
+                        {{ t.duplicates.merge_metadata }} ← {{ merge_ns.source_names[0] }}
+                    </button>
+                    {% else %}
+                    <button type="button" class="btn btn-small btn-merge"
+                            onclick="mergeMetadataAll('{{ merge_ns.source_keys | join(',') }}', '{{ member.debug_key }}', '{{ member.filename }}')">
+                        {{ t.duplicates.merge_metadata_all }} ({{ merge_ns.source_keys | length }})
+                    </button>
+                    {% endif %}
+                {% endif %}
 
                 {% if not member.is_original %}
                 <form method="post" action="/api/duplicates/not-duplicate" class="inline-form"
