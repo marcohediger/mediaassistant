@@ -125,6 +125,12 @@
                 </div>
             </form>
         </div>
+        <details style="margin-top: 0.75rem;">
+            <summary style="cursor: pointer; color: var(--primary);">{{ t.settings.inbox_options_info_title | default('Optionen-Übersicht') }}</summary>
+            <div style="margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-input); border-radius: 6px; line-height: 1.7;">
+                {{ t.settings.inbox_options_info | default('') | safe }}
+            </div>
+        </details>
     </div>
 </div>
 
@@ -637,6 +643,12 @@
     </div>
     <div class="section-body">
         <small>{{ t.settings.ordner_tags_hint | default('Wenn aktiviert, werden aus der Ordnerstruktur der Inbox (z.B. Ferien/Mallorca/) Tags und Immich-Alben erstellt. Die Einstellung pro Inbox (Ordner-Tags Checkbox) muss zusätzlich aktiviert sein.') }}</small>
+        <details style="margin-top: 0.5rem;">
+            <summary style="cursor: pointer; color: var(--primary);">{{ t.settings.ordner_tags_detail_title | default('Wie funktioniert es?') }}</summary>
+            <div style="margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-input); border-radius: 6px; line-height: 1.7;">
+                {{ t.settings.ordner_tags_detail | default('') | safe }}
+            </div>
+        </details>
     </div>
 </div>
 

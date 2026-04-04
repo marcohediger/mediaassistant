@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.25.10 — 2026-04-04
+
+### Optionen-Übersicht im Eingangsverzeichnisse-Bereich
+
+- **Ausklapp-Info** unter den Eingangsverzeichnissen erklärt alle Inbox-Optionen (Immich, Ordner-Tags, Dry-Run, Aktiv) und wann Änderungen übernommen werden
+- Ordner-Tags: sofort (Runtime-Prüfung), Immich/Dry-Run: bei Job-Erstellung, Aktiv: beim nächsten Scan
+- i18n: DE + EN
+
 ## v2.25.9 — 2026-04-04
 
 ### Fix: Inbox folder_tags Einstellung wird live nachgelesen
