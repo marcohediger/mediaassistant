@@ -35,6 +35,10 @@ async def retry_job_endpoint(debug_key: str):
     if not job:
         return {"status": "error", "message": "Job nicht gefunden"}
 
+    # Only retry if job is in error state (prevents double-retry via browser reload)
+    if job.status != "error":
+        return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
+
     asyncio.create_task(retry_job(job.id))
     return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
 

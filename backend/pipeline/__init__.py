@@ -254,8 +254,11 @@ async def retry_job(job_id: int):
     """Reset a failed job and re-run the pipeline from the failed step."""
     async with async_session() as session:
         job = await session.get(Job, job_id)
-        if not job or job.status != "error":
+        if not job or job.status not in ("error",):
             return False
+        # Immediately mark as queued to prevent duplicate retries
+        job.status = "queued"
+        await session.commit()
 
         # If file was moved to error/, move it to internal reprocess dir (never back to inbox)
         if job.target_path and os.path.exists(job.target_path):
