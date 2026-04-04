@@ -33,50 +33,60 @@ def _sha256(filepath: str) -> str:
     return h.hexdigest()
 
 
-_debug_key_lock = asyncio.Lock()
+# In-memory counter — initialized from DB on first use, then only incremented in memory.
+# Eliminates race conditions entirely: no two coroutines can ever get the same counter.
+_key_counter: int | None = None
+_key_counter_lock = asyncio.Lock()
 
 
-async def _generate_debug_key(session) -> str:
-    year = datetime.now().year
-    prefix = f"MA-{year}-"
-    result = await session.execute(
-        select(func.max(Job.debug_key)).where(Job.debug_key.like(f"{prefix}%"))
-    )
-    max_key = result.scalar()
-    if max_key:
-        counter = int(max_key.split("-")[-1]) + 1
-    else:
-        counter = 1
-    return f"{prefix}{counter:04d}"
+async def _next_debug_key() -> str:
+    """Generate the next debug_key using an in-memory counter (no race conditions)."""
+    global _key_counter
+    async with _key_counter_lock:
+        year = datetime.now().year
+        prefix = f"MA-{year}-"
+        if _key_counter is None:
+            # Initialize from DB once
+            async with async_session() as session:
+                result = await session.execute(
+                    select(func.max(Job.debug_key)).where(Job.debug_key.like(f"{prefix}%"))
+                )
+                max_key = result.scalar()
+                _key_counter = int(max_key.split("-")[-1]) if max_key else 0
+        _key_counter += 1
+        return f"{prefix}{_key_counter:04d}"
 
 
 async def _create_job_safe(*, filename, original_path, source_label, source_inbox_path=None,
                            folder_tags=False, dry_run=False, use_immich=False,
                            immich_asset_id=None, immich_user_id=None, file_hash=None) -> Job | None:
-    """Create a Job with serialized debug_key generation (collision-free)."""
-    async with _debug_key_lock:
-        try:
-            async with async_session() as session:
-                debug_key = await _generate_debug_key(session)
-                job = Job(
-                    filename=filename,
-                    original_path=original_path,
-                    debug_key=debug_key,
-                    status="queued",
-                    source_label=source_label,
-                    source_inbox_path=source_inbox_path,
-                    folder_tags=folder_tags,
-                    dry_run=dry_run,
-                    use_immich=use_immich,
-                    immich_asset_id=immich_asset_id,
-                    immich_user_id=immich_user_id,
-                    file_hash=file_hash,
-                )
-                session.add(job)
-                await session.commit()
-                return job
-        except IntegrityError:
-            logger.error(f"debug_key collision for {filename} (should not happen with lock)")
+    """Create a Job with collision-free debug_key from in-memory counter."""
+    debug_key = await _next_debug_key()
+    try:
+        async with async_session() as session:
+            job = Job(
+                filename=filename,
+                original_path=original_path,
+                debug_key=debug_key,
+                status="queued",
+                source_label=source_label,
+                source_inbox_path=source_inbox_path,
+                folder_tags=folder_tags,
+                dry_run=dry_run,
+                use_immich=use_immich,
+                immich_asset_id=immich_asset_id,
+                immich_user_id=immich_user_id,
+                file_hash=file_hash,
+            )
+            session.add(job)
+            await session.commit()
+            return job
+    except IntegrityError:
+        logger.error(f"debug_key collision for {filename} key={debug_key} — resetting counter")
+        # Reset counter so next call re-reads from DB
+        async with _key_counter_lock:
+            global _key_counter
+            _key_counter = None
     return None
 
 
