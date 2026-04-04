@@ -33,6 +33,9 @@ def _sha256(filepath: str) -> str:
     return h.hexdigest()
 
 
+_debug_key_lock = asyncio.Lock()
+
+
 async def _generate_debug_key(session) -> str:
     year = datetime.now().year
     prefix = f"MA-{year}-"
@@ -50,9 +53,8 @@ async def _generate_debug_key(session) -> str:
 async def _create_job_safe(*, filename, original_path, source_label, source_inbox_path=None,
                            folder_tags=False, dry_run=False, use_immich=False,
                            immich_asset_id=None, immich_user_id=None, file_hash=None) -> Job | None:
-    """Create a Job with retry on debug_key collision (race condition safe)."""
-    import random
-    for attempt in range(10):
+    """Create a Job with serialized debug_key generation (collision-free)."""
+    async with _debug_key_lock:
         try:
             async with async_session() as session:
                 debug_key = await _generate_debug_key(session)
@@ -74,9 +76,7 @@ async def _create_job_safe(*, filename, original_path, source_label, source_inbo
                 await session.commit()
                 return job
         except IntegrityError:
-            logger.warning(f"debug_key collision (attempt {attempt + 1}), retrying...")
-            await asyncio.sleep(0.05 + random.random() * 0.1 * (attempt + 1))
-    logger.error(f"Failed to create job for {filename} after 10 attempts")
+            logger.error(f"debug_key collision for {filename} (should not happen with lock)")
     return None
 
 
