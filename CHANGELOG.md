@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.27.1 — 2026-04-04
+
+### Fix: debug_key Kollision ab 10000 Jobs
+
+- **Ursache:** `MAX(debug_key)` ist ein String-Vergleich in SQLite. `MA-2026-9999` ist alphabetisch grösser als `MA-2026-10000` (weil `9` > `1`). Der Counter las immer 9999, inkrementierte auf 10000, kollidierte mit dem existierenden Key.
+- **Fix:** `CAST(SUBSTR(debug_key, N) AS INTEGER)` — numerischer MAX statt String-MAX.
+- Betrifft nur Systeme mit >9999 Jobs pro Jahr.
+
 ## v2.27.0 — 2026-04-04
 
 ### Stabilität & Performance bei grossen Imports (#28-#35)
