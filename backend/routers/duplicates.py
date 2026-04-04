@@ -166,34 +166,42 @@ def _get_image_info(filepath: str) -> dict:
         return _empty_img_info()
 
 
+_EXIFTOOL_BATCH_SIZE = 100
+
+
 def _get_image_info_batch(filepaths: list[str]) -> dict[str, dict]:
-    """Get image info for multiple files in a single exiftool call."""
+    """Get image info for multiple files in batched exiftool calls (max 100 per call)."""
     existing = [fp for fp in filepaths if os.path.exists(fp)]
     if not existing:
         return {fp: _empty_img_info() for fp in filepaths}
 
     result_map = {fp: _empty_img_info() for fp in filepaths}
-    try:
-        result = subprocess.run(
-            ["exiftool", "-j",
-             "-ImageWidth", "-ImageHeight",
-             "-DateTimeOriginal", "-CreateDate",
-             "-Make", "-Model",
-             "-ISO", "-FNumber", "-ExposureTime", "-FocalLength",
-             "-Keywords", "-Subject",
-             "-ImageDescription",
-             "-GPSLatitude", "-GPSLongitude",
-             ] + existing,
-            capture_output=True, text=True, timeout=30,
-        )
-        import json as _json
-        entries = _json.loads(result.stdout) if result.stdout.strip() else []
-        for entry in entries:
-            src = entry.get("SourceFile", "")
-            if src in result_map:
-                result_map[src] = _parse_exiftool_entry(entry, src)
-    except Exception:
-        pass
+    import json as _json
+    exif_args = [
+        "-j",
+        "-ImageWidth", "-ImageHeight",
+        "-DateTimeOriginal", "-CreateDate",
+        "-Make", "-Model",
+        "-ISO", "-FNumber", "-ExposureTime", "-FocalLength",
+        "-Keywords", "-Subject",
+        "-ImageDescription",
+        "-GPSLatitude", "-GPSLongitude",
+    ]
+    for i in range(0, len(existing), _EXIFTOOL_BATCH_SIZE):
+        batch = existing[i:i + _EXIFTOOL_BATCH_SIZE]
+        try:
+            result = subprocess.run(
+                ["exiftool"] + exif_args + batch,
+                capture_output=True, text=True,
+                timeout=max(30, len(batch) * 2),
+            )
+            entries = _json.loads(result.stdout) if result.stdout.strip() else []
+            for entry in entries:
+                src = entry.get("SourceFile", "")
+                if src in result_map:
+                    result_map[src] = _parse_exiftool_entry(entry, src)
+        except Exception:
+            pass
     return result_map
 
 

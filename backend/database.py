@@ -8,7 +8,7 @@ DATABASE_PATH = os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")
 engine = create_async_engine(
     f"sqlite+aiosqlite:///{DATABASE_PATH}",
     echo=False,
-    connect_args={"timeout": 30},
+    connect_args={"timeout": 120},
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -18,7 +18,7 @@ def _set_sqlite_pragmas(dbapi_conn, connection_record):
     """Set SQLite pragmas on every new connection for concurrency."""
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.execute("PRAGMA busy_timeout=120000")
     cursor.close()
 
 DEFAULT_MODULES = [
@@ -66,6 +66,10 @@ async def _migrate_columns(conn):
         "CREATE INDEX IF NOT EXISTS idx_job_created_at ON jobs(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_job_updated_at ON jobs(updated_at)",
         "CREATE INDEX IF NOT EXISTS idx_syslog_created_at ON system_logs(created_at)",
+        # Composite indexes for common query patterns (150k+ jobs)
+        "CREATE INDEX IF NOT EXISTS idx_job_hash_status ON jobs(file_hash, status)",
+        "CREATE INDEX IF NOT EXISTS idx_job_phash_status ON jobs(phash, status)",
+        "CREATE INDEX IF NOT EXISTS idx_job_status_created ON jobs(status, created_at)",
     ]
     for sql in indexes:
         await conn.execute(sqlalchemy.text(sql))
@@ -77,7 +81,7 @@ async def init_db():
     async with engine.begin() as conn:
         # Enable WAL mode for better concurrent read/write performance
         await conn.execute(sqlalchemy.text("PRAGMA journal_mode=WAL"))
-        await conn.execute(sqlalchemy.text("PRAGMA busy_timeout=30000"))
+        await conn.execute(sqlalchemy.text("PRAGMA busy_timeout=120000"))
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_columns(conn)
 
