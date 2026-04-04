@@ -915,22 +915,42 @@ async def merge_metadata(request: Request):
         if not os.path.exists(target_path):
             return JSONResponse({"error": "target file not found"}, status_code=404)
 
-        # Resolve source paths (skip missing)
-        source_paths = []
+        # Resolve sources — local files AND Immich assets
+        # source_infos: list of (info_dict, local_path_or_None)
+        source_infos: list[tuple[dict, str | None]] = []
+        local_paths = []
         for sk in source_keys:
             sj = jobs.get(sk)
             if not sj:
                 continue
             sp = _resolve_filepath(sj)
             if os.path.exists(sp):
-                source_paths.append(sp)
-        if not source_paths:
+                local_paths.append(sp)
+                source_infos.append((None, sp))  # info filled via batch below
+            else:
+                # Try Immich
+                asset_id = sj.immich_asset_id or ""
+                target_str = sj.target_path or ""
+                if target_str.startswith("immich:"):
+                    asset_id = asset_id or target_str[7:]
+                if asset_id:
+                    from immich_client import get_user_api_key as _guk
+                    _ukey = await _guk(sj.immich_user_id) if sj.immich_user_id else None
+                    immich_info = await _img_info_from_immich(asset_id, api_key=_ukey)
+                    source_infos.append((immich_info, None))
+
+        if not source_infos:
             return JSONResponse({"error": "no source files found"}, status_code=404)
 
-        # Read EXIF from target + all sources in one batch call
-        all_paths = [target_path] + source_paths
-        batch = await asyncio.to_thread(_get_image_info_batch, all_paths)
+        # Batch-read EXIF for all local files (target + local sources)
+        all_local = [target_path] + local_paths
+        batch = await asyncio.to_thread(_get_image_info_batch, all_local)
         target_info = batch.get(target_path, _empty_img_info())
+
+        # Fill in batch info for local sources
+        for i, (info, lp) in enumerate(source_infos):
+            if lp and info is None:
+                source_infos[i] = (batch.get(lp, _empty_img_info()), lp)
 
         from pipeline.step_ia07_exif_write import _IPTC_FORMATS, _NO_XPCOMMENT
         ext = os.path.splitext(target_path)[1].lower()
@@ -940,19 +960,24 @@ async def merge_metadata(request: Request):
 
         # GPS — take from first source that has it
         if not target_info["exif_has_gps"]:
-            for sp in source_paths:
-                si = batch.get(sp, _empty_img_info())
+            for si, lp in source_infos:
                 if si["exif_has_gps"]:
-                    cmd += ["-TagsFromFile", sp,
-                            "-GPSLatitude", "-GPSLongitude",
-                            "-GPSLatitudeRef", "-GPSLongitudeRef"]
+                    if lp:
+                        # Local file: copy GPS tags directly
+                        cmd += ["-TagsFromFile", lp,
+                                "-GPSLatitude", "-GPSLongitude",
+                                "-GPSLatitudeRef", "-GPSLongitudeRef"]
+                    else:
+                        # Immich source: GPS data already in info but not as raw tags.
+                        # Read raw GPS string from exif_date-style fields won't work.
+                        # Skip — GPS from Immich-only sources not supported yet.
+                        continue
                     merged_fields.append("GPS")
                     break
 
         # Date — take from first source that has it
         if not target_info["exif_date"]:
-            for sp in source_paths:
-                si = batch.get(sp, _empty_img_info())
+            for si, lp in source_infos:
                 if si["exif_date"]:
                     cmd.append(f"-DateTimeOriginal={si['exif_date']}")
                     merged_fields.append("DateTimeOriginal")
@@ -960,26 +985,31 @@ async def merge_metadata(request: Request):
 
         # Camera — take from first source that has it
         if not target_info["exif_camera"]:
-            for sp in source_paths:
-                si = batch.get(sp, _empty_img_info())
+            for si, lp in source_infos:
                 if si["exif_camera"]:
-                    import json as _json
-                    src_exif = subprocess.run(
-                        ["exiftool", "-j", "-Make", "-Model", sp],
-                        capture_output=True, text=True, timeout=10,
-                    )
-                    src_data = _json.loads(src_exif.stdout)[0] if src_exif.stdout.strip() else {}
-                    if src_data.get("Make"):
-                        cmd.append(f"-Make={src_data['Make']}")
-                    if src_data.get("Model"):
-                        cmd.append(f"-Model={src_data['Model']}")
+                    if lp:
+                        import json as _json
+                        src_exif = subprocess.run(
+                            ["exiftool", "-j", "-Make", "-Model", lp],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        src_data = _json.loads(src_exif.stdout)[0] if src_exif.stdout.strip() else {}
+                        if src_data.get("Make"):
+                            cmd.append(f"-Make={src_data['Make']}")
+                        if src_data.get("Model"):
+                            cmd.append(f"-Model={src_data['Model']}")
+                    else:
+                        # Immich source: camera info is combined string, split heuristic
+                        parts = si["exif_camera"].split(" ", 1)
+                        cmd.append(f"-Make={parts[0]}")
+                        if len(parts) > 1:
+                            cmd.append(f"-Model={parts[1]}")
                     merged_fields.append("Camera")
                     break
 
         # Description — take from first source that has it
         if not target_info["exif_description"]:
-            for sp in source_paths:
-                si = batch.get(sp, _empty_img_info())
+            for si, lp in source_infos:
                 if si["exif_description"]:
                     cmd.append(f"-ImageDescription={si['exif_description']}")
                     if ext not in _NO_XPCOMMENT:
@@ -987,11 +1017,10 @@ async def merge_metadata(request: Request):
                     merged_fields.append("Description")
                     break
 
-        # Keywords — union from ALL sources
+        # Keywords — union from ALL sources (local + Immich)
         target_kw = set(target_info["exif_keywords"])
         new_kw = set()
-        for sp in source_paths:
-            si = batch.get(sp, _empty_img_info())
+        for si, lp in source_infos:
             new_kw |= set(si["exif_keywords"])
         new_kw -= target_kw
         if new_kw:
