@@ -45,6 +45,7 @@ router = APIRouter()
 THUMB_SIZE = (400, 400)
 PREVIEW_SIZE = (1600, 1600)
 HEIC_EXTENSIONS = {".heic", ".heif"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mts"}
 
 
 def _heic_to_jpeg(filepath: str) -> bytes | None:
@@ -60,8 +61,29 @@ def _heic_to_jpeg(filepath: str) -> bytes | None:
         return None
 
 
+def _video_to_jpeg(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
+    """Extract a frame from a video file via ffmpeg."""
+    try:
+        w, h = max_size
+        result = subprocess.run(
+            ["ffmpeg", "-ss", "1", "-i", filepath,
+             "-frames:v", "1", "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease",
+             "-f", "image2", "-c:v", "mjpeg", "-q:v", "5", "pipe:1"],
+            capture_output=True, timeout=15,
+        )
+        if result.stdout and len(result.stdout) > 500:
+            return result.stdout
+    except Exception:
+        pass
+    return None
+
+
 def _generate_thumbnail(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
     ext = os.path.splitext(filepath)[1].lower()
+
+    if ext in VIDEO_EXTENSIONS:
+        return _video_to_jpeg(filepath, max_size)
+
     if ext in HEIC_EXTENSIONS:
         jpeg_data = _heic_to_jpeg(filepath)
         if not jpeg_data:

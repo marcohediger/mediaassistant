@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.26.1 — 2026-04-04
+
+### Video-Vorschau in Duplikat- und Review-Ansicht (#24)
+
+- **Video-Thumbnails** — ffmpeg extrahiert ein Frame (bei Sekunde 1) und liefert es als JPEG-Thumbnail
+- Funktioniert für MP4, MOV, AVI, MKV, WebM, M4V, MTS
+- Gilt für beide Ansichten: Duplikat-Review und manuelle Review-Seite
+
 ## v2.26.0 — 2026-04-04
 
 ### Duplikat-Ansicht: Performance, Metadaten-Merge & Bestätigungsdialog (#25, #27)
