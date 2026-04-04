@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.25.9 — 2026-04-04
+
+### Fix: Inbox folder_tags Einstellung wird live nachgelesen
+
+- **Runtime-Prüfung** — IA-07 und IA-08 lesen die `folder_tags` Einstellung der Inbox jetzt direkt aus der Datenbank statt den bei Job-Erstellung gespeicherten Wert zu verwenden
+- Umschalten der Inbox-Option greift sofort, auch für bereits erstellte Jobs in der Queue
+- Prüft sowohl das globale Modul `ordner_tags` als auch die Inbox-Einstellung zur Laufzeit
+
 ## v2.25.8 — 2026-04-04
 
 ### Album-Logging im IA-08 Ergebnis
