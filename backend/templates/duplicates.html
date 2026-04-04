@@ -69,14 +69,7 @@ function loadMoreGroups() {
         });
 }
 
-function mergeMetadata(sourceKey, targetKey, sourceName, targetName) {
-    const msg = '{{ t.duplicates.merge_confirm }}'.replace('{source}', sourceName).replace('{target}', targetName);
-    if (!SKIP_CONFIRM && !confirm(msg)) return;
-
-    const formData = new FormData();
-    formData.append('target_key', targetKey);
-    formData.append('source_key', sourceKey);
-
+function _doMerge(formData) {
     fetch('/api/duplicates/merge-metadata', { method: 'POST', body: formData })
         .then(r => r.json())
         .then(data => {
@@ -90,6 +83,24 @@ function mergeMetadata(sourceKey, targetKey, sourceName, targetName) {
             }
         })
         .catch(() => alert('{{ t.duplicates.merge_error }}'));
+}
+
+function mergeMetadata(sourceKey, targetKey, sourceName, targetName) {
+    const msg = '{{ t.duplicates.merge_confirm }}'.replace('{source}', sourceName).replace('{target}', targetName);
+    if (!SKIP_CONFIRM && !confirm(msg)) return;
+    const formData = new FormData();
+    formData.append('target_key', targetKey);
+    formData.append('source_key', sourceKey);
+    _doMerge(formData);
+}
+
+function mergeMetadataAll(sourceKeys, targetKey, targetName) {
+    const msg = '{{ t.duplicates.merge_all_confirm }}'.replace('{n}', sourceKeys.split(',').length).replace('{target}', targetName);
+    if (!SKIP_CONFIRM && !confirm(msg)) return;
+    const formData = new FormData();
+    formData.append('target_key', targetKey);
+    formData.append('source_keys', sourceKeys);
+    _doMerge(formData);
 }
 </script>
 {% endblock %}

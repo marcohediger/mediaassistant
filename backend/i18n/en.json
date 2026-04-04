@@ -136,7 +136,9 @@
     "merge_error": "Error merging metadata",
     "has_more_metadata": "More metadata",
     "load_more": "Load more groups",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "merge_metadata_all": "Merge all metadata",
+    "merge_all_confirm": "Transfer missing metadata from {n} files to {target}?"
   },
   "settings": {
     "title": "Settings",
