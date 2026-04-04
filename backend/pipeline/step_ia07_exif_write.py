@@ -196,6 +196,10 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
     """Write metadata to an XMP sidecar file, leaving the original untouched."""
     sidecar_path = job.original_path + ".xmp"
 
+    # Remove existing sidecar (e.g. from a previous failed/retried run)
+    if os.path.exists(sidecar_path):
+        os.remove(sidecar_path)
+
     # ExifTool -o file.xmp creates an XMP sidecar from the source file
     cmd = ["exiftool", "-o", sidecar_path, "-P", "-m"]
 
