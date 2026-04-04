@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.26.2 — 2026-04-04
+
+### Fix: debug_key Kollision bei vielen gleichzeitigen Dateien
+
+- **Race Condition** — wenn viele Dateien gleichzeitig eintreffen (z.B. Immich-Poll mit 60+ Assets), fragten alle Coroutines gleichzeitig `MAX(debug_key)` ab und erhielten denselben Wert. Das führte zu Endlos-Kollisionen und alle Jobs scheiterten nach 10 Versuchen.
+- **Fix:** `asyncio.Lock` serialisiert die debug_key-Generierung. Key-Vergabe + INSERT erfolgen atomar — Kollisionen sind ausgeschlossen.
+- Retry-Loop entfernt (nicht mehr nötig)
+
 ## v2.26.1 — 2026-04-04
 
 ### Video-Vorschau in Duplikat- und Review-Ansicht (#24)
