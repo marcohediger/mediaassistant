@@ -40,13 +40,19 @@
     {% endif %}
 </div>
 
-<div class="throughput-bar" id="throughput-bar">
-    <span class="throughput-label">{{ t.dashboard.throughput }}:</span>
-    <span class="throughput-value" data-throughput="files_per_min">{{ throughput.files_per_min }}</span> {{ t.dashboard.files_per_min }}
-    <span class="throughput-sep">&middot;</span>
-    <span class="throughput-value" data-throughput="files_per_hour">{{ throughput.files_per_hour }}</span> {{ t.dashboard.files_per_hour }}
-    <span class="throughput-sep">&middot;</span>
-    <span class="throughput-value" data-throughput="files_24h">{{ throughput.files_24h }}</span> {{ t.dashboard.files_24h }}
+<div class="throughput-grid" id="throughput-bar">
+    <div class="throughput-card">
+        <div class="throughput-card-value" data-throughput="files_per_min">{{ throughput.files_per_min }}</div>
+        <div class="throughput-card-label">{{ t.dashboard.files_per_min }}</div>
+    </div>
+    <div class="throughput-card">
+        <div class="throughput-card-value" data-throughput="files_per_hour">{{ throughput.files_per_hour }}</div>
+        <div class="throughput-card-label">{{ t.dashboard.files_per_hour }}</div>
+    </div>
+    <div class="throughput-card">
+        <div class="throughput-card-value" data-throughput="files_24h">{{ throughput.files_24h }}</div>
+        <div class="throughput-card-label">{{ t.dashboard.files_24h }}</div>
+    </div>
 </div>
 
 <h2>{{ t.dashboard.modules }}</h2>

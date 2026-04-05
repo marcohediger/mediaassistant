@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.28.1 — 2026-04-05
+
+### UI: Durchsatz als Grid-Karten statt Inline-Balken
+
+- Durchsatz-Anzeige (Dateien/Min, /Std, /24h) als 3 einzelne Karten im Grid-Layout
+- Konsistenter mit dem Stats-Grid darüber
+
 ## v2.28.0 — 2026-04-05
 
 ### Feature: Durchsatz-Anzeige & ETA auf dem Dashboard (#41)
