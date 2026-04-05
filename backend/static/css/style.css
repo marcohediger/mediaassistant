@@ -97,33 +97,32 @@ h2 { margin: 2rem 0 1rem; font-size: 1.25rem; color: var(--text-muted); }
 .stat-info .stat-value { color: var(--info); }
 .stat-error .stat-value { color: var(--error); }
 
-/* Throughput */
-.throughput-bar {
+/* Throughput Grid */
+.throughput-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.throughput-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 0.75rem 1.25rem;
-    margin-top: 1rem;
-    font-size: 0.9rem;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    padding: 1rem 1.25rem;
+    text-align: center;
 }
 
-.throughput-label {
-    font-weight: 600;
-    color: var(--text);
-}
-
-.throughput-value {
+.throughput-card-value {
+    font-size: 1.5rem;
     font-weight: 700;
     color: var(--text);
 }
 
-.throughput-sep {
-    margin: 0 0.25rem;
+.throughput-card-label {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
 }
 
 /* Modules */
