@@ -15,8 +15,8 @@ router = APIRouter(prefix="/api")
 async def health():
     exiftool_version = None
     try:
-        result = subprocess.run(["exiftool", "-ver"], capture_output=True, text=True, timeout=5)
-        exiftool_version = result.stdout.strip()
+        result = subprocess.run(["exiftool", "-ver"], capture_output=True, timeout=5)
+        exiftool_version = (result.stdout.decode('utf-8', errors='replace') if result.stdout else '').strip()
     except Exception:
         pass
 

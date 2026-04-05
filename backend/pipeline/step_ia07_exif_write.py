@@ -172,11 +172,12 @@ async def _write_direct(job, keywords, description, ocr_text, ext):
     result = await asyncio.to_thread(
         subprocess.run,
         cmd,
-        capture_output=True, text=True, timeout=30
+        capture_output=True, timeout=30
     )
 
     if result.returncode != 0:
-        raise RuntimeError(f"ExifTool Write Fehler: {result.stderr.strip()}")
+        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+        raise RuntimeError(f"ExifTool Write Fehler: {stderr.strip()}")
 
     new_hash = await asyncio.to_thread(_sha256, job.original_path)
     new_size = os.path.getsize(job.original_path)
@@ -219,11 +220,12 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
     result = await asyncio.to_thread(
         subprocess.run,
         cmd,
-        capture_output=True, text=True, timeout=30
+        capture_output=True, timeout=30
     )
 
     if result.returncode != 0:
-        raise RuntimeError(f"ExifTool Sidecar Fehler: {result.stderr.strip()}")
+        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+        raise RuntimeError(f"ExifTool Sidecar Fehler: {stderr.strip()}")
 
     return {
         "keywords_written": keywords,
