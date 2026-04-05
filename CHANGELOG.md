@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.27.5 — 2026-04-05
+
+### Fix: Duplikate fälschlicherweise bis IA-08 weitergeleitet (#38)
+
+- **Ursache:** Wenn nach dem Verschieben einer Duplikat-Datei das Aufräumen leerer Ordner fehlschlug, wurde IA-02 als "unkritischer Fehler" übersprungen. Die Pipeline lief weiter bis IA-08, wo die bereits verschobene Datei nicht mehr gefunden wurde → "File disappeared before upload".
+- **Fix 1:** Cleanup in `_handle_duplicate` ist jetzt in try-except gewrappt — ein Fehler beim Aufräumen kann nicht mehr die Duplikat-Erkennung sabotieren.
+- **Fix 2:** Fallback in der Pipeline: Wenn IA-02 fehlschlägt aber `job.status == "duplicate"` bereits gesetzt ist, wird die Pipeline korrekt als Duplikat beendet.
+
 ## v2.27.2 — 2026-04-04
 
 ### Fix: XMP Sidecar "already exists" bei Retry
