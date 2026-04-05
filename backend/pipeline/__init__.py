@@ -117,6 +117,15 @@ async def run_pipeline(job_id: int):
                 if step_code in non_critical:
                     tb = traceback.format_exc()
                     await log_warning("pipeline", f"{job.debug_key} {step_code} skipped", f"{e}\n\n{tb}")
+                    # IA-02: If file was already moved as duplicate before the error,
+                    # treat it as a successful duplicate detection (don't continue pipeline)
+                    if step_code == "IA-02" and job.status == "duplicate":
+                        existing_results[step_code] = {"status": "duplicate", "note": f"detected but cleanup failed: {e}"}
+                        job.step_result = existing_results
+                        flag_modified(job, "step_result")
+                        await session.commit()
+                        duplicate_detected = True
+                        break
                     existing_results[step_code] = {"status": "error", "reason": str(e)}
                     if step_code == "IA-05":
                         existing_results[step_code].update({

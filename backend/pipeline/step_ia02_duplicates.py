@@ -336,13 +336,16 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     job.status = "duplicate"
     job.target_path = dup_path
 
-    # Clean up empty parent directories in inbox
-    if job.source_inbox_path:
-        from pipeline.step_ia08_sort import _cleanup_empty_dirs
-        source_dir = os.path.dirname(job.original_path)
-        await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
-
     await log_info("IA-02", f"{job.debug_key} {desc}")
+
+    # Clean up empty parent directories in inbox (best-effort, file is already moved)
+    try:
+        if job.source_inbox_path:
+            from pipeline.step_ia08_sort import _cleanup_empty_dirs
+            source_dir = os.path.dirname(job.original_path)
+            await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
+    except Exception as e:
+        await log_warning("IA-02", f"{job.debug_key} Cleanup nach Duplikat-Move fehlgeschlagen: {e}")
 
 
 
