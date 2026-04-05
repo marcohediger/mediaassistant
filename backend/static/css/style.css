@@ -91,10 +91,40 @@ h2 { margin: 2rem 0 1rem; font-size: 1.25rem; color: var(--text-muted); }
 
 .stat-value { font-size: 2rem; font-weight: 700; }
 .stat-label { color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem; }
+.stat-eta { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem; opacity: 0.8; }
 .stat-success .stat-value { color: var(--success); }
 .stat-warning .stat-value { color: var(--warning); }
 .stat-info .stat-value { color: var(--info); }
 .stat-error .stat-value { color: var(--error); }
+
+/* Throughput */
+.throughput-bar {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.throughput-label {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.throughput-value {
+    font-weight: 700;
+    color: var(--text);
+}
+
+.throughput-sep {
+    margin: 0 0.25rem;
+}
 
 /* Modules */
 .modules-grid {

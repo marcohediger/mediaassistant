@@ -20,6 +20,9 @@
     <div class="stat-card stat-warning">
         <div class="stat-value" data-stat="queued">{{ stats.queued }}</div>
         <div class="stat-label">{{ t.dashboard.queued }}</div>
+        {% if throughput.eta %}
+        <div class="stat-eta" data-stat="eta">{{ throughput.eta }}</div>
+        {% endif %}
     </div>
     <div class="stat-card stat-info">
         <div class="stat-value" data-stat="processing">{{ stats.processing }}</div>
@@ -35,6 +38,15 @@
         <div class="stat-label">{{ t.dashboard.duplicates }}</div>
     </a>
     {% endif %}
+</div>
+
+<div class="throughput-bar" id="throughput-bar">
+    <span class="throughput-label">{{ t.dashboard.throughput }}:</span>
+    <span class="throughput-value" data-throughput="files_per_min">{{ throughput.files_per_min }}</span> {{ t.dashboard.files_per_min }}
+    <span class="throughput-sep">&middot;</span>
+    <span class="throughput-value" data-throughput="files_per_hour">{{ throughput.files_per_hour }}</span> {{ t.dashboard.files_per_hour }}
+    <span class="throughput-sep">&middot;</span>
+    <span class="throughput-value" data-throughput="files_24h">{{ throughput.files_24h }}</span> {{ t.dashboard.files_24h }}
 </div>
 
 <h2>{{ t.dashboard.modules }}</h2>

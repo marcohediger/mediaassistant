@@ -24,18 +24,21 @@ async def execute(job, session) -> dict:
     result = await asyncio.to_thread(
         subprocess.run,
         ["exiftool", "-json", "-n", job.original_path],
-        capture_output=True, text=True, timeout=exif_timeout
+        capture_output=True, timeout=exif_timeout
     )
 
+    stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+    stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+
     if result.returncode != 0:
-        stderr = result.stderr.strip()
-        if stderr:
-            raise RuntimeError(f"ExifTool Fehler: {stderr}")
+        stderr_stripped = stderr.strip()
+        if stderr_stripped:
+            raise RuntimeError(f"ExifTool Fehler: {stderr_stripped}")
         else:
             raise RuntimeError(f"ExifTool konnte die Datei nicht lesen (möglicherweise beschädigt oder kein gültiges Bildformat)")
 
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(stdout)
     except json.JSONDecodeError:
         raise RuntimeError(f"ExifTool konnte die Datei nicht lesen (möglicherweise beschädigt oder kein gültiges Bildformat)")
     if not data:
@@ -114,12 +117,13 @@ async def _run_ffprobe(filepath: str) -> dict | None:
                 "-show_format", "-show_streams",
                 filepath,
             ],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, timeout=30
         )
         if result.returncode != 0:
             return None
 
-        data = json.loads(result.stdout)
+        stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+        data = json.loads(stdout)
         fmt = data.get("format", {})
         tags = fmt.get("tags", {})
 

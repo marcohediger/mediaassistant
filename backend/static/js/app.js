@@ -14,6 +14,7 @@
         if (!resp.ok) return;
         const data = await resp.json();
         updateStats(data.stats);
+        updateThroughput(data.throughput);
         updateModules(data.modules);
         updateRecentJobs(data.recent_jobs);
       } catch (_) {}
@@ -24,6 +25,24 @@
     for (const [key, val] of Object.entries(stats)) {
       const el = document.querySelector(`[data-stat="${key}"]`);
       if (el) el.textContent = val;
+    }
+  }
+
+  function updateThroughput(throughput) {
+    if (!throughput) return;
+    for (const [key, val] of Object.entries(throughput)) {
+      const el = document.querySelector(`[data-throughput="${key}"]`);
+      if (el) el.textContent = val;
+    }
+    // Update ETA display
+    const etaEl = document.querySelector('[data-stat="eta"]');
+    if (etaEl) {
+      if (throughput.eta) {
+        etaEl.textContent = throughput.eta;
+        etaEl.style.display = "";
+      } else {
+        etaEl.style.display = "none";
+      }
     }
   }
 

@@ -2,7 +2,7 @@
 {% block title %}{{ job.debug_key }} — MediaAssistant{% endblock %}
 {% block content %}
 <div class="detail-header" data-page="job-detail" data-debug-key="{{ job.debug_key }}">
-    <a href="/logs?tab=jobs" class="btn btn-small btn-secondary">{{ t.job_detail.back }}</a>
+    <a href="{{ back_url | default('/logs?tab=jobs') }}" class="btn btn-small btn-secondary">{{ t.job_detail.back }}</a>
     <h1><code>{{ job.debug_key }}</code></h1>
 </div>
 

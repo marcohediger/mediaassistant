@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.28.0 — 2026-04-05
+
+### Feature: Durchsatz-Anzeige & ETA auf dem Dashboard (#41)
+
+- Neuer Throughput-Balken unter den Stats-Karten zeigt:
+  - Dateien/Min (letzte 5 Minuten)
+  - Dateien/Std (letzte Stunde)
+  - Dateien gesamt (letzte 24 Stunden)
+- **ETA bei wartenden Jobs:** Bei der "Wartend"-Karte wird die geschätzte Restzeit angezeigt (z.B. "~50 Min", "~5.6 Std"), berechnet aus aktuellem Durchsatz und Anzahl wartender Jobs
+- Wird automatisch via Live-Polling aktualisiert
+- i18n-Unterstützung für DE und EN
+
+### Fix: UnicodeDecodeError in ExifTool-Aufrufen (#38)
+
+- Alle `subprocess.run(..., text=True)` Aufrufe durch manuelle `decode('utf-8', errors='replace')` ersetzt
+- Betrifft: IA-01 (EXIF Read), IA-07 (EXIF Write), Duplikat-Merge, API Health-Check
+- Verhindert Crash bei Nicht-UTF-8-Bytes in ExifTool stderr
+
+### Fix: Immich Upload Retry bei 5xx (#39)
+
+- Upload versucht bei HTTP 5xx bis zu 3 Retries mit Backoff (30s, 60s, 120s)
+- File-Handles werden pro Retry neu geöffnet
+- Jeder Retry wird geloggt (System-Log + Python-Logger)
+
+### Fix: Log-Filter geht verloren beim Zurücknavigieren (#40)
+
+- Filter-Parameter (Status, Suche, Seite) werden als URL-Params an die Detail-Ansicht weitergereicht
+- Zurück-Button in der Detail-Ansicht stellt den Filter wieder her
+
 ## v2.27.5 — 2026-04-05
 
 ### Fix: Duplikate fälschlicherweise bis IA-08 weitergeleitet (#38)

@@ -1,4 +1,5 @@
 import json
+from urllib.parse import urlencode
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from markupsafe import Markup
@@ -69,6 +70,18 @@ async def logs_page(request: Request):
 
     total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
 
+    # Build filter query string for detail links (so back-navigation preserves filters)
+    filter_params = {}
+    if page > 1:
+        filter_params["page"] = page
+    if status_filter:
+        filter_params["status"] = status_filter
+    if level_filter:
+        filter_params["level"] = level_filter
+    if search:
+        filter_params["q"] = search
+    filter_query = urlencode(filter_params)
+
     return await render(request, "logs.html", {
         "tab": tab,
         "jobs": jobs,
@@ -79,6 +92,7 @@ async def logs_page(request: Request):
         "status_filter": status_filter,
         "level_filter": level_filter,
         "search": search,
+        "filter_query": filter_query,
     })
 
 
@@ -94,7 +108,15 @@ async def log_detail(request: Request, debug_key: str):
     if not job:
         return RedirectResponse(url="/logs?tab=jobs", status_code=302)
 
-    return await render(request, "log_detail.html", {"job": job})
+    # Build back URL preserving filter params from the list view
+    back_params = {"tab": "jobs"}
+    for key in ("page", "status", "q"):
+        val = request.query_params.get(key, "")
+        if val:
+            back_params[key] = val
+    back_url = "/logs?" + urlencode(back_params)
+
+    return await render(request, "log_detail.html", {"job": job, "back_url": back_url})
 
 
 @router.get("/dryrun-report")

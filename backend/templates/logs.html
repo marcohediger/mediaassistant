@@ -103,7 +103,7 @@
         <tbody>
             {% for job in jobs %}
             <tr class="log-row log-{{ job.status }}">
-                <td style="white-space: nowrap;"><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
+                <td style="white-space: nowrap;"><a href="/logs/job/{{ job.debug_key }}{% if filter_query %}?{{ filter_query }}{% endif %}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
                 <td style="white-space: nowrap; line-height: 1.4;">
                     {{ job.updated_at.strftime('%d.%m.%Y %H:%M:%S') if job.updated_at else '—' }}
                     {% set start = job.started_at or job.created_at %}

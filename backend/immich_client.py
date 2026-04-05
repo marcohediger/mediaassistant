@@ -1,9 +1,11 @@
+import asyncio
 import json
 import logging
 import os
 from datetime import datetime, timezone
 import httpx
 from config import config_manager
+from system_logger import log_warning
 
 logger = logging.getLogger("mediaassistant.immich")
 
@@ -54,24 +56,41 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
     headers = {"x-api-key": api_key}
 
     # Stream file directly from disk — avoids loading entire file into RAM
+    # Retry up to 3 times on 5xx errors with backoff (Immich restarts take time)
     timeout = httpx.Timeout(connect=10, read=120, write=300, pool=10)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        from contextlib import ExitStack
-        with ExitStack() as stack:
-            f = stack.enter_context(open(file_path, "rb"))
-            files = {"assetData": (filename, f)}
-            if sidecar_path and os.path.exists(sidecar_path):
-                sidecar_fh = stack.enter_context(open(sidecar_path, "rb"))
-                files["sidecarData"] = (os.path.basename(sidecar_path), sidecar_fh)
-            resp = await client.post(
-                f"{url}/api/assets",
-                headers=headers,
-                data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
-                      "deviceId": "MediaAssistant",
-                      "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                      "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
-                files=files,
-            )
+    max_retries = 3
+    backoff_delays = [30, 60, 120]
+    resp = None
+
+    for attempt in range(max_retries + 1):
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            from contextlib import ExitStack
+            with ExitStack() as stack:
+                f = stack.enter_context(open(file_path, "rb"))
+                files = {"assetData": (filename, f)}
+                if sidecar_path and os.path.exists(sidecar_path):
+                    sidecar_fh = stack.enter_context(open(sidecar_path, "rb"))
+                    files["sidecarData"] = (os.path.basename(sidecar_path), sidecar_fh)
+                resp = await client.post(
+                    f"{url}/api/assets",
+                    headers=headers,
+                    data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
+                          "deviceId": "MediaAssistant",
+                          "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                          "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
+                    files=files,
+                )
+
+        # Non-5xx: accept result (success or client error)
+        if resp.status_code < 500:
+            break
+
+        # 5xx: retry with backoff if attempts remain
+        if attempt < max_retries:
+            delay = backoff_delays[attempt]
+            await log_warning("immich_upload", f"Immich returned HTTP {resp.status_code} for '{filename}', retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+            logger.warning("Immich upload HTTP %s for '%s', retry %d/%d in %ds", resp.status_code, filename, attempt + 1, max_retries, delay)
+            await asyncio.sleep(delay)
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Immich upload failed: HTTP {resp.status_code} — {resp.text[:200]}")

@@ -157,10 +157,11 @@ def _get_image_info(filepath: str) -> dict:
              "-ImageDescription",
              "-GPSLatitude", "-GPSLongitude",
              filepath],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, timeout=10,
         )
         import json as _json
-        data = _json.loads(result.stdout)[0] if result.stdout.strip() else {}
+        stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+        data = _json.loads(stdout)[0] if stdout.strip() else {}
         return _parse_exiftool_entry(data, filepath)
     except Exception:
         return _empty_img_info()
@@ -192,10 +193,11 @@ def _get_image_info_batch(filepaths: list[str]) -> dict[str, dict]:
         try:
             result = subprocess.run(
                 ["exiftool"] + exif_args + batch,
-                capture_output=True, text=True,
+                capture_output=True,
                 timeout=max(30, len(batch) * 2),
             )
-            entries = _json.loads(result.stdout) if result.stdout.strip() else []
+            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+            entries = _json.loads(stdout) if stdout.strip() else []
             for entry in entries:
                 src = entry.get("SourceFile", "")
                 if src in result_map:
@@ -1020,9 +1022,10 @@ async def merge_metadata(request: Request):
                         import json as _json
                         src_exif = subprocess.run(
                             ["exiftool", "-j", "-Make", "-Model", lp],
-                            capture_output=True, text=True, timeout=10,
+                            capture_output=True, timeout=10,
                         )
-                        src_data = _json.loads(src_exif.stdout)[0] if src_exif.stdout.strip() else {}
+                        src_stdout = src_exif.stdout.decode('utf-8', errors='replace') if src_exif.stdout else ''
+                        src_data = _json.loads(src_stdout)[0] if src_stdout.strip() else {}
                         if src_data.get("Make"):
                             cmd.append(f"-Make={src_data['Make']}")
                         if src_data.get("Model"):
@@ -1068,12 +1071,13 @@ async def merge_metadata(request: Request):
 
         result = await asyncio.to_thread(
             subprocess.run, cmd,
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, timeout=30,
         )
 
         if result.returncode != 0:
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
             return JSONResponse(
-                {"error": f"ExifTool error: {result.stderr.strip()}"},
+                {"error": f"ExifTool error: {stderr.strip()}"},
                 status_code=500,
             )
 

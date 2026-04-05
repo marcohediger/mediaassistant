@@ -2,6 +2,7 @@ import asyncio
 import smtplib
 import ssl
 import time
+from datetime import datetime, timedelta
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
@@ -308,6 +309,73 @@ async def _get_module_status(i18n: dict) -> list[dict]:
     return statuses
 
 
+async def _get_throughput(session) -> dict:
+    """Calculate throughput stats for completed jobs."""
+    now = datetime.now()
+    completed_statuses = ("done", "duplicate")
+
+    five_min_ago = now - timedelta(minutes=5)
+    one_hour_ago = now - timedelta(hours=1)
+    twenty_four_h_ago = now - timedelta(hours=24)
+
+    r5 = await session.execute(
+        select(func.count(Job.id)).where(
+            Job.completed_at >= five_min_ago,
+            Job.status.in_(completed_statuses),
+        )
+    )
+    count_5min = r5.scalar() or 0
+
+    r1h = await session.execute(
+        select(func.count(Job.id)).where(
+            Job.completed_at >= one_hour_ago,
+            Job.status.in_(completed_statuses),
+        )
+    )
+    count_1h = r1h.scalar() or 0
+
+    r24h = await session.execute(
+        select(func.count(Job.id)).where(
+            Job.completed_at >= twenty_four_h_ago,
+            Job.status.in_(completed_statuses),
+        )
+    )
+    count_24h = r24h.scalar() or 0
+
+    # files per minute (last 5 min), files per hour (last hour), total last 24h
+    files_per_min = round(count_5min / 5, 1) if count_5min else 0
+    files_per_hour = count_1h  # already a 1-hour window
+    files_24h = count_24h
+
+    # Queued count for ETA calculation
+    rq = await session.execute(
+        select(func.count(Job.id)).where(Job.status == "queued")
+    )
+    queued_count = rq.scalar() or 0
+
+    # Estimate remaining time based on current throughput
+    eta_text = ""
+    if queued_count > 0 and files_per_min > 0:
+        eta_minutes = queued_count / files_per_min
+        if eta_minutes < 1:
+            eta_text = "< 1 Min"
+        elif eta_minutes < 60:
+            eta_text = f"~{int(eta_minutes)} Min"
+        elif eta_minutes < 1440:
+            hours = eta_minutes / 60
+            eta_text = f"~{hours:.1f} Std"
+        else:
+            days = eta_minutes / 1440
+            eta_text = f"~{days:.1f} Tage"
+
+    return {
+        "files_per_min": files_per_min,
+        "files_per_hour": files_per_hour,
+        "files_24h": files_24h,
+        "eta": eta_text,
+    }
+
+
 @router.get("/")
 async def dashboard(request: Request):
     if not await config_manager.is_setup_complete():
@@ -326,6 +394,8 @@ async def dashboard(request: Request):
         )
         recent_jobs = recent_result.scalars().all()
 
+        throughput = await _get_throughput(session)
+
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
     i18n = load_lang(lang)
     modules = await _get_module_status(i18n)
@@ -339,6 +409,7 @@ async def dashboard(request: Request):
             "processing": counts.get("processing", 0),
             "duplicates": counts.get("duplicate", 0),
         },
+        "throughput": throughput,
         "modules": modules,
         "recent_jobs": recent_jobs,
     })
@@ -360,6 +431,8 @@ async def dashboard_json():
         )
         recent_jobs = recent_result.scalars().all()
 
+        throughput = await _get_throughput(session)
+
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
     i18n = load_lang(lang)
     modules = await _get_module_status(i18n)
@@ -373,6 +446,7 @@ async def dashboard_json():
             "processing": counts.get("processing", 0),
             "duplicates": counts.get("duplicate", 0),
         },
+        "throughput": throughput,
         "modules": [
             {
                 "name": m["name"],
