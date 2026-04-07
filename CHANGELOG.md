@@ -1,5 +1,51 @@
 # Changelog
 
+## v2.28.2 — 2026-04-07
+
+### Fix: Race-Condition — derselbe Job wurde von mehreren Pipeline-Instanzen parallel verarbeitet
+
+**Root Cause:** `run_pipeline()` hatte keinen atomaren Schutz gegen den Übergang
+`queued → processing`. Da `run_pipeline` von 5 Stellen aufgerufen wird (Worker,
+`retry_job`, `_poll_immich`, Startup-Resume, Duplikate-Router), konnten zwei
+Aufrufer denselben Job gleichzeitig starten — z.B. Worker selektiert einen
+Job, der gleichzeitig per API-Retry wiederaufgenommen wird. Beide Pipelines
+schrieben dann parallel in dieselben Dateien:
+
+- IA-07 schlug mit `XMP Sidecar already exists` fehl, weil Run B die Datei
+  vorfand, die Run A gerade geschrieben hatte
+- IA-08 schlug mit `File disappeared before upload` fehl, weil Run A die
+  Quelldatei nach Immich-Upload bereits gelöscht hatte
+- IA-01 schlug mit `ExifTool File not found` fehl aus demselben Grund
+
+In den Logs sichtbar als doppelte `Pipeline done`-Einträge mit
+unterschiedlichen Tag-Counts für dieselbe debug_key, sowie Jobs mit Status
+`done`, deren `error_message`-Feld trotzdem einen IA-07-Traceback enthielt.
+**~30 betroffene Jobs / 120 inkonsistente error_messages über 2 Tage.**
+
+**Fix:** Atomarer Claim am Anfang von `run_pipeline` via `UPDATE jobs SET
+status='processing' WHERE id=? AND status='queued'`. Nur der Aufrufer mit
+`rowcount == 1` läuft weiter; alle anderen brechen sofort ab.
+
+### Fix: Symptom-Pflaster zurückgebaut
+
+Mit dem echten Race-Fix sind die folgenden Workarounds aus v2.28.0/v2.27.x
+nicht mehr nötig und wurden entfernt:
+
+- `step_ia07_exif_write.py`: pre-delete des XMP-Sidecars vor dem ExifTool-Aufruf
+  (war ein TOCTOU-Pflaster für die Race)
+- `step_ia08_sort.py`: `os.path.exists`-Check vor Immich-Upload und Library-Move
+  (war ebenfalls ein TOCTOU-Pflaster)
+
+Falls echte Filesystem-Probleme auftreten, sollen Fehler aus `upload_asset`
+oder `safe_move` direkt durchgereicht werden — die irreführende Meldung
+"file disappeared … or was moved by another process" wurde ohnehin durch die
+Race ausgelöst, nicht durch externe Prozesse.
+
+### Hinweis
+
+Das Startup-Resume in `filewatcher.py` setzt jetzt `status='queued'` bevor es
+`run_pipeline` aufruft, damit der atomare Claim zugreift.
+
 ## v2.28.1 — 2026-04-05
 
 ### UI: Durchsatz als Grid-Karten statt Inline-Balken
