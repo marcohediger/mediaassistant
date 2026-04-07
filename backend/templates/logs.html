@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t.logs.title }} — MediaAssistant{% endblock %}
 {% block content %}
-<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.5rem;">
     <h1 style="margin: 0;">{{ t.logs.title }}</h1>
     <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
         <a href="/logs/dryrun-report" class="btn btn-small btn-secondary">{{ t.dryrun.report_button }}</a>
