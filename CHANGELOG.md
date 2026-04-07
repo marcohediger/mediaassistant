@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.22 — 2026-04-07
+
+### UI: Dashboard-Header-Buttons brechen auf Mobile um
+
+Die `Pipeline pausieren` / `Jetzt scannen` Buttons im Dashboard-Header
+saßen in einem `flex`-Container ohne `flex-wrap` — auf engen Viewports
+wurden sie aus der Zeile gedrängt oder überliefen den Container.
+`flex-wrap: wrap` auf Header-Container und Button-Gruppe lässt sie
+jetzt sauber unter den Titel umbrechen.
+
 ## v2.28.21 — 2026-04-07
 
 ### UI: Module-Karten auf dem Dashboard skalieren responsiv
