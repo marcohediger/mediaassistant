@@ -237,8 +237,12 @@ async def run_pipeline(job_id: int):
                 await session.commit()
             except Exception as e:
                 tb = traceback.format_exc()
-                await log_warning("pipeline", f"{job.debug_key} {step_code} übersprungen", f"{e}\n\n{tb}")
-                existing_results[step_code] = {"status": "error", "reason": str(e)}
+                await log_warning(
+                    "pipeline",
+                    f"{job.debug_key} {step_code} übersprungen",
+                    f"{type(e).__name__}: {e}\n\n{tb}",
+                )
+                existing_results[step_code] = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
                 job.step_result = existing_results
                 flag_modified(job, "step_result")
                 await session.commit()
@@ -247,19 +251,22 @@ async def run_pipeline(job_id: int):
             job.completed_at = datetime.now()
             await session.commit()
         elif not pipeline_failed and not duplicate_detected:
-            # Check if any non-critical steps had errors
+            # Aggregate any step that returned status='error' OR status='warning'
+            # so soft failures (e.g. IA-08 immich_tags_failed) are surfaced in
+            # the job UI instead of being silently hidden in sub-fields.
+            warn_states = {"error", "warning"}
             has_step_errors = any(
-                isinstance(r, dict) and r.get("status") == "error"
+                isinstance(r, dict) and r.get("status") in warn_states
                 for r in existing_results.values()
             )
             if has_step_errors:
                 # Preserve "review" status set by IA-08 for unknown files
                 if job.status != "review":
                     job.status = "done"
-                # Collect error summaries
+                # Collect step summaries
                 error_steps = [
                     code for code, r in existing_results.items()
-                    if isinstance(r, dict) and r.get("status") == "error"
+                    if isinstance(r, dict) and r.get("status") in warn_states
                 ]
                 job.error_message = f"Warnungen in: {', '.join(error_steps)}"
             else:

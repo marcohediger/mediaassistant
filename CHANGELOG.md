@@ -1,5 +1,59 @@
 # Changelog
 
+## v2.28.18 — 2026-04-07
+
+### Fix: Soft-Warnungen werden jetzt im Job sichtbar
+
+User-Frage: „Werden jetzt alle Warnungen in den Job geschrieben?" —
+Antwort: nicht ganz. Es gab drei Lücken die Warnungen still in
+Sub-Feldern versteckt haben, ohne dass der Job-Status oder das
+`error_message`-Feld irgendwas davon zeigte.
+
+#### 1) IA-08: `immich_tags_failed` wird nicht mehr stillschweigend versteckt
+
+Wenn beim Hochladen zu Immich ein oder mehrere Tags nicht gesetzt
+werden konnten (`immich_tags_failed: ["tag1", "tag2"]`), war das
+bisher nur in einem Sub-Feld des Step-Results sichtbar. Der Job
+zeigte „done" ohne jegliche Warnung — wenn man nicht ins Detail
+schaute, wusste man nicht dass Tags gefehlt haben.
+
+**Fix:** `step_ia08_sort.py` setzt jetzt zusätzlich `status="warning"`
+und ein `reason` mit der Liste der fehlgeschlagenen Tags. Beide
+IA-08-Return-Pfade (Upload und Replace) sind angepasst.
+
+#### 2) Pipeline aggregiert jetzt `status="warning"` zusätzlich zu `status="error"`
+
+`pipeline/__init__.py` hat den `has_step_errors`-Check erweitert: er
+prüft jetzt sowohl `status == "error"` als auch `status == "warning"`.
+Das `error_message`-Feld zeigt entsprechend `Warnungen in: IA-08`
+auch bei reinen Soft-Warnungen.
+
+Nebenbei: das Feld heißt weiterhin `error_message`, beinhaltet aber
+sowohl Errors als auch Warnungen — der Name ist historisch.
+
+#### 3) Finalizer-Block: bessere Diagnose-Strings
+
+`pipeline/__init__.py:238-244` (Finalizer-Catch-Block für IA-09/10/11)
+benutzte noch `str(e)` für Exception-Reasons. Wenn die Exception einen
+leeren `__str__` hatte (z.B. manche httpx-Fehler), landete `reason: ""`
+in der DB und im System-Log. Jetzt: `f"{type(e).__name__}: {e}"`
+konsistent mit dem main loop von v2.28.17.
+
+### Was noch NICHT als Warnung erscheint (bewusst still)
+
+- `_skipped: True`-Pfade in IA-05 (zu kleines Bild, Format nicht
+  konvertierbar) — Skip ist semantisch kein Fehler, bleibt still wie
+  bisher
+- `IA-09.errors_reported: N` — das ist die Bestätigung dass eine
+  Notification erfolgreich versendet wurde mit N Errors aus VORIGEN
+  Steps. Die eigentlichen Warnungen kommen aus diesen vorigen Steps
+  und werden separat aggregiert. Doppel-Tracking wäre Noise.
+
+### Geänderte Dateien
+
+- `backend/pipeline/__init__.py` (Finalizer-Diagnose, has_step_errors-Check)
+- `backend/pipeline/step_ia08_sort.py` (immich_tags_failed → status=warning)
+
 ## v2.28.17 — 2026-04-07
 
 ### Fix: Pipeline Auto-Pause/Auto-Resume bei Service-Outages
