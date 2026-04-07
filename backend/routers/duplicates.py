@@ -16,7 +16,6 @@ from sqlalchemy.orm.attributes import flag_modified
 from config import config_manager
 from database import async_session
 from models import Job
-from safe_file import safe_move
 from system_logger import log_info
 
 from template_engine import render
@@ -783,32 +782,16 @@ async def keep_file(request: Request):
                 # Original that was already fully processed — nothing to do
                 pass
             elif kept_job.status == "duplicate" and kept_filepath and os.path.exists(kept_filepath):
-                # Move file to internal temp directory (never back to inbox)
-                import tempfile
-                reprocess_dir = os.path.join("/app/data", "reprocess")
-                await asyncio.to_thread(os.makedirs, reprocess_dir, exist_ok=True)
-                reprocess_path = os.path.join(reprocess_dir, kept_job.filename)
-                if os.path.exists(reprocess_path):
-                    name, ext = os.path.splitext(kept_job.filename)
-                    reprocess_path = os.path.join(reprocess_dir, f"{name}_{kept_job.debug_key}{ext}")
-                await asyncio.to_thread(safe_move, kept_filepath, reprocess_path, kept_job.debug_key)
-                # Remove .log file
-                log_path = kept_filepath + ".log"
-                if os.path.exists(log_path):
-                    await asyncio.to_thread(os.remove, log_path)
-
-                # Update original_path to the reprocess location
-                kept_job.original_path = reprocess_path
-
-                # Reset job for re-processing: keep IA-01 (EXIF), clear everything else
-                step_results = kept_job.step_result or {}
-                ia01 = step_results.get("IA-01")
-                kept_job.step_result = {"IA-01": ia01} if ia01 else {}
-                flag_modified(kept_job, "step_result")
-                kept_job.status = "queued"
-                kept_job.target_path = None
-                kept_job.error_message = None
-                await session.commit()
+                # File move (incl. .xmp sidecar) + step_result reset (keep
+                # only IA-01 EXIF) + status flip is delegated to the shared
+                # reprocess helper.
+                from pipeline.reprocess import prepare_job_for_reprocess
+                await prepare_job_for_reprocess(
+                    session,
+                    kept_job,
+                    keep_steps={"IA-01"},
+                    move_file=True,
+                )
 
                 # Re-run pipeline in background
                 from pipeline import run_pipeline
@@ -843,39 +826,26 @@ async def not_duplicate(request: Request):
             return RedirectResponse(url="/duplicates", status_code=303)
 
         filepath = job.target_path or job.original_path
-        if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
-            # Move file from duplicates dir to internal reprocess dir
-            reprocess_dir = os.path.join("/app/data", "reprocess")
-            await asyncio.to_thread(os.makedirs, reprocess_dir, exist_ok=True)
-            reprocess_path = os.path.join(reprocess_dir, job.filename)
-            if os.path.exists(reprocess_path):
-                name, ext = os.path.splitext(job.filename)
-                reprocess_path = os.path.join(reprocess_dir, f"{name}_{job.debug_key}{ext}")
-            await asyncio.to_thread(safe_move, filepath, reprocess_path, job.debug_key)
-            # Remove .log file
-            log_path = filepath + ".log"
-            if os.path.exists(log_path):
-                await asyncio.to_thread(os.remove, log_path)
-
-            job.original_path = reprocess_path
-        elif not filepath or not os.path.exists(filepath):
+        if not filepath or filepath.startswith("immich:") or not os.path.exists(filepath):
             # File doesn't exist locally — can't reprocess
             return RedirectResponse(url="/duplicates", status_code=303)
 
-        # Reset job: keep IA-01, mark IA-02 to skip duplicate check
-        step_results = dict(job.step_result or {})
-        ia01 = step_results.get("IA-01")
-        new_results = {}
-        if ia01:
-            new_results["IA-01"] = ia01
-        # Mark IA-02 as already done (skip duplicate detection on re-run)
-        new_results["IA-02"] = {"status": "skipped", "reason": "manually marked as not a duplicate"}
-        job.step_result = new_results
-        flag_modified(job, "step_result")
-        job.status = "queued"
-        job.target_path = None
-        job.error_message = None
-        await session.commit()
+        # File move (incl. .xmp sidecar) + step_result reset (keep IA-01,
+        # inject IA-02 as skipped so the pipeline doesn't re-flag it as a
+        # duplicate) + status flip is delegated to the shared helper.
+        from pipeline.reprocess import prepare_job_for_reprocess
+        await prepare_job_for_reprocess(
+            session,
+            job,
+            keep_steps={"IA-01"},
+            inject_steps={
+                "IA-02": {
+                    "status": "skipped",
+                    "reason": "manually marked as not a duplicate",
+                }
+            },
+            move_file=True,
+        )
 
         # Re-run pipeline in background
         from pipeline import run_pipeline

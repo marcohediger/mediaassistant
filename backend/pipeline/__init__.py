@@ -375,58 +375,26 @@ async def reset_job_for_retry(job_id: int) -> bool:
         if not job:
             return False
 
-        # If file was moved to error/, move it to internal reprocess dir (never back to inbox)
-        if job.target_path and os.path.exists(job.target_path):
-            reprocess_dir = os.path.join(os.path.dirname(os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")), "reprocess")
-            os.makedirs(reprocess_dir, exist_ok=True)
-            reprocess_path = os.path.join(reprocess_dir, os.path.basename(job.target_path))
-            if os.path.exists(reprocess_path):
-                name, ext = os.path.splitext(os.path.basename(job.target_path))
-                reprocess_path = os.path.join(reprocess_dir, f"{name}_{job.debug_key}{ext}")
-            await asyncio.to_thread(safe_move, job.target_path, reprocess_path, job.debug_key)
-            # Remove .log file
-            log_path = job.target_path + ".log"
-            if os.path.exists(log_path):
-                os.remove(log_path)
-            job.original_path = reprocess_path
-            job.target_path = None
-
-        # Remove failed step results so pipeline resumes from there.
-        # Both 'error' and 'warning' results are dropped so soft failures
-        # (e.g. IA-08 immich_tags_failed) get a fresh attempt on retry.
-        step_results = dict(job.step_result or {})
-        for step_code in list(step_results.keys()):
-            if isinstance(step_results[step_code], dict) and step_results[step_code].get("status") in ("error", "warning"):
-                del step_results[step_code]
-        # Also remove finalizer results so they re-run
-        for code in ("IA-09", "IA-10", "IA-11"):
-            step_results.pop(code, None)
-
-        # Defensive cleanup: remove any leftover .xmp sidecar from a previous
-        # run that crashed before IA-08 could move/delete it. The new IA-07
-        # uses atomic os.replace() so this isn't strictly required, but it
-        # also clears stale `.xmp.tmp` files from interrupted ExifTool runs.
-        if job.original_path:
-            stale_sidecar = job.original_path + ".xmp"
-            if os.path.exists(stale_sidecar):
-                try:
-                    os.remove(stale_sidecar)
-                except OSError:
-                    pass
-            # Also any tmp files from this debug_key
-            stale_tmp = f"{stale_sidecar}.{job.debug_key}.tmp"
-            if os.path.exists(stale_tmp):
-                try:
-                    os.remove(stale_tmp)
-                except OSError:
-                    pass
-
-        job.step_result = step_results
+        # Drop both 'error' and 'warning' step results so soft failures
+        # (e.g. IA-08 immich_tags_failed) get a fresh attempt. Finalizer
+        # steps (IA-09/10/11) are dropped unconditionally so notification,
+        # cleanup and sqlite-log re-run for the new attempt.
+        # File move + sidecar handling + status flip is done by the helper.
+        from pipeline.reprocess import prepare_job_for_reprocess
+        finalizer_skip = {code: None for code in ("IA-09", "IA-10", "IA-11")}
+        await prepare_job_for_reprocess(
+            session,
+            job,
+            drop_step_statuses={"error", "warning"},
+            move_file=True,
+            commit=False,
+        )
+        # Finalizer reset is retry-specific — apply after the helper.
+        current = dict(job.step_result or {})
+        for code in finalizer_skip:
+            current.pop(code, None)
+        job.step_result = current
         flag_modified(job, "step_result")
-        # Now flip from transient 'processing' to 'queued' so the pipeline
-        # worker / run_pipeline can claim it.
-        job.status = "queued"
-        job.error_message = None
         await session.commit()
 
     return True
