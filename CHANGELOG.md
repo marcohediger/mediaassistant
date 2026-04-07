@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.28.6 — 2026-04-07
+
+### Fix: "Alle Fehler retry"-Button — Höhe und Funktionalität
+
+**Problem 1 (Höhe):** Der `<button>`-Tag im POST-Form hatte eine andere
+Höhe als der `<a>`-Tag des "Dry-Run Report"-Buttons, weil `.btn` keine
+expliziten `font-family`, `line-height` oder `box-sizing` Properties
+hatte und Browser diese für `<button>` und `<a>` unterschiedlich
+defaulten.
+
+**Problem 2 (Funktionalität):** Das Form-POST war fragil — bei manchen
+Browser/Auth-Konstellationen wurde das Submit nicht ausgeführt, oder die
+Redirect-Kette mit Session-Cookie ging schief.
+
+**Fix:**
+- `style.css` `.btn`: explizit `font-family: inherit`, `line-height: 1.5`,
+  `box-sizing: border-box`, `vertical-align: middle` gesetzt → identische
+  Box-Maße für `<a>` und `<button>` (Cache-Buster v19 → v20)
+- `logs.html`: Form durch `<a href="#">` mit `onclick="retryAllErrors()"`
+  ersetzt. Der JS-Handler nutzt `fetch()` mit `credentials: 'same-origin'`,
+  ruft den Endpoint async auf und reloadet danach die Seite mit
+  preserved Filter-State
+- Confirm-Dialog wird via `tojson` filter sicher in JS gerendert (mit
+  korrektem Escaping für Sonderzeichen in der i18n-Übersetzung)
+
+Dadurch:
+- Beide Buttons sind exakt gleich hoch und visuell identisch
+- Click ist robust auch bei Session-Edge-Cases
+- Filter-State bleibt 100% erhalten (return_url wird via JS aus
+  `current_query` gebaut und an POST + window.location übergeben)
+
 ## v2.28.5 — 2026-04-07
 
 ### Fix: Log-Filter bleiben erhalten beim Tab-Wechsel und Button-Klick

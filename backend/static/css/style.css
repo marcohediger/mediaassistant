@@ -268,9 +268,13 @@ h2 { margin: 2rem 0 1rem; font-size: 1.25rem; color: var(--text-muted); }
     border: none;
     border-radius: 6px;
     font-size: 0.9rem;
+    font-family: inherit;
+    line-height: 1.5;
     cursor: pointer;
     text-decoration: none;
     display: inline-block;
+    box-sizing: border-box;
+    vertical-align: middle;
     transition: background 0.2s;
 }
 

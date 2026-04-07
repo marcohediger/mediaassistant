@@ -3,16 +3,37 @@
 {% block content %}
 <div style="display: flex; justify-content: space-between; align-items: center;">
     <h1 style="margin: 0;">{{ t.logs.title }}</h1>
-    <div style="display: flex; gap: 0.5rem;">
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
         <a href="/logs/dryrun-report" class="btn btn-small btn-secondary">{{ t.dryrun.report_button }}</a>
-        <form method="post" action="/api/jobs/retry-all-errors" style="display: inline;"
-              onsubmit="return confirm('{{ t.logs.retry_all_confirm }}');">
-            {# Preserve current filter so the user stays on their filtered view #}
-            <input type="hidden" name="return_url" value="/logs?{{ current_query }}">
-            <button type="submit" class="btn btn-small btn-secondary">{{ t.logs.retry_all_errors }}</button>
-        </form>
+        <a href="#" class="btn btn-small btn-secondary"
+           onclick="retryAllErrors(event)">{{ t.logs.retry_all_errors }}</a>
     </div>
 </div>
+
+<script>
+async function retryAllErrors(ev) {
+    ev.preventDefault();
+    const confirmMsg = {{ t.logs.retry_all_confirm | tojson }};
+    const returnUrl = {{ ('/logs?' + current_query) | tojson }};
+    if (!confirm(confirmMsg)) return;
+    try {
+        const resp = await fetch('/api/jobs/retry-all-errors', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'return_url=' + encodeURIComponent(returnUrl),
+            redirect: 'follow',
+            credentials: 'same-origin'
+        });
+        if (resp.ok || resp.status === 303 || resp.redirected) {
+            window.location.href = returnUrl;
+        } else {
+            alert('Retry-All fehlgeschlagen: HTTP ' + resp.status);
+        }
+    } catch (e) {
+        alert('Retry-All Fehler: ' + e.message);
+    }
+}
+</script>
 
 <div class="tabs">
     {# Tab links preserve all current filters except tab itself #}
