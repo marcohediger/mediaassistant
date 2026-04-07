@@ -1,5 +1,63 @@
 # Changelog
 
+## v2.28.14 — 2026-04-07
+
+### Feature: Pipeline-Pause für sauberen Container-Stop
+
+User-Feedback: "filewatcher stoppen bringt nichts wenn die jobs schon
+'wartend' sind". Korrekt — der Filewatcher-Modul-Toggle verhindert nur
+neues Scannen, der Pipeline-Worker arbeitet bereits gequeuete Jobs
+trotzdem weiter ab.
+
+**Neuer "Drain & Pause"-Mechanismus:**
+
+Der Pipeline-Worker checkt am Anfang jeder Loop-Iteration den
+Config-Key `pipeline.paused`. Wenn `True`:
+- Bereits laufende Jobs (`status=processing`) laufen zu Ende
+- Worker pulled keine neuen Jobs aus der `queued`-Queue
+- Filewatcher-Scanner läuft weiter und legt neue Jobs an (kein
+  Datenverlust durch hängengebliebene Inbox-Files)
+- Sobald alle laufenden Jobs fertig sind, ist der Worker komplett im
+  Leerlauf — sicher für `docker stop`
+
+**Neuer Button im Dashboard** (rechts oben neben "Jetzt scannen"):
+- `⏸ Pipeline pausieren` / `▶ Pipeline fortsetzen` (Toggle)
+- Confirm-Dialog vor Aktion
+- Live-Status-Banner unter dem Header zeigt "Pipeline pausiert" mit
+  Drain-Status: "(N aktiv, M wartend)"
+- Auto-Refresh alle 5s via `/api/pipeline/status`
+
+**Neue API-Endpoints:**
+- `POST /api/pipeline/pause` → setzt `pipeline.paused=True`
+- `POST /api/pipeline/resume` → setzt `pipeline.paused=False`
+- `GET /api/pipeline/status` → `{paused, in_flight, queued}`
+
+Alle Endpoints unterstützen `Accept: application/json` für Fetch-Calls
+und 303-Redirect für klassische Form-POSTs.
+
+**Empfohlener Workflow für sauberen Container-Stop:**
+
+1. Dashboard → "⏸ Pipeline pausieren" klicken
+2. Banner zeigt "(N aktiv, M wartend)" — warten bis N=0
+3. `docker stop -t 60 mediaassistant`
+4. Beim nächsten Start: Pause-Status persistiert via Config (auch
+   nach Restart noch pausiert!) — Erst dann auf Resume klicken oder
+   in Settings rücksetzen.
+
+Wichtiger Hinweis: `pipeline.paused` ist persistent in der Config-DB.
+Wenn der Container neu startet während Pause aktiv ist, bleibt die
+Pipeline pausiert bis explizit ein Resume gesendet wird. Das ist
+gewollt — verhindert dass eine vorherige Pause vergessen wird.
+
+**Tests im Dev-Container — alle grün:**
+
+| Test | Resultat |
+|---|---|
+| Pause via API setzt config | ✅ paused=True |
+| 3 queued Jobs während Pause werden nicht gepulled | ✅ alle 3 bleiben queued |
+| Status-Endpoint liefert in_flight + queued counts | ✅ |
+| Resume → Worker startet sofort, processed alle 3 | ✅ |
+
 ## v2.28.13 — 2026-04-07
 
 ### Hotfix: IA-07 "ExifTool Sidecar already exists" — atomic write
