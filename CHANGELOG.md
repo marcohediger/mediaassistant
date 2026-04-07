@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.28.7 — 2026-04-07
+
+### UX: "Alle Fehler retry"-Button zeigt jetzt visuelles Feedback
+
+User-Feedback: "ich weis nicht ob er wirklich alle auf retry setzt".
+
+**Vorher:** Click → kurzer Page-Reload, keine Bestätigung. User wusste
+nicht ob 0 oder 100 Jobs retried wurden.
+
+**Jetzt:**
+1. Click → Confirm-Dialog
+2. Button zeigt `⏳ ...` während die Anfrage läuft (disabled)
+3. Endpoint gibt JSON `{count, debug_keys[]}` zurück (vorher nur Redirect)
+4. Alert: `✅ 13 Jobs für Retry vorgemerkt. Erste IDs: MA-2026-0003, ...`
+5. Erst nach OK auf dem Alert wird die Seite geladen
+6. Bei `count=0` (keine Error-Jobs gefunden): klare Meldung statt
+   silent reload
+7. Bei HTTP-Fehler: Alert mit Status-Code, Button kommt zurück
+
+**Endpoint-Änderung (`/api/jobs/retry-all-errors`):**
+- Detection via `Accept: application/json` oder `X-Requested-With: fetch`
+- Fetch-Mode → JSONResponse mit `count`, `debug_keys[]` (max 20),
+  `truncated`-Flag
+- Klassischer Form-POST-Fallback → 303 Redirect (rückwärtskompatibel)
+- System-Log-Eintrag enthält jetzt die ersten 20 Debug-Keys als Detail
+
 ## v2.28.6 — 2026-04-07
 
 ### Fix: "Alle Fehler retry"-Button — Höhe und Funktionalität
