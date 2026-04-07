@@ -5,7 +5,7 @@
     <h1 style="margin: 0;">{{ t.dashboard.title }}</h1>
     <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
         <a href="#" id="pipeline-toggle-btn" class="btn btn-small btn-secondary"
-           onclick="togglePipeline(event)" style="display: none;">⏸ {{ t.dashboard.pause_pipeline }}</a>
+           onclick="togglePipeline(event)" data-state="running">⏸ {{ t.dashboard.pause_pipeline }}</a>
         <a href="#" class="btn btn-small btn-primary"
            onclick="triggerScan(event)">{{ t.dashboard.trigger_scan }}</a>
     </div>
@@ -29,7 +29,6 @@ async function refreshPipelineStatus() {
         const banner = document.getElementById('pipeline-paused-banner');
         const detail = document.getElementById('pipeline-paused-detail');
         if (!btn || !banner) return;
-        btn.style.display = '';
         if (data.paused) {
             btn.textContent = '▶ {{ t.dashboard.resume_pipeline }}';
             btn.dataset.state = 'paused';

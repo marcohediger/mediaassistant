@@ -129,11 +129,18 @@ h2 { margin: 2rem 0 1rem; font-size: 1.25rem; color: var(--text-muted); }
 /* Modules */
 .modules-grid {
     display: grid;
-    /* auto-fit + minmax statt fester 4-Spalten-Grid: Karten fließen
-       responsiv von 1 Spalte (Mobile) bis 4+ Spalten (Desktop), ohne
-       starre Zeilen-Gruppierung. */
+    /* Mobile/Tablet: auto-fit lässt die Karten von 1 Spalte (sehr klein)
+       bis 3 Spalten fließen, abhängig vom Viewport. Auf breiten Viewports
+       (≥ 920px) deckelt die Media-Query unten die Spaltenzahl auf 4,
+       damit die 8 Module-Karten zu sauberen 4×2 statt 5+×n werden. */
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 0.75rem;
+}
+
+@media (min-width: 920px) {
+    .modules-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
 }
 
 .module-card {
