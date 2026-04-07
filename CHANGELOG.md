@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.28.21 — 2026-04-07
+
+### UI: Module-Karten auf dem Dashboard skalieren responsiv
+
+`.modules-grid` hatte seit Tag 1 ein hardcoded `grid-template-columns:
+repeat(4, 1fr)`, was die 8 Module-Karten auf dem Dashboard auf jedem
+Viewport in 4 Spalten zwingt. Auf Mobile ergab das vier viel zu schmale
+Spalten, die optisch wie zwei „Gruppen" zu je vier Karten wirkten.
+
+Umgestellt auf `repeat(auto-fit, minmax(180px, 1fr))` — die Karten
+fließen jetzt von 1 Spalte (kleines Mobile) bis 4+ Spalten (Desktop)
+ohne starre Zeilen-Gruppierung. Zusätzlich `flex-wrap: wrap` auf der
+`.module-legend` darunter, damit die Status-Legende auf engen Viewports
+nicht mehr horizontal überläuft.
+
 ## v2.28.20 — 2026-04-07
 
 ### Refactor: gemeinsamer `prepare_job_for_reprocess()` Helper

@@ -129,7 +129,10 @@ h2 { margin: 2rem 0 1rem; font-size: 1.25rem; color: var(--text-muted); }
 /* Modules */
 .modules-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    /* auto-fit + minmax statt fester 4-Spalten-Grid: Karten fließen
+       responsiv von 1 Spalte (Mobile) bis 4+ Spalten (Desktop), ohne
+       starre Zeilen-Gruppierung. */
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 0.75rem;
 }
 
@@ -171,7 +174,8 @@ h2 { margin: 2rem 0 1rem; font-size: 1.25rem; color: var(--text-muted); }
 
 .module-legend {
     display: flex;
-    gap: 1.5rem;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
     margin-top: 0.75rem;
     font-size: 0.8rem;
     color: var(--text-muted);
