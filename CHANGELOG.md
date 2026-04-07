@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.28.26 — 2026-04-07
+
+### Fix: Dashboard-Header-Layout-Shift + Module-Grid auf 4 Spalten gedeckelt
+
+**Layout-Shift bei Pipeline-Pause-Button:** Der `pipeline-toggle-btn`
+startete bisher mit `style="display: none;"` und wurde erst per JS
+sichtbar gemacht (`refreshPipelineStatus()` setzte `btn.style.display
+= ''` nach dem ersten API-Call). Das ergab einen Layout-Shift kurz
+nach Page-Load — der Button erschien plötzlich im Header und drückte
+Title + Buttons in eine zweite Zeile.
+
+Fix: Button von Anfang an sichtbar mit Default-Label „⏸ Pipeline
+pausieren" und `data-state="running"`. Die JS aktualisiert nur noch
+`textContent` und `dataset.state` wenn der API-Call wirklich `paused`
+zurückgibt. Header bleibt damit von Anfang an stabil in einer Zeile,
+wie auf der Logs-Seite.
+
+**Module-Grid 4-Spalten-Cap auf Desktop:** `repeat(auto-fit, minmax(
+180px, 1fr))` ließ die 8 Module-Karten auf sehr breiten Viewports zu
+5+ Spalten ausufern. Eine Media-Query ab 920px Breite deckelt jetzt
+auf `repeat(4, 1fr)` — ergibt das gewohnte 4×2-Layout am Desktop, ohne
+das responsive Verhalten unter 920px (1–3 Spalten je nach Breite) zu
+verlieren.
+
 ## v2.28.25 — 2026-04-07
 
 ### Fix: Cache-Buster für CSS/JS an die App-Version koppeln
