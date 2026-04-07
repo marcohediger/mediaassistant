@@ -1,7 +1,7 @@
 import asyncio
 import os
 import subprocess
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from database import async_session
@@ -44,13 +44,16 @@ async def retry_job_endpoint(debug_key: str):
 
 
 @router.post("/jobs/retry-all-errors")
-async def retry_all_errors_endpoint():
+async def retry_all_errors_endpoint(request: Request):
     """Retry every job that is currently in 'error' state.
 
     Each retry runs through the standard retry_job() flow, which uses an
     atomic claim (error → processing) to guarantee that no two retries can
     process the same job_id concurrently — even if this endpoint is called
     multiple times in rapid succession.
+
+    Redirect target: 'return_url' form field if present (preserves the user's
+    filter state), else Referer header, else /logs?tab=jobs&status=error.
     """
     from pipeline import retry_job
     async with async_session() as session:
@@ -69,7 +72,25 @@ async def retry_all_errors_endpoint():
     except Exception:
         pass
 
-    return RedirectResponse(url="/logs?tab=jobs&status=error", status_code=303)
+    # Determine redirect target — preserve user's filter view if possible
+    return_url = None
+    try:
+        form = await request.form()
+        return_url = form.get("return_url")
+    except Exception:
+        pass
+    if not return_url:
+        return_url = request.headers.get("referer")
+    if not return_url or not return_url.startswith("/logs"):
+        # Sanitize: only allow /logs paths to prevent open redirect
+        if return_url and "/logs" in return_url:
+            # Extract the /logs portion from a full URL
+            idx = return_url.find("/logs")
+            return_url = return_url[idx:]
+        else:
+            return_url = "/logs?tab=jobs&status=error"
+
+    return RedirectResponse(url=return_url, status_code=303)
 
 
 @router.post("/trigger-scan")
