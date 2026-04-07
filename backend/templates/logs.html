@@ -16,21 +16,46 @@ async function retryAllErrors(ev) {
     const confirmMsg = {{ t.logs.retry_all_confirm | tojson }};
     const returnUrl = {{ ('/logs?' + current_query) | tojson }};
     if (!confirm(confirmMsg)) return;
+
+    const btn = ev.currentTarget;
+    const origText = btn.textContent;
+    btn.textContent = '⏳ ...';
+    btn.style.pointerEvents = 'none';
+
     try {
         const resp = await fetch('/api/jobs/retry-all-errors', {
             method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: 'return_url=' + encodeURIComponent(returnUrl),
-            redirect: 'follow',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'fetch'
+            },
             credentials: 'same-origin'
         });
-        if (resp.ok || resp.status === 303 || resp.redirected) {
-            window.location.href = returnUrl;
-        } else {
+        if (!resp.ok) {
             alert('Retry-All fehlgeschlagen: HTTP ' + resp.status);
+            btn.textContent = origText;
+            btn.style.pointerEvents = '';
+            return;
         }
+        const data = await resp.json();
+        const count = data.count || 0;
+        const sample = (data.debug_keys || []).slice(0, 5).join(', ');
+        const more = data.truncated ? ' …' : '';
+        if (count === 0) {
+            alert('Keine Jobs im Status "error" gefunden — nichts zu tun.');
+            btn.textContent = origText;
+            btn.style.pointerEvents = '';
+            return;
+        }
+        alert('✅ ' + count + ' Job' + (count === 1 ? '' : 's') +
+              ' für Retry vorgemerkt.\n\n' +
+              'Erste IDs: ' + sample + more +
+              '\n\nSeite wird neu geladen.');
+        window.location.href = returnUrl;
     } catch (e) {
         alert('Retry-All Fehler: ' + e.message);
+        btn.textContent = origText;
+        btn.style.pointerEvents = '';
     }
 }
 </script>

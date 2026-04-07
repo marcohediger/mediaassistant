@@ -2,7 +2,7 @@ import asyncio
 import os
 import subprocess
 from fastapi import APIRouter, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy import select
 from database import async_session
 from models import Job
@@ -52,8 +52,9 @@ async def retry_all_errors_endpoint(request: Request):
     process the same job_id concurrently — even if this endpoint is called
     multiple times in rapid succession.
 
-    Redirect target: 'return_url' form field if present (preserves the user's
-    filter state), else Referer header, else /logs?tab=jobs&status=error.
+    Returns JSON `{count, debug_keys[]}` when called via fetch (the JS
+    handler shows a toast and reloads). Falls back to a 303 redirect when
+    called via classic form-POST so non-JS clients still work.
     """
     from pipeline import retry_job
     async with async_session() as session:
@@ -63,16 +64,36 @@ async def retry_all_errors_endpoint(request: Request):
         rows = result.all()
 
     count = 0
+    debug_keys = []
     for row in rows:
         asyncio.create_task(retry_job(row.id))
         count += 1
+        if len(debug_keys) < 20:
+            debug_keys.append(row.debug_key)
 
     try:
-        await log_info("api", f"Retry-All triggered: {count} errored jobs queued for retry")
+        await log_info(
+            "api",
+            f"Retry-All triggered: {count} errored jobs queued for retry",
+            ", ".join(debug_keys[:20]) + (" ..." if count > 20 else ""),
+        )
     except Exception:
         pass
 
-    # Determine redirect target — preserve user's filter view if possible
+    # Detect fetch vs classic form post
+    accept = request.headers.get("accept", "")
+    requested_with = request.headers.get("x-requested-with", "")
+    is_fetch = "application/json" in accept or requested_with == "fetch"
+
+    if is_fetch:
+        return JSONResponse({
+            "status": "ok",
+            "count": count,
+            "debug_keys": debug_keys,
+            "truncated": count > len(debug_keys),
+        })
+
+    # Classic form-POST fallback: 303 redirect
     return_url = None
     try:
         form = await request.form()
@@ -82,9 +103,7 @@ async def retry_all_errors_endpoint(request: Request):
     if not return_url:
         return_url = request.headers.get("referer")
     if not return_url or not return_url.startswith("/logs"):
-        # Sanitize: only allow /logs paths to prevent open redirect
         if return_url and "/logs" in return_url:
-            # Extract the /logs portion from a full URL
             idx = return_url.find("/logs")
             return_url = return_url[idx:]
         else:
