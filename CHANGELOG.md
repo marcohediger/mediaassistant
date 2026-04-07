@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.28.3 — 2026-04-07
+
+### Fix: retry_job hatte Folge-Race-Window
+
+Beim Test des v2.28.2-Fixes im Dev-Container fiel auf, dass `retry_job`
+zwischen seinen zwei Commits (1. status=queued, 2. step_result aufgeräumt)
+ein TOCTOU-Window hat, in dem ein paralleler Aufrufer mit *stale* step_result
+claimen konnte — Pipeline würde dann IA-01 überspringen, weil der alte
+Error-Eintrag noch im step_result liegt.
+
+**Fix:** `retry_job` claimt jetzt atomar `error → processing` (transienter
+Lock-State), führt die Cleanup-Operationen durch (Datei-Move, step_result
+bereinigen), und flippt erst danach auf `queued`. Erst dann darf
+`run_pipeline` claimen. Das verhindert sowohl parallele `retry_job`-Aufrufe
+(z.B. Doppelklick / mehrere Browser-Tabs) als auch die Race mit dem Worker.
+
+### Test Suite: 4 neue Race-Condition-Tests in `test_duplicate_fix.py`
+
+- **Test 5:** 10 parallele `run_pipeline()` für denselben queued Job → exakt
+  1 Ausführung, 9 mit `already claimed` geblockt, exakt 1 IA-01 Error-Log
+- **Test 6:** `run_pipeline()` auf Job mit Status `done` ist No-op
+- **Test 7:** `retry_job()` parallel zu 5× `run_pipeline()` → nur retry_job
+  läuft, IA-01 wird tatsächlich frisch ausgeführt (kein stale Reuse)
+- **Test 8:** 5 parallele `retry_job()`-Aufrufe → exakt 1 erfolgreich, 4
+  geben False zurück
+
+Alle 26 Tests im Dev-Container grün (`docker exec mediaassistant-dev
+python3 /app/test_duplicate_fix.py`).
+
 ## v2.28.2 — 2026-04-07
 
 ### Fix: Race-Condition — derselbe Job wurde von mehreren Pipeline-Instanzen parallel verarbeitet

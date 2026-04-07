@@ -279,12 +279,23 @@ def _write_log(path: str, content: str):
 async def retry_job(job_id: int):
     """Reset a failed job and re-run the pipeline from the failed step."""
     async with async_session() as session:
-        job = await session.get(Job, job_id)
-        if not job or job.status not in ("error",):
-            return False
-        # Immediately mark as queued to prevent duplicate retries
-        job.status = "queued"
+        # Atomic claim: only one caller transitions error -> processing.
+        # We use 'processing' as a transient lock state during cleanup so
+        # neither the worker nor a parallel run_pipeline call can claim the
+        # job while we still have a stale step_result on it. After cleanup
+        # we flip to 'queued' and let run_pipeline claim it normally.
+        claim = await session.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.status == "error")
+            .values(status="processing")
+        )
         await session.commit()
+        if claim.rowcount == 0:
+            return False
+
+        job = await session.get(Job, job_id)
+        if not job:
+            return False
 
         # If file was moved to error/, move it to internal reprocess dir (never back to inbox)
         if job.target_path and os.path.exists(job.target_path):
@@ -313,6 +324,8 @@ async def retry_job(job_id: int):
 
         job.step_result = step_results
         flag_modified(job, "step_result")
+        # Now flip from transient 'processing' to 'queued' so run_pipeline's
+        # atomic claim can pick it up.
         job.status = "queued"
         job.error_message = None
         await session.commit()
