@@ -6,6 +6,7 @@ import os
 import httpx
 from ai_backends import acquire_ai_backend
 from config import config_manager
+from system_logger import log_warning
 from PIL import Image
 
 
@@ -341,8 +342,34 @@ Use this information together with the image content for your classification."""
 
     try:
         result = json.loads(content)
-    except json.JSONDecodeError:
-        result = {"raw_response": content, "parse_error": True}
+    except json.JSONDecodeError as parse_exc:
+        # Loud failure: silent parse_error previously caused jobs to be marked
+        # 'done' with empty tags. Set status=error so the pipeline picks it up
+        # AND emit a system log entry so it shows up in the dashboard.
+        await log_warning(
+            "ai",
+            f"{job.debug_key} IA-05 JSON parse failed",
+            (
+                f"Modell {model} lieferte unparsbares JSON "
+                f"(wahrscheinlich Repetition-Loop oder abgeschnittene Antwort).\n"
+                f"Parse-Fehler: {parse_exc}\n\n"
+                f"Erste 800 Zeichen der Antwort:\n{content[:800]}"
+            ),
+        )
+        result = {
+            "status": "error",
+            "reason": "JSON parse failed (likely truncated/repetition loop in AI response)",
+            "raw_response": content,
+            "parse_error": True,
+            # Sane defaults so IA-07 does not crash on missing fields:
+            "type": "unknown",
+            "tags": [],
+            "description": "",
+            "mood": "",
+            "people_count": 0,
+            "quality": "unbekannt",
+            "confidence": 0.0,
+        }
 
     # KI-Kontext für Anzeige im Log-Detail speichern
     result["_context"] = metadata_context

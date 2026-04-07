@@ -1,5 +1,49 @@
 # Changelog
 
+## v2.28.16 — 2026-04-07
+
+### Fix: Stille IA-05 parse_error landeten als 'done' im Log
+
+User-Report: Eine HEIC-Datei wurde von `qwen3-vl-4b` mit einer
+Repetition-Loop-Antwort verarbeitet (`"Hügel", "Hügel", "Hügel", ...`
+bis `max_tokens=500` voll war), das JSON war abgeschnitten und
+unparsbar. **Trotzdem** wurde der Job stillschweigend als `done`
+markiert — keine Warnung im UI, keine `error_message`, keine
+System-Log-Notification. IA-07 schrieb dann eine Datei mit leeren
+KI-Tags in die Library.
+
+**Ursache** in `pipeline/step_ia05_ai.py:340-343`: bei
+`json.JSONDecodeError` wurde ein Result mit `parse_error: True`
+zurückgegeben, aber **ohne** `status="error"`. Die Pipeline-Logik in
+`pipeline/__init__.py:203-206` prüft ausschließlich auf
+`status == "error"` — das `parse_error`-Flag wurde komplett ignoriert.
+Konsequenz: `has_step_errors = False` → Job wird als `done` markiert,
+Datei landet in der Library, Bug bleibt unsichtbar.
+
+**Fix:**
+
+1. parse_error-Pfad in IA-05 returniert jetzt ein vollständiges
+   Error-Result mit `status="error"`, einem klaren `reason`, der
+   `raw_response` (zur Diagnose) und sane Default-Feldern (`tags=[]`,
+   `type="unknown"` etc.) damit IA-07 nicht crasht.
+2. Zusätzlich wird via `log_warning("ai", ...)` ein prominenter
+   System-Log-Eintrag erzeugt: Modell, debug_key, Parse-Fehler und
+   die ersten 800 Zeichen der kaputten Antwort. Damit ist das Problem
+   im Dashboard sichtbar und debuggbar.
+
+**Effekt im UI:**
+- Job-Status: `done` mit `error_message: "Warnungen in: IA-05"`
+  (statt stillem `done` ohne Hinweis)
+- System-Log-Eintrag mit Quelle `ai` und der vollständigen kaputten
+  KI-Antwort
+
+**Nicht im Scope dieses Fixes** (eigene Folge-Issues möglich):
+- Repetition-Loop selbst verhindern (würde `frequency_penalty` /
+  `presence_penalty` / `response_format=json_object` in der API-Payload
+  brauchen)
+- JSON-Reparatur bei abgeschnittenen Antworten
+- Auto-Retry bei parse_error mit härteren Sampling-Parametern
+
 ## v2.28.15 — 2026-04-07
 
 ### Fix: AI-Tag-Halluzinationen ("Hund" ohne sichtbaren Hund)
