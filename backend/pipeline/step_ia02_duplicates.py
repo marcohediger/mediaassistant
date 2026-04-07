@@ -111,7 +111,7 @@ async def execute(job, session) -> dict:
             select(Job).where(
                 Job.file_hash == file_hash,
                 Job.id != job.id,
-                Job.status.in_(("done", "duplicate", "review", "processing", "error")),
+                Job.status.in_(("done", "duplicate", "review", "processing", "error")),  # excludes 'orphan' & 'queued' & 'deleted' & 'skipped'
             ).limit(10)
         )
         candidates = result.scalars().all()
@@ -151,7 +151,7 @@ async def execute(job, session) -> dict:
             result = await session.execute(
                 select(Job).where(
                     Job.id != job.id,
-                    Job.status.in_(("done", "duplicate", "review", "processing", "error")),
+                    Job.status.in_(("done", "duplicate", "review", "processing", "error")),  # excludes 'orphan' & 'queued' & 'deleted' & 'skipped'
                     Job.filename.like(f"{basename}.%"),
                 )
             )
@@ -188,7 +188,7 @@ async def execute(job, session) -> dict:
                 select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id).where(
                     Job.phash.isnot(None),
                     Job.id != job.id,
-                    Job.status.in_(("done", "duplicate", "review", "processing", "error")),
+                    Job.status.in_(("done", "duplicate", "review", "processing", "error")),  # excludes 'orphan' & 'queued' & 'deleted' & 'skipped'
                 ).offset(offset).limit(BATCH_SIZE)
             )
             rows = result.all()
@@ -273,7 +273,7 @@ async def execute_video_phash(job, session) -> dict | None:
             select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id).where(
                 Job.phash.isnot(None),
                 Job.id != job.id,
-                Job.status.in_(("done", "duplicate", "review", "processing", "error")),
+                Job.status.in_(("done", "duplicate", "review", "processing", "error")),  # excludes 'orphan' & 'queued' & 'deleted' & 'skipped'
             ).offset(offset).limit(BATCH_SIZE)
         )
         rows = result.all()

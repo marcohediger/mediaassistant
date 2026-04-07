@@ -7,6 +7,8 @@
         <a href="/logs/dryrun-report" class="btn btn-small btn-secondary">{{ t.dryrun.report_button }}</a>
         <a href="#" class="btn btn-small btn-secondary"
            onclick="retryAllErrors(event)">{{ t.logs.retry_all_errors }}</a>
+        <a href="#" class="btn btn-small btn-secondary"
+           onclick="cleanupOrphans(event)">{{ t.logs.cleanup_orphans }}</a>
     </div>
 </div>
 
@@ -54,6 +56,48 @@ async function retryAllErrors(ev) {
         window.location.href = returnUrl;
     } catch (e) {
         alert('Retry-All Fehler: ' + e.message);
+        btn.textContent = origText;
+        btn.style.pointerEvents = '';
+    }
+}
+
+async function cleanupOrphans(ev) {
+    ev.preventDefault();
+    const confirmMsg = {{ t.logs.cleanup_orphans_confirm | tojson }};
+    if (!confirm(confirmMsg)) return;
+
+    const checkImmich = confirm({{ t.logs.cleanup_orphans_immich | tojson }});
+
+    const btn = ev.currentTarget;
+    const origText = btn.textContent;
+    btn.textContent = '⏳ ...';
+    btn.style.pointerEvents = 'none';
+
+    try {
+        const url = '/api/jobs/cleanup-orphans' + (checkImmich ? '?check_immich=1' : '');
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'fetch'
+            },
+            credentials: 'same-origin'
+        });
+        if (!resp.ok) {
+            alert('Cleanup fehlgeschlagen: HTTP ' + resp.status);
+            btn.textContent = origText;
+            btn.style.pointerEvents = '';
+            return;
+        }
+        const data = await resp.json();
+        alert('🔍 Orphan-Scan gestartet im Hintergrund.\n\n' +
+              'Geprüft werden ' + data.scanning + ' Jobs (done/duplicate/review).\n' +
+              (data.check_immich ? 'Inkl. Immich-API-Check.' : 'Lokale Pfade only.') +
+              '\n\nDer Scan läuft asynchron — Resultat im System-Log.\n\n' +
+              'Filterst du jetzt nach Status "orphan" um die Ergebnisse zu sehen.');
+        window.location.href = '/logs?tab=jobs&status=orphan';
+    } catch (e) {
+        alert('Cleanup Fehler: ' + e.message);
         btn.textContent = origText;
         btn.style.pointerEvents = '';
     }
@@ -133,6 +177,7 @@ async function retryAllErrors(ev) {
                 <option value="error" {{ 'selected' if status_filter == 'error' else '' }}>{{ t.logs.error }}</option>
                 <option value="duplicate" {{ 'selected' if status_filter == 'duplicate' else '' }}>{{ t.logs.duplicate }}</option>
                 <option value="review" {{ 'selected' if status_filter == 'review' else '' }}>{{ t.logs.review }}</option>
+                <option value="orphan" {{ 'selected' if status_filter == 'orphan' else '' }}>{{ t.logs.orphan }}</option>
             </select>
         </div>
         <button type="submit" class="btn btn-small btn-secondary">{{ t.logs.filter }}</button>

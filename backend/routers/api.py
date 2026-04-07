@@ -62,6 +62,92 @@ async def _bulk_reset_errors_in_background(job_ids: list[int]):
         await asyncio.sleep(0.05)
 
 
+async def _scan_orphans_in_background(check_immich: bool):
+    """Scan all settled jobs (done/duplicate/review) and mark those whose
+    file no longer exists as 'orphan'. Stores the previous status in
+    error_message for possible un-orphan recovery.
+    """
+    from datetime import datetime
+    from immich_client import asset_exists
+    from sqlalchemy import update as sql_update
+
+    SETTLED_STATES = ("done", "duplicate", "review")
+    BATCH_SIZE = 200
+    offset = 0
+    total_checked = 0
+    total_orphaned = 0
+    total_immich_skipped = 0
+
+    while True:
+        async with async_session() as session:
+            result = await session.execute(
+                select(Job.id, Job.debug_key, Job.status, Job.target_path, Job.original_path)
+                .where(Job.status.in_(SETTLED_STATES))
+                .order_by(Job.id)
+                .offset(offset)
+                .limit(BATCH_SIZE)
+            )
+            rows = result.all()
+
+        if not rows:
+            break
+
+        orphan_ids = []
+        for row in rows:
+            total_checked += 1
+            path = row.target_path or row.original_path
+            if not path:
+                # No path at all → orphan
+                orphan_ids.append((row.id, row.status, "no path"))
+                continue
+
+            if path.startswith("immich:"):
+                if not check_immich:
+                    total_immich_skipped += 1
+                    continue
+                asset_id = path[7:]
+                try:
+                    exists = await asset_exists(asset_id)
+                except Exception:
+                    # API error → don't mark as orphan, skip cautiously
+                    continue
+                if not exists:
+                    orphan_ids.append((row.id, row.status, "immich asset gone"))
+                continue
+
+            # Local path
+            if not os.path.exists(path):
+                orphan_ids.append((row.id, row.status, "file gone"))
+
+        # Mark this batch as orphan
+        if orphan_ids:
+            async with async_session() as session:
+                for jid, prev_status, reason in orphan_ids:
+                    await session.execute(
+                        sql_update(Job)
+                        .where(Job.id == jid)
+                        .values(
+                            status="orphan",
+                            error_message=f"Auto-orphaned from {prev_status} ({reason}) at {datetime.now().isoformat(timespec='seconds')}",
+                        )
+                    )
+                await session.commit()
+            total_orphaned += len(orphan_ids)
+
+        offset += BATCH_SIZE
+        # Tiny pause to avoid blocking the event loop / DB pool
+        await asyncio.sleep(0.05)
+
+    try:
+        await log_info(
+            "api",
+            f"Orphan-Cleanup done: {total_orphaned} jobs marked orphan",
+            f"Checked {total_checked}, immich skipped {total_immich_skipped}",
+        )
+    except Exception:
+        pass
+
+
 @router.post("/jobs/retry-all-errors")
 async def retry_all_errors_endpoint(request: Request):
     """Reset every job that is currently in 'error' state to 'queued'.
@@ -129,6 +215,50 @@ async def retry_all_errors_endpoint(request: Request):
             return_url = "/logs?tab=jobs&status=error"
 
     return RedirectResponse(url=return_url, status_code=303)
+
+
+@router.post("/jobs/cleanup-orphans")
+async def cleanup_orphans_endpoint(request: Request):
+    """Scan all settled jobs (done/duplicate/review) and mark those whose
+    file is gone as status='orphan'. Excludes them from IA-02 candidate
+    queries so they no longer cause orphan-warnings on every new job.
+
+    Query param `check_immich=1` (default 0) also verifies Immich-asset
+    existence via API. Without it, immich:* targets are assumed valid.
+    """
+    check_immich = request.query_params.get("check_immich") == "1"
+
+    # Get count for immediate UI feedback
+    async with async_session() as session:
+        result = await session.execute(
+            select(func.count(Job.id))
+            .where(Job.status.in_(("done", "duplicate", "review")))
+        )
+        total_to_scan = result.scalar() or 0
+
+    asyncio.create_task(_scan_orphans_in_background(check_immich))
+
+    try:
+        await log_info(
+            "api",
+            f"Orphan-Cleanup triggered: scanning {total_to_scan} settled jobs"
+            + (" (incl. Immich check)" if check_immich else " (local only)"),
+        )
+    except Exception:
+        pass
+
+    accept = request.headers.get("accept", "")
+    requested_with = request.headers.get("x-requested-with", "")
+    is_fetch = "application/json" in accept or requested_with == "fetch"
+
+    if is_fetch:
+        return JSONResponse({
+            "status": "ok",
+            "scanning": total_to_scan,
+            "check_immich": check_immich,
+        })
+
+    return RedirectResponse(url="/logs?tab=jobs&status=orphan", status_code=303)
 
 
 @router.post("/trigger-scan")

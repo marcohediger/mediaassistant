@@ -15,7 +15,7 @@ class Job(Base):
     original_path = Column(Text, nullable=False)
     target_path = Column(Text)
     debug_key = Column(Text, unique=True)
-    status = Column(Text, default="queued")  # queued/processing/done/error/duplicate/review
+    status = Column(Text, default="queued")  # queued/processing/done/error/duplicate/review/orphan/skipped/deleted
     current_step = Column(Text)  # IA-01 bis IA-11
     step_result = Column(JSON, default=dict)
     error_message = Column(Text)
