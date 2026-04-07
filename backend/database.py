@@ -9,6 +9,16 @@ engine = create_async_engine(
     f"sqlite+aiosqlite:///{DATABASE_PATH}",
     echo=False,
     connect_args={"timeout": 120},
+    # Pool tuning for high-concurrency scenarios (bulk retries, parallel
+    # pipeline workers, dashboard polling). Default was 5/10 = max 15
+    # connections, which got exhausted in v2.28.7 when retry-all spawned
+    # ~33 parallel tasks. With 20/40 we have headroom for ~60 concurrent
+    # connections — comfortably above the worker pool size + bulk-retry
+    # background task + dashboard JSON polling.
+    pool_size=20,
+    max_overflow=40,
+    pool_timeout=60,
+    pool_pre_ping=True,
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

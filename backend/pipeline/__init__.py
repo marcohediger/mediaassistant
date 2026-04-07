@@ -276,14 +276,25 @@ def _write_log(path: str, content: str):
         f.write(content)
 
 
-async def retry_job(job_id: int):
-    """Reset a failed job and re-run the pipeline from the failed step."""
+async def reset_job_for_retry(job_id: int) -> bool:
+    """Prepare a failed job for retry: file move + step_result cleanup +
+    transition error → queued. Does NOT call run_pipeline directly.
+
+    Returns True if the job was successfully reset, False if not in error
+    state. The pipeline worker will pick the job up at its own pace,
+    avoiding DB connection-pool exhaustion when retrying many jobs at once.
+
+    This is the building block used by both retry_job() (single retry,
+    runs pipeline immediately for instant feedback) and the bulk
+    /api/jobs/retry-all-errors endpoint (queues many jobs without
+    bursting connections).
+    """
     async with async_session() as session:
         # Atomic claim: only one caller transitions error -> processing.
         # We use 'processing' as a transient lock state during cleanup so
         # neither the worker nor a parallel run_pipeline call can claim the
         # job while we still have a stale step_result on it. After cleanup
-        # we flip to 'queued' and let run_pipeline claim it normally.
+        # we flip to 'queued' and let the worker / run_pipeline claim it.
         claim = await session.execute(
             update(Job)
             .where(Job.id == job_id, Job.status == "error")
@@ -324,12 +335,25 @@ async def retry_job(job_id: int):
 
         job.step_result = step_results
         flag_modified(job, "step_result")
-        # Now flip from transient 'processing' to 'queued' so run_pipeline's
-        # atomic claim can pick it up.
+        # Now flip from transient 'processing' to 'queued' so the pipeline
+        # worker / run_pipeline can claim it.
         job.status = "queued"
         job.error_message = None
         await session.commit()
 
-    # Re-run pipeline
+    return True
+
+
+async def retry_job(job_id: int):
+    """Single-job retry: reset state, then immediately run the pipeline.
+
+    Used by the per-job retry button (instant feedback). Bulk retries via
+    /api/jobs/retry-all-errors should use reset_job_for_retry() directly
+    and let the worker pick the jobs up — otherwise the burst of parallel
+    run_pipeline calls exhausts the DB connection pool.
+    """
+    ok = await reset_job_for_retry(job_id)
+    if not ok:
+        return False
     await run_pipeline(job_id)
     return True

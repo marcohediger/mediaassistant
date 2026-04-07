@@ -43,39 +43,58 @@ async def retry_job_endpoint(debug_key: str):
     return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
 
 
+async def _bulk_reset_errors_in_background(job_ids: list[int]):
+    """Sequentially reset many errored jobs to 'queued' so the pipeline
+    worker picks them up at its own pace. Throttled to avoid bursting
+    the DB connection pool.
+    """
+    from pipeline import reset_job_for_retry
+    for jid in job_ids:
+        try:
+            await reset_job_for_retry(jid)
+        except Exception as e:
+            try:
+                await log_info("api", f"Bulk-Retry: Job {jid} reset failed: {e}")
+            except Exception:
+                pass
+        # Small delay → spreads DB writes, gives the worker room to claim
+        # already-reset jobs while we keep resetting more
+        await asyncio.sleep(0.05)
+
+
 @router.post("/jobs/retry-all-errors")
 async def retry_all_errors_endpoint(request: Request):
-    """Retry every job that is currently in 'error' state.
+    """Reset every job that is currently in 'error' state to 'queued'.
 
-    Each retry runs through the standard retry_job() flow, which uses an
-    atomic claim (error → processing) to guarantee that no two retries can
-    process the same job_id concurrently — even if this endpoint is called
-    multiple times in rapid succession.
+    Uses reset_job_for_retry() (NOT retry_job()) so we don't fire one
+    run_pipeline() per job in parallel — that exhausted the SQLAlchemy
+    connection pool in v2.28.7. Instead, the resets happen sequentially
+    in a background task with a tiny delay between each, and the normal
+    pipeline worker picks the jobs up at its configured concurrency.
 
     Returns JSON `{count, debug_keys[]}` when called via fetch (the JS
     handler shows a toast and reloads). Falls back to a 303 redirect when
     called via classic form-POST so non-JS clients still work.
     """
-    from pipeline import retry_job
     async with async_session() as session:
         result = await session.execute(
             select(Job.id, Job.debug_key).where(Job.status == "error")
         )
         rows = result.all()
 
-    count = 0
-    debug_keys = []
-    for row in rows:
-        asyncio.create_task(retry_job(row.id))
-        count += 1
-        if len(debug_keys) < 20:
-            debug_keys.append(row.debug_key)
+    count = len(rows)
+    debug_keys = [row.debug_key for row in rows[:20]]
+    job_ids = [row.id for row in rows]
+
+    # Spawn a SINGLE background task that resets all jobs sequentially
+    if job_ids:
+        asyncio.create_task(_bulk_reset_errors_in_background(job_ids))
 
     try:
         await log_info(
             "api",
-            f"Retry-All triggered: {count} errored jobs queued for retry",
-            ", ".join(debug_keys[:20]) + (" ..." if count > 20 else ""),
+            f"Retry-All triggered: {count} errored jobs scheduled for sequential reset",
+            ", ".join(debug_keys) + (" ..." if count > len(debug_keys) else ""),
         )
     except Exception:
         pass
