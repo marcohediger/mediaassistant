@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.28.10 — 2026-04-07
+
+### Fix: IA-02 Warnungen für orphan-Kandidaten in jeden Job-Detail
+
+**Symptom:** Nach dem Bulk-Retry zeigte jeder neue Job mehrere Warnungen
+in IA-02 vom Typ:
+```
+Orphaned job MA-2026-XXXX: file missing, skipping duplicate match
+```
+
+**Ursache:** Die Duplikat-Erkennung sucht im DB nach Jobs mit gleichem
+file_hash oder ähnlichem pHash. Nach dem Retry-All wurden viele Files
+von `/library/error/duplicates/` nach `/app/data/reprocess/` verschoben,
+aber die alten DB-Einträge zeigen noch auf den ursprünglichen Pfad.
+`_file_exists()` gibt False zurück, und die Pipeline loggt ein
+**WARNING** für jeden Treffer — auch wenn der Orphan korrekt übersprungen
+und die Pipeline normal weiterläuft.
+
+**Fix:** Die Orphan-Meldungen werden jetzt nur noch auf **DEBUG-Level**
+geloggt, nicht mehr als WARNING. Die Funktionalität ändert sich nicht
+— Orphans werden weiter korrekt übersprungen, aber tauchen nicht mehr
+in der system_logs Warning-Liste oder im Job-Detail auf.
+
+Betrifft beide Stellen in `step_ia02_duplicates.py`:
+- Stage 1: SHA256 exact-match Loop
+- Stage 2: pHash similarity Loop
+
 ## v2.28.9 — 2026-04-07
 
 ### 🔥 Hotfix: Geocoding HTTP 429 (Nominatim Rate-Limit)
