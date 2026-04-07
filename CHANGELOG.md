@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.23 — 2026-04-07
+
+### UI: Logs-Header-Buttons brechen auf Mobile um
+
+Gleicher Fix wie v2.28.22 für die `/logs`-Ansicht: Dryrun-Report,
+Retry-All-Errors und Cleanup-Orphans bekommen `flex-wrap: wrap` und
+brechen auf engen Viewports unter den Titel um.
+
 ## v2.28.22 — 2026-04-07
 
 ### UI: Dashboard-Header-Buttons brechen auf Mobile um
