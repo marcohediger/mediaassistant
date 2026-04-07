@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}MediaAssistant{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
     {% if theme | default('dark') == 'light' %}
-    <link rel="stylesheet" href="/static/css/light.css?v=4">
+    <link rel="stylesheet" href="/static/css/light.css?v={{ version }}">
     {% endif %}
 </head>
 <body data-theme="{{ theme | default('dark') }}">
@@ -48,6 +48,6 @@
     <div id="lightbox" class="lightbox" onclick="this.classList.remove('active')">
         <img id="lightbox-img" src="" alt="">
     </div>
-    <script src="/static/js/app.js?v=4"></script>
+    <script src="/static/js/app.js?v={{ version }}"></script>
 </body>
 </html>
