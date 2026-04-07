@@ -1,13 +1,99 @@
+import asyncio
+import logging
+import time
+
 import httpx
 from config import config_manager
+from version import VERSION
+
+logger = logging.getLogger("mediaassistant.pipeline.ia03")
+
+# Identifying User-Agent — required by Nominatim Usage Policy
+# (https://operations.osmfoundation.org/policies/nominatim/)
+USER_AGENT = f"MediaAssistant/{VERSION} (self-hosted photo manager)"
+
+# Global rate limiter: Nominatim requires ≤ 1 req/s. We use a single
+# asyncio.Lock + last_request timestamp to enforce this across all
+# concurrent pipeline workers.
+_rate_lock = asyncio.Lock()
+_last_request_ts = 0.0
+_MIN_INTERVAL_SEC = 1.1  # 1.1 to be safe (Nominatim measures strictly)
+
+# In-memory cache: round coords to 4 decimal places (~11m precision) so
+# adjacent photos from a single location share the same geocoding result.
+# Max 1024 entries; simple FIFO eviction.
+_geo_cache: dict[tuple[float, float], dict] = {}
+_GEO_CACHE_MAX = 1024
+
+
+def _cache_key(lat: float, lon: float) -> tuple[float, float]:
+    return (round(lat, 4), round(lon, 4))
+
+
+async def _throttle():
+    """Enforce ≥ _MIN_INTERVAL_SEC between Nominatim requests globally."""
+    global _last_request_ts
+    async with _rate_lock:
+        now = time.monotonic()
+        wait = _MIN_INTERVAL_SEC - (now - _last_request_ts)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_request_ts = time.monotonic()
+
+
+async def _http_get_with_retry(url: str, params: dict, headers: dict | None = None,
+                                max_attempts: int = 4) -> httpx.Response:
+    """GET with respect for HTTP 429 + 5xx retry-after, exponential backoff.
+
+    The wait between attempts is `max(retry_after, exponential_backoff)`,
+    so a server that responds `Retry-After: 0` doesn't trick us into a
+    busy-loop. Initial backoff is 5s and doubles each attempt → 5/10/20s.
+    """
+    attempt = 0
+    backoff = 5.0
+    while True:
+        attempt += 1
+        async with httpx.AsyncClient(timeout=15, headers=headers or {}) as client:
+            try:
+                resp = await client.get(url, params=params)
+            except (httpx.TimeoutException, httpx.NetworkError) as e:
+                if attempt >= max_attempts:
+                    raise
+                logger.warning("Geocoding network error (attempt %d): %s", attempt, e)
+                await asyncio.sleep(backoff)
+                backoff *= 2
+                continue
+        if resp.status_code == 200:
+            return resp
+        if resp.status_code in (429, 502, 503, 504) and attempt < max_attempts:
+            retry_after = resp.headers.get("retry-after")
+            ra = 0.0
+            if retry_after:
+                try:
+                    ra = float(retry_after)
+                except ValueError:
+                    ra = 0.0
+            # Always wait at least the exponential backoff, even if the
+            # server says Retry-After: 0 (which Nominatim does when
+            # blocking abusive IPs).
+            delay = max(ra, backoff)
+            logger.warning(
+                "Geocoding HTTP %d (attempt %d/%d), Retry-After=%s, waiting %.1fs",
+                resp.status_code, attempt, max_attempts, retry_after or "-", delay,
+            )
+            await asyncio.sleep(delay)
+            backoff *= 2
+            continue
+        return resp
 
 
 async def _reverse_nominatim(url: str, lat: float, lon: float) -> dict:
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{url.rstrip('/')}/reverse",
-            params={"lat": lat, "lon": lon, "format": "json", "accept-language": "de"},
-        )
+    await _throttle()
+    resp = await _http_get_with_retry(
+        f"{url.rstrip('/')}/reverse",
+        params={"lat": lat, "lon": lon, "format": "json", "accept-language": "de"},
+        headers={"User-Agent": USER_AGENT},
+    )
     if resp.status_code != 200:
         raise RuntimeError(f"Nominatim HTTP {resp.status_code}")
     data = resp.json()
@@ -22,11 +108,11 @@ async def _reverse_nominatim(url: str, lat: float, lon: float) -> dict:
 
 
 async def _reverse_photon(url: str, lat: float, lon: float) -> dict:
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{url.rstrip('/')}/reverse",
-            params={"lat": lat, "lon": lon, "lang": "de"},
-        )
+    resp = await _http_get_with_retry(
+        f"{url.rstrip('/')}/reverse",
+        params={"lat": lat, "lon": lon, "lang": "de"},
+        headers={"User-Agent": USER_AGENT},
+    )
     if resp.status_code != 200:
         raise RuntimeError(f"Photon HTTP {resp.status_code}")
     data = resp.json()
@@ -44,11 +130,11 @@ async def _reverse_photon(url: str, lat: float, lon: float) -> dict:
 
 
 async def _reverse_google(url: str, lat: float, lon: float, api_key: str) -> dict:
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{url.rstrip('/')}/json",
-            params={"latlng": f"{lat},{lon}", "key": api_key, "language": "de"},
-        )
+    resp = await _http_get_with_retry(
+        f"{url.rstrip('/')}/json",
+        params={"latlng": f"{lat},{lon}", "key": api_key, "language": "de"},
+        headers={"User-Agent": USER_AGENT},
+    )
     if resp.status_code != 200:
         raise RuntimeError(f"Google HTTP {resp.status_code}")
     data = resp.json()
@@ -95,15 +181,37 @@ async def execute(job, session) -> dict:
     if not url:
         return {"status": "skipped", "reason": "no geocoding URL configured"}
 
-    if provider == "photon":
-        geo = await _reverse_photon(url, lat, lon)
-    elif provider == "google":
-        geo = await _reverse_google(url, lat, lon, api_key)
-    else:
-        geo = await _reverse_nominatim(url, lat, lon)
+    # In-memory cache lookup (key rounded to ~11m precision)
+    ck = _cache_key(lat, lon)
+    if ck in _geo_cache:
+        cached = dict(_geo_cache[ck])
+        cached["lat"] = lat
+        cached["lon"] = lon
+        cached["cached"] = True
+        return cached
+
+    try:
+        if provider == "photon":
+            geo = await _reverse_photon(url, lat, lon)
+        elif provider == "google":
+            geo = await _reverse_google(url, lat, lon, api_key)
+        else:
+            geo = await _reverse_nominatim(url, lat, lon)
+    except RuntimeError as e:
+        # Don't fail the whole pipeline on geocoding errors — IA-03 is non-critical
+        return {"status": "error", "reason": str(e), "provider": provider}
 
     geo["provider"] = provider
     geo["lat"] = lat
     geo["lon"] = lon
+
+    # Store in cache (FIFO eviction at max size)
+    if len(_geo_cache) >= _GEO_CACHE_MAX:
+        # drop oldest entry
+        try:
+            _geo_cache.pop(next(iter(_geo_cache)))
+        except StopIteration:
+            pass
+    _geo_cache[ck] = {k: v for k, v in geo.items() if k not in ("lat", "lon")}
 
     return geo
