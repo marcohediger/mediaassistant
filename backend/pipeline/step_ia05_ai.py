@@ -66,7 +66,9 @@ You may define new fitting sources if none of the examples match.
 
 ## 3) tags — Descriptive content tags
 3-8 tags describing the image content. In GERMAN, capitalize first letter, human-readable.
-Examples: Landschaft, Essen, Tier, Hund, Katze, Gruppe, Stadt, Natur, Sport, Feier, Strand, Berge, Haus, Boot, Auto, Blumen, Sonnenuntergang, Familie, Kind
+IMPORTANT: Only assign tags for things that are CLEARLY VISIBLE in the image. Never invent or guess tags. If you are unsure about an object, do NOT tag it.
+Tags should cover broad categories like: scene type (e.g. Landschaft, Innenraum), main subjects actually visible, activity, location type, notable objects, atmosphere.
+Do NOT use a fixed vocabulary — derive tags strictly from what you actually see.
 
 ## Other fields:
 - description: In GERMAN, factual, 1-2 sentences
