@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.28.25 — 2026-04-07
+
+### Fix: Cache-Buster für CSS/JS an die App-Version koppeln
+
+`base.html` hatte hardcoded `?v=20` (style.css), `?v=4` (light.css) und
+`?v=4` (app.js) als Cache-Buster — die wurden seit Ewigkeiten nicht
+mehr von Hand gebumpt. Jeder Browser hatte deswegen die alten Asset-
+Versionen unter dieser URL gecacht und hat die UI-Änderungen aus
+v2.28.21–v2.28.24 (responsive Module-Karten, Header-Wrap, Scan-Button-
+Refactor) gar nicht zu sehen bekommen.
+
+Cache-Buster jetzt an `{{ version }}` gekoppelt — bei jedem Release
+ändert sich die URL automatisch und der Browser holt frisch.
+
 ## v2.28.24 — 2026-04-07
 
 ### UI: Dashboard-Header analog zu Logs-Header + Module-Karten Text-Wrap
