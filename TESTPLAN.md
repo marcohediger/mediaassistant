@@ -129,6 +129,8 @@
 - [x] DNG: Tags korrekt geschrieben (file_size ändert sich)
 - [x] MP4: Tags korrekt in Video geschrieben
 - [x] Modul deaktiviert / keine Tags → `status: skipped, reason: no tags to write`
+- [x] **v2.28.2:** Sidecar-Schreiben ohne pre-delete (Workaround entfernt) — die Race, die den pre-delete nötig machte, ist via atomic claim in `run_pipeline` verhindert (siehe Sektion 13)
+- [x] **v2.28.2:** Bei einem Retry, der IA-07 erneut ausführen muss, ist ein leftover `.xmp` aus einem früheren Crash kein Problem mehr — `retry_job` löscht den entsprechenden step_result-Eintrag, neuer IA-07 schreibt frisch (kein leftover bei normalen Retries, da `retry_job` bei IA-07-Erfolg den Eintrag in step_result behält und IA-07 daher beim Retry komplett übersprungen wird)
 
 ### IA-08: Sortierung
 - [x] Statische Regeln werden immer zuerst ausgewertet (v2.8.0, verifiziert: rule_category vor AI)
@@ -160,6 +162,9 @@
 - [x] ISO 8601 Datumsformate mit Timezone/Mikrosekunden korrekt geparst
 - [x] DNG nach korrektem Jahresordner sortiert
 - [x] Video nach korrektem Jahresordner sortiert
+- [x] **v2.28.2:** `os.path.exists`-Check vor Immich-Upload **entfernt** (war Workaround für Race, die jetzt via atomic claim verhindert wird) — wenn die Quelldatei wirklich fehlt (z.B. User löscht manuell), wird der Fehler aus `upload_asset()` direkt durchgereicht
+- [x] **v2.28.2:** `os.path.exists`-Check vor Library-Move **entfernt** (gleicher Grund) — Fehler aus `safe_move()` werden direkt durchgereicht
+- [x] **v2.28.2:** Schutz vor Half-Copied Files liegt jetzt ausschliesslich beim Filewatcher (`_is_file_stable`, siehe Sektion 4) und beim atomic claim (verhindert dass zwei Pipeline-Instanzen denselben Pfad gleichzeitig anfassen)
 
 ### IA-09: Benachrichtigung
 - [x] Fehler vorhanden → E-Mail gesendet
@@ -271,6 +276,7 @@
 - [x] Dateigrösse stabil → Verarbeitung startet
 - [x] Dateigrösse geändert → erneute Wartezeit
 - [x] Leere Datei (0 Bytes) → wird als "unstable" übersprungen (current_size > 0 Check)
+- [x] **v2.28.2:** `_is_file_stable` ist nach Entfernung der IA-07/IA-08-Workarounds der **einzige** Schutz vor Half-Copied Files in der Pipeline — bestätigt durch Filewatcher-Tests, kein Workaround mehr in den Pipeline-Steps nötig
 - [x] Nicht unterstütztes Format (.txt) → wird vom Filewatcher ignoriert
 - [x] Bereits verarbeitete Datei erneut in Inbox → wird erneut verarbeitet, IA-02 erkennt Duplikat (MA-2026-0056/0057)
 - [x] Datei liegt nach Verarbeitung noch in Inbox (Move fehlgeschlagen) → wird erneut verarbeitet
@@ -577,6 +583,7 @@
 - [x] Gleiche Datei 5x mit verschiedenen Namen → 1 done + 4 SHA256-Duplikate
 - [x] Datei vor Filewatcher-Pickup gelöscht → kein Crash, kein Job erstellt
 - [x] 15 Dateien in Queue auf langsamem System → alle verarbeitet, kein OOM
+- [x] **v2.28.2/v2.28.3:** Derselbe `job_id` wird nicht von zwei Pipeline-Instanzen gleichzeitig verarbeitet (siehe Sektion 13: Race-Condition-Tests 5–8 in `test_duplicate_fix.py`)
 
 ### Grosse Dateien auf langsamem System
 
@@ -616,6 +623,7 @@
 | SMTP leerer Wert | JSON-encoded leerer String `""` wird nicht als "nicht konfiguriert" erkannt |
 | `...jpg` Dateiname | `os.path.splitext("...jpg")` gibt keine Extension → still ignoriert |
 | Max-Retry nur bei Start | `retry_count > MAX_RETRIES` Check nur beim Container-Start, nicht im laufenden Betrieb |
+| Externe Datei-Race | Wenn ein **externer** Prozess eine Inbox-Datei mid-pipeline löscht/ersetzt (z.B. iCloud re-sync), wird der entsprechende ExifTool/upload_asset/safe_move-Fehler direkt durchgereicht — der atomic claim aus v2.28.2 schützt nur vor *internen* Doppel-Verarbeitungen, nicht vor externen Filesystem-Eingriffen |
 
 ## 13. Race-Condition-Tests (v2.28.2 / v2.28.3)
 
