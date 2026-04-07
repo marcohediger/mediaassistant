@@ -1,5 +1,55 @@
 # Changelog
 
+## v2.28.13 — 2026-04-07
+
+### Hotfix: IA-07 "ExifTool Sidecar already exists" — atomic write
+
+**Symptom:**
+```
+[IA-07] ExifTool Sidecar Fehler: Error: '/app/data/reprocess/IMG_8484.HEIC.xmp'
+already exists - /app/data/reprocess/IMG_8484.HEIC
+```
+
+**Ursache:** Sequenzielles Retry-Szenario:
+1. Job A processed `/app/data/reprocess/IMG_8484.HEIC`, IA-07 schrieb
+   `IMG_8484.HEIC.xmp` erfolgreich
+2. Ein späterer Step (z.B. IA-08 Immich-Upload) failte
+3. Sidecar bleibt am Ort liegen (kein Cleanup im Fehlerfall)
+4. Bulk-Retry-Click → `reset_job_for_retry` cleared step_result, aber
+   nicht das `.xmp`-File auf der Disk
+5. Pipeline rennt erneut bis IA-07 → ExifTool refused mit "already
+   exists"
+
+In v2.28.2 hatte ich den `os.path.exists + os.remove`-Pre-Check entfernt
+weil er TOCTOU-anfällig war. Das war zu radikal — es löste die Race,
+nicht aber den sequenziellen Retry-Fall.
+
+**Fix:** Atomic-Write-Pattern in `_write_sidecar`:
+1. ExifTool schreibt zu `<sidecar>.{debug_key}.tmp` (eindeutiger Name)
+2. Bei Erfolg: `os.replace(tmp, final)` → POSIX-atomar, überschreibt
+   bestehendes File cleanly
+3. Bei Fehler: tmp wird gelöscht, ursprüngliches Sidecar bleibt unberührt
+
+Vorteile:
+- **Sequenzielles Retry**: stale `.xmp` von vorherigem Run wird sauber
+  überschrieben (anders als ExifTool-`-o` das refused)
+- **Race-frei**: jeder Job hat eindeutigen tmp-Namen via `debug_key`
+- **Atomar**: `os.replace` ist auf POSIX atomar, kein Half-State möglich
+- **Kein TOCTOU**: keine Existenz-Checks, einfach replacen
+
+**Defensive cleanup in `reset_job_for_retry`:**
+Räumt jetzt zusätzlich leftover `.xmp` und `.xmp.<key>.tmp` Files
+proaktiv weg, falls ein Job-Reset getriggert wird. Belt-and-suspenders
+zur atomic write — schadet nicht, hilft bei interrupted ExifTool-Runs.
+
+**Tests im Dev-Container — alle 3 grün:**
+
+| Test | Resultat |
+|---|---|
+| Stale 43-byte sidecar wird durch 869KB XMP ersetzt | ✅ STALE_MARKER weg |
+| First-time write ohne Leftover | ✅ Sidecar erstellt |
+| Kein `.tmp`-File leftover nach Replace | ✅ aufgeräumt |
+
 ## v2.28.12 — 2026-04-07
 
 ### i18n: "Orphan" → "Verwaist" (Deutsch)

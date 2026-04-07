@@ -194,11 +194,38 @@ async def _write_direct(job, keywords, description, ocr_text, ext):
 
 
 async def _write_sidecar(job, keywords, description, ocr_text, ext):
-    """Write metadata to an XMP sidecar file, leaving the original untouched."""
+    """Write metadata to an XMP sidecar file, leaving the original untouched.
+
+    Uses an atomic write pattern: ExifTool writes to a temp file with the
+    debug_key in its name, then os.replace() atomically moves it to the
+    final destination. This handles three cases robustly:
+
+    1. **First-time write**: temp doesn't exist, ExifTool creates it,
+       os.replace creates the final sidecar.
+    2. **Retry after a previous IA-07 success + later step failure**:
+       a stale sidecar from the prior run exists at the final path.
+       os.replace overwrites it cleanly (POSIX atomic).
+    3. **Concurrent calls** (shouldn't happen with the v2.28.2 atomic
+       claim, but defense in depth): each call uses a unique temp name
+       (debug_key suffix), so neither ExifTool invocation conflicts
+       with the other.
+
+    The previous v2.28.1 pre-delete approach had a TOCTOU race between
+    `os.path.exists` and `subprocess.run(exiftool)`. The atomic
+    write pattern eliminates that race entirely.
+    """
     sidecar_path = job.original_path + ".xmp"
+    tmp_sidecar = f"{sidecar_path}.{job.debug_key}.tmp"
+
+    # Clean up any leftover tmp from a crashed previous run of THIS job
+    if os.path.exists(tmp_sidecar):
+        try:
+            os.remove(tmp_sidecar)
+        except OSError:
+            pass
 
     # ExifTool -o file.xmp creates an XMP sidecar from the source file
-    cmd = ["exiftool", "-o", sidecar_path, "-P", "-m"]
+    cmd = ["exiftool", "-o", tmp_sidecar, "-P", "-m"]
 
     # Always use XMP Subject for sidecar files (universal XMP format)
     for kw in keywords:
@@ -220,8 +247,23 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
     )
 
     if result.returncode != 0:
+        # Cleanup tmp on failure
+        try:
+            os.remove(tmp_sidecar)
+        except OSError:
+            pass
         stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
         raise RuntimeError(f"ExifTool Sidecar Fehler: {stderr.strip()}")
+
+    # Atomic move: overwrites existing sidecar (from a prior failed run) cleanly
+    try:
+        os.replace(tmp_sidecar, sidecar_path)
+    except OSError as e:
+        try:
+            os.remove(tmp_sidecar)
+        except OSError:
+            pass
+        raise RuntimeError(f"Sidecar atomic replace failed: {e}")
 
     return {
         "keywords_written": keywords,

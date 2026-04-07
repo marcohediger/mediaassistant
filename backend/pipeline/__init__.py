@@ -333,6 +333,25 @@ async def reset_job_for_retry(job_id: int) -> bool:
         for code in ("IA-09", "IA-10", "IA-11"):
             step_results.pop(code, None)
 
+        # Defensive cleanup: remove any leftover .xmp sidecar from a previous
+        # run that crashed before IA-08 could move/delete it. The new IA-07
+        # uses atomic os.replace() so this isn't strictly required, but it
+        # also clears stale `.xmp.tmp` files from interrupted ExifTool runs.
+        if job.original_path:
+            stale_sidecar = job.original_path + ".xmp"
+            if os.path.exists(stale_sidecar):
+                try:
+                    os.remove(stale_sidecar)
+                except OSError:
+                    pass
+            # Also any tmp files from this debug_key
+            stale_tmp = f"{stale_sidecar}.{job.debug_key}.tmp"
+            if os.path.exists(stale_tmp):
+                try:
+                    os.remove(stale_tmp)
+                except OSError:
+                    pass
+
         job.step_result = step_results
         flag_modified(job, "step_result")
         # Now flip from transient 'processing' to 'queued' so the pipeline
