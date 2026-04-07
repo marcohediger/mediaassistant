@@ -3,7 +3,8 @@ import os
 import subprocess
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
-from sqlalchemy import select
+from sqlalchemy import select, func
+from config import config_manager
 from database import async_session
 from models import Job
 from system_logger import log_info
@@ -271,6 +272,77 @@ async def trigger_scan():
     except Exception:
         pass  # DB may be busy during parallel processing
     return RedirectResponse(url="/", status_code=303)
+
+
+@router.post("/pipeline/pause")
+async def pause_pipeline_endpoint(request: Request):
+    """Pause the pipeline worker — currently running jobs finish, no new
+    jobs are pulled from the queue. Used before container shutdown to
+    avoid hard-killing in-flight pipeline steps.
+
+    Filewatcher continues to scan and queue new jobs (so no incoming
+    files are lost), they just stay in 'queued' until pipeline is resumed.
+    """
+    await config_manager.set("pipeline.paused", True)
+    try:
+        await log_info("api", "Pipeline paused — worker will drain running jobs")
+    except Exception:
+        pass
+
+    # Count what's currently in flight for the response
+    async with async_session() as session:
+        r = await session.execute(
+            select(func.count(Job.id)).where(Job.status == "processing")
+        )
+        in_flight = r.scalar() or 0
+        r = await session.execute(
+            select(func.count(Job.id)).where(Job.status == "queued")
+        )
+        queued = r.scalar() or 0
+
+    accept = request.headers.get("accept", "")
+    if "application/json" in accept:
+        return JSONResponse({
+            "status": "paused",
+            "in_flight": in_flight,
+            "queued": queued,
+        })
+    return RedirectResponse(url="/", status_code=303)
+
+
+@router.post("/pipeline/resume")
+async def resume_pipeline_endpoint(request: Request):
+    """Resume the pipeline worker after a pause."""
+    await config_manager.set("pipeline.paused", False)
+    try:
+        await log_info("api", "Pipeline resumed")
+    except Exception:
+        pass
+
+    accept = request.headers.get("accept", "")
+    if "application/json" in accept:
+        return JSONResponse({"status": "running"})
+    return RedirectResponse(url="/", status_code=303)
+
+
+@router.get("/pipeline/status")
+async def pipeline_status_endpoint():
+    """Return current pipeline pause-state and in-flight counters."""
+    paused = bool(await config_manager.get("pipeline.paused", False))
+    async with async_session() as session:
+        r = await session.execute(
+            select(func.count(Job.id)).where(Job.status == "processing")
+        )
+        in_flight = r.scalar() or 0
+        r = await session.execute(
+            select(func.count(Job.id)).where(Job.status == "queued")
+        )
+        queued = r.scalar() or 0
+    return JSONResponse({
+        "paused": paused,
+        "in_flight": in_flight,
+        "queued": queued,
+    })
 
 
 @router.post("/job/{debug_key}/delete")

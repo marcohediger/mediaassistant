@@ -3,10 +3,79 @@
 {% block content %}
 <div style="display: flex; justify-content: space-between; align-items: center;">
     <h1 style="margin: 0;">{{ t.dashboard.title }}</h1>
-    <form method="post" action="/api/trigger-scan" style="margin: 0;">
-        <button type="submit" class="btn btn-small btn-primary">{{ t.dashboard.trigger_scan }}</button>
-    </form>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <a href="#" id="pipeline-toggle-btn" class="btn btn-small btn-secondary"
+           onclick="togglePipeline(event)" style="display: none;">⏸ {{ t.dashboard.pause_pipeline }}</a>
+        <form method="post" action="/api/trigger-scan" style="margin: 0;">
+            <button type="submit" class="btn btn-small btn-primary">{{ t.dashboard.trigger_scan }}</button>
+        </form>
+    </div>
 </div>
+
+<div id="pipeline-paused-banner" style="display: none; margin: 0.5rem 0; padding: 0.75rem 1rem; background: rgba(255, 165, 0, 0.15); border: 1px solid rgba(255, 165, 0, 0.5); border-radius: 6px; color: var(--text);">
+    ⏸ <strong>{{ t.dashboard.pipeline_paused_title }}</strong> —
+    <span id="pipeline-paused-detail">{{ t.dashboard.pipeline_paused_drain }}</span>
+</div>
+
+<script>
+async function refreshPipelineStatus() {
+    try {
+        const r = await fetch('/api/pipeline/status', {
+            credentials: 'same-origin',
+            headers: {'Accept': 'application/json'}
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        const btn = document.getElementById('pipeline-toggle-btn');
+        const banner = document.getElementById('pipeline-paused-banner');
+        const detail = document.getElementById('pipeline-paused-detail');
+        if (!btn || !banner) return;
+        btn.style.display = '';
+        if (data.paused) {
+            btn.textContent = '▶ {{ t.dashboard.resume_pipeline }}';
+            btn.dataset.state = 'paused';
+            banner.style.display = '';
+            if (data.in_flight > 0) {
+                detail.textContent = '{{ t.dashboard.pipeline_paused_drain }} (' + data.in_flight + ' aktiv, ' + data.queued + ' wartend)';
+            } else {
+                detail.textContent = '{{ t.dashboard.pipeline_paused_idle }} (' + data.queued + ' wartend)';
+            }
+        } else {
+            btn.textContent = '⏸ {{ t.dashboard.pause_pipeline }}';
+            btn.dataset.state = 'running';
+            banner.style.display = 'none';
+        }
+    } catch (e) { /* silent */ }
+}
+
+async function togglePipeline(ev) {
+    ev.preventDefault();
+    const btn = ev.currentTarget;
+    const action = btn.dataset.state === 'paused' ? 'resume' : 'pause';
+    const confirmMsg = action === 'pause'
+        ? {{ t.dashboard.pause_pipeline_confirm | tojson }}
+        : {{ t.dashboard.resume_pipeline_confirm | tojson }};
+    if (!confirm(confirmMsg)) return;
+    try {
+        const r = await fetch('/api/pipeline/' + action, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Accept': 'application/json'}
+        });
+        if (!r.ok) {
+            alert('Fehler: HTTP ' + r.status);
+            return;
+        }
+        await refreshPipelineStatus();
+    } catch (e) {
+        alert('Pipeline-Toggle fehlgeschlagen: ' + e.message);
+    }
+}
+
+// Initial + auto-refresh every 5s
+refreshPipelineStatus();
+setInterval(refreshPipelineStatus, 5000);
+</script>
 
 <div class="stats-grid" id="stats-grid">
     <div class="stat-card">

@@ -560,6 +560,7 @@ async def _pipeline_worker(shutdown_event: asyncio.Event):
     logger.info("Pipeline worker started")
     running: set[asyncio.Task] = set()
     jobs_since_gc = 0
+    last_pause_log = 0  # rate-limit "paused" log to once per 60s
 
     while not shutdown_event.is_set():
         try:
@@ -575,6 +576,25 @@ async def _pipeline_worker(shutdown_event: asyncio.Event):
             if jobs_since_gc >= 10:
                 gc.collect()
                 jobs_since_gc = 0
+
+            # Drain & pause: if pipeline.paused config is set, the worker
+            # finishes its currently running tasks but does NOT pull new
+            # queued jobs. Used by the "Pause Pipeline" UI button so the
+            # user can stop the worker cleanly before docker stop, even
+            # when there are already jobs in 'queued' state.
+            paused = await config_manager.get("pipeline.paused", False)
+            if paused:
+                now = time.time()
+                if now - last_pause_log > 60:
+                    logger.info(
+                        "Pipeline paused — %d running, drainage in progress",
+                        len(running),
+                    )
+                    last_pause_log = now
+                # Don't pull new jobs, but keep the loop alive so running
+                # tasks can finish and be cleaned up next iteration
+                await asyncio.sleep(1)
+                continue
 
             # Fill free slots with queued jobs
             max_concurrent = await get_total_slots()
