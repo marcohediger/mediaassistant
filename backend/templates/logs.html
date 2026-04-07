@@ -3,7 +3,13 @@
 {% block content %}
 <div style="display: flex; justify-content: space-between; align-items: center;">
     <h1 style="margin: 0;">{{ t.logs.title }}</h1>
-    <a href="/logs/dryrun-report" class="btn btn-small btn-secondary">{{ t.dryrun.report_button }}</a>
+    <div style="display: flex; gap: 0.5rem;">
+        <a href="/logs/dryrun-report" class="btn btn-small btn-secondary">{{ t.dryrun.report_button }}</a>
+        <form method="post" action="/api/jobs/retry-all-errors" style="display: inline;"
+              onsubmit="return confirm('{{ t.logs.retry_all_confirm }}');">
+            <button type="submit" class="btn btn-small btn-secondary">{{ t.logs.retry_all_errors }}</button>
+        </form>
+    </div>
 </div>
 
 <div class="tabs">

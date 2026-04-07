@@ -44,6 +44,8 @@
     "warning": "Warning",
     "error": "Error",
     "filter": "Filter",
+    "retry_all_errors": "Retry all errors",
+    "retry_all_confirm": "Really retry all jobs in 'error' state?",
     "entries": "entries",
     "time": "Time",
     "level": "Level",

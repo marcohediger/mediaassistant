@@ -43,6 +43,35 @@ async def retry_job_endpoint(debug_key: str):
     return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
 
 
+@router.post("/jobs/retry-all-errors")
+async def retry_all_errors_endpoint():
+    """Retry every job that is currently in 'error' state.
+
+    Each retry runs through the standard retry_job() flow, which uses an
+    atomic claim (error → processing) to guarantee that no two retries can
+    process the same job_id concurrently — even if this endpoint is called
+    multiple times in rapid succession.
+    """
+    from pipeline import retry_job
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job.id, Job.debug_key).where(Job.status == "error")
+        )
+        rows = result.all()
+
+    count = 0
+    for row in rows:
+        asyncio.create_task(retry_job(row.id))
+        count += 1
+
+    try:
+        await log_info("api", f"Retry-All triggered: {count} errored jobs queued for retry")
+    except Exception:
+        pass
+
+    return RedirectResponse(url="/logs?tab=jobs&status=error", status_code=303)
+
+
 @router.post("/trigger-scan")
 async def trigger_scan():
     """Manual trigger: run one scan cycle regardless of schedule mode."""

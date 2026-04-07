@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.4 — 2026-04-07
+
+### Feature: "Alle Fehler retry" Button im Logs-View
+
+Neuer Button neben "Dry-Run Report" oben rechts auf der Logs-Seite. Klick
+ruft `POST /api/jobs/retry-all-errors` auf, das alle Jobs im Status `error`
+parallel über `retry_job()` neu startet. Da `retry_job` einen atomaren
+Claim (`error → processing`) verwendet, ist der Endpoint sicher gegen
+Doppelklicks und kann beliebig oft aufgerufen werden — derselbe Job wird
+nie zweimal parallel verarbeitet.
+
+Nach dem Klick wird der User auf `/logs?tab=jobs&status=error` umgeleitet,
+damit er den Fortschritt verfolgen kann. Confirm-Dialog vor dem Trigger.
+
+i18n: `logs.retry_all_errors` + `logs.retry_all_confirm` für DE und EN.
+
 ## v2.28.3 — 2026-04-07
 
 ### Fix: retry_job hatte Folge-Race-Window
