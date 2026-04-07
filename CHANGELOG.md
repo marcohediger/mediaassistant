@@ -1,5 +1,51 @@
 # Changelog
 
+## v2.28.8 — 2026-04-07
+
+### 🔥 Hotfix: Retry-All erschöpfte den DB-Connection-Pool (v2.28.7 Folgebug)
+
+**Symptome aus Production-Logs nach v2.28.7-Klick:**
+```
+sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00
+```
+- Pipeline-Jobs scheiterten reihenweise an IA-08
+- Dashboard JSON gab HTTP 500
+- `PendingRollbackError` Kaskaden in zerstörten Sessions
+
+**Root Cause:** Der v2.28.4-Endpoint feuerte für jeden errored Job ein
+`asyncio.create_task(retry_job(...))`. Bei 33 parallelen Retries hat
+jeder Task zwei DB-Sessions geöffnet (atomic claim + run_pipeline-claim
++ Pipeline-Steps), was den Default-Pool von 5+10=15 sofort überlief.
+
+**Fix in zwei Schritten:**
+
+**1. Refactor `retry_job` → `reset_job_for_retry`:**
+- Neue Helper-Funktion `reset_job_for_retry()` macht NUR die Vorbereitung:
+  atomic claim (error → processing), File-Move, step_result Cleanup,
+  flip auf `queued`. **Ruft `run_pipeline()` NICHT auf.**
+- `retry_job()` (für Single-Retry per Detail-Button) bleibt: ruft
+  `reset_job_for_retry()` + dann sofort `run_pipeline()` für instant
+  feedback.
+- `/api/jobs/retry-all-errors` nutzt jetzt nur `reset_job_for_retry()`
+  in einem **einzigen** Background-Task, der die Jobs **sequenziell**
+  mit 50ms Delay zwischen jedem reseted. Der normale Pipeline-Worker
+  picked die Jobs danach an seiner konfigurierten Slot-Concurrency auf.
+
+**2. DB Pool-Tuning:**
+- `pool_size`: 5 → **20**
+- `max_overflow`: 10 → **40**
+- `pool_timeout`: default → **60s**
+- `pool_pre_ping`: True (verhindert stale connections)
+
+Damit ~60 max. Connections, ausreichend für Worker + Bulk-Reset-Task +
+Dashboard-Polling auch unter Last.
+
+**Test im Dev-Container:**
+- 30 errored Test-Jobs erstellt + Endpoint aufgerufen
+- Endpoint kehrte in **138ms** zurück (vorher: blockierender Burst)
+- Nach 4s alle 30 Jobs in `queued`, kein einziger TimeoutError
+- Dashboard parallel weiter erreichbar (kein 500)
+
 ## v2.28.7 — 2026-04-07
 
 ### UX: "Alle Fehler retry"-Button zeigt jetzt visuelles Feedback
