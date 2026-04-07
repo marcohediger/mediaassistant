@@ -1,5 +1,139 @@
 # Changelog
 
+## v2.28.17 — 2026-04-07
+
+### Fix: Pipeline Auto-Pause/Auto-Resume bei Service-Outages
+
+User-Report: Das KI-Backend hatte Verbindungsfehler und Timeouts, **die
+Pipeline lief aber stur weiter** und produzierte hunderte Files mit
+leeren KI-Tags ("unknown") in der Library und in Immich. Pro File
+wurden bis zu 6 Minuten verschwendet (3 Retries × 120s Timeout +
+Backoff), bevor der Job stillschweigend als `done` markiert wurde.
+
+**Ursache:** Die Pipeline kannte nur zwei Fehlerklassen — *critical*
+(IA-01, IA-07, IA-08, IA-11) und *non-critical* (IA-02..IA-06).
+Verbindungsfehler in non-critical Steps wurden behandelt wie inhaltliche
+Fehler ("AI hat schlechte Antwort geliefert") → einzelner Step als
+error markieren, weiter mit dem nächsten File. Keine Unterscheidung
+zwischen *"AI ist offline"* und *"AI hat geantwortet, war aber Müll"*.
+
+**Fix:** Drei Komponenten in einem zusammenhängenden Patch:
+
+#### 1) Service-Outage-Klassifizierung
+
+Neue Exception-Klassen die explizit „Backend ist tot" signalisieren:
+
+- `pipeline.step_ia05_ai.AIConnectionError` — Backend nicht erreichbar
+  (httpx.ConnectError/ConnectTimeout/ReadTimeout/NetworkError nach allen
+  Retries, oder dauerhaft HTTP 5xx)
+- `pipeline.step_ia05_ai.AIResponseError` — Backend hat geantwortet,
+  Antwort aber unbrauchbar (HTTP 4xx etc.) → bleibt non-critical wie heute
+- `pipeline.step_ia03_geocoding.GeocodingConnectionError` — Geo-Backend
+  nach allen Retries unerreichbar oder dauerhaft HTTP 502/503/504. 429
+  (Rate Limit) wird NICHT eskaliert — das ist ein Per-Request-Problem,
+  kein Outage.
+
+#### 2) Auto-Pause der Pipeline
+
+`pipeline/__init__.py` fängt diese Connection-Errors gezielt ab und
+setzt drei Config-Keys:
+
+- `pipeline.paused = true`
+- `pipeline.auto_paused_reason = "ai_unreachable" | "geo_unreachable"`
+- `pipeline.auto_paused_at = ISO timestamp`
+
+Der aktuelle Job wird als `error` markiert (nicht `done`!) und landet
+in `error/` — keine Müll-Daten in der Library oder in Immich. Ein
+prominenter `log_error("pipeline", ...)`-Eintrag erscheint im
+System-Log mit Klartext-Hinweis dass die Pipeline pausiert wurde und
+auf den health_watcher wartet.
+
+#### 3) Health-Watcher mit Auto-Resume
+
+Neuer Background-Task `backend/health_watcher.py`, registriert in der
+`main.py` lifespan zusammen mit dem filewatcher. Pollt alle 30 Sekunden
+(konfigurierbar via `health.check_interval`):
+
+- Liest `pipeline.auto_paused_reason`
+- Wenn gesetzt: ruft die **bestehenden Health-Check-Funktionen** aus
+  `routers.dashboard` auf (`_check_ai_backend`, `_check_geocoding`) —
+  selbe Checks die der User auch in der Modul-Liste sieht, kein
+  duplizierter Code
+- Wenn der Service wieder antwortet: setzt `pipeline.paused = false`,
+  cleart die Auto-Pause-Keys, schreibt `log_info("pipeline", ...)`
+  „Service wieder erreichbar — Pipeline AUTO-RESUMED"
+- Pipeline-Worker übernimmt automatisch beim nächsten Loop-Iteration
+
+**Wichtig — manuelle Pause-Trennung:**
+- User klickt Pause-Button → setzt nur `pipeline.paused`, leeres
+  `auto_paused_reason`. Health-Watcher fasst das **nicht** an. Auto-Resume
+  erfolgt **nur** wenn die Pause auch automatisch war.
+- User klickt manuell Resume während Auto-Pause → beide Keys werden
+  gelöscht. Wenn Backend immer noch tot ist, wird der nächste Job die
+  Auto-Pause sofort wieder triggern.
+
+#### 4) Diagnose-Verbesserung
+
+`pipeline/__init__.py` verwendet jetzt `f"{type(e).__name__}: {e}"`
+statt `str(e)` an drei Stellen. Vorher landeten Exceptions mit leerem
+`__str__` als `reason: ""` in der DB — z.B. der Job aus dem User-Report
+hatte `IA-05.reason = ""` und niemand wusste warum. Jetzt sieht man
+`"ConnectError: "` oder `"JSONDecodeError: ..."` und kann sofort
+nachgehen.
+
+#### 5) Sampling-Härtung gegen Repetition-Loops
+
+In `step_ia05_ai.py` Payload:
+
+```python
+"frequency_penalty": 0.5,
+"presence_penalty": 0.3,
+```
+
+Verhindert „Hügel Hügel Hügel..."-Token-Loops in kleinen Vision-Modellen
+wie `qwen3-vl-4b`. Unbekannte Felder werden von OpenAI-kompatiblen
+Backends ignoriert, kein Risiko. `response_format=json_object`
+bewusst ausgelassen — wird nicht von allen Backends verstanden.
+
+#### 6) "unknown"-Tag-Filter in IA-07
+
+`step_ia07_exif_write.py` schrieb bisher den Wert von `ai_result["type"]`
+literal als Keyword. Wenn IA-05 fehlgeschlagen ist und `type="unknown"`
+default war, landete **literal „unknown"** als Tag im Sidecar und in
+Immich (siehe User-Report `keywords_written: ["unknown"]`). Jetzt wird
+„unknown" gezielt rausgefiltert.
+
+### Geänderte Dateien
+
+- `backend/pipeline/step_ia05_ai.py` (Exceptions, Klassifizierung, Sampling)
+- `backend/pipeline/step_ia03_geocoding.py` (Exception, Retry-Eskalation)
+- `backend/pipeline/__init__.py` (Auto-Pause + bessere Diagnose-Strings)
+- `backend/pipeline/step_ia07_exif_write.py` (unknown-Filter)
+- `backend/health_watcher.py` **NEU** (Background-Task)
+- `backend/main.py` (Watcher-Registrierung in lifespan)
+
+### Effekt im UI
+
+- Pipeline pausiert sich selbst bei Service-Outages — keine Müll-Daten
+  mehr in der Library oder in Immich während AI/Geo down sind
+- System-Log zeigt rote Errors beim Auto-Pause und grüne Infos beim
+  Auto-Resume
+- Pause-Banner unter dem Header (existiert seit `v2.28.14`) bleibt
+  weiterhin sichtbar während Auto-Pause aktiv ist
+- Manuelle Pause/Resume-Workflows sind unverändert
+
+### Konfiguration
+
+- `health.check_interval` (Sekunden, default 30, minimum 5)
+
+### Bekannte Einschränkungen
+
+- Health-Check für `google` Geocoding-Provider triggert echte (kostenpflichtige)
+  API-Calls. Workaround: Provider auf nominatim/photon umstellen oder
+  bei Bedarf einen separaten "kein Ping für google"-Pfad einbauen.
+- Reprocess der bereits kaputten Jobs (Issue #34/#42) wird durch diesen
+  Fix NICHT mit erledigt — das kommt mit dem Cleanup-Tool.
+
 ## v2.28.16 — 2026-04-07
 
 ### Fix: Stille IA-05 parse_error landeten als 'done' im Log

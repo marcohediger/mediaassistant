@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from config import config_manager
 from database import init_db, seed_inbox_from_env
 from filewatcher import start_filewatcher
+from health_watcher import start_health_watcher
 from routers import dashboard, setup, settings, logs, api, duplicates, review
 
 # Configure logging for Docker stdout
@@ -25,13 +26,16 @@ async def lifespan(app: FastAPI):
     await seed_inbox_from_env()
     shutdown_event = asyncio.Event()
     watcher_task = asyncio.create_task(start_filewatcher(shutdown_event))
+    health_task = asyncio.create_task(start_health_watcher(shutdown_event))
     yield
     shutdown_event.set()
     watcher_task.cancel()
-    try:
-        await watcher_task
-    except asyncio.CancelledError:
-        pass
+    health_task.cancel()
+    for t in (watcher_task, health_task):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
 
 from version import VERSION
