@@ -7,14 +7,17 @@
         <a href="/logs/dryrun-report" class="btn btn-small btn-secondary">{{ t.dryrun.report_button }}</a>
         <form method="post" action="/api/jobs/retry-all-errors" style="display: inline;"
               onsubmit="return confirm('{{ t.logs.retry_all_confirm }}');">
+            {# Preserve current filter so the user stays on their filtered view #}
+            <input type="hidden" name="return_url" value="/logs?{{ current_query }}">
             <button type="submit" class="btn btn-small btn-secondary">{{ t.logs.retry_all_errors }}</button>
         </form>
     </div>
 </div>
 
 <div class="tabs">
-    <a href="/logs?tab=system" class="tab {{ 'tab-active' if tab == 'system' else '' }}">{{ t.logs.system_log }}</a>
-    <a href="/logs?tab=jobs" class="tab {{ 'tab-active' if tab == 'jobs' else '' }}">{{ t.logs.job_log }}</a>
+    {# Tab links preserve all current filters except tab itself #}
+    <a href="/logs?tab=system{% if non_tab_query %}&{{ non_tab_query }}{% endif %}" class="tab {{ 'tab-active' if tab == 'system' else '' }}">{{ t.logs.system_log }}</a>
+    <a href="/logs?tab=jobs{% if non_tab_query %}&{{ non_tab_query }}{% endif %}" class="tab {{ 'tab-active' if tab == 'jobs' else '' }}">{{ t.logs.job_log }}</a>
 </div>
 
 {% if tab == 'system' %}

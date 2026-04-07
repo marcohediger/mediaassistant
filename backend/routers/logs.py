@@ -82,6 +82,15 @@ async def logs_page(request: Request):
         filter_params["q"] = search
     filter_query = urlencode(filter_params)
 
+    # current_query: full state including tab — used by retry-all return_url
+    current_params = {"tab": tab}
+    current_params.update(filter_params)
+    current_query = urlencode(current_params)
+
+    # non_tab_query: filters without tab — used by tab links to preserve filters
+    # while switching tabs
+    non_tab_query = urlencode(filter_params)
+
     return await render(request, "logs.html", {
         "tab": tab,
         "jobs": jobs,
@@ -93,6 +102,8 @@ async def logs_page(request: Request):
         "level_filter": level_filter,
         "search": search,
         "filter_query": filter_query,
+        "current_query": current_query,
+        "non_tab_query": non_tab_query,
     })
 
 

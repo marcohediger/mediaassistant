@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.28.5 — 2026-04-07
+
+### Fix: Log-Filter bleiben erhalten beim Tab-Wechsel und Button-Klick
+
+Bisher gingen die gesetzten Filter (Status, Level, Suchbegriff, Page) auf
+der Logs-Seite verloren, sobald man:
+
+- Zwischen den Tabs "System-Log" und "Verarbeitungs-Log" wechselte
+  (Links zeigten hardcoded auf `/logs?tab=...` ohne Filter-Params)
+- Den "Alle Fehler retry"-Button (v2.28.4) drückte (Redirect ging immer
+  auf `/logs?tab=jobs&status=error`, ungeachtet der vorher gesetzten Filter)
+
+**Fix:**
+- Tab-Links übernehmen jetzt alle gesetzten Filter via `non_tab_query`
+- Retry-All-Endpoint akzeptiert ein verstecktes `return_url`-Form-Field
+  (gefüllt aus dem aktuellen Filter-State) und nutzt sonst den Referer-Header
+  als Fallback. Open-Redirect ist via Whitelist (`return_url muss /logs...
+  enthalten`) abgesichert
+- Pagination, Detail-Navigation und Browser-Reload waren bereits
+  filter-stable und bleiben unverändert
+
+Tests im Dev-Container — alle 4 Redirect-Szenarien grün:
+1. explizite `return_url` → preserved
+2. nur `Referer` Header → preserved (mit `/logs`-Extraktion)
+3. weder noch → Default `/logs?tab=jobs&status=error`
+4. bösartige URL `https://evil.com/` → Default (Open-Redirect-Schutz)
+
 ## v2.28.4 — 2026-04-07
 
 ### Feature: "Alle Fehler retry" Button im Logs-View
