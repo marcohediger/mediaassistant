@@ -12,6 +12,8 @@ from models import Job
 from safe_file import safe_move
 from system_logger import log_error, log_warning
 from pipeline import step_ia01_exif, step_ia02_duplicates, step_ia03_geocoding, step_ia04_convert, step_ia05_ai, step_ia06_ocr, step_ia07_exif_write, step_ia08_sort, step_ia09_notify, step_ia10_cleanup, step_ia11_log
+from pipeline.step_ia03_geocoding import GeocodingConnectionError
+from pipeline.step_ia05_ai import AIConnectionError
 
 logger = logging.getLogger("mediaassistant.pipeline")
 
@@ -130,20 +132,66 @@ async def run_pipeline(job_id: int):
                         break
 
             except Exception as e:
+                # Service-outage exceptions: auto-pause the entire pipeline
+                # so we don't bulldoze through hundreds of files producing
+                # garbage results while a backend is down. The health_watcher
+                # will auto-resume once the backend is reachable again.
+                if isinstance(e, (AIConnectionError, GeocodingConnectionError)):
+                    reason = "ai_unreachable" if isinstance(e, AIConnectionError) else "geo_unreachable"
+                    tb = traceback.format_exc()
+                    await config_manager.set("pipeline.paused", True)
+                    await config_manager.set("pipeline.auto_paused_reason", reason)
+                    await config_manager.set("pipeline.auto_paused_at", datetime.now().isoformat(timespec="seconds"))
+                    await log_error(
+                        "pipeline",
+                        f"Service down — Pipeline AUTO-PAUSIERT ({reason})",
+                        (
+                            f"Job {job.debug_key} bei {step_code}: {type(e).__name__}: {e}\n\n"
+                            f"Die Pipeline wurde automatisch pausiert. Der health_watcher "
+                            f"prüft alle 30 Sekunden ob das Backend wieder erreichbar ist und "
+                            f"setzt die Pipeline dann automatisch fort.\n\n{tb}"
+                        ),
+                    )
+                    job.status = "error"
+                    job.error_message = f"[{step_code}] {reason} — Pipeline auto-pausiert: {type(e).__name__}: {e}"
+                    existing_results[step_code] = {
+                        "status": "error",
+                        "reason": f"{type(e).__name__}: {e}",
+                        "ai_unreachable": isinstance(e, AIConnectionError),
+                        "geo_unreachable": isinstance(e, GeocodingConnectionError),
+                        "traceback": tb,
+                    }
+                    if step_code == "IA-05":
+                        existing_results[step_code].update({
+                            "type": "unknown",
+                            "tags": [],
+                            "description": "",
+                            "mood": "",
+                            "people_count": 0,
+                            "quality": "unbekannt",
+                            "confidence": 0.0,
+                        })
+                    job.step_result = existing_results
+                    flag_modified(job, "step_result")
+                    await session.commit()
+                    logger.error(f"{job.debug_key} Service down at {step_code}: pipeline auto-paused ({reason})")
+                    pipeline_failed = True
+                    break
+
                 non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}
                 if step_code in non_critical:
                     tb = traceback.format_exc()
-                    await log_warning("pipeline", f"{job.debug_key} {step_code} skipped", f"{e}\n\n{tb}")
+                    await log_warning("pipeline", f"{job.debug_key} {step_code} skipped", f"{type(e).__name__}: {e}\n\n{tb}")
                     # IA-02: If file was already moved as duplicate before the error,
                     # treat it as a successful duplicate detection (don't continue pipeline)
                     if step_code == "IA-02" and job.status == "duplicate":
-                        existing_results[step_code] = {"status": "duplicate", "note": f"detected but cleanup failed: {e}"}
+                        existing_results[step_code] = {"status": "duplicate", "note": f"detected but cleanup failed: {type(e).__name__}: {e}"}
                         job.step_result = existing_results
                         flag_modified(job, "step_result")
                         await session.commit()
                         duplicate_detected = True
                         break
-                    existing_results[step_code] = {"status": "error", "reason": str(e)}
+                    existing_results[step_code] = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
                     if step_code == "IA-05":
                         existing_results[step_code].update({
                             "type": "unknown",
@@ -161,12 +209,12 @@ async def run_pipeline(job_id: int):
                 # Critical step failed — mark error, then run finalizers
                 tb = traceback.format_exc()
                 job.status = "error"
-                job.error_message = f"[{step_code}] {e}\n\n{tb}"
-                existing_results[step_code] = {"status": "error", "reason": str(e), "traceback": tb}
+                job.error_message = f"[{step_code}] {type(e).__name__}: {e}\n\n{tb}"
+                existing_results[step_code] = {"status": "error", "reason": f"{type(e).__name__}: {e}", "traceback": tb}
                 job.step_result = existing_results
                 flag_modified(job, "step_result")
                 await session.commit()
-                await log_error("pipeline", f"{job.debug_key} Error at {step_code}", f"{e}\n\n{tb}")
+                await log_error("pipeline", f"{job.debug_key} Error at {step_code}", f"{type(e).__name__}: {e}\n\n{tb}")
                 logger.error(f"{job.debug_key} Error at {step_code}: {e}")
                 pipeline_failed = True
                 break

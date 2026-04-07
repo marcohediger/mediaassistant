@@ -10,6 +10,23 @@ from system_logger import log_warning
 from PIL import Image
 
 
+class AIConnectionError(Exception):
+    """Raised when the AI backend is unreachable (network/timeout/5xx after retries).
+
+    The pipeline catches this specifically and auto-pauses itself — the
+    health_watcher will auto-resume once the backend is reachable again.
+    """
+
+
+class AIResponseError(Exception):
+    """Raised when the AI backend responded but the response is unusable
+    (HTTP 4xx, malformed JSON beyond repair, etc.).
+
+    Non-fatal for the pipeline — only the current job is marked as error,
+    pipeline keeps running.
+    """
+
+
 DEFAULT_SYSTEM_PROMPT = """You are an image analysis assistant for a photo media library. Static rules pre-classify files based on filename, extension, and EXIF metadata. Your job is to verify the pre-classification and correct it ONLY when the image content clearly contradicts it.
 
 The available categories and the static rule pre-classification are provided with the metadata.
@@ -294,6 +311,11 @@ Use this information together with the image content for your classification."""
             ],
             "temperature": 0.3,
             "max_tokens": 500,
+            # Hardening against token-repetition loops in small vision models
+            # (e.g. qwen3-vl-4b filling max_tokens with the same word).
+            # Unknown fields are ignored by OpenAI-compatible backends.
+            "frequency_penalty": 0.5,
+            "presence_penalty": 0.3,
         }
 
         headers = {"Content-Type": "application/json"}
@@ -304,6 +326,7 @@ Use this information together with the image content for your classification."""
         max_retries = 2
         resp = None
         last_exc = None
+        connection_error = False  # tracks whether retries failed for network reasons
         for attempt in range(max_retries + 1):
             try:
                 async with httpx.AsyncClient(timeout=ai_timeout) as client:
@@ -313,10 +336,13 @@ Use this information together with the image content for your classification."""
                         headers=headers,
                     )
                 if resp.status_code < 500:
+                    connection_error = False
                     break
-                # Server error — retry
+                # Server 5xx — treat as transient connection issue, retry
+                connection_error = True
                 last_exc = RuntimeError(f"KI-API Fehler: HTTP {resp.status_code} — {resp.text[:200]}")
-            except httpx.ReadTimeout as e:
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.NetworkError) as e:
+                connection_error = True
                 last_exc = e
             if attempt < max_retries:
                 await asyncio.sleep(5 * (attempt + 1))
@@ -326,9 +352,20 @@ Use this information together with the image content for your classification."""
     del image_data_list, content_parts, payload
 
     if resp is None:
-        raise RuntimeError(f"KI-API Timeout nach {max_retries + 1} Versuchen") from last_exc
+        # All retries failed without ever getting a response — backend unreachable
+        raise AIConnectionError(
+            f"KI-Backend nicht erreichbar nach {max_retries + 1} Versuchen "
+            f"({type(last_exc).__name__ if last_exc else 'unknown'}: {last_exc})"
+        ) from last_exc
+    if resp.status_code >= 500:
+        # Persistent 5xx after all retries — backend is up but broken
+        raise AIConnectionError(
+            f"KI-Backend liefert dauerhaft HTTP {resp.status_code} nach {max_retries + 1} Versuchen — {resp.text[:200]}"
+        )
     if resp.status_code != 200:
-        raise RuntimeError(f"KI-API Fehler: HTTP {resp.status_code} — {resp.text[:200]}")
+        # 4xx — backend rejects our request, probably config/payload issue.
+        # Not a connectivity problem — only this job fails.
+        raise AIResponseError(f"KI-API Fehler: HTTP {resp.status_code} — {resp.text[:200]}")
 
     response_data = resp.json()
     content = response_data["choices"][0]["message"]["content"]

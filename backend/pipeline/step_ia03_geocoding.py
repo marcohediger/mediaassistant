@@ -8,6 +8,16 @@ from version import VERSION
 
 logger = logging.getLogger("mediaassistant.pipeline.ia03")
 
+
+class GeocodingConnectionError(Exception):
+    """Raised when the geocoding backend is unreachable after all retries.
+
+    The pipeline catches this specifically and auto-pauses itself — the
+    health_watcher will auto-resume once the backend is reachable again.
+    Single coordinate lookup failures (invalid coords, empty results) are
+    NOT this — only persistent connectivity problems.
+    """
+
 # Identifying User-Agent — required by Nominatim Usage Policy
 # (https://operations.osmfoundation.org/policies/nominatim/)
 USER_AGENT = f"MediaAssistant/{VERSION} (self-hosted photo manager)"
@@ -48,17 +58,27 @@ async def _http_get_with_retry(url: str, params: dict, headers: dict | None = No
     The wait between attempts is `max(retry_after, exponential_backoff)`,
     so a server that responds `Retry-After: 0` doesn't trick us into a
     busy-loop. Initial backoff is 5s and doubles each attempt → 5/10/20s.
+
+    Raises GeocodingConnectionError if all attempts fail with network errors
+    or persistent 5xx — this signals the pipeline to auto-pause until the
+    backend is reachable again.
     """
     attempt = 0
     backoff = 5.0
+    last_net_exc: Exception | None = None
+    last_5xx: int | None = None
     while True:
         attempt += 1
         async with httpx.AsyncClient(timeout=15, headers=headers or {}) as client:
             try:
                 resp = await client.get(url, params=params)
             except (httpx.TimeoutException, httpx.NetworkError) as e:
+                last_net_exc = e
                 if attempt >= max_attempts:
-                    raise
+                    raise GeocodingConnectionError(
+                        f"Geocoding-Backend nicht erreichbar nach {max_attempts} Versuchen "
+                        f"({type(e).__name__}: {e})"
+                    ) from e
                 logger.warning("Geocoding network error (attempt %d): %s", attempt, e)
                 await asyncio.sleep(backoff)
                 backoff *= 2
@@ -66,6 +86,7 @@ async def _http_get_with_retry(url: str, params: dict, headers: dict | None = No
         if resp.status_code == 200:
             return resp
         if resp.status_code in (429, 502, 503, 504) and attempt < max_attempts:
+            last_5xx = resp.status_code
             retry_after = resp.headers.get("retry-after")
             ra = 0.0
             if retry_after:
@@ -84,6 +105,14 @@ async def _http_get_with_retry(url: str, params: dict, headers: dict | None = No
             await asyncio.sleep(delay)
             backoff *= 2
             continue
+        # Persistent 5xx after all retries → backend unhealthy → pause pipeline.
+        # 429 (rate limit) is NOT escalated — that's a per-request issue, not a
+        # backend outage. 4xx other than 429 are config/data problems for the
+        # individual coordinate and stay soft (caller wraps in status=error).
+        if resp.status_code in (502, 503, 504):
+            raise GeocodingConnectionError(
+                f"Geocoding-Backend liefert dauerhaft HTTP {resp.status_code} nach {max_attempts} Versuchen"
+            )
         return resp
 
 
@@ -197,8 +226,13 @@ async def execute(job, session) -> dict:
             geo = await _reverse_google(url, lat, lon, api_key)
         else:
             geo = await _reverse_nominatim(url, lat, lon)
+    except GeocodingConnectionError:
+        # Backend completely unreachable — let it bubble so the pipeline can
+        # auto-pause and the health_watcher can auto-resume on recovery.
+        raise
     except RuntimeError as e:
-        # Don't fail the whole pipeline on geocoding errors — IA-03 is non-critical
+        # Single-coordinate failures (HTTP 4xx, empty result) stay non-critical
+        # — only this job's IA-03 is marked error, pipeline continues.
         return {"status": "error", "reason": str(e), "provider": provider}
 
     geo["provider"] = provider

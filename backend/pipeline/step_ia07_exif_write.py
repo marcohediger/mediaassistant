@@ -87,8 +87,11 @@ async def execute(job, session) -> dict:
                 keywords.append(combined)
 
     # From AI analysis (type + tags + source)
-    if ai_result.get("type"):
-        keywords.append(ai_result["type"])
+    # Skip the literal "unknown" type — it gets set as a default when IA-05
+    # failed and would otherwise pollute the file/Immich with a useless tag.
+    ai_type = ai_result.get("type")
+    if ai_type and ai_type != "unknown":
+        keywords.append(ai_type)
     if ai_result.get("tags"):
         keywords.extend(ai_result["tags"])
     if ai_result.get("source"):
