@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.28.19 — 2026-04-07
+
+### Feature: Filter „Warnung" im Verarbeitungs-Log + Retry für Warning-Jobs (#43)
+
+Ergänzt den Status-Filter im Verarbeitungs-Log (`/logs?tab=jobs`) um einen
+neuen Eintrag **„Warnung"**. Da Jobs mit aggregierten Step-Warnungen technisch
+weiterhin den Status `done` tragen (siehe v2.28.18), ist das ein Pseudo-Filter:
+Backend matcht `status='done' AND error_message LIKE 'Warnungen in:%'`.
+
+Zusätzlich kann ein einzelner Warning-Job jetzt über die Detail-Ansicht
+nochmal durch die Pipeline geschickt werden — der Retry-Button war bisher nur
+für `error`-Jobs sichtbar. `reset_job_for_retry()` akzeptiert jetzt beide
+Zustände und verwirft sowohl `error`- als auch `warning`-Step-Results, damit
+die betroffenen Schritte beim nächsten Lauf neu ausgeführt werden.
+
+Schliesst marcohediger/mediaassistant#43.
+
 ## v2.28.18 — 2026-04-07
 
 ### Fix: Soft-Warnungen werden jetzt im Job sichtbar
