@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.28.15 — 2026-04-07
+
+### Fix: AI-Tag-Halluzinationen ("Hund" ohne sichtbaren Hund)
+
+User-Report: "die AI hat bei den Tags Halluzinationen, es kommt immer
+wieder der Tag 'Hund' vor obwohl kein Hund sichtbar ist".
+
+**Ursache:** Der DEFAULT_SYSTEM_PROMPT in `pipeline/step_ia05_ai.py`
+listete im Tag-Abschnitt eine konkrete Beispiel-Vokabelliste auf
+(`Landschaft, Essen, Tier, Hund, Katze, Gruppe, ...`). Gerade kleinere
+lokale Vision-Modelle übernehmen solche Beispiele aus dem Prompt
+häufig wörtlich als Output, auch wenn die Bildinhalte nichts damit zu
+tun haben — klassisches In-Context-Bias / Priming. „Hund" stand früh
+in der Liste und tauchte deshalb überdurchschnittlich oft auf.
+
+**Fix:** Beispiel-Vokabelliste entfernt. Stattdessen explizite
+Anweisung im Prompt:
+
+- Tags **nur** für Dinge vergeben, die klar sichtbar sind
+- Keine festen Vokabeln, Tags müssen aus dem tatsächlichen Bildinhalt
+  abgeleitet werden
+- Bei Unsicherheit lieber kein Tag
+
+Hinweis: Wer in den Settings einen eigenen `ai.prompt` gespeichert
+hat, muss diesen manuell aktualisieren — der Code-Default greift nur,
+wenn kein Custom-Prompt in der DB liegt.
+
 ## v2.28.14 — 2026-04-07
 
 ### Feature: Pipeline-Pause für sauberen Container-Stop
