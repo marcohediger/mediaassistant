@@ -11,10 +11,14 @@ from sqlalchemy import select
 
 register_heif_opener()
 
+import logging
+
 from config import config_manager
 from models import Job
 from safe_file import safe_move
 from system_logger import log_info, log_warning
+
+_orphan_logger = logging.getLogger("mediaassistant.pipeline.ia02.orphan")
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif", ".webp", ".gif", ".bmp", ".dng", ".cr2", ".nef", ".arw"}
@@ -120,8 +124,16 @@ async def execute(job, session) -> dict:
                     "original_debug_key": existing.debug_key,
                     "original_path": existing.target_path or existing.original_path,
                 }
-            else:
-                await log_warning("IA-02", f"Orphaned job {existing.debug_key}: file missing, skipping duplicate match")
+            # File missing — likely because it's currently being retried
+            # (path in transition from /library/error to /app/data/reprocess)
+            # or the user manually deleted it. Operational noise, not a real
+            # issue → DEBUG-level only, not the system_logs WARNING level
+            # that surfaces in the UI.
+            _orphan_logger.debug(
+                "Orphan candidate %s for job %s: file missing at %s",
+                existing.debug_key, job.debug_key,
+                existing.target_path or existing.original_path,
+            )
 
     # --- Stage 1.5: JPG+RAW Paar-Erkennung ---
     # Wenn raw_jpg_keep_both=True → beide Dateien unabhängig verarbeiten (kein Duplikat)
@@ -204,7 +216,11 @@ async def execute(job, session) -> dict:
                         }
                         break
                     elif candidate:
-                        await log_warning("IA-02", f"Orphaned job {candidate.debug_key}: file missing, skipping duplicate match")
+                        _orphan_logger.debug(
+                            "Orphan pHash candidate %s for job %s: file missing at %s",
+                            candidate.debug_key, job.debug_key,
+                            candidate.target_path or candidate.original_path,
+                        )
 
             offset += BATCH_SIZE
 
