@@ -90,11 +90,11 @@ async function cleanupOrphans(ev) {
             return;
         }
         const data = await resp.json();
-        alert('🔍 Orphan-Scan gestartet im Hintergrund.\n\n' +
+        alert('🔍 Scan auf verwaiste Einträge gestartet.\n\n' +
               'Geprüft werden ' + data.scanning + ' Jobs (done/duplicate/review).\n' +
-              (data.check_immich ? 'Inkl. Immich-API-Check.' : 'Lokale Pfade only.') +
+              (data.check_immich ? 'Inkl. Immich-API-Check.' : 'Nur lokale Pfade.') +
               '\n\nDer Scan läuft asynchron — Resultat im System-Log.\n\n' +
-              'Filterst du jetzt nach Status "orphan" um die Ergebnisse zu sehen.');
+              'Du wirst jetzt zur gefilterten Ansicht "Verwaist" weitergeleitet.');
         window.location.href = '/logs?tab=jobs&status=orphan';
     } catch (e) {
         alert('Cleanup Fehler: ' + e.message);
