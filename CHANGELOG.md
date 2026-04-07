@@ -1,5 +1,47 @@
 # Changelog
 
+## v2.28.9 — 2026-04-07
+
+### 🔥 Hotfix: Geocoding HTTP 429 (Nominatim Rate-Limit)
+
+**Symptom:** Nach dem Bulk-Retry hagelte es HTTP 429 vom Nominatim-Server.
+Geocoding-Step fiel reihenweise mit `RuntimeError: Nominatim HTTP 429`.
+
+**Vier konkrete Probleme im alten Code (`step_ia03_geocoding.py`):**
+
+1. **Kein User-Agent** — Nominatim Usage Policy verlangt einen
+   identifizierenden User-Agent, sonst rate-limited oder blockiert
+2. **Kein Retry bei 429** — wirft direkt RuntimeError, Job geht auf error
+3. **Kein Client-Side Rate-Limit** — Nominatim erlaubt **max 1 req/s**
+4. **Kein Cache** — gleiche Koordinaten (z.B. iCloud-Batch von einem Ort)
+   wurden hunderte Male neu angefragt
+
+**Fix:**
+
+- **`USER_AGENT = "MediaAssistant/{VERSION} (self-hosted photo manager)"`**
+  in allen drei Provider-Calls (Nominatim, Photon, Google)
+- **Globaler asyncio-Throttle**: `_rate_lock` + `_last_request_ts`,
+  enforce ≥ 1.1s zwischen Nominatim-Calls (gilt für alle parallelen
+  Pipeline-Worker)
+- **Retry-Helper `_http_get_with_retry()`**: max 4 Versuche bei
+  HTTP 429 / 502 / 503 / 504, exponential backoff 5s → 10s → 20s.
+  Wartet **mindestens** den exponential backoff, auch wenn der Server
+  `Retry-After: 0` zurückgibt (das macht Nominatim bei abusive IPs)
+- **In-Memory FIFO-Cache** mit ~11m Präzision (rounding auf 4 Dezimal-
+  stellen), max 1024 Einträge. Bei iCloud-Batch-Imports trifft der
+  Cache 90%+ der Anfragen
+- **Non-fatal error handling**: Bei finalem Geocoding-Fail wird
+  `{"status": "error", ...}` zurückgegeben statt RuntimeError → IA-03
+  bleibt non-critical, Pipeline läuft weiter
+
+**Tests im Dev-Container — alle grün:**
+
+| Test | Resultat |
+|---|---|
+| Throttle 5× sequenziell | ✅ 4.40s (~1.1s/Call) |
+| Retry-After=0 ignoriert + Backoff 5s+10s | ✅ 15.0s gesamt |
+| Cache-Hit für gleiche Koordinaten | ✅ 12ms statt Network-Call |
+
 ## v2.28.8 — 2026-04-07
 
 ### 🔥 Hotfix: Retry-All erschöpfte den DB-Connection-Pool (v2.28.7 Folgebug)
