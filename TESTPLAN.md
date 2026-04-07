@@ -1,5 +1,6 @@
 # Testplan — MediaAssistant
 
+> Letzter Race-Condition-Testlauf: **v2.28.3 — 2026-04-07** (26/26 bestanden, alle Tests in `backend/test_duplicate_fix.py`)
 > Letzter vollständiger Testlauf: **v2.17.1 — 2026-04-02** (296/305 bestanden, 9 nicht testbar)
 > Exotische Tests: 42 Zusatztests, 3 Bugs gefunden und behoben
 > Slow-System Test: 0.5 CPU / 512MB RAM (Synology-Simulation) bestanden
@@ -10,6 +11,10 @@
 > **v2.8.0 Änderungen**: Kategorien sind dynamisch aus DB (library_categories). Statische Regeln primär, KI verifies/korrigiert. AI gibt type (DB-Key), source (Herkunft), tags (beschreibend) zurück. Review-Buttons dynamisch. EXIF-Tags: IA-07 schreibt AI-Tags+Source, IA-08 schreibt Kategorie-Label+Source. Noch nicht regressionsgetestet.
 >
 > **v2.9.0 Änderungen**: Sorting Rules mit media_type Filter (Bilder/Videos/Alle). Video-pHash Duplikaterkennung (Durchschnitt aus IA-04 Frames). Separate Kategorien sourceless_foto/sourceless_video/personliches_video. Duplikat-"Behalten" startet volle Pipeline nach. Inbox-Garantie: keine Datei bleibt unbeachtet. Retry-Counter (max 3) gegen Crash-Loops. Immich Tag-Fix (HTTP 400). Config JSON-Crash Resilience.
+>
+> **v2.28.2 Änderungen**: Atomarer Claim am Anfang von `run_pipeline` via `UPDATE jobs SET status='processing' WHERE id=? AND status='queued'`. Verhindert die Race, dass derselbe Job von zwei Pipeline-Instanzen parallel verarbeitet wird (Worker + retry_job + duplicates_router + immich_poll + startup-resume sind 5 Aufrufer). Symptom-Pflaster aus älteren Releases (XMP pre-delete in IA-07, exists-Check vor Upload in IA-08) wurden entfernt, weil nicht mehr nötig. Startup-Resume setzt Status nun auf `queued` vor `run_pipeline`-Aufruf.
+>
+> **v2.28.3 Änderungen**: `retry_job` hatte ein Folge-TOCTOU-Window zwischen seinen zwei Commits (1. status=queued, 2. step_result aufgeräumt). Fix: transienter Lock-State `error → processing → queued` nach Cleanup. 4 neue Race-Condition-Tests (Test 5–8) zu `backend/test_duplicate_fix.py` hinzugefügt — alle 26 Tests grün.
 
 ## 1. Pipeline-Steps
 
@@ -181,6 +186,13 @@
 - [x] Korruptes Video → Warnungen, E-Mail-Benachrichtigung, kein Crash
 - [x] Job in "processing" nach Crash → max. 3 Retry-Versuche, danach Status "error" (MAX_RETRIES=3, retry_count in DB)
 - [x] Retry-Counter wird bei jedem Neustart-Versuch hochgezählt und geloggt
+- [x] **Atomic Claim (v2.28.2)**: `run_pipeline` weigert sich, einen Job zu verarbeiten, der nicht im Status `queued` ist — verhindert Doppel-Ausführung
+- [x] **Atomic Claim (v2.28.2)**: 10 parallele `run_pipeline(same_id)`-Aufrufe → 9 brechen mit Log-Eintrag `already claimed by another caller — skipping` ab
+- [x] **Atomic Claim (v2.28.2)**: `run_pipeline` auf Job mit Status `done`/`processing`/`error` → No-op, keine Status-Änderung
+- [x] **Startup-Resume (v2.28.2)**: Resume setzt Status auf `queued` bevor `run_pipeline` aufgerufen wird, damit der atomare Claim greift
+- [x] **retry_job (v2.28.3)**: Atomarer Claim `error → processing` (transienter Lock-State während Cleanup), dann `queued` für `run_pipeline`
+- [x] **retry_job (v2.28.3)**: 5 parallele `retry_job(same_id)`-Aufrufe → exakt 1× True, 4× False (Doppelklick-/Multi-Tab-Schutz)
+- [x] **retry_job (v2.28.3)**: `retry_job` parallel zu Worker-`run_pipeline` → kein stale step_result, IA-01 wird tatsächlich frisch ausgeführt
 
 ## 3. Web Interface
 
@@ -604,3 +616,186 @@
 | SMTP leerer Wert | JSON-encoded leerer String `""` wird nicht als "nicht konfiguriert" erkannt |
 | `...jpg` Dateiname | `os.path.splitext("...jpg")` gibt keine Extension → still ignoriert |
 | Max-Retry nur bei Start | `retry_count > MAX_RETRIES` Check nur beim Container-Start, nicht im laufenden Betrieb |
+
+## 13. Race-Condition-Tests (v2.28.2 / v2.28.3)
+
+> Testlauf: **v2.28.3 — 2026-04-07**, Dev-Container `mediaassistant-dev`, 26/26 Tests bestanden
+> Testdatei: `backend/test_duplicate_fix.py` (kombiniert die alten Duplikat-Tests mit den neuen Race-Tests)
+> Ausführung: `docker exec mediaassistant-dev python3 /app/test_duplicate_fix.py`
+
+### Hintergrund
+
+In `v2.28.0`/`v2.28.1` traten ~30 Jobs/Tag mit doppelten Pipeline-Logs auf
+(verschiedene Tag-Counts für dieselbe `debug_key`), 120 Jobs mit
+inkonsistenten `error_message`-Feldern, sowie die wiederkehrenden Fehler
+`ExifTool Sidecar already exists`, `File disappeared before upload` und
+`ExifTool File not found`. Die Live-DB-Analyse bewies, dass `run_pipeline`
+von **5 verschiedenen Stellen** aufgerufen wird:
+
+| # | Aufrufer | Datei:Zeile |
+|---|---|---|
+| 1 | `_pipeline_worker` | `filewatcher.py:264` |
+| 2 | `_poll_immich` | `filewatcher.py:379` |
+| 3 | Startup-Resume | `filewatcher.py:503` |
+| 4 | `retry_job` | `pipeline/__init__.py:304` |
+| 5 | Duplikate-Router (Keep / Not-a-duplicate) | `routers/duplicates.py:815, 882` |
+
+Ohne Schutz konnten zwei Aufrufer denselben Job parallel verarbeiten und
+schrieben gleichzeitig in dieselben Dateien (`.xmp`, Quelldatei, Immich).
+
+### Fix-Architektur
+
+**v2.28.2 — `run_pipeline` atomarer Claim:**
+```python
+claim = await session.execute(
+    update(Job)
+    .where(Job.id == job_id, Job.status == "queued")
+    .values(status="processing", started_at=datetime.now())
+)
+await session.commit()
+if claim.rowcount == 0:
+    return  # someone else already claimed
+```
+
+**v2.28.3 — `retry_job` atomarer Claim mit transientem Lock:**
+```python
+claim = await session.execute(
+    update(Job)
+    .where(Job.id == job_id, Job.status == "error")
+    .values(status="processing")  # transient lock during cleanup
+)
+# ... cleanup file move + step_result reset ...
+job.status = "queued"  # only now is the job claimable by run_pipeline
+await session.commit()
+```
+
+### Tests
+
+#### Test 1: `_handle_duplicate` Cleanup-Fehler abgefangen (Fix #38)
+| Assertion | Resultat |
+|---|---|
+| `_handle_duplicate` wirft keine Exception bei Cleanup-Fehler | ✅ |
+| `job.status == "duplicate"` (auch nach Cleanup-Fehler) | ✅ |
+| `job.target_path` korrekt gesetzt | ✅ |
+| Original-Datei in `error/duplicates/` verschoben | ✅ |
+
+#### Test 2: Pipeline-Fallback erkennt `job.status == "duplicate"` (Fix #38)
+| Assertion | Resultat |
+|---|---|
+| `job.status == "duplicate"` | ✅ |
+| `job.status != "error"` | ✅ |
+| IA-02 result enthält `note: detected but cleanup failed` | ✅ |
+| IA-08 wurde NICHT ausgeführt (Pipeline brach korrekt nach IA-02 ab) | ✅ |
+
+#### Test 3: Normaler Duplikat-Flow ohne Fehler
+| Assertion | Resultat |
+|---|---|
+| `job.status == "duplicate"` | ✅ |
+| `IA-02.match_type == "exact"` | ✅ |
+| IA-08 wurde NICHT ausgeführt | ✅ |
+| Datei aus Original-Ort verschoben | ✅ |
+
+#### Test 4: Nicht-Duplikat läuft normal weiter bis IA-08
+| Assertion | Resultat |
+|---|---|
+| `job.status != "duplicate"` | ✅ |
+| `IA-02.status != "duplicate"` | ✅ |
+| Pipeline lief über IA-02 hinaus weiter (IA-03+) | ✅ |
+
+#### Test 5 (NEU v2.28.2): Atomic claim blockiert 10 parallele `run_pipeline`-Aufrufe
+**Setup:** Job in `queued` Status, dann `asyncio.gather(*[run_pipeline(jid) for _ in range(10)])`.
+
+| Assertion | Erwartet | Resultat |
+|---|---|---|
+| 9/10 Aufrufer blockiert mit `already claimed`-Log | 9 | ✅ 9 |
+| `step_result` enthält IA-01 (genau eine Ausführung) | True | ✅ True |
+| `system_logs`-Einträge `Error at IA-01` für diesen Job | 1 | ✅ 1 |
+
+**Beweis ohne den Fix:** vor dem Fix wären die step_results von 10 parallelen Runs überlagert worden, mehrere Tag-Counts in `system_logs` aufgetreten, und das `error_message`-Feld hätte einen Traceback aus einem RUN, während `step_result` Daten aus einem anderen RUN enthielt.
+
+#### Test 6 (NEU v2.28.2): `run_pipeline` auf nicht-queued Job ist No-op
+**Setup:** Job in Status `done`, dann `await run_pipeline(jid)`.
+
+| Assertion | Erwartet | Resultat |
+|---|---|---|
+| Status unverändert (`done`) | done | ✅ done |
+| Kein step_result hinzugefügt | leer | ✅ leer |
+
+**Bedeutung:** Jobs, die bereits abgeschlossen sind, werden niemals versehentlich neu verarbeitet — auch nicht durch falsche API-Calls oder Race-bedingte Doppel-Aufrufe.
+
+#### Test 7 (NEU v2.28.3): `retry_job` parallel zu 5× `run_pipeline`
+**Setup:** Job in `error`, dann `asyncio.gather(retry_job(jid), run_pipeline(jid)*5)`.
+
+| Assertion | Erwartet | Resultat |
+|---|---|---|
+| `retry_job` returned `True` | 1× True | ✅ |
+| 5× `run_pipeline` returned `None` (alle blockiert) | 5× None | ✅ |
+| IA-01 wurde frisch ausgeführt (kein stale `reason: stale`) | reason startswith "ExifTool" | ✅ |
+| `system_logs`-Einträge ≤ 2 (kein Doppel-Processing) | ≤ 2 | ✅ 2 |
+
+**Beweis für den Fix-Wert:** Vor dem v2.28.3-Fix konnte `retry_job` zwischen seinen zwei Commits einen Worker reinrutschen lassen, der mit dem alten `step_result` (`{IA-01: {status: error, reason: stale}}`) gestartet ist und IA-01 übersprungen hat.
+
+#### Test 8 (NEU v2.28.3): 5 parallele `retry_job`-Aufrufe (Doppelklick-Schutz)
+**Setup:** Job in `error`, dann `asyncio.gather(*[retry_job(jid) for _ in range(5)])`.
+
+| Assertion | Erwartet | Resultat |
+|---|---|---|
+| `retry_job` returned True genau 1× | 1 | ✅ 1 |
+| `retry_job` returned False 4× | 4 | ✅ 4 |
+
+**Bedeutung:** Schutz gegen Doppelklick im UI, mehrere Browser-Tabs, oder API-Spam. Nur der erste Aufrufer flippt den Status atomar von `error` zu `processing`.
+
+### Live-Datenbank-Analyse vor dem Fix (07.04.2026)
+
+**Smoking guns aus der Produktions-DB:**
+
+```
+MA-2026-19689 (drei Pipeline-Ausführungen für denselben job_id):
+  14:03:17.411 INFO  unknown, 5 Tags, ... -> immich:62f46271-...   ← Run A erfolgreich
+  14:03:29.596 ERROR Error at IA-07                                  ← Run B parallel zu A
+  14:03:29.664 ERROR Error at IA-08                                  ← Run B
+  14:03:32.915 INFO  Persönliches Foto, ...                          ← Run B notify
+  14:03:33.194 INFO  Persönliches Foto, 11 Tags, ...                 ← Run B final
+  15:51:31.241 INFO  Persönliches Foto, 11 Tags, ... -> immich:...   ← Run C (~2h später, Retry)
+
+MA-2026-23090 (zwei Pipeline-Ausführungen mit unterschiedlichen Tag-Counts):
+  00:04:47.641 INFO  Persönliches Foto, 11 Tags, ...                 ← Run A
+  00:04:55.271 ERROR Error at IA-08                                  ← Run B
+  00:04:59.233 INFO  Persönliches Foto, 10 Tags                      ← Run B (anderes Tag-Count!)
+```
+
+**Aggregierte Schäden in 2 Tagen:**
+- 30+ Jobs mit doppelten `INFO pipeline` Log-Einträgen pro `debug_key`
+- 120 Jobs mit `error_message LIKE '%already exists%'` aber Status `done`
+- 71 Jobs mit `File disappeared` Fehler
+
+### Reproduktionsschritte (für künftige Regression-Tests)
+
+```bash
+# Im Dev-Container ausführen:
+docker exec mediaassistant-dev python3 /app/test_duplicate_fix.py
+
+# Erwartete Ausgabe:
+#   Ergebnis: 26/26 Tests bestanden
+#   🎉 Alle Tests bestanden!
+```
+
+Bei Code-Änderungen an:
+- `backend/pipeline/__init__.py` (`run_pipeline` oder `retry_job`)
+- `backend/filewatcher.py` (`_pipeline_worker` oder Startup-Resume)
+- `backend/routers/duplicates.py` (Keep/Not-a-duplicate Endpoints)
+
+→ **Pflicht-Durchlauf** der vollen Suite vor dem Commit, inkl. der Race-Tests 5–8.
+
+### Symptom-Pflaster, die mit v2.28.2 entfernt wurden
+
+Diese beiden Workarounds aus älteren Releases waren nach dem echten Fix
+nicht mehr nötig und wurden bewusst entfernt — sie hätten neue Race-Bugs
+maskiert:
+
+| Pflaster | Ursprung | Status |
+|---|---|---|
+| `step_ia07_exif_write.py`: `os.path.exists(sidecar_path) → os.remove()` vor ExifTool | `00b1d5b` | ❌ entfernt |
+| `step_ia08_sort.py`: `os.path.exists(job.original_path)` vor Upload UND vor Move | `4a149f4` | ❌ entfernt |
+
+Falls echte Filesystem-Probleme auftreten (User löscht Datei manuell, NFS-Glitch), werden die Fehler aus `upload_asset()` oder `safe_move()` direkt durchgereicht — mit präziseren Meldungen als die irreführende `file may still be copying or was moved by another process`.
