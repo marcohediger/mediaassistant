@@ -521,7 +521,7 @@ async def execute(job, session) -> dict:
                     job.immich_asset_id, exc,
                 )
 
-        return {
+        result = {
             "category": category,
             "target_path": job.target_path,
             "moved": False,
@@ -534,6 +534,10 @@ async def execute(job, session) -> dict:
             "immich_tags_written": tags_written,
             "immich_tags_failed": tags_failed,
         }
+        if tags_failed:
+            result["status"] = "warning"
+            result["reason"] = f"Immich-Tags fehlgeschlagen: {', '.join(tags_failed)}"
+        return result
 
     # Route: Immich upload or target directory
     if job.use_immich:
@@ -605,7 +609,7 @@ async def execute(job, session) -> dict:
         # Mark asset ID so Immich polling skips this asset
         job.immich_asset_id = asset_id
 
-        return {
+        result = {
             "category": category,
             "target_path": job.target_path,
             "moved": False,
@@ -617,6 +621,13 @@ async def execute(job, session) -> dict:
             "immich_tags_written": tags_written,
             "immich_tags_failed": tags_failed,
         }
+        # Surface immich tag failures as a soft warning so the job UI shows
+        # "Warnungen in: IA-08" instead of silently hiding the failure in
+        # a sub-field that nobody looks at.
+        if tags_failed:
+            result["status"] = "warning"
+            result["reason"] = f"Immich-Tags fehlgeschlagen: {', '.join(tags_failed)}"
+        return result
 
     # Move file to library (safe: copy → verify → delete)
     await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
