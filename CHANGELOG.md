@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.28.12 — 2026-04-07
+
+### i18n: "Orphan" → "Verwaist" (Deutsch)
+
+User-Feedback: Es gibt ein deutsches Wort dafür. Eingedeutschung der
+Orphan-Strings im DE-Locale:
+
+| Key | Vorher | Nachher |
+|---|---|---|
+| `orphan` | "Orphan" | "Verwaist" |
+| `cleanup_orphans` | "Orphans aufräumen" | "Verwaiste aufräumen" |
+| `cleanup_orphans_confirm` | "...als 'orphan' markieren?" | "...als 'verwaist' markieren?" |
+
+Auch der hardcoded Alert-Text im JS-Handler eingedeutscht:
+- "Orphan-Scan gestartet" → "Scan auf verwaiste Einträge gestartet"
+- "Status orphan" → "Status Verwaist"
+- "Lokale Pfade only" → "Nur lokale Pfade"
+
+**Internal:** Der DB-Status-Wert bleibt `orphan` und URLs verwenden
+weiter `?status=orphan` — das ist API-Contract und nicht
+benutzersichtbar. Nur die i18n-Labels und User-Texte sind übersetzt.
+
+`en.json` bleibt unverändert ("Orphan" / "Cleanup orphans").
+
 ## v2.28.11 — 2026-04-07
 
 ### Feature: Orphan-Cleanup (manueller Trigger im Logs-View)
