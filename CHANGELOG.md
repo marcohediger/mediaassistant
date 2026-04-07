@@ -1,5 +1,35 @@
 # Changelog
 
+## v2.28.20 — 2026-04-07
+
+### Refactor: gemeinsamer `prepare_job_for_reprocess()` Helper
+
+Vier Codepfade haben bisher denselben „Job zurück in die Queue"-Tanz
+inline implementiert: `pipeline.reset_job_for_retry()` (error/warning
+Retry), `routers/duplicates.py` Review-Keep-One, `routers/duplicates.py`
+Not-Duplicate, und das geplante Wartungs-Tool aus #42. Die Logik ist
+jetzt als `pipeline.reprocess.prepare_job_for_reprocess()` zentralisiert.
+
+**Bonus-Fix beim Refactor:** Der File-Move in den `reprocess/`-Ordner
+verschiebt jetzt das `.xmp`-Sidecar **mit** der Datei. Vorher wurden
+Sidecars im alten Library-Pfad orphaned, was bei `metadata.write_mode =
+sidecar` dazu führen konnte, dass nach einem Reprocess Tags nicht mehr
+am ursprünglichen Speicherort lagen. IA-07 schreibt jetzt im neuen
+Reprocess-Pfad mit konsistentem Modus weiter — direct bleibt direct,
+sidecar bleibt sidecar.
+
+**Policies des Helpers:**
+- `keep_steps={"IA-01"}` — nur diese Schritte behalten (Duplicates-Flow)
+- `drop_step_statuses={"error","warning"}` — Schritte mit diesen Status
+  verwerfen (Retry-Flow)
+- `inject_steps={"IA-02": {...}}` — synthetische Step-Results einfügen
+  (Not-Duplicate markiert IA-02 als skipped)
+- `move_file=False` — In-Place Reprocess für Tools wie tag_cleanup, die
+  die Datei am Library-Pfad lassen und nur das EXIF wipen
+
+Issue #42 (tag_cleanup) wurde nachgeführt — Phase 3 (REQUEUE) ist jetzt
+ein Einzeiler über `prepare_job_for_reprocess(move_file=False, ...)`.
+
 ## v2.28.19 — 2026-04-07
 
 ### Feature: Filter „Warnung" im Verarbeitungs-Log + Retry für Warning-Jobs (#43)
