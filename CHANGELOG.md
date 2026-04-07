@@ -1,5 +1,67 @@
 # Changelog
 
+## v2.28.11 — 2026-04-07
+
+### Feature: Orphan-Cleanup (manueller Trigger im Logs-View)
+
+Neuer Button **"Orphans aufräumen"** rechts oben neben "Alle Fehler retry".
+Click triggert einen Background-Scan der alle Jobs im Status `done`,
+`duplicate` und `review` durchgeht und diejenigen, deren `target_path`
+oder `original_path` nicht mehr existiert, atomar als `status='orphan'`
+markiert.
+
+**Folgewirkung:**
+- Orphan-Jobs werden aus IA-02 Candidate-Queries ausgeschlossen
+  (`Job.status.in_(("done", "duplicate", "review", "processing", "error"))`
+  enthält 'orphan' nicht)
+- Daher keine Orphan-Logs (auch nicht auf DEBUG) mehr für diese Jobs
+- Neue Filter-Option im Logs-View: `Status: Orphan` zeigt alle markierten
+
+**Endpoint:** `POST /api/jobs/cleanup-orphans`
+- `?check_immich=1` (optional) prüft auch Immich-Asset-Existenz via API
+  (langsamer, default: nur lokale Pfade)
+- JSON-Response mit `{scanning, check_immich}` für Fetch-Calls
+- Background-Task läuft mit 50ms Pause zwischen Batches (200 Jobs/Batch)
+- System-Log-Eintrag mit final count + reason wenn fertig
+
+**JS-Handler im Logs-View:**
+- Doppel-Confirm: erst Hauptaktion, dann ob Immich auch geprüft werden soll
+- Button zeigt `⏳ ...` während des Calls (disabled)
+- Alert mit Job-Anzahl und Hinweis auf Status-Filter
+- Auto-redirect auf `/logs?tab=jobs&status=orphan` zur direkten Inspektion
+
+**Recovery:** `error_message` dokumentiert den vorherigen Status:
+`"Auto-orphaned from done (file gone) at 2026-04-07T...`. Falls die
+Dateien wieder auftauchen, kann ein Operator manuell den Status
+zurücksetzen.
+
+### Performance: Pipeline-Worker Stagger reduziert
+
+Worker-Stagger zwischen parallelen Job-Starts: **2.0s → 0.3s**.
+
+In v2.28.x davor wartete der Worker 2 Sekunden zwischen jedem neuen Job
+beim parallelen Start, um DB-Bursts zu vermeiden. Mit dem v2.28.8
+Pool-Tuning (20/40 Connections) ist das nicht mehr nötig — und 2s
+war zu lang: bei `slots=4` und Jobs mit ~5s Dauer war der erste Job
+fertig bevor der vierte überhaupt startete, also effektiv nur 1–2
+parallel statt 4. 0.3s ist genug Pause für DB-Atomic-Claims, lässt
+aber alle 4 Slots in <1.5s vollaufen.
+
+### i18n
+
+Neue Strings in `de.json` und `en.json`:
+- `logs.cleanup_orphans` / `logs.cleanup_orphans_confirm`
+  / `logs.cleanup_orphans_immich` / `logs.orphan`
+
+### Tests im Dev-Container
+
+| Setup | Resultat |
+|---|---|
+| 5 done jobs mit existierenden lokalen Files | ✅ bleiben `done` |
+| 5 done jobs mit fehlenden lokalen Files | 🗑️ alle 5 → `orphan` |
+| 3 done jobs mit `target_path: immich:*` | ✓ bleiben `done` (kein API-Check) |
+| Mit `check_immich=1`: fake immich:* IDs | 🗑️ würden via API als gone erkannt |
+
 ## v2.28.10 — 2026-04-07
 
 ### Fix: IA-02 Warnungen für orphan-Kandidaten in jeden Job-Detail

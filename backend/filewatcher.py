@@ -593,9 +593,13 @@ async def _pipeline_worker(shutdown_event: asyncio.Event):
                         _run_job(job.id, job.filename, job.debug_key)
                     )
                     running.add(task)
-                    # Staggered start: 2s apart to spread load
+                    # Staggered start: 0.3s apart so DB writes / atomic
+                    # claims don't all fire in the same microsecond but
+                    # parallelism still ramps up quickly. Was 2s in
+                    # earlier versions which made effective concurrency
+                    # very low for jobs that complete in <10s.
                     if len(new_jobs) > 1:
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(0.3)
 
         except Exception as e:
             try:
