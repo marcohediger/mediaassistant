@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.28.27 — 2026-04-07
+
+### UI: Header-Buttons mit Title oben bündig statt vertikal zentriert
+
+`align-items: center` auf den Headern von Dashboard und Logs hat die
+Action-Buttons vertikal zur Mitte des H1 zentriert — das wirkte
+optisch zu tief, weil das H1 mit `font-size: 1.75rem` deutlich höher
+ist als die `btn-small`-Buttons. Auf `align-items: flex-start`
+umgestellt, sodass die Buttons jetzt oben am H1 sitzen statt in der
+Mitte zu schweben.
+
 ## v2.28.26 — 2026-04-07
 
 ### Fix: Dashboard-Header-Layout-Shift + Module-Grid auf 4 Spalten gedeckelt
