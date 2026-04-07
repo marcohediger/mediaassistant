@@ -1,7 +1,12 @@
 # Testplan — MediaAssistant
 
+> **Letzter vollständiger Testlauf: v2.28.3 — 2026-04-07 — 92/92 bestanden** (Dev-Container)
+>   - 26/26 in `backend/test_duplicate_fix.py` (Duplikat-Fix #38 + Race-Conditions Test 5–8)
+>   - 66/66 in `/tmp/testplan_final.py` (Sektionen 1, 2, 3, 4, 6, 7, 8, 9, 12)
+>   - Sektion 5 (Immich Replace), Sektion 11 (DJI Daten) nicht erneut getestet — keine relevante Code-Änderung
+>
 > Letzter Race-Condition-Testlauf: **v2.28.3 — 2026-04-07** (26/26 bestanden, alle Tests in `backend/test_duplicate_fix.py`)
-> Letzter vollständiger Testlauf: **v2.17.1 — 2026-04-02** (296/305 bestanden, 9 nicht testbar)
+> Letzter vollständiger Testlauf vor v2.28.x: **v2.17.1 — 2026-04-02** (296/305 bestanden, 9 nicht testbar)
 > Exotische Tests: 42 Zusatztests, 3 Bugs gefunden und behoben
 > Slow-System Test: 0.5 CPU / 512MB RAM (Synology-Simulation) bestanden
 > Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203 JPGs, iPhone 12 Pro HEIC/MOV, Casio EX-S600 JPGs, generierte PNG/GIF/WebP/TIFF, UUID Messenger-Dateien
@@ -807,3 +812,150 @@ maskiert:
 | `step_ia08_sort.py`: `os.path.exists(job.original_path)` vor Upload UND vor Move | `4a149f4` | ❌ entfernt |
 
 Falls echte Filesystem-Probleme auftreten (User löscht Datei manuell, NFS-Glitch), werden die Fehler aus `upload_asset()` oder `safe_move()` direkt durchgereicht — mit präziseren Meldungen als die irreführende `file may still be copying or was moved by another process`.
+
+## 14. Vollständiger Testlauf — v2.28.3 — 2026-04-07
+
+> Dev-Container `mediaassistant-dev`, durchgeführt nach v2.28.2/v2.28.3 Race-Condition-Fixes
+> Gesamt: **92/92 Tests bestanden, 0 Fehler, 0 geblockt**
+
+### Test 1: `backend/test_duplicate_fix.py` (26 Tests)
+
+`docker exec mediaassistant-dev python3 /app/test_duplicate_fix.py`
+
+| Bereich | Tests | Resultat |
+|---|---|---|
+| Test 1: `_handle_duplicate` Cleanup-Fehler-Resilienz (Fix #38) | 4 | ✅ |
+| Test 2: Pipeline-Fallback bei IA-02 Exception (Fix #38) | 4 | ✅ |
+| Test 3: Normaler Duplikat-Flow | 4 | ✅ |
+| Test 4: Nicht-Duplikat läuft bis IA-08 | 3 | ✅ |
+| **Test 5 (NEU v2.28.2):** 10× parallel `run_pipeline` → atomic claim blockiert 9 | 3 | ✅ |
+| **Test 6 (NEU v2.28.2):** `run_pipeline` auf done Job → no-op | 2 | ✅ |
+| **Test 7 (NEU v2.28.3):** `retry_job` + 5× `run_pipeline` → frischer IA-01 | 4 | ✅ |
+| **Test 8 (NEU v2.28.3):** 5× parallel `retry_job` → exakt 1× True | 2 | ✅ |
+| **Total** | **26** | **✅ 26/26** |
+
+### Test 2: TESTPLAN-Sektionen (66 Tests in `/tmp/testplan_final.py`)
+
+#### Sektion 9 — Performance
+| Test | Resultat |
+|---|---|
+| 7+ DB-Indexes vorhanden (R4) | ✅ 10 indexes |
+| Dashboard GROUP BY query (R2) | ✅ 3.3ms (< 100ms) |
+| `MAX_FILE_SIZE = 10 GB` (S7) | ✅ 10737418240 |
+
+#### Sektion 8 — Security
+| Test | Resultat |
+|---|---|
+| `_validate_target_path('/library/../etc')` → ValueError | ✅ |
+| `_validate_target_path('/library/photos/2026')` → akzeptiert | ✅ |
+| `_sanitize_filename('../../etc/passwd')` → `'passwd'` | ✅ |
+| `_sanitize_filename('/etc/passwd')` → `'passwd'` | ✅ |
+| `_sanitize_filename('photo_2026.jpg')` → unverändert | ✅ |
+| `_sanitize_filename('')` → `'asset.jpg'` (Fallback) | ✅ |
+| `_sanitize_filename(None)` → `'asset.jpg'` (Fallback) | ✅ |
+
+#### Sektion 4 — Filewatcher-Stabilität
+| Test | Resultat |
+|---|---|
+| Stabile Datei (Größe stimmt) → True | ✅ |
+| Leere Datei (0 Bytes) → unstable (current_size > 0 Check) | ✅ |
+| Größen-Mismatch → unstable nach 1.0s Wartezeit | ✅ |
+| 24/24 Extensions registriert | ✅ |
+| Synology SKIP_DIRS = `{'@eadir', '.synology', '#recycle'}` | ✅ |
+
+#### Sektion 7 — Edge Cases
+| Test | Resultat |
+|---|---|
+| `.txt` wird vom Filewatcher ignoriert | ✅ |
+| Job mit Leerzeichen-Name | ✅ |
+| Job mit Umlauten (`Umläüten_äöü.jpg`) | ✅ |
+| Job mit CJK (`测试照片_テスト.jpg`) | ✅ |
+| Job mit Emoji (`🏔️_Berge.jpg`) | ✅ |
+| Job mit Klammern (`DJI_0061 (2).JPG`) | ✅ |
+| Job mit doppelter Extension (`photo.jpg.jpg`) | ✅ |
+
+#### Sektion 2 — Pipeline-Fehlerbehandlung
+| Test | Resultat |
+|---|---|
+| Critical IA-01 Fehler → status=error | ✅ |
+| `error_message` enthält IA-01-Marker | ✅ |
+| Finalizer (IA-09/10/11) liefen nach kritischem Fehler | ✅ |
+
+#### Sektion 1 + 6 — Pipeline-Steps & Dateiformate
+> Reale Dateien aus `/home/marcohediger/claude/Testbilder/iphone/`, synthetische via PIL.
+
+**HEIC** (iPhone 12 Pro, IMG_2410.HEIC, 759KB):
+| Step | Resultat |
+|---|---|
+| IA-01: `file_type=HEIC`, EXIF Apple iPhone 12 Pro | ✅ |
+| IA-02: status=ok | ✅ |
+| IA-04: konvertiert → temp JPEG | ✅ |
+| IA-05: `Persönliches Foto`, confidence 1.00 | ✅ |
+| IA-07 dry_run: 9 Tags geplant | ✅ |
+| IA-08 dry_run: target `/library/photos/2022/2022-12/...` | ✅ |
+| Final status: `done` | ✅ |
+
+**MOV** (iPhone Video, IMG_2539.MOV, 1.4MB, 1.02s):
+| Step | Resultat |
+|---|---|
+| IA-01: `file_type=MOV`, mime=`video/quicktime`, ffprobe-Daten | ✅ |
+| IA-02: status=ok | ✅ |
+| IA-04: `converted=False` (Video-Thumbnail im Test deaktiviert) | ✅ |
+| IA-05: type=unknown (kein Thumbnail) | ✅ |
+| IA-07 dry_run: 4 Tags | ✅ |
+| IA-08 dry_run: target `/library/videos/2022/2022-12/...` | ✅ |
+| Final status: `done` | ✅ |
+
+**PNG / WEBP / TIFF / GIF / JPEG / BMP** (synthetische Bilder via PIL):
+| Format | IA-01 | IA-02 | Final |
+|---|---|---|---|
+| PNG | ✅ PNG | ✅ duplicate | ✅ duplicate |
+| WEBP | ✅ WEBP | ✅ duplicate | ✅ duplicate |
+| TIFF | ✅ TIFF | ✅ duplicate | ✅ duplicate |
+| GIF | ✅ GIF | ✅ duplicate | ✅ duplicate |
+| JPEG | ✅ JPEG | ✅ duplicate | ✅ duplicate |
+| BMP | ✅ BMP | ✅ duplicate | ✅ duplicate |
+
+> Synthetische Mini-Bilder werden korrekt von der Duplikat-Erkennung erfasst (pHash-Match mit existierenden Test-Bildern in der DB) — IA-01 läuft trotzdem korrekt durch.
+
+#### Sektion 12 — Stress / Concurrent
+| Test | Resultat |
+|---|---|
+| 10 Dateien parallel via `asyncio.gather` → alle 10 verarbeitet in 1.1s | ✅ |
+
+#### Sektion 3 — Web Interface (Endpoint-Reachability)
+| Endpoint | Status | Antwortzeit |
+|---|---|---|
+| `/api/version` | 200 | 5ms |
+| `/api/dashboard` | 200 | 4ms |
+| `/` | 200 | 3ms |
+| `/login` | 200 | 4ms |
+| `/review` | 200 | 4ms |
+| `/logs` | 200 | 3ms |
+| `/settings` | 200 | 3ms |
+| `/duplicates` | 200 | 4ms |
+
+> Alle Endpoints redirecten zu `/login` (Auth aktiv) und liefern HTTP 200 — Browser-UI-Tests selbst wurden nicht durchgeführt (manuelle Validierung erforderlich).
+
+### Nicht erneut getestete Sektionen (keine Code-Änderung in v2.28.x)
+
+| Sektion | Begründung |
+|---|---|
+| **5 — Immich-Integration** | Erfordert echte Immich-Instanz; bereits in v2.17.1 grün |
+| **10 — Nicht testbar (Photon, CR2/NEF/ARW)** | Infrastruktur fehlt |
+| **11 — DJI-Testdaten Ergebnisse** | Historische Tests, weiterhin gültig |
+
+### Reproduktionsschritte
+
+```bash
+# Race-Condition-Tests
+docker exec mediaassistant-dev python3 /app/test_duplicate_fix.py
+
+# Konsolidierter TESTPLAN-Lauf (66 Tests, ~30s)
+docker cp /tmp/testplan_final.py mediaassistant-dev:/tmp/
+docker exec mediaassistant-dev python3 /tmp/testplan_final.py
+```
+
+**Erwartetes Ergebnis:**
+- `test_duplicate_fix.py`: `26/26 Tests bestanden`
+- `testplan_final.py`: `PASS: 66, FAIL: 0, BLOCK: 0`
