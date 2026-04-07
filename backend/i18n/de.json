@@ -44,6 +44,8 @@
     "warning": "Warnung",
     "error": "Fehler",
     "filter": "Filtern",
+    "retry_all_errors": "Alle Fehler retry",
+    "retry_all_confirm": "Wirklich alle Jobs im Status 'Fehler' erneut verarbeiten?",
     "entries": "Einträge",
     "time": "Zeit",
     "level": "Level",
