@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.28.24 — 2026-04-07
+
+### UI: Dashboard-Header analog zu Logs-Header + Module-Karten Text-Wrap
+
+Auf der `/logs`-Seite sind alle drei Action-Buttons direkte `<a>`-Children
+des Flex-Containers — auf dem Dashboard war einer davon (`Jetzt scannen`)
+in einem `<form>` gewrappt, also war die Form das Flex-Item statt der
+Button. Beim Wrappen auf Mobile wirkte das uneinheitlich.
+
+Umgestellt: Der Scan-Button ist jetzt ebenfalls ein direkter Anchor
+mit `onclick="triggerScan(event)"`-Handler nach dem Muster von
+`retryAllErrors()` aus `logs.html`. Die POST-Semantik bleibt erhalten
+(Fetch auf `/api/trigger-scan`), inklusive temporärem `⏳`-State und
+Fehler-Alert wie bei den anderen Action-Buttons.
+
+Zusätzlich darf `.module-detail` auf den Module-Karten jetzt umbrechen:
+`white-space: nowrap; text-overflow: ellipsis;` ersetzt durch
+`word-break: break-word; overflow-wrap: anywhere;`. Auf schmalen
+Mobile-Karten wird Detail-Text damit über mehrere Zeilen umgebrochen
+statt mit Ellipsis abgeschnitten.
+
 ## v2.28.23 — 2026-04-07
 
 ### UI: Logs-Header-Buttons brechen auf Mobile um

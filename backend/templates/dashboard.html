@@ -6,9 +6,8 @@
     <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
         <a href="#" id="pipeline-toggle-btn" class="btn btn-small btn-secondary"
            onclick="togglePipeline(event)" style="display: none;">⏸ {{ t.dashboard.pause_pipeline }}</a>
-        <form method="post" action="/api/trigger-scan" style="margin: 0;">
-            <button type="submit" class="btn btn-small btn-primary">{{ t.dashboard.trigger_scan }}</button>
-        </form>
+        <a href="#" class="btn btn-small btn-primary"
+           onclick="triggerScan(event)">{{ t.dashboard.trigger_scan }}</a>
     </div>
 </div>
 
@@ -46,6 +45,34 @@ async function refreshPipelineStatus() {
             banner.style.display = 'none';
         }
     } catch (e) { /* silent */ }
+}
+
+async function triggerScan(ev) {
+    ev.preventDefault();
+    const btn = ev.currentTarget;
+    const origText = btn.textContent;
+    btn.textContent = '⏳ ...';
+    btn.style.pointerEvents = 'none';
+    try {
+        const resp = await fetch('/api/trigger-scan', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Accept': 'application/json'}
+        });
+        if (!resp.ok && resp.status !== 303) {
+            alert('Scan-Trigger fehlgeschlagen: HTTP ' + resp.status);
+            btn.textContent = origText;
+            btn.style.pointerEvents = '';
+            return;
+        }
+        // Endpoint returns 303 redirect to / — just refresh state via API.
+        btn.textContent = origText;
+        btn.style.pointerEvents = '';
+    } catch (e) {
+        alert('Scan-Trigger fehlgeschlagen: ' + e.message);
+        btn.textContent = origText;
+        btn.style.pointerEvents = '';
+    }
 }
 
 async function togglePipeline(ev) {
