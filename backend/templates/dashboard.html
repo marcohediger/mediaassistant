@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ t.dashboard.title }} — MediaAssistant{% endblock %}
 {% block content %}
-<div style="display: flex; justify-content: space-between; align-items: center;">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
     <h1 style="margin: 0;">{{ t.dashboard.title }}</h1>
-    <div style="display: flex; gap: 0.5rem; align-items: center;">
+    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
         <a href="#" id="pipeline-toggle-btn" class="btn btn-small btn-secondary"
            onclick="togglePipeline(event)" style="display: none;">⏸ {{ t.dashboard.pause_pipeline }}</a>
         <form method="post" action="/api/trigger-scan" style="margin: 0;">
