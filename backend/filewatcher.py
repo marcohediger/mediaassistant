@@ -497,6 +497,8 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
                 logger.error(f"Job {job.debug_key} abandoned after {MAX_RETRIES} retries")
                 continue
             job.retry_count = retry
+            # Reset to queued so run_pipeline's atomic claim accepts it.
+            job.status = "queued"
             await session.commit()
             await log_info("filewatcher", f"Job resumed (attempt {retry}/{MAX_RETRIES})", f"{job.debug_key} ({job.filename})")
             logger.info(f"Resuming {job.debug_key} (attempt {retry}/{MAX_RETRIES})")

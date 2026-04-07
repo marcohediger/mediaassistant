@@ -4,6 +4,7 @@ import logging
 import os
 import traceback
 from datetime import datetime
+from sqlalchemy import update
 from sqlalchemy.orm.attributes import flag_modified
 from config import config_manager
 from database import async_session
@@ -40,15 +41,31 @@ MAIN_STEPS = [s for s in STEPS if s[0] not in {"IA-09", "IA-10", "IA-11"}]
 
 async def run_pipeline(job_id: int):
     async with async_session() as session:
+        # Atomic claim: only one caller can transition queued -> processing.
+        # Prevents the race where multiple entry points (worker, retry_job,
+        # immich_poll, duplicates router) start the same job in parallel,
+        # which previously caused IA-07 "already exists" and IA-08
+        # "file disappeared" errors when two pipelines wrote/uploaded the
+        # same file concurrently.
+        claim = await session.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.status == "queued")
+            .values(status="processing", started_at=datetime.now())
+        )
+        await session.commit()
+        if claim.rowcount == 0:
+            logger.info(
+                "Job %s: not in queued state, another caller already claimed it — skipping",
+                job_id,
+            )
+            return
+
         job = await session.get(Job, job_id)
         if not job:
             return
 
-        job.status = "processing"
-        job.started_at = datetime.now()
         existing_results = dict(job.step_result or {})
         pipeline_failed = False
-        await session.commit()
 
         # Main pipeline steps (IA-01 to IA-08)
         duplicate_detected = False
