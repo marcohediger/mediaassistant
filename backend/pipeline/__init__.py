@@ -4,7 +4,7 @@ import logging
 import os
 import traceback
 from datetime import datetime
-from sqlalchemy import update
+from sqlalchemy import update, or_, and_
 from sqlalchemy.orm.attributes import flag_modified
 from config import config_manager
 from database import async_session
@@ -345,14 +345,26 @@ async def reset_job_for_retry(job_id: int) -> bool:
     bursting connections).
     """
     async with async_session() as session:
-        # Atomic claim: only one caller transitions error -> processing.
+        # Atomic claim: only one caller transitions error/warning -> processing.
         # We use 'processing' as a transient lock state during cleanup so
         # neither the worker nor a parallel run_pipeline call can claim the
         # job while we still have a stale step_result on it. After cleanup
         # we flip to 'queued' and let the worker / run_pipeline claim it.
+        # Eligible: status='error' OR status='done' with aggregated step
+        # warnings (error_message starts with "Warnungen in:" — see the
+        # aggregation block above).
         claim = await session.execute(
             update(Job)
-            .where(Job.id == job_id, Job.status == "error")
+            .where(
+                Job.id == job_id,
+                or_(
+                    Job.status == "error",
+                    and_(
+                        Job.status == "done",
+                        Job.error_message.like("Warnungen in:%"),
+                    ),
+                ),
+            )
             .values(status="processing")
         )
         await session.commit()
@@ -379,10 +391,12 @@ async def reset_job_for_retry(job_id: int) -> bool:
             job.original_path = reprocess_path
             job.target_path = None
 
-        # Remove failed step results so pipeline resumes from there
+        # Remove failed step results so pipeline resumes from there.
+        # Both 'error' and 'warning' results are dropped so soft failures
+        # (e.g. IA-08 immich_tags_failed) get a fresh attempt on retry.
         step_results = dict(job.step_result or {})
         for step_code in list(step_results.keys()):
-            if isinstance(step_results[step_code], dict) and step_results[step_code].get("status") == "error":
+            if isinstance(step_results[step_code], dict) and step_results[step_code].get("status") in ("error", "warning"):
                 del step_results[step_code]
         # Also remove finalizer results so they re-run
         for code in ("IA-09", "IA-10", "IA-11"):

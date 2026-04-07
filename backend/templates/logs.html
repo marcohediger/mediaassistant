@@ -175,6 +175,7 @@ async function cleanupOrphans(ev) {
                 <option value="processing" {{ 'selected' if status_filter == 'processing' else '' }}>{{ t.logs.processing }}</option>
                 <option value="done" {{ 'selected' if status_filter == 'done' else '' }}>{{ t.logs.done }}</option>
                 <option value="error" {{ 'selected' if status_filter == 'error' else '' }}>{{ t.logs.error }}</option>
+                <option value="warning" {{ 'selected' if status_filter == 'warning' else '' }}>{{ t.logs.warning }}</option>
                 <option value="duplicate" {{ 'selected' if status_filter == 'duplicate' else '' }}>{{ t.logs.duplicate }}</option>
                 <option value="review" {{ 'selected' if status_filter == 'review' else '' }}>{{ t.logs.review }}</option>
                 <option value="orphan" {{ 'selected' if status_filter == 'orphan' else '' }}>{{ t.logs.orphan }}</option>

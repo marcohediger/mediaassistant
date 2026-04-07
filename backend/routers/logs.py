@@ -42,7 +42,15 @@ async def logs_page(request: Request):
     if tab == "jobs":
         async with async_session() as session:
             query = select(Job)
-            if status_filter:
+            if status_filter == "warning":
+                # Pseudo-status: jobs that completed with step warnings.
+                # Pipeline aggregates warning steps as status='done' with
+                # error_message starting with "Warnungen in:" (see pipeline/__init__.py).
+                query = query.where(
+                    Job.status == "done",
+                    Job.error_message.like("Warnungen in:%"),
+                )
+            elif status_filter:
                 query = query.where(Job.status == status_filter)
             if search:
                 query = query.where(
