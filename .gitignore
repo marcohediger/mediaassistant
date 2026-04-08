@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 data/
+dataLiveSystem/
 test_inbox/
 test_library/
 .env
