@@ -5,4 +5,3 @@ test_inbox/
 test_library/
 .env
 docker-compose.local.yml
-AGENTS.md
