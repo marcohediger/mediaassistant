@@ -617,25 +617,40 @@ async def _run_error_retry_test(source_heic: str, *, mode: str = "direct",
         report(f"{scenario_id}: unexpected exception", False, repr(e))
 
 
-async def _run_missing_file_test(source_heic: str):
-    """Negative case: file is gone before retry → retry must abort cleanly."""
-    print(f"\n── Test: retry with missing source file ──")
-    test_name = f"__retry_missing_{int(datetime.now().timestamp())}.HEIC"
+async def _run_immich_only_retry_test(source_heic: str):
+    """Retry a job whose only surviving copy lives in Immich.
+
+    Mirrors the live scenario from MA-2026-28111 (user-reported):
+      - Job was processed via inbox → IA-08 uploaded to Immich and
+        deleted the inbox file (this is the normal happy path)
+      - Job ends up with `target_path='immich:<asset_id>'`,
+        `original_path` pointing at the now-empty inbox spot,
+        `error_message='Warnungen in: IA-05'` (or any soft warning)
+      - User clicks Retry: pre-v2.28.32 the retry aborted with
+        "Datei nicht auffindbar", because _move_file_for_reprocess
+        couldn't find the file on local disk. But the asset is still
+        in Immich — the retry should download it and reprocess.
+
+    Post-fix expectation: retry SUCCEEDS by downloading the original
+    from Immich into REPROCESS_DIR, then runs the pipeline as usual.
+    """
+    print(f"\n── Test: retry [Immich-only, inbox file deleted] ──")
+    test_name = f"__retry_immich_only_{int(datetime.now().timestamp())}.HEIC"
     inbox_path = os.path.join(INBOX, test_name)
-    asset_ids: list[str] = []
     job_id: int | None = None
 
     try:
         source_heic = _make_unique_source(source_heic)
-        # First run to get a real immich_asset_id
         await config_manager.set("metadata.write_mode", "sidecar")
         _stage_inbox_file(source_heic, test_name)
 
+        # First run: file goes through pipeline, IA-08 uploads to
+        # Immich and deletes the inbox copy.
         async with async_session() as session:
             job = Job(
                 filename=test_name,
                 original_path=inbox_path,
-                debug_key=f"MA-LIFECYCLE-MISS-{int(datetime.now().timestamp())}",
+                debug_key=f"MA-LIFECYCLE-IMMONLY-{int(datetime.now().timestamp())}",
                 status="queued",
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
@@ -650,24 +665,112 @@ async def _run_missing_file_test(source_heic: str):
 
         async with async_session() as session:
             job = await session.get(Job, job_id)
-            if job.immich_asset_id:
-                asset_ids.append(job.immich_asset_id)
+            first_target = job.target_path
+            first_asset = job.immich_asset_id
+
+        report("immich-only: first run uploaded to Immich",
+               bool(first_asset and first_target and first_target.startswith("immich:")),
+               f"target={first_target} asset={first_asset}")
+
+        if not first_asset:
+            return
+
+        # Inject the warning state. original_path still points at the
+        # now-deleted inbox spot (mimics live state), target_path is the
+        # immich: ref.
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
             sr = dict(job.step_result or {})
             sr["IA-05"] = {
-                "status": "warning", "reason": "synthetic", "type": "unknown",
-                "tags": [], "description": "", "mood": "", "people_count": 0,
-                "quality": "unbekannt", "confidence": 0.0,
+                "status": "warning", "reason": "synthetic for immich-only test",
+                "type": "unknown", "tags": [], "description": "", "mood": "",
+                "people_count": 0, "quality": "unbekannt", "confidence": 0.0,
             }
             job.step_result = sr
             flag_modified(job, "step_result")
             job.error_message = "Warnungen in: IA-05"
-            # Point original_path back to inbox, then DELETE the inbox file.
-            job.original_path = inbox_path
+            job.original_path = inbox_path  # the now-empty spot
             await session.commit()
 
-        # Make sure the file is really gone before retry
+        # Make double-sure the inbox spot is empty
         if os.path.exists(inbox_path):
             os.remove(inbox_path)
+        report("immich-only: inbox spot is empty before retry",
+               not os.path.exists(inbox_path))
+
+        # Trigger retry — pre-fix this aborted with "Datei nicht
+        # auffindbar". Post-fix it must download from Immich and
+        # complete the pipeline.
+        ok = await reset_job_for_retry(job_id)
+        report("immich-only: reset_job_for_retry succeeded (no abort)", ok)
+
+        if ok:
+            await run_pipeline(job_id)
+
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            final_status = job.status
+            final_target = job.target_path
+            final_orig = job.original_path
+            final_err = job.error_message
+
+        report(
+            "immich-only: job ends in done/review (not error)",
+            final_status in ("done", "review"),
+            f"status={final_status} err={(final_err or '')[:60]}",
+        )
+        report(
+            "immich-only: target_path still points at the immich asset",
+            bool(final_target and final_target.startswith("immich:")),
+            f"target={final_target}",
+        )
+        report(
+            "immich-only: original_path moved into reprocess/",
+            bool(final_orig and final_orig.startswith(REPROCESS_DIR)),
+            f"original_path={final_orig}",
+        )
+        report(
+            "immich-only: downloaded file exists in reprocess/",
+            bool(final_orig and os.path.exists(final_orig)),
+            f"checked={final_orig}",
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        report("unexpected exception in immich-only retry test", False, repr(e))
+
+
+async def _run_truly_missing_test():
+    """Negative case: no source ANYWHERE (no disk file, no immich asset).
+
+    target_path is None, original_path doesn't exist, no immich_asset_id
+    to fall back on. Retry must abort cleanly with the
+    "Datei nicht auffindbar" message — and NOT loop forever.
+    """
+    print(f"\n── Test: retry with truly missing source (no disk, no immich) ──")
+    test_name = f"__retry_truly_missing_{int(datetime.now().timestamp())}.HEIC"
+    inbox_path = os.path.join(INBOX, test_name)
+    job_id: int | None = None
+
+    try:
+        # Build a job that points at a non-existent file with no immich
+        # fallback whatsoever.
+        async with async_session() as session:
+            job = Job(
+                filename=test_name,
+                original_path=inbox_path,
+                target_path=None,
+                debug_key=f"MA-LIFECYCLE-NONE-{int(datetime.now().timestamp())}",
+                status="error",
+                error_message="[IA-01] previous failure",
+                source_label="Default Inbox",
+                source_inbox_path=INBOX,
+                use_immich=True,
+                step_result={"IA-01": {"status": "error", "reason": "stale"}},
+            )
+            session.add(job)
+            await session.commit()
+            job_id = job.id
 
         ok = await reset_job_for_retry(job_id)
 
@@ -676,22 +779,20 @@ async def _run_missing_file_test(source_heic: str):
             final_status = job.status
             final_err = job.error_message or ""
 
-        # Post-fix expectation: retry aborts cleanly with status='error'
-        # and a clear message; no infinite-requeue loop.
         report(
-            "missing-file retry aborted (not requeued)",
-            final_status == "error",
-            f"status={final_status} err={final_err[:80]}",
+            "truly-missing: retry aborted (not requeued)",
+            final_status == "error" and not ok,
+            f"status={final_status} ok={ok}",
         )
         report(
-            "error message mentions missing file",
-            "nicht auffindbar" in final_err.lower() or "not found" in final_err.lower() or "missing" in final_err.lower(),
+            "truly-missing: error message mentions missing file",
+            "nicht auffindbar" in final_err.lower(),
             f"err={final_err[:120]}",
         )
 
     except Exception as e:
         traceback.print_exc()
-        report("unexpected exception in missing-file test", False, repr(e))
+        report("unexpected exception in truly-missing test", False, repr(e))
 
 
 async def main():
@@ -749,7 +850,8 @@ async def main():
         await _run_error_retry_test(
             source_heic=source, mode="sidecar", use_immich=False, scenario_id="R11",
         )
-        await _run_missing_file_test(source_heic=source)
+        await _run_immich_only_retry_test(source_heic=source)
+        await _run_truly_missing_test()
     finally:
         await config_manager.set("metadata.write_mode", saved_write_mode)
         async with async_session() as session:

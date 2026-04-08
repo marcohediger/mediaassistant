@@ -1,5 +1,56 @@
 # Changelog
 
+## v2.28.32 — 2026-04-08
+
+### Fix: Retry bricht ab obwohl Datei in Immich noch lebt (MA-2026-28111)
+
+User-Bericht: Job MA-2026-28111 (`IMG_2500.HEIC`), `target_path =
+immich:154a3211-...`, `original_path = /inbox/iPhone/2022/12/IMG_2500.HEIC`,
+Status `error` mit "Datei nicht auffindbar — Retry abgebrochen". Der
+User bestätigte: "ich kann die datei aber manuel finden in immich".
+
+**Was war kaputt:** Mein v2.28.28-Fix gegen die Endlos-Retry-Schleife
+hat zu pauschal auf "weder target_path noch original_path existieren
+auf der Disk → abort" geprüft. Wenn aber `target_path` ein
+`immich:<asset_id>`-Reference ist, lebt die Datei nach wie vor in
+Immich — sie ist nicht verloren, nur nicht lokal. Das ist sogar der
+**häufigste Live-Zustand überhaupt**: jeder Inbox-Job, der erfolgreich
+nach Immich hochgeladen wurde, hat ab dem Moment KEINE lokale Kopie
+mehr (IA-08 räumt die Inbox-Datei nach Upload auf). Ein späterer Retry
+wegen einer Soft-Warning hat dann immer abgebrochen.
+
+**Fix in `pipeline/reprocess.py:_move_file_for_reprocess()`:**
+Wenn die lokalen Quellen (target_path, original_path) leer sind UND
+target_path eine `immich:`-Reference ist, wird die Datei jetzt via
+`download_asset()` aus Immich nach `/app/data/reprocess/` runtergeladen
+und der Pipeline-Lauf läuft normal weiter. Der debug_key wird ans
+Filename suffigiert um Kollisionen zwischen parallelen Reprocesses
+des gleichen Immich-Filenames zu vermeiden.
+
+Wenn weder lokal noch in Immich was zu finden ist (echter "missing"-
+Fall), bricht der Retry weiterhin sauber ab — wie bisher.
+
+**Test-Matrix-Lücke geschlossen (Sektion 14):**
+- Neuer Test `_run_immich_only_retry_test`: setzt das exakte
+  MA-2026-28111-Szenario auf — erster Lauf hochladen, Inbox-Datei
+  weg, Warning injizieren, Retry → muss erfolgreich sein. Vor
+  v2.28.32 rot, nach v2.28.32 grün.
+- Neuer Test `_run_truly_missing_test`: weder lokal noch in Immich.
+  Retry muss abbrechen, kein Endlos-Loop.
+- Sektion 14 R15 umformuliert (jetzt explizit: "weder Disk noch Immich")
+- Sektion 14 R17 neu hinzugefügt für den Immich-only-Pfad.
+
+Test-Lauf: 80/80 grün (`test_retry_file_lifecycle.py`).
+Regressionen: 26/26 (`test_duplicate_fix.py`), 59/0/1-block
+(`test_testplan_final.py`).
+
+**Selbstkritik:** Die Test-Matrix in v2.28.30 hat genau diese Achse
+übersehen. Sektion 14 hatte zwar "R12-R14: Immich-Poller-Source"-
+Lücken aber nicht den **Inbox-Job-nach-erfolgreichem-Upload**-Pfad,
+obwohl das der häufigste Job-Endzustand überhaupt ist. Das ist eine
+ehrliche Lücke in meiner Coverage-Analyse, die Sektion 14 ab v2.28.32
+mit R17 schliesst.
+
 ## v2.28.31 — 2026-04-08
 
 ### Fix: Doppelter Status-Badge auf der Job-Detail-Seite

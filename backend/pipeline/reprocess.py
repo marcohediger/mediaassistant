@@ -60,14 +60,23 @@ def _is_immich_target(target_path: str | None) -> bool:
 async def _move_file_for_reprocess(job) -> bool:
     """Move the job's current file (+ sidecar, - log) into REPROCESS_DIR.
 
-    Picks `target_path` if it exists on disk, otherwise falls back to
-    `original_path`. Updates `job.original_path` to the new location and
-    clears `job.target_path` **only when it pointed to a now-stale local
-    file location**. An `immich:<asset_id>` reference is preserved across
-    the retry, because the asset itself survives — clearing it would
-    leave the job orphaned even though Immich still has the data.
-    Returns True if a file was moved, False if no source file could be
-    located on disk.
+    Source resolution order:
+      1. `target_path` (if it's a real disk path that exists)
+      2. `original_path` (if it exists on disk)
+      3. `target_path` if it's an `immich:<asset_id>` reference — in
+         that case the asset is downloaded from Immich into the
+         reprocess dir. This is the path used for jobs whose only
+         remaining copy lives in Immich (the inbox file was already
+         deleted by IA-08 after the successful upload).
+
+    Updates `job.original_path` to the new local location. Clears
+    `job.target_path` **only when it pointed to a now-stale local file
+    path** — an `immich:<asset_id>` reference is preserved so the job
+    stays linked to its Immich data.
+
+    Returns True if the file is now available in REPROCESS_DIR (either
+    via local move or Immich download), False if no source could be
+    located anywhere.
     """
     src = None
     if job.target_path and not _is_immich_target(job.target_path) and os.path.exists(job.target_path):
@@ -76,6 +85,40 @@ async def _move_file_for_reprocess(job) -> bool:
         src = job.original_path
 
     if not src:
+        # Last-resort: if target_path is an immich:<asset_id> reference,
+        # download the original from Immich into REPROCESS_DIR. This
+        # makes retry work for jobs whose only surviving copy lives in
+        # Immich (typical state for any job whose inbox file IA-08
+        # already removed after upload).
+        if _is_immich_target(job.target_path):
+            asset_id = job.target_path[len("immich:"):]
+            try:
+                # Lazy import to avoid an immich_client → reprocess
+                # circular at module-load time and to keep this module
+                # importable in tests that don't need Immich at all.
+                from immich_client import download_asset, get_user_api_key
+                user_api_key = None
+                if job.immich_user_id:
+                    user_api_key = await get_user_api_key(job.immich_user_id)
+                await asyncio.to_thread(os.makedirs, REPROCESS_DIR, exist_ok=True)
+                downloaded = await download_asset(
+                    asset_id, REPROCESS_DIR, api_key=user_api_key,
+                )
+            except Exception:
+                # Asset gone from Immich too — no source anywhere.
+                return False
+
+            # Move the just-downloaded file to a debug-key-suffixed name
+            # so concurrent reprocesses of different jobs that happen to
+            # have the same Immich filename don't collide.
+            dst = _resolve_reprocess_path(os.path.basename(downloaded), job.debug_key)
+            if downloaded != dst:
+                await asyncio.to_thread(os.rename, downloaded, dst)
+            job.original_path = dst
+            # Keep target_path = "immich:<id>" so IA-08's webhook branch
+            # (cached in step_result) still recognises the asset.
+            return True
+
         # Nothing to move — caller decides whether to fail or continue.
         # Clear a stale local target_path; preserve immich: references.
         if not _is_immich_target(job.target_path):

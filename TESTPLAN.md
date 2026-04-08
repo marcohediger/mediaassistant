@@ -717,8 +717,9 @@ Eingangs-Status: `status='error'` ODER `status='done' + error_message='Warnungen
 | R12 | Immich | direct | Immich-Poller | done+Warnung | `/tmp/ma_immich_xxx/` | gesetzt | Datei → reprocess → IA-08 webhook tags, IA-10 darf jetzt löschen (poller-temp) | ⚠️ **Lücke** |
 | R13 | Immich | sidecar | Immich-Poller | done+Warnung | `/tmp/ma_immich_xxx/` + `.xmp` | gesetzt | wie R12, sidecar im Poller-Tempdir | ⚠️ **Lücke** |
 | R14 | Immich | direct | Immich-Poller | error (IA-05) | `/tmp/ma_immich_xxx/` | gesetzt | wie R12 mit Critical-Statt-Warning | ⚠️ **Lücke** |
-| R15 | – | – | – | – | nowhere (Datei vor Retry weg) | egal | Retry bricht ab mit `status='error'`, Meldung "Datei nicht auffindbar — Retry abgebrochen" | ✅ `_run_missing_file_test` |
+| R15 | – | – | – | – | nowhere (Datei vor Retry weg, **kein** Immich-Asset) | nein | Retry bricht ab mit `status='error'`, Meldung "Datei nicht auffindbar — Retry abgebrochen" | ✅ `_run_truly_missing_test` |
 | R16 | Immich | direct | Inbox | error (IA-01, Datei niemals existiert) | `/tmp/__race_X.jpg` (0-Byte) | nein | atomic claim race: 1 retry winnt, andere blocked | ✅ `test_duplicate_fix.py` Test 7+8 |
+| R17 | Immich | sidecar | Inbox | done+Warnung | nowhere lokal (IA-08 hat Inbox-Datei nach Upload weggeräumt — **häufigster Live-Zustand** überhaupt) | gesetzt | Retry lädt Datei aus Immich nach `reprocess/`, Pipeline läuft normal durch. Live-Vorfall MA-2026-28111 vor v2.28.32. | ✅ `_run_immich_only_retry_test` |
 
 ### Test-Matrix: Retry-All Bulk (Entry 5)
 
@@ -798,8 +799,9 @@ Coverage-Stand pro Test-Funktion siehe `TESTRESULTS.md`.
 | Retry-Job, Warnungs-Retry (R1–R4) | 4 | `test_retry_file_lifecycle.py` |
 | Retry-Job, Error-Retry (R5–R11) | 7 | `test_retry_file_lifecycle.py` (R5), Rest offen |
 | Retry-Job, Immich-Poller-Source (R12–R14) | 3 | (offen) |
-| Retry-Job, Negativ-Fall (R15) | 1 | `test_retry_file_lifecycle.py` |
+| Retry-Job, Negativ-Fall — keine Datei nirgends (R15) | 1 | `test_retry_file_lifecycle.py:_run_truly_missing_test` |
 | Retry-Job, Race-Conditions (R16) | 1 | `test_duplicate_fix.py` Tests 7+8 |
+| Retry-Job, Immich-only Live-Pfad (R17) | 1 | `test_retry_file_lifecycle.py:_run_immich_only_retry_test` |
 | Retry-All Bulk (RA1) | 1 | (offen) |
 | Duplikat-Review (D1–D5) | 5 | (offen) |
 | `move_file=False` (M1) | 1 | (kein Caller im Code) |
