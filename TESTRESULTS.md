@@ -103,20 +103,80 @@ Nach jedem vollständigen Test-Lauf:
  wird (z.B. nur die letzten 6 Releases im Detail, ältere als
  Übersichts-Zeile).
 
+
+## Historische Notizen (anonymisiert)
+
+### Pre-Fix-Forensik Race-Conditions (RACE-05 bis RACE-08)
+
+Vor dem Fix-Release der `run_pipeline` / `retry_job` Atomic-Claims
+zeigte die Live-DB:
+
+- ~30 Jobs/Tag mit doppelten `INFO pipeline` Log-Einträgen pro Job-Key
+  (verschiedene Tag-Counts für dieselbe ID, was nur möglich ist wenn
+  zwei Pipeline-Runs parallel auf dem Job liefen).
+- ~120 Jobs mit `error_message LIKE '%already exists%'` aber Status
+  `done` — ExifTool-Sidecar-Race zwischen zwei IA-07-Runs.
+- ~71 Jobs mit `File disappeared` Fehler — IA-08 in einem Run hat die
+  Datei hochgeladen + gelöscht, der parallele Run fand sie nicht mehr.
+
+`run_pipeline` wurde von 5 verschiedenen Stellen aufgerufen ohne
+Schutz gegen parallele Eintritte (Worker, Immich-Poller, Startup-
+Resume, retry_job, Duplikate-Router). Die Atomic-Claims `UPDATE jobs
+SET status='processing' WHERE id=? AND status='queued'` und der
+zwei-Phasen-Lock in retry_job (`error → processing → queued`) haben
+das Symptom eliminiert. Beweis siehe RACE-05 bis RACE-08.
+
+Konkrete Job-IDs aus der Live-Forensik liegen ausschliesslich in den
+internen Logs / Commit-Messages — nicht hier, weil sie als
+identifizierbare Personen-Bezogene Daten gewertet werden müssen.
+
 ## Verifikations-Historie pro Test-ID
 
 > Tabelle aller im Testplan definierten Test-IDs mit dem Stand der
-> historischen Verifikation. Eine ID gilt als 'verifiziert' wenn sie
-> in irgendeinem früheren Release-Lauf manuell oder automatisiert
-> bestätigt wurde — die konkrete Version steht in der zweiten Spalte.
-> Vollkommen anonymisiert: keine echten Datei- oder Job-Referenzen.
+> Verifikation. Eine ID gilt als 'verifiziert' wenn sie in einem
+> Release-Lauf manuell oder automatisiert bestätigt wurde — die
+> Version steht in der zweiten Spalte.
+>
+> **Synchronisation:** dieser Block ist 1:1 mit den IDs in `TESTPLAN.md`
+> synchron — jede Test-ID erscheint hier genau einmal. Wer einen Test
+> hinzufügt/entfernt, passt beide Files in derselben Commit an.
 >
 > **Wann eine Zelle leer ist:** der Test ist im Plan vorhanden, aber
-> es gibt keinen dokumentierten Verifikations-Lauf. Beim nächsten
+> nicht in einem dokumentierten Lauf bestätigt. Beim nächsten
 > kompletten Regressions-Lauf hier nachtragen.
 
 
-### EDGE-* (13 Tests)
+### D1 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `D1` | – | (siehe Sektion 14 Matrix) |
+
+### D2 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `D2` | – | (siehe Sektion 14 Matrix) |
+
+### D3 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `D3` | – | (siehe Sektion 14 Matrix) |
+
+### D4 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `D4` | – | (siehe Sektion 14 Matrix) |
+
+### D5 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `D5` | – | (siehe Sektion 14 Matrix) |
+
+### EDGE (13 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -134,7 +194,7 @@ Nach jedem vollständigen Test-Lauf:
 | `EDGE-12` | pre-v2.4 | Dateien in Unterordnern → rekursiv erkannt und verarbeitet |
 | `EDGE-13` | pre-v2.4 | UUID-Dateiname (WhatsApp-Format) ohne EXIF + keine KI → Status "review" |
 
-### EX-* (43 Tests)
+### EX (43 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -170,7 +230,7 @@ Nach jedem vollständigen Test-Lauf:
 | `EX-30` | pre-v2.4 | Gleiche Datei 5x mit verschiedenen Namen → 1 done + 4 SHA256-Duplikate |
 | `EX-31` | pre-v2.4 | Datei vor Filewatcher-Pickup gelöscht → kein Crash, kein Job erstellt |
 | `EX-32` | pre-v2.4 | 15 Dateien in Queue auf langsamem System → alle verarbeitet, kein OOM |
-| `EX-33` | pre-v2.4 | **v2.28.2/v2.28.3:** Derselbe `job_id` wird nicht von zwei Pipeline-Instanzen... |
+| `EX-33` | pre-v2.4 | Derselbe `job_id` wird nicht von zwei Pipeline-Instanzen gleichzeitig verarbe... |
 | `EX-34` | pre-v2.4 | 97MB DNG → korrekt verarbeitet, Memory ~260MB |
 | `EX-35` | pre-v2.4 | 273MB MP4 Video → korrekt verarbeitet, Memory unter 260MB |
 | `EX-36` | pre-v2.4 | 8MB PNG → korrekt verarbeitet |
@@ -182,7 +242,7 @@ Nach jedem vollständigen Test-Lauf:
 | `EX-42` | pre-v2.4 | XSS-Payload in Textfeldern → HTML-escaped gespeichert (`&lt;script&gt;`) |
 | `EX-43` | pre-v2.4 | Module-Checkboxen nur aktualisiert wenn `_form_token` vorhanden |
 
-### FMT-* (10 Tests)
+### FMT (10 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -197,7 +257,7 @@ Nach jedem vollständigen Test-Lauf:
 | `FMT-09` | pre-v2.4 | MOV — Video erkannt, ffprobe, 5 Thumbnails, KI, Tags, korrekt sortiert |
 | `FMT-10` | pre-v2.4 | Nicht unterstütztes Format (.txt) → vom Filewatcher ignoriert (SUPPORTED_EXTE... |
 
-### FW-* (15 Tests)
+### FW (15 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -217,7 +277,7 @@ Nach jedem vollständigen Test-Lauf:
 | `FW-14` | pre-v2.4 | Docker-Logging: Alle Filewatcher-Aktionen in stdout sichtbar |
 | `FW-15` | pre-v2.4 | Unterordner in Inbox → Dateien werden rekursiv gefunden und verarbeitet |
 
-### IA01-* (26 Tests)
+### IA01 (26 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -248,7 +308,7 @@ Nach jedem vollständigen Test-Lauf:
 | `IA01-25` | pre-v2.4 | TIFF: file_type=TIFF, mime=image/tiff korrekt |
 | `IA01-26` | pre-v2.4 | MOV: file_type=MOV, mime=video/quicktime, ffprobe-Metadaten korrekt |
 
-### IA02-* (13 Tests)
+### IA02 (13 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -266,7 +326,7 @@ Nach jedem vollständigen Test-Lauf:
 | `IA02-12` | pre-v2.4 | Video: Re-encoded Video (anderer Codec/Bitrate) → pHash-Match, als "similar" ... |
 | `IA02-13` | pre-v2.4 | Video: Exakte Kopie eines Videos → SHA256-Match, als "exact" Duplikat erkannt |
 
-### IA03-* (7 Tests)
+### IA03 (7 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -278,7 +338,7 @@ Nach jedem vollständigen Test-Lauf:
 | `IA03-06` | pre-v2.4 | DJI-Drohne GPS → korrekt aufgelöst |
 | `IA03-07` | pre-v2.4 | Video GPS (ffprobe ISO 6709) → korrekt geocodiert |
 
-### IA04-* (10 Tests)
+### IA04 (10 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -293,13 +353,13 @@ Nach jedem vollständigen Test-Lauf:
 | `IA04-09` | pre-v2.4 | Video-Thumbnail: ffmpeg nicht verfügbar / Fehler → Fehler gefangen, `converte... |
 | `IA04-10` | pre-v2.4 | MOV Video → 5 Thumbnails extrahiert, KI-Analyse erfolgreich |
 
-### IA05-* (16 Tests)
+### IA05 (16 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
 | `IA05-01` | v2.8.0 | Persönliches Foto → `type: personliches_foto`, sinnvolle Tags |
 | `IA05-02` | pre-v2.4 | Screenshot → `type: screenshot` (Statusleiste, Navigationsbar erkannt) |
-| `IA05-03` | pre-v2.4 | Internet-Bild → `type: sourceless` (generierte PNG/WebP/TIFF, v2.8.0: kein in... |
+| `IA05-03` | pre-v2.4 | Internet-Bild → `type: sourceless` (generierte PNG/WebP/TIFF, : kein internet... |
 | `IA05-04` | pre-v2.4 | KI-Backend nicht erreichbar → Fehler gefangen, Fallback-Werte gesetzt |
 | `IA05-05` | pre-v2.4 | Modul deaktiviert → `status: skipped, reason: module disabled` |
 | `IA05-06` | pre-v2.4 | Metadata-Kontext (EXIF, Geo, Dateigrösse) wird an KI übergeben |
@@ -314,7 +374,7 @@ Nach jedem vollständigen Test-Lauf:
 | `IA05-15` | pre-v2.4 | NSFW-Erkennung: KI gibt `nsfw: true` für nicht-jugendfreie Inhalte zurück |
 | `IA05-16` | pre-v2.4 | NSFW-Erkennung: `nsfw: false` für normale Bilder (Landschaft, Essen, etc.) |
 
-### IA06-* (5 Tests)
+### IA06 (5 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -324,7 +384,7 @@ Nach jedem vollständigen Test-Lauf:
 | `IA06-04` | pre-v2.4 | Always-Modus → OCR wird immer ausgeführt (auch für normale Fotos) |
 | `IA06-05` | pre-v2.4 | Modul deaktiviert → `status: skipped, reason: module disabled` |
 
-### IA07-* (23 Tests)
+### IA07 (23 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -352,7 +412,7 @@ Nach jedem vollständigen Test-Lauf:
 | `IA07-22` | v2.28.2 | Sidecar-Schreiben ohne pre-delete (Workaround entfernt) — die Race, die den p... |
 | `IA07-23` | v2.28.2 | Bei einem Retry, der IA-07 erneut ausführen muss, ist ein leftover `.xmp` aus... |
 
-### IA08-* (32 Tests)
+### IA08 (32 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -374,7 +434,7 @@ Nach jedem vollständigen Test-Lauf:
 | `IA08-16` | pre-v2.4 | KI gibt "Kameravideo" statt "Kamerafoto" als Source zurück bei Videos (Prompt... |
 | `IA08-17` | pre-v2.4 | Unklar (kein EXIF, KI unsicher) → Status "review", Datei in unknown/review/ |
 | `IA08-18` | pre-v2.4 | Immich Upload → Datei hochgeladen, Quelle gelöscht |
-| `IA08-19` | pre-v2.4 | Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB... |
+| `IA08-19` | pre-v2.4 | Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (verifiziert:... |
 | `IA08-20` | pre-v2.4 | Immich: NSFW-Bild → gesperrter Ordner (`visibility: locked`), nicht archivier... |
 | `IA08-21` | pre-v2.4 | Immich: NSFW-Lock funktioniert im Upload-Pfad (Inbox → Immich) |
 | `IA08-22` | pre-v2.4 | Immich: NSFW-Lock funktioniert im Replace-Pfad (Polling → Immich) |
@@ -389,7 +449,7 @@ Nach jedem vollständigen Test-Lauf:
 | `IA08-31` | v2.28.2 | `os.path.exists`-Check vor Library-Move **entfernt** (gleicher Grund) — Fehle... |
 | `IA08-32` | v2.28.2 | Schutz vor Half-Copied Files liegt jetzt ausschliesslich beim Filewatcher (`_... |
 
-### IA09-* (3 Tests)
+### IA09 (3 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -397,21 +457,21 @@ Nach jedem vollständigen Test-Lauf:
 | `IA09-02` | pre-v2.4 | Kein Fehler → keine E-Mail |
 | `IA09-03` | pre-v2.4 | Modul deaktiviert → `status: skipped, reason: module disabled` |
 
-### IA10-* (2 Tests)
+### IA10 (2 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
 | `IA10-01` | pre-v2.4 | Temp JPEG aus IA-04 gelöscht (DNG-Konvertierung + Video-Thumbnails) |
 | `IA10-02` | pre-v2.4 | Keine temp Dateien → nichts zu tun |
 
-### IA11-* (2 Tests)
+### IA11 (2 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
 | `IA11-01` | pre-v2.4 | Zusammenfassung korrekt (Typ, Tags, Ort, Ziel) |
 | `IA11-02` | pre-v2.4 | Log-Eintrag in system_log Tabelle erstellt |
 
-### IM-* (10 Tests)
+### IM (10 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -426,7 +486,79 @@ Nach jedem vollständigen Test-Lauf:
 | `IM-09` | pre-v2.4 | Immich: Alle Tags korrekt zugewiesen (auch bereits existierende Tags, HTTP 40... |
 | `IM-10` | pre-v2.4 | Cross-Mode Duplikat: Dateiablage → Immich erkannt |
 
-### NT-* (8 Tests)
+### LIM (7 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `LIM-01` | – | GIF-Konvertierung — `convert` (ImageMagick) nicht im Container → GIF wird dir... |
+| `LIM-02` | – | Video < 1s — Thumbnail-Extraktion scheitert (Seek-Position > Videolänge) |
+| `LIM-03` | – | Leere Ordner — Werden nur aufgeräumt wenn `folder_tags` aktiv ist |
+| `LIM-04` | – | SMTP leerer Wert — JSON-encoded leerer String `""` wird nicht als "nicht konf... |
+| `LIM-05` | – | `...jpg` Dateiname — `os.path.splitext("...jpg")` gibt keine Extension → stil... |
+| `LIM-06` | – | Max-Retry nur bei Start — `retry_count > MAX_RETRIES` Check nur beim Containe... |
+| `LIM-07` | – | Externe Datei-Race — Wenn ein **externer** Prozess eine Inbox-Datei mid-pipel... |
+
+### M1 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `M1` | – | (siehe Sektion 14 Matrix) |
+
+### MATRIX (Sektion 14) (49 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `N1.1` | – | (siehe Sektion 14 Matrix) |
+| `N1.2` | – | (siehe Sektion 14 Matrix) |
+| `N1.3` | – | (siehe Sektion 14 Matrix) |
+| `N1.4` | – | (siehe Sektion 14 Matrix) |
+| `N1.5` | – | (siehe Sektion 14 Matrix) |
+| `N1.6` | – | (siehe Sektion 14 Matrix) |
+| `N1.7` | – | (siehe Sektion 14 Matrix) |
+| `N1.8` | – | (siehe Sektion 14 Matrix) |
+| `N1.9` | – | (siehe Sektion 14 Matrix) |
+| `N1.10` | – | (siehe Sektion 14 Matrix) |
+| `N1.11` | – | (siehe Sektion 14 Matrix) |
+| `N1.12` | – | (siehe Sektion 14 Matrix) |
+| `N1.13` | – | (siehe Sektion 14 Matrix) |
+| `N1.14` | – | (siehe Sektion 14 Matrix) |
+| `N1.15` | – | (siehe Sektion 14 Matrix) |
+| `N2.1` | – | (siehe Sektion 14 Matrix) |
+| `N2.2` | – | (siehe Sektion 14 Matrix) |
+| `N2.3` | – | (siehe Sektion 14 Matrix) |
+| `N2.4` | – | (siehe Sektion 14 Matrix) |
+| `N3.1` | – | (siehe Sektion 14 Matrix) |
+| `N3.2` | – | (siehe Sektion 14 Matrix) |
+| `N3.3` | – | (siehe Sektion 14 Matrix) |
+| `N3.4` | – | (siehe Sektion 14 Matrix) |
+| `N3.5` | – | (siehe Sektion 14 Matrix) |
+| `N4.1` | – | (siehe Sektion 14 Matrix) |
+| `N4.2` | – | (siehe Sektion 14 Matrix) |
+| `N4.3` | – | (siehe Sektion 14 Matrix) |
+| `N4.4` | – | (siehe Sektion 14 Matrix) |
+| `N4.5` | – | (siehe Sektion 14 Matrix) |
+| `N4.6` | – | (siehe Sektion 14 Matrix) |
+| `N4.7` | – | (siehe Sektion 14 Matrix) |
+| `N4.8` | – | (siehe Sektion 14 Matrix) |
+| `N5.1` | – | (siehe Sektion 14 Matrix) |
+| `N5.2` | – | (siehe Sektion 14 Matrix) |
+| `N5.3` | – | (siehe Sektion 14 Matrix) |
+| `N5.4` | – | (siehe Sektion 14 Matrix) |
+| `N5.5` | – | (siehe Sektion 14 Matrix) |
+| `N5.6` | – | (siehe Sektion 14 Matrix) |
+| `N5.7` | – | (siehe Sektion 14 Matrix) |
+| `N5.8` | – | (siehe Sektion 14 Matrix) |
+| `N6.1` | – | (siehe Sektion 14 Matrix) |
+| `N6.2` | – | (siehe Sektion 14 Matrix) |
+| `N6.3` | – | (siehe Sektion 14 Matrix) |
+| `N7.1` | – | (siehe Sektion 14 Matrix) |
+| `N7.2` | – | (siehe Sektion 14 Matrix) |
+| `N7.3` | – | (siehe Sektion 14 Matrix) |
+| `N7.4` | – | (siehe Sektion 14 Matrix) |
+| `N7.5` | – | (siehe Sektion 14 Matrix) |
+| `N7.6` | – | (siehe Sektion 14 Matrix) |
+
+### NT (8 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -439,7 +571,7 @@ Nach jedem vollständigen Test-Lauf:
 | `NT-07` | – | ffprobe nicht verfügbar (fest im Container installiert) |
 | `NT-08` | – | Video < 1s Thumbnail (Seek-Position > Videolänge, bekanntes Limit) |
 
-### PE-* (17 Tests)
+### PE (17 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -461,7 +593,7 @@ Nach jedem vollständigen Test-Lauf:
 | `PE-16` | v2.28.3 | **retry_job**: 5 parallele `retry_job(same_id)`-Aufrufe → exakt 1× True, 4× F... |
 | `PE-17` | v2.28.3 | **retry_job**: `retry_job` parallel zu Worker-`run_pipeline` → kein stale ste... |
 
-### PERF-* (9 Tests)
+### PERF (9 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -475,7 +607,109 @@ Nach jedem vollständigen Test-Lauf:
 | `PERF-08` | pre-v2.4 | Temp-Cleanup: `shutil.rmtree` bei fehlgeschlagenen Immich-Downloads |
 | `PERF-09` | pre-v2.4 | Docker: Memory-Limit 2 GB und CPU-Limit 2.0 aktiv (cgroup verifiziert) |
 
-### SEC-* (7 Tests)
+### R1 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R1` | – | (siehe Sektion 14 Matrix) |
+
+### R10 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R10` | – | (siehe Sektion 14 Matrix) |
+
+### R11 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R11` | – | (siehe Sektion 14 Matrix) |
+
+### R12 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R12` | – | (siehe Sektion 14 Matrix) |
+
+### R13 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R13` | – | (siehe Sektion 14 Matrix) |
+
+### R14 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R14` | – | (siehe Sektion 14 Matrix) |
+
+### R15 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R15` | – | (siehe Sektion 14 Matrix) |
+
+### R16 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R16` | – | (siehe Sektion 14 Matrix) |
+
+### R2 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R2` | – | (siehe Sektion 14 Matrix) |
+
+### R3 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R3` | – | (siehe Sektion 14 Matrix) |
+
+### R4 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R4` | – | (siehe Sektion 14 Matrix) |
+
+### R5 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R5` | – | (siehe Sektion 14 Matrix) |
+
+### R6 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R6` | – | (siehe Sektion 14 Matrix) |
+
+### R7 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R7` | – | (siehe Sektion 14 Matrix) |
+
+### R8 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R8` | – | (siehe Sektion 14 Matrix) |
+
+### R9 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `R9` | – | (siehe Sektion 14 Matrix) |
+
+### RA1 (1 Tests)
+
+| Test-ID | Verifiziert in | Beschreibung (Kurz) |
+|---|---|---|
+| `RA1` | – | (siehe Sektion 14 Matrix) |
+
+### SEC (7 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -487,7 +721,7 @@ Nach jedem vollständigen Test-Lauf:
 | `SEC-06` | pre-v2.4 | Dateigrössenlimit: `MAX_FILE_SIZE = 10 GB` korrekt gesetzt |
 | `SEC-07` | – | Dateigrössenlimit: Datei > 10 GB wird im Filewatcher übersprungen (nicht test... |
 
-### WEB-* (58 Tests)
+### WEB (58 Tests)
 
 | Test-ID | Verifiziert in | Beschreibung (Kurz) |
 |---|---|---|
@@ -534,7 +768,7 @@ Nach jedem vollständigen Test-Lauf:
 | `WEB-41` | v2.8.0 | Kategorie-Buttons dynamisch aus DB geladen |
 | `WEB-42` | pre-v2.4 | Löschen-Button entfernt Review-Datei |
 | `WEB-43` | pre-v2.4 | Lokal: Datei in richtigen Zielordner verschoben (Review → Photo) |
-| `WEB-44` | pre-v2.4 | Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB... |
+| `WEB-44` | pre-v2.4 | Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (verifiziert:... |
 | `WEB-45` | pre-v2.4 | Batch: "Alle → Sourceless" funktioniert (beide lokale und Immich-Items) |
 | `WEB-46` | pre-v2.4 | System-Log mit Level-Filter (Info/Warning/Error) |
 | `WEB-47` | pre-v2.4 | System-Log Detail mit vollem Traceback |
@@ -550,28 +784,25 @@ Nach jedem vollständigen Test-Lauf:
 | `WEB-57` | pre-v2.4 | Job löschen und Retry funktioniert (API-Endpunkte getestet) |
 | `WEB-58` | pre-v2.4 | Preview-Badge bei Dry-Run-Jobs angezeigt |
 
-## Historische Notizen (anonymisiert)
+## Historische Bug-Liste (anonymisiert)
 
-### Pre-Fix-Forensik Race-Conditions (RACE-05 bis RACE-08)
+Dokumentation früherer Bugs, die im Testplan keinen festen Test-Slot
+mehr haben (weil bereits verifiziert und zu LIM-XX abgewandert oder
+durch generische Tests in den IA-XX/SEC-XX/EDGE-XX abgedeckt). Hier
+nur als historische Referenz, ohne Versions-Stempel.
 
-Vor dem Fix-Release der `run_pipeline` / `retry_job` Atomic-Claims
-zeigte die Live-DB:
+| Symptom | Root-Cause | Fix |
+|---|---|---|
+| GPS lon=0 / lat=0 ignoriert | `bool(0)` ist False → Greenwich/Äquator GPS verworfen | `is not None`-Check |
+| GPS lat=999, lon=999 akzeptiert | keine Range-Validierung | Range-Check -90..90 / -180..180 |
+| Format-Mismatch (JPG mit `.png`-Endung) | ExifTool Write crasht | Mismatch-Erkennung vor Write |
+| Settings partieller POST | wipte alle Module + Config | `_form_token` Guard |
+| Settings XSS in Textfeldern | ungefilterte Eingabe in Config gespeichert | `html.escape` Sanitisierung |
+| `_handle_duplicate` Cleanup-Fehler | crashte Pipeline statt Status zu setzen | try/except + Fallback |
+| Pipeline Race auf gleichem Job | 5 Aufrufer ohne Schutz | atomic claim `UPDATE WHERE status='queued'` |
+| `retry_job` TOCTOU zwischen Commits | parallele Worker fanden alten step_result | transienter Lock-State `error → processing → queued` |
+| Bulk-Retry erschöpfte DB-Pool | 30+ parallele Tasks > pool=15 | pool_size=20, max_overflow=40, sequenziell statt parallel |
+| Retry löscht Datei via IA-10 | `immich_asset_id` als Lösch-Trigger statt `source_label='Immich'` | spezifische Bedingung in IA-10 |
+| Retry verliert Datei im File-Storage | IA-08 cached → kein Re-Move zurück nach `/library/` | IA-08 step_result wird beim Retry gedroppt wenn target lokal war |
+| Retry-Endlosschleife bei missing file | `prepare_job_for_reprocess` False ignored | Rückgabewert geprüft, Retry abgebrochen mit klarer Meldung |
 
-- ~30 Jobs/Tag mit doppelten `INFO pipeline` Log-Einträgen pro Job-Key
-  (verschiedene Tag-Counts für dieselbe ID, was nur möglich ist wenn
-  zwei Pipeline-Runs parallel auf dem Job liefen).
-- ~120 Jobs mit `error_message LIKE '%already exists%'` aber Status
-  `done` — ExifTool-Sidecar-Race zwischen zwei IA-07-Runs.
-- ~71 Jobs mit `File disappeared` Fehler — IA-08 in einem Run hat die
-  Datei hochgeladen + gelöscht, der parallele Run fand sie nicht mehr.
-
-`run_pipeline` wurde von 5 verschiedenen Stellen aufgerufen ohne
-Schutz gegen parallele Eintritte (Worker, Immich-Poller, Startup-
-Resume, retry_job, Duplikate-Router). Die Atomic-Claims `UPDATE jobs
-SET status='processing' WHERE id=? AND status='queued'` und der
-zwei-Phasen-Lock in retry_job (`error → processing → queued`) haben
-das Symptom eliminiert. Beweis siehe RACE-05 bis RACE-08.
-
-Konkrete Job-IDs aus der Live-Forensik liegen ausschliesslich in den
-internen Logs / Commit-Messages — nicht hier, weil sie als
-identifizierbare Personen-Bezogene Daten gewertet werden müssen.
