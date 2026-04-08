@@ -74,7 +74,8 @@ MediaAssistant/
 │   └── sorting-flow.md
 ├── CHANGELOG.md                # Pflicht: jedem Release ein Eintrag
 ├── REQUIREMENTS.md             # Original-Spec, eher historisch
-├── TESTPLAN.md                 # Umfangreich, älterer Stand (>900 Zeilen)
+├── TESTPLAN.md                 # WAS getestet wird (Sektionen 1-13 per Step, Sektion 14 Test-Matrix per Code-Pfad)
+├── TESTRESULTS.md              # WANN/wie ein Test-Lauf ausging (Tabelle: Funktion × Datum × Ergebnis, nur abstrakte Zahlen)
 └── README.md
 ```
 
@@ -181,10 +182,15 @@ Wenn ein Live-Bug gemeldet wird, ist die Pflicht-Reihenfolge:
 4. Bestehende Tests ALLE laufen lassen — keine Regressionen erlaubt.
 5. Erst dann Version bumpen + commit + push.
 
-Siehe auch [`TESTPLAN.md` Sektion 15](TESTPLAN.md#15-test-matrix--vollständige-coverage-karte-v22829)
+Siehe auch [`TESTPLAN.md` Sektion 14](TESTPLAN.md#14-test-matrix--vollständige-coverage-karte)
 für die vollständig kartografierte Test-Matrix aller Pipeline-
 Entry-Points (Filewatcher, Immich-Poller, Retry, Duplikat-Review)
 mit explizit markierten Lücken.
+
+Konkrete **Lauf-Resultate** (Datum × Test-Funktion × Pass/Fail) leben
+in [`TESTRESULTS.md`](TESTRESULTS.md). Nach jedem vollständigen
+Test-Lauf eine neue Spalte am rechten Ende einfügen. **Nur abstrakte
+Zahlen** — keine personenbezogenen Daten, keine echten Datei-Inhalte.
 
 ### Test-Schreibung — Konventionen
 
@@ -263,12 +269,17 @@ Mantra:
 
 1. `backend/version.py`: `VERSION` und `VERSION_DATE` bumpen.
 2. `CHANGELOG.md`: neuen Eintrag oben einfügen, Format siehe oben.
-3. Nur die geänderten Files stagen (kein `git add -A`!).
-4. Commit-Message als HEREDOC, signiert mit
+3. **Wenn ein vollständiger Test-Lauf gemacht wurde:** neue Spalte in
+   `TESTRESULTS.md` einfügen (Datum, Release, Commit, pro Test-Skript
+   Pass/Fail-Counts). **Nur abstrakte Zahlen — keine personenbezogenen
+   Daten, keine echten Datei-Inhalte, keine Mail-Adressen, Hostnames,
+   IP-Adressen, GPS-Koordinaten oder Immich-Asset-IDs.**
+4. Nur die geänderten Files stagen (kein `git add -A`!).
+5. Commit-Message als HEREDOC, signiert mit
    `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
    wenn der Code per AI-Agent kam.
-5. `git push origin master`.
-6. **Niemals** `--no-verify`, `--force`, `--amend` ohne explizite
+6. `git push origin master`.
+7. **Niemals** `--no-verify`, `--force`, `--amend` ohne explizite
    User-Erlaubnis. Niemals interaktive git-Modi (`-i`).
 
 ## Was NICHT tun
