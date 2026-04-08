@@ -36,15 +36,15 @@ async def retry_job_endpoint(debug_key: str):
     if not job:
         return {"status": "error", "message": "Job nicht gefunden"}
 
-    # Allow retry for error jobs and for "warning" jobs (status='done' with
-    # aggregated step warnings — see pipeline/__init__.py). Prevents
-    # double-retry of healthy jobs via browser reload.
-    is_warning = (
-        job.status == "done"
-        and job.error_message
-        and job.error_message.startswith("Warnungen in:")
-    )
-    if job.status != "error" and not is_warning:
+    # Allow retry on any job that has reached a terminal state. The user
+    # is the source of truth for "this needs to be redone" — clicking
+    # Retry on a job that looks fine in the UI but has stale data inside
+    # is a legitimate use case (live: MA-2026-28115/28121, where IA-07/
+    # IA-08 had stale 'unknown' tags but error_message had been cleared
+    # by an earlier partial retry, so the old gating refused the click).
+    # Only refuse if the job is currently being processed or queued —
+    # that would race the worker.
+    if job.status in ("queued", "processing"):
         return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
 
     asyncio.create_task(retry_job(job.id))

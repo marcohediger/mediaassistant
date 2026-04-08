@@ -350,20 +350,19 @@ async def reset_job_for_retry(job_id: int) -> bool:
         # neither the worker nor a parallel run_pipeline call can claim the
         # job while we still have a stale step_result on it. After cleanup
         # we flip to 'queued' and let the worker / run_pipeline claim it.
-        # Eligible: status='error' OR status='done' with aggregated step
-        # warnings (error_message starts with "Warnungen in:" — see the
-        # aggregation block above).
+        #
+        # Eligible: any terminal state. Specifically NOT eligible: jobs
+        # currently being processed by the worker (`queued`/`processing`)
+        # — those would race. The user is the source of truth for "this
+        # needs to be redone" — we accept stuck-state jobs (status='done'
+        # with error_message=None but stale internal step_result, like
+        # live MA-2026-28115/28121) too.
         claim = await session.execute(
             update(Job)
             .where(
                 Job.id == job_id,
-                or_(
-                    Job.status == "error",
-                    and_(
-                        Job.status == "done",
-                        Job.error_message.like("Warnungen in:%"),
-                    ),
-                ),
+                Job.status.in_(("error", "done", "review", "duplicate",
+                                "skipped", "orphan")),
             )
             .values(status="processing")
         )
@@ -375,45 +374,30 @@ async def reset_job_for_retry(job_id: int) -> bool:
         if not job:
             return False
 
-        # Figure out which steps need to be re-run.
+        # **Nuclear retry**: drop EVERY step result. The previous "be
+        # clever, only drop what's broken" cascade logic (v2.28.33-35)
+        # failed in four different ways and left ~15 jobs in an
+        # unfixable stuck state on live (MA-2026-28111, MA-2026-28115,
+        # MA-2026-28121, ...). The user's mental model is
+        # "Retry = redo the work" — that's exactly what this does now,
+        # no exceptions, no shortcuts.
         #
-        # Two complementary sources of truth:
-        #   1) `step_result[code].status in {"error","warning"}` — set by
-        #      the pipeline's error handler when a step raised an exception
-        #      mid-run. Reliable.
-        #   2) `error_message="Warnungen in: IA-XX, IA-YY"` — aggregated by
-        #      the pipeline at the end of a run from the same statuses.
-        #      This catches the case where step_result[X].status was
-        #      OVERWRITTEN by a later partial retry to a successful state
-        #      WITHOUT clearing the error_message — so the user still sees
-        #      "Warnungen in: IA-05" but step_result['IA-05'].status no
-        #      longer has any flag. The cascade by status alone would not
-        #      drop anything in that case, leaving downstream steps stale
-        #      forever (live: MA-2026-28121).
-        explicit_drops: set[str] = set()
-        msg = job.error_message or ""
-        if msg.startswith("Warnungen in:"):
-            tail = msg[len("Warnungen in:"):]
-            for piece in tail.split(","):
-                code = piece.strip()
-                if code:
-                    explicit_drops.add(code)
-
-        # Drop both 'error' and 'warning' step results AND any step that
-        # error_message names explicitly. The downstream cascade in
-        # _reset_step_results then drops every step that runs after the
-        # dropped ones in pipeline order, so IA-07/IA-08 results that
-        # depend on IA-05's classification are also re-computed.
-        # Finalizer steps (IA-09/10/11) are dropped unconditionally so
-        # notification, cleanup and sqlite-log re-run for the new attempt.
+        # IA-01 (EXIF read) is included in the drop because the file
+        # might have changed between runs (e.g. retry after the user
+        # re-edited it externally). It's a single fast ExifTool call,
+        # the cost of always re-running it is negligible.
+        # Finalizer steps (IA-09/10/11) are dropped too so notification,
+        # cleanup and sqlite-log re-run for the new attempt.
         # File move + sidecar handling + status flip is done by the helper.
         from pipeline.reprocess import prepare_job_for_reprocess
-        finalizer_skip = {code: None for code in ("IA-09", "IA-10", "IA-11")}
+        nuke_steps = {
+            "IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06",
+            "IA-07", "IA-08", "IA-09", "IA-10", "IA-11",
+        }
         moved_or_skipped = await prepare_job_for_reprocess(
             session,
             job,
-            drop_step_statuses={"error", "warning"},
-            drop_step_codes=explicit_drops,
+            drop_step_codes=nuke_steps,
             move_file=True,
             commit=False,
         )
@@ -432,15 +416,8 @@ async def reset_job_for_retry(job_id: int) -> bool:
             )
             await session.commit()
             return False
-        # Finalizer reset is retry-specific — apply after the helper.
-        # The cascade in _reset_step_results already removes IA-06/07/08
-        # whenever any earlier step matched the drop-statuses, so we
-        # only need to nuke the finalizers here.
-        current = dict(job.step_result or {})
-        for code in finalizer_skip:
-            current.pop(code, None)
-        job.step_result = current
-        flag_modified(job, "step_result")
+        # Nuke-steps + finalizers were dropped by the helper above via
+        # drop_step_codes. No further per-step cleanup needed here.
         await session.commit()
 
     return True
