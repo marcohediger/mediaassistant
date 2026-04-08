@@ -767,6 +767,86 @@ async def _run_immich_only_retry_test(source_heic: str):
         report("unexpected exception in immich-only retry test", False, repr(e))
 
 
+async def _run_immich_tag_wait_skip_test(source_heic: str):
+    """Verify v2.28.34 fix: _tag_immich_asset skips the wait-loop entirely
+    when IA-07 wrote no keywords into the file.
+
+    Setup:
+      - Upload a real HEIC to dev-Immich (via upload_asset)
+      - Call _tag_immich_asset with ia07_wrote_tags=False → must return
+        in <10s (fast path: single GET, no poll loop)
+      - Call _tag_immich_asset with ia07_wrote_tags=True for the same
+        asset → may take longer (poll loop active, but still bounded)
+
+    Without this fix, EVERY IA-08 ran the poll loop to its 120s timeout
+    on systems where Immich does not auto-extract TagsList from the
+    file (which is most setups for HEIC without pre-existing XMP tags).
+    """
+    print(f"\n── Test: IA-08 tag-wait skip when IA-07 wrote no keywords ──")
+    from immich_client import upload_asset, delete_asset
+    from pipeline.step_ia08_sort import _tag_immich_asset
+    import time
+
+    # Stage a unique HEIC and upload it directly to Immich (no pipeline)
+    src = _make_unique_source(source_heic)
+    asset_id = None
+    try:
+        upload_result = await upload_asset(src)
+        asset_id = upload_result.get("id")
+        report("staged a real Immich asset for the timing test", bool(asset_id),
+               f"asset={asset_id}")
+        if not asset_id:
+            return
+
+        # Fast path: ia07_wrote_tags=False → no poll, just one GET
+        t0 = time.monotonic()
+        tags_written, tags_failed = await _tag_immich_asset(
+            asset_id, ["TagWaitSkipTest_Fast"], ia07_wrote_tags=False,
+        )
+        fast_dur = time.monotonic() - t0
+        report(
+            f"fast path (ia07_wrote_tags=False) finished in <10s",
+            fast_dur < 10,
+            f"actual={fast_dur:.1f}s, tags_written={tags_written}",
+        )
+
+        # Slow path: ia07_wrote_tags=True → poll loop active. We don't
+        # actually need it to be slow — Immich may extract instantly
+        # in some setups — we only verify the call still works and
+        # didn't blow up. The point of the previous assert is the
+        # fast path; this one is just a smoke test that we didn't
+        # break the existing wait branch.
+        t0 = time.monotonic()
+        tags_written2, tags_failed2 = await _tag_immich_asset(
+            asset_id, ["TagWaitSkipTest_Slow"], ia07_wrote_tags=True,
+        )
+        slow_dur = time.monotonic() - t0
+        report(
+            "slow path (ia07_wrote_tags=True) still works",
+            isinstance(tags_written2, list),
+            f"actual={slow_dur:.1f}s, tags_written={tags_written2}",
+        )
+
+        # Sanity: the fast path was at least 10x quicker than the slow
+        # path on this setup. (Not enforced as a hard pass — if the
+        # user happens to be on an Immich instance where extraction is
+        # instant, both paths are fast and that's fine. Soft warning.)
+        if slow_dur > 1.0 and fast_dur < slow_dur / 5:
+            print(f"     ↳ fast path is {slow_dur/fast_dur:.0f}× faster than slow path")
+        elif slow_dur < 5:
+            print(f"     ↳ Immich extracts instantly on this setup; skip-flag still saves the GET")
+
+    except Exception as e:
+        traceback.print_exc()
+        report("unexpected exception in tag-wait-skip test", False, repr(e))
+    finally:
+        if asset_id:
+            try:
+                await delete_asset(asset_id)
+            except Exception:
+                pass
+
+
 async def _run_truly_missing_test():
     """Negative case: no source ANYWHERE (no disk file, no immich asset).
 
@@ -878,6 +958,7 @@ async def main():
             source_heic=source, mode="sidecar", use_immich=False, scenario_id="R11",
         )
         await _run_immich_only_retry_test(source_heic=source)
+        await _run_immich_tag_wait_skip_test(source_heic=source)
         await _run_truly_missing_test()
     finally:
         await config_manager.set("metadata.write_mode", saved_write_mode)

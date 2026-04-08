@@ -51,9 +51,30 @@ async def _wait_for_immich_tags(asset_id: str, *, api_key: str | None = None, ma
     return await get_asset_info(asset_id, api_key=api_key)
 
 
-async def _tag_immich_asset(asset_id: str, tag_keywords: list[str], *, api_key: str | None = None) -> tuple[list, list]:
-    """Tag an Immich asset, skipping tags that Immich already read from the file."""
-    info = await _wait_for_immich_tags(asset_id, api_key=api_key)
+async def _tag_immich_asset(
+    asset_id: str,
+    tag_keywords: list[str],
+    *,
+    api_key: str | None = None,
+    ia07_wrote_tags: bool = False,
+) -> tuple[list, list]:
+    """Tag an Immich asset, skipping tags that Immich already read from the file.
+
+    The wait for Immich's auto-extraction is **only** triggered if IA-07
+    actually wrote tags into the file (or its `.xmp` sidecar). When IA-07
+    wrote nothing — typical for jobs with `keywords_written=[]` or jobs
+    that bypass IA-07 entirely — Immich has nothing to extract and the
+    wait would always run to its timeout for nothing. In that case we
+    skip the poll loop and tag everything via API directly. The API
+    side is idempotent on tag names, so a duplicate would be a no-op.
+    """
+    if ia07_wrote_tags:
+        info = await _wait_for_immich_tags(asset_id, api_key=api_key)
+    else:
+        # No tags in file → no point polling. Single GET is enough to
+        # know whether the asset already has unrelated tags from a
+        # previous import.
+        info = await get_asset_info(asset_id, api_key=api_key)
     existing_tags = set()
     if info:
         existing_tags = {t["value"] for t in info.get("tags", [])}
@@ -491,9 +512,11 @@ async def execute(job, session) -> dict:
                     raise
             job.target_path = f"immich:{job.immich_asset_id}"
 
-        # Tag the asset in Immich (wait for processing, skip existing)
+        # Tag the asset in Immich. Only wait for Immich's auto-extraction
+        # if IA-07 actually wrote keywords into the file (or sidecar).
         tags_written, tags_failed = await _tag_immich_asset(
-            job.immich_asset_id, tag_keywords, api_key=user_api_key
+            job.immich_asset_id, tag_keywords, api_key=user_api_key,
+            ia07_wrote_tags=bool(ia07_result.get("keywords_written")),
         )
 
         # NSFW: move to locked folder
@@ -562,12 +585,14 @@ async def execute(job, session) -> dict:
 
         asset_id = immich_result.get("id", "")
 
-        # Tag asset in Immich (wait for processing, skip existing)
+        # Tag asset in Immich. Only wait for Immich's auto-extraction
+        # if IA-07 actually wrote keywords into the file (or sidecar).
         tags_written = []
         tags_failed = []
         if asset_id:
             tags_written, tags_failed = await _tag_immich_asset(
-                asset_id, tag_keywords, api_key=user_api_key
+                asset_id, tag_keywords, api_key=user_api_key,
+                ia07_wrote_tags=bool(ia07_result.get("keywords_written")),
             )
 
         # NSFW: move to locked folder in Immich
