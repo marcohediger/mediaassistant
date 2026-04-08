@@ -80,7 +80,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `IA02-02` | ✅ | – | – | – | Ähnliches Bild (z.B. leicht beschnitten) → pHash-Match unter Schwellwert |
 | `IA02-03` | ✅ | – | – | – | Unterschiedliches Bild → kein Match, `status: ok` |
 | `IA02-04` | ✅ | – | – | – | RAW-Format (DNG/CR2) → pHash via ExifTool PreviewImage berechnet |
-| `IA02-05` | ✅ | – | – | – | Modul deaktiviert → `status: skipped, reason: module disabled` |
+| `IA02-05` | ✅ | – | – | – | Modul `duplikat_erkennung` deaktiviert → IA-02 `status: skipped, reason: modu... |
 | `IA02-06` | ✅ | – | – | – | Duplikat eines Immich-Assets → korrekt erkannt |
 | `IA02-07` | ✅ | – | – | – | Orphaned Job (Original-Datei gelöscht) → Match wird übersprungen |
 | `IA02-08` | ✅ | – | – | – | JPG+DNG Paar mit keep_both=true → beide unabhängig verarbeitet |
@@ -97,7 +97,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `IA03-01` | ✅ | – | – | – | Bild mit GPS-Koordinaten → Land, Stadt, Stadtteil aufgelöst |
 | `IA03-02` | ✅ | – | – | – | Bild ohne GPS → `status: skipped` |
 | `IA03-03` | ✅ | – | – | – | Nominatim-Provider → korrekte Ergebnisse |
-| `IA03-04` | ✅ | – | – | – | Modul deaktiviert → `status: skipped, reason: module disabled` |
+| `IA03-04` | ✅ | – | – | – | Modul `geocoding` deaktiviert → IA-03 `status: skipped, reason: module disabled` |
 | `IA03-05` | ✅ | – | – | – | Geocoding-Server nicht erreichbar → Fehler gefangen, Step übersprungen, Pipel... |
 | `IA03-06` | ✅ | – | – | – | DJI-Drohne GPS → korrekt aufgelöst |
 | `IA03-07` | ✅ | – | – | – | Video GPS (ffprobe ISO 6709) → korrekt geocodiert |
@@ -125,7 +125,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `IA05-02` | ✅ | – | – | – | Screenshot → `type: screenshot` (Statusleiste, Navigationsbar erkannt) |
 | `IA05-03` | ✅ | – | – | – | Internet-Bild → `type: sourceless` (generierte PNG/WebP/TIFF, : kein internet... |
 | `IA05-04` | ✅ | – | – | – | KI-Backend nicht erreichbar → Fehler gefangen, Fallback-Werte gesetzt |
-| `IA05-05` | ✅ | – | – | – | Modul deaktiviert → `status: skipped, reason: module disabled` |
+| `IA05-05` | ✅ | – | – | – | Modul `ki_analyse` deaktiviert → IA-05 `status: skipped, reason: module disab... |
 | `IA05-06` | ✅ | – | – | – | Metadata-Kontext (EXIF, Geo, Dateigrösse) wird an KI übergeben |
 | `IA05-07` | ✅ | – | – | – | Kategorien aus DB werden im Prompt übergeben |
 | `IA05-08` | ✅ | – | – | – | Statische Regel-Vorklassifikation wird der KI als Kontext mitgegeben: Persönl... |
@@ -146,7 +146,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `IA06-02` | ✅ | – | – | – | Foto ohne Text (Smart-Modus) → OCR übersprungen (`type=personal, OCR nicht nö... |
 | `IA06-03` | ✅ | – | – | – | Smart-Modus: Screenshot → OCR ausgeführt |
 | `IA06-04` | ✅ | – | – | – | Always-Modus → OCR wird immer ausgeführt (auch für normale Fotos) |
-| `IA06-05` | ✅ | – | – | – | Modul deaktiviert → `status: skipped, reason: module disabled` |
+| `IA06-05` | ✅ | – | – | – | Modul `ocr` deaktiviert → IA-06 `status: skipped, reason: module disabled` |
 
 ### IA07 — IA-07 EXIF-Tags schreiben (23 Tests)
 
@@ -219,7 +219,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 |---|---|---|---|---|---|
 | `IA09-01` | ✅ | – | – | – | Fehler vorhanden → E-Mail gesendet |
 | `IA09-02` | ✅ | – | – | – | Kein Fehler → keine E-Mail |
-| `IA09-03` | ✅ | – | – | – | Modul deaktiviert → `status: skipped, reason: module disabled` |
+| `IA09-03` | ✅ | – | – | – | Modul `smtp` deaktiviert → IA-09 `status: skipped, reason: module disabled` |
 
 ### IA10 — IA-10 Cleanup (2 Tests)
 
@@ -257,7 +257,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `PE-16` | – | – | ✅ | – | **retry_job**: 5 parallele `retry_job(same_id)`-Aufrufe → exakt 1× True, 4× F... |
 | `PE-17` | – | – | ✅ | – | **retry_job**: `retry_job` parallel zu Worker-`run_pipeline` → kein stale ste... |
 
-### WEB — Web Interface (58 Tests)
+### WEB — Web Interface (56 Tests)
 
 | Test-ID | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | Beschreibung |
 |---|---|---|---|---|---|
@@ -286,7 +286,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `WEB-23` | ✅ | – | – | – | EXIF-Daten für Immich-Assets via Immich API geholt |
 | `WEB-24` | ✅ | – | – | – | "Dieses behalten" Button auf allen Gruppenmitgliedern (nicht nur lokale) |
 | `WEB-25` | ✅ | – | – | – | "Dieses behalten" → volle Pipeline wird nachgeholt (KI, Tags, Sortierung/Immich) |
-| `WEB-26` | ✅ | – | – | – | "Dieses behalten" bei Immich-Gruppe → KI + Tags + Upload zu Immich (<job-id> ... |
+| `WEB-26` | ✅ | – | – | – | "Dieses behalten" bei Immich-Gruppe → KI + Tags + Upload zu Immich (MA-2026-0... |
 | `WEB-27` | ✅ | – | – | – | "Dieses behalten" bei lokaler Gruppe → KI + Tags + lokale Ablage |
 | `WEB-28` | ✅ | – | – | – | Badge (ORIGINAL/EXAKT) ist klickbarer Link (Immich → öffnet Immich, lokal → D... |
 | `WEB-29` | ✅ | – | – | – | Batch-Clean → alle exakten SHA256-Duplikate gelöscht, ähnliche (pHash) behalten |
@@ -295,30 +295,28 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `WEB-32` | ✅ | – | – | – | Keep/Delete mit JPG+DNG Paar funktioniert korrekt |
 | `WEB-33` | ✅ | – | – | – | Alle Jobs mit Status "review" angezeigt |
 | `WEB-34` | ✅ | – | – | – | Thumbnail (lokal oder Immich) |
-| `WEB-35` | ✅ | – | – | – | Lightbox: Klick auf Thumbnail öffnet Originalbild als Overlay |
-| `WEB-36` | ✅ | – | – | – | AI-Beschreibung, Tags, Metadaten angezeigt |
-| `WEB-37` | ✅ | – | – | – | Dateigrösse angezeigt (Immich API Fallback wenn lokal nicht verfügbar) |
-| `WEB-38` | ✅ | – | – | – | Datum angezeigt mit Fallback auf FileModifyDate bzw. job.created_at |
-| `WEB-39` | ✅ | – | – | – | Bildabmessungen (Auflösung) angezeigt |
-| `WEB-40` | ✅ | – | – | – | Metadatenfelder bedingt (Datum/Kamera nur wenn vorhanden) |
-| `WEB-41` | ✅ | – | – | – | Kategorie-Buttons dynamisch aus DB geladen |
-| `WEB-42` | ✅ | – | – | – | Löschen-Button entfernt Review-Datei |
-| `WEB-43` | ✅ | – | – | – | Lokal: Datei in richtigen Zielordner verschoben (Review → Photo) |
-| `WEB-44` | ✅ | – | – | – | Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (verifiziert:... |
-| `WEB-45` | ✅ | – | – | – | Batch: "Alle → Sourceless" funktioniert (beide lokale und Immich-Items) |
-| `WEB-46` | ✅ | – | – | – | System-Log mit Level-Filter (Info/Warning/Error) |
-| `WEB-47` | ✅ | – | – | – | System-Log Detail mit vollem Traceback |
-| `WEB-48` | ✅ | – | – | – | Verarbeitungs-Log mit Status-Filter |
-| `WEB-49` | ✅ | – | – | – | Verarbeitungs-Log zeigt Dauer an |
-| `WEB-50` | ✅ | – | – | – | Suche nach Dateiname und Debug-Key |
-| `WEB-51` | ✅ | – | – | – | Pagination funktioniert |
-| `WEB-52` | ✅ | – | – | – | Job-Detail: alle Step-Results, Pfade, Timestamps, Hashes |
-| `WEB-53` | ✅ | – | – | – | Job-Detail: voller Traceback bei Fehlern |
-| `WEB-54` | ✅ | – | – | – | Job-Detail: Immich-Thumbnail bei Immich-Assets |
-| `WEB-55` | ✅ | – | – | – | Job-Detail: Lightbox — Klick auf Thumbnail öffnet Originalbild |
-| `WEB-56` | ✅ | – | – | – | Job-Detail: Zurück-Button geht zu Verarbeitungs-Log |
-| `WEB-57` | ✅ | – | – | – | Job löschen und Retry funktioniert (API-Endpunkte getestet) |
-| `WEB-58` | ✅ | – | – | – | Preview-Badge bei Dry-Run-Jobs angezeigt |
+| `WEB-35` | ✅ | – | – | – | AI-Beschreibung, Tags, Metadaten angezeigt |
+| `WEB-36` | ✅ | – | – | – | Dateigrösse angezeigt (Immich API Fallback wenn lokal nicht verfügbar) |
+| `WEB-37` | ✅ | – | – | – | Datum angezeigt mit Fallback auf FileModifyDate bzw. job.created_at |
+| `WEB-38` | ✅ | – | – | – | Bildabmessungen (Auflösung) angezeigt |
+| `WEB-39` | ✅ | – | – | – | Metadatenfelder bedingt (Datum/Kamera nur wenn vorhanden) |
+| `WEB-40` | ✅ | – | – | – | Kategorie-Buttons dynamisch aus DB geladen |
+| `WEB-41` | ✅ | – | – | – | Löschen-Button entfernt Review-Datei |
+| `WEB-42` | ✅ | – | – | – | Lokal: Datei in richtigen Zielordner verschoben (Review → Photo) |
+| `WEB-43` | ✅ | – | – | – | Batch: "Alle → Sourceless" funktioniert (beide lokale und Immich-Items) |
+| `WEB-44` | ✅ | – | – | – | System-Log mit Level-Filter (Info/Warning/Error) |
+| `WEB-45` | ✅ | – | – | – | System-Log Detail mit vollem Traceback |
+| `WEB-46` | ✅ | – | – | – | Verarbeitungs-Log mit Status-Filter |
+| `WEB-47` | ✅ | – | – | – | Verarbeitungs-Log zeigt Dauer an |
+| `WEB-48` | ✅ | – | – | – | Suche nach Dateiname und Debug-Key |
+| `WEB-49` | ✅ | – | – | – | Pagination funktioniert |
+| `WEB-50` | ✅ | – | – | – | Job-Detail: alle Step-Results, Pfade, Timestamps, Hashes |
+| `WEB-51` | ✅ | – | – | – | Job-Detail: voller Traceback bei Fehlern |
+| `WEB-52` | ✅ | – | – | – | Job-Detail: Immich-Thumbnail bei Immich-Assets |
+| `WEB-53` | ✅ | – | – | – | Job-Detail: Lightbox — Klick auf Thumbnail öffnet Originalbild |
+| `WEB-54` | ✅ | – | – | – | Job-Detail: Zurück-Button geht zu Verarbeitungs-Log |
+| `WEB-55` | ✅ | – | – | – | Job löschen und Retry funktioniert (API-Endpunkte getestet) |
+| `WEB-56` | ✅ | – | – | – | Preview-Badge bei Dry-Run-Jobs angezeigt |
 
 ### FW — Filewatcher-Stabilität (15 Tests)
 
@@ -504,78 +502,78 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 
 | Test-ID | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | Beschreibung |
 |---|---|---|---|---|---|
-| `D1` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `D2` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `D3` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `D4` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `D5` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `M1` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.1` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.2` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.3` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.4` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.5` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.6` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.7` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.8` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.9` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.10` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.11` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.12` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.13` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.14` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N1.15` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N2.1` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N2.2` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N2.3` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N2.4` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N3.1` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N3.2` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N3.3` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N3.4` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N3.5` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N4.1` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N4.2` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N4.3` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N4.4` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N4.5` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N4.6` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N4.7` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N4.8` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N5.1` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N5.2` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N5.3` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N5.4` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N5.5` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N5.6` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N5.7` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N5.8` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N6.1` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N6.2` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N6.3` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N7.1` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N7.2` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N7.3` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N7.4` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N7.5` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `N7.6` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R1` | – | – | – | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R2` | – | – | – | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R3` | – | – | – | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R4` | – | – | – | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R5` | – | – | – | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R6` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R7` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R8` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R9` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R10` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R11` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R12` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R13` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R14` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R15` | – | – | – | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `R16` | – | – | ✅ | ✅ | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
-| `RA1` | – | – | – | – | Matrix-Szenario (siehe TESTPLAN Sektion 14) |
+| `D1` | – | – | – | – | "Behalten" im Review: kept_job läuft volle Pipeline neu (keep IA-01) Immich |
+| `D2` | – | – | – | – | "Behalten" im Review, File-Storage File-Storage |
+| `D3` | – | – | – | – | "Kein Duplikat": IA-02 wird auf skipped injiziert, IA-01 behalten Immich |
+| `D4` | – | – | – | – | "Kein Duplikat", File-Storage File-Storage |
+| `D5` | – | – | – | – | "Kein Duplikat" wenn Datei im library/duplicates/ verschwunden ist – |
+| `M1` | – | – | – | – | In-place reprocess ohne Datei-Move (z.B. nach EXIF-Wipe in target_path) ⚠️ **... |
+| `N1.1` | – | – | – | – | JPG (Kamera, voll) ✓ |
+| `N1.2` | – | – | – | – | HEIC (iPhone) ✓ |
+| `N1.3` | – | – | – | – | HEIC (iPhone) ✓ |
+| `N1.4` | – | – | – | – | PNG (Screenshot) – |
+| `N1.5` | – | – | – | – | GIF – |
+| `N1.6` | – | – | – | – | DNG/RAW (Kamera) ✓ |
+| `N1.7` | – | – | – | – | TIFF ✓ |
+| `N1.8` | – | – | – | – | WebP – |
+| `N1.9` | – | – | – | – | MP4 (Kamera-Video) ✓ |
+| `N1.10` | – | – | – | – | MOV (iPhone-Video) ✓ |
+| `N1.11` | – | – | – | – | MOV iPhone Live-Photo ✓ |
+| `N1.12` | – | – | – | – | JPG ohne EXIF (Messenger-Bild) – |
+| `N1.13` | – | – | – | – | UUID-Filename (WhatsApp `[0-9a-f]{8}-...jpg`) – |
+| `N1.14` | – | – | – | – | JPG mit EXIF aber ohne GPS ✓ |
+| `N1.15` | – | – | – | – | Korrupte Datei (z.B. 0-Byte) – |
+| `N2.1` | – | – | – | – | JPG ✓ |
+| `N2.2` | – | – | – | – | HEIC ✓ |
+| `N2.3` | – | – | – | – | MP4 ✓ |
+| `N2.4` | – | – | – | – | JPG ohne EXIF – |
+| `N3.1` | – | – | – | – | JPG direct |
+| `N3.2` | – | – | – | – | JPG sidecar |
+| `N3.3` | – | – | – | – | HEIC direct |
+| `N3.4` | – | – | – | – | HEIC sidecar |
+| `N3.5` | – | – | – | – | MOV (Video) direct |
+| `N4.1` | – | – | – | – | `ki_analyse` IA-05 skipped, Klassifikation rein über statische Sorting Rules ... |
+| `N4.2` | – | – | – | – | `geocoding` IA-03 skipped, keine Geo-Tags, kein Geo-Album |
+| `N4.3` | – | – | – | – | `duplikat_erkennung` IA-02 läuft nur als Hash-Check ohne pHash, alles passiert |
+| `N4.4` | – | – | – | – | `ocr` IA-06 skipped |
+| `N4.5` | – | – | – | – | `ordner_tags` (per Inbox) IA-08 erstellt kein Album aus Inbox-Subfolder-Pfad |
+| `N4.6` | – | – | – | – | `smtp` IA-09 skipped (kein Mail-Versand), `sent=false` im step_result |
+| `N4.7` | – | – | – | – | `immich` (komplett aus) `use_immich=True`-Jobs scheitern oder fallen auf File... |
+| `N4.8` | – | – | – | – | beide AI-Backends aus (`ki_analyse` + `ki_analyse_2`) IA-05 skipped, kein Aut... |
+| `N5.1` | – | – | ✅ | ✅ | IA-02 findet exact-Hash-Duplikat eines schon verarbeiteten Jobs status=`dupli... |
+| `N5.2` | – | – | ✅ | ✅ | IA-02 findet pHash-similar (nicht exact) status=`duplicate`, match_type=`simi... |
+| `N5.3` | – | – | ✅ | ✅ | IA-02 Video-pHash post-IA-04 status=`duplicate`, IA-02 nachträglich überschri... |
+| `N5.4` | – | – | – | – | KI gibt Kategorie `unknown` zurück (oder keine valide) status=`review`, file ... |
+| `N5.5` | – | – | – | – | Sorting-Rule mit `target_category="skip"` matched status=`skipped`, **keine**... |
+| `N5.6` | – | – | – | – | `dry_run=True` auf der Inbox status=`done` (oder `dry_run`), KEIN Move, KEIN ... |
+| `N5.7` | – | – | – | – | IA-05 mit AI Auto-Pause (`AIConnectionError`, beide Backends down) `pipeline.... |
+| `N5.8` | – | – | – | – | IA-03 mit Geocoding Auto-Pause (`GeocodingConnectionError`) wie N5.7 für Geoc... |
+| `N6.1` | – | – | – | – | 1 Job `processing` nach Restart: status='queued' + retry_count++, Pipeline lä... |
+| `N6.2` | – | – | – | – | Job mit retry_count=3 abandoned: status='error', Meldung "Max retries (3) exc... |
+| `N6.3` | – | – | – | – | mehrere Jobs `processing` parallel alle requeued sequenziell |
+| `N7.1` | – | – | ✅ | ✅ | 10 Dateien gleichzeitig im Inbox alle 10 verarbeitet, kein Duplicate-Job, kei... |
+| `N7.2` | – | – | ✅ | ✅ | derselbe Job von 5 Pipeline-Aufrufern parallel atomic claim: 1 läuft, 4 retur... |
+| `N7.3` | – | – | ✅ | ✅ | retry_job + 5 parallele run_pipeline auf demselben Job nur retry's pipeline l... |
+| `N7.4` | – | – | ✅ | ✅ | 5 parallele retry_job auf demselben Job exakt 1 succeeded, 4 returnen False |
+| `N7.5` | – | – | ✅ | ✅ | run_pipeline auf done/processing-Job (Idempotenz-Check) no-op |
+| `N7.6` | – | – | – | – | Bulk-Retry-All triggert 30+ parallele Pipeline-Tasks DB-Pool reicht (20/40), ... |
+| `R1` | – | – | – | ✅ | Immich sidecar |
+| `R2` | – | – | – | ✅ | Immich direct |
+| `R3` | – | – | – | ✅ | File-Storage direct |
+| `R4` | – | – | – | ✅ | File-Storage sidecar |
+| `R5` | – | – | – | ✅ | Immich direct |
+| `R6` | – | – | – | – | Immich sidecar |
+| `R7` | – | – | – | – | Immich direct |
+| `R8` | – | – | – | – | Immich sidecar |
+| `R9` | – | – | – | – | Immich direct |
+| `R10` | – | – | – | – | File-Storage direct |
+| `R11` | – | – | – | – | File-Storage sidecar |
+| `R12` | – | – | – | – | Immich direct |
+| `R13` | – | – | – | – | Immich sidecar |
+| `R14` | – | – | – | – | Immich direct |
+| `R15` | – | – | – | ✅ | – – |
+| `R16` | – | – | ✅ | ✅ | Immich direct |
+| `RA1` | – | – | – | – | Bulk-Retry mehrerer Error-Jobs ohne sofortigen Pipeline-Run (background worke... |
 
 ## Notizen pro Lauf
 
