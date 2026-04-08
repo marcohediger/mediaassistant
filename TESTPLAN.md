@@ -88,7 +88,7 @@
 ### IA-05: KI-Analyse
 - **IA05-01:** Persönliches Foto → `type: personliches_foto`, sinnvolle Tags
 - **IA05-02:** Screenshot → `type: screenshot` (Statusleiste, Navigationsbar erkannt)
-- **IA05-03:** Internet-Bild → `type: sourceless` (generierte PNG/WebP/TIFF, v2.8.0: kein internet_image mehr)
+- **IA05-03:** Internet-Bild → `type: sourceless` (generierte PNG/WebP/TIFF, : kein internet_image mehr)
 - **IA05-04:** KI-Backend nicht erreichbar → Fehler gefangen, Fallback-Werte gesetzt
 - **IA05-05:** Modul deaktiviert → `status: skipped, reason: module disabled`
 - **IA05-06:** Metadata-Kontext (EXIF, Geo, Dateigrösse) wird an KI übergeben
@@ -367,7 +367,7 @@
 
 ## 12. Exotische Tests
 
-> Testlauf: **v2.17.1 — 2026-04-02**, Container 0.5 CPU / 512MB RAM (Synology-Simulation)
+> Testlauf: ** — 2026-04-02**, Container 0.5 CPU / 512MB RAM (Synology-Simulation)
 
 ### Format/Extension-Mismatch
 
@@ -400,7 +400,7 @@
 - **EX-18:** Sehr altes Datum (1900-01-01) → korrekt verarbeitet
 - **EX-19:** GPS Longitude=0 (Greenwich-Meridian) → Geocoding korrekt "Vereinigtes Königreich / Groß-London"
 - **EX-20:** GPS Latitude=0 (Äquator) → gps=true, Geocoding ausgeführt
-- **EX-21:** Ungültige GPS (999,999) → "skipped, invalid GPS coordinates" (Validierung in v2.17.1 hinzugefügt)
+- **EX-21:** Ungültige GPS (999,999) → "skipped, invalid GPS coordinates" (Validierung in hinzugefügt)
 - **EX-22:** GPS Null Island (0,0) → Geocoding wird ausgeführt
 - **EX-23:** 10KB EXIF Description → ExifTool verarbeitet ohne Probleme
 - **EX-24:** XSS in EXIF Keywords (`<script>alert(1)</script>`) → wird nicht in KI-Tags übernommen
@@ -418,7 +418,7 @@
 - **EX-30:** Gleiche Datei 5x mit verschiedenen Namen → 1 done + 4 SHA256-Duplikate
 - **EX-31:** Datei vor Filewatcher-Pickup gelöscht → kein Crash, kein Job erstellt
 - **EX-32:** 15 Dateien in Queue auf langsamem System → alle verarbeitet, kein OOM
-- **EX-33:** **v2.28.2/v2.28.3:** Derselbe `job_id` wird nicht von zwei Pipeline-Instanzen gleichzeitig verarbeitet (siehe Sektion 13: Race-Condition-Tests 5–8 in `test_duplicate_fix.py`)
+- **EX-33:** Derselbe `job_id` wird nicht von zwei Pipeline-Instanzen gleichzeitig verarbeitet (siehe Sektion 13: Race-Condition-Tests 5–8 in `test_duplicate_fix.py`)
 
 ### Grosse Dateien auf langsamem System
 
@@ -439,78 +439,25 @@
 - **EX-42:** XSS-Payload in Textfeldern → HTML-escaped gespeichert (`&lt;script&gt;`)
 - **EX-43:** Module-Checkboxen nur aktualisiert wenn `_form_token` vorhanden
 
-### Gefundene und behobene Bugs
+### Bekannte Einschränkungen (Verhalten muss so bleiben)
 
-| Bug | Beschreibung | Fix |
-|-----|-------------|-----|
-| GPS lon=0 / lat=0 | `bool(0)` ist False → GPS am Äquator/Greenwich ignoriert | `is not None` Check |
-| GPS Validierung | GPS lat=999, lon=999 akzeptiert | Range-Check -90..90 / -180..180 |
-| Format-Mismatch | JPG als.png → ExifTool Write crasht | Mismatch-Erkennung vor Write |
-| Settings partieller POST | Wiped alle Module + Config | `_form_token` Guard |
-| Settings XSS | Ungefilterte Eingabe in Config gespeichert | `html.escape` Sanitisierung |
+Dokumentierte Limitations — der Test prüft, dass die Pipeline
+genau dieses Verhalten zeigt (nicht crasht, dokumentierte
+Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 
-### Bekannte Einschränkungen
-| Thema | Beschreibung |
-|-------|-------------|
-| GIF-Konvertierung | `convert` (ImageMagick) nicht im Container → GIF wird direkt an KI gesendet |
-| Video < 1s | Thumbnail-Extraktion scheitert (Seek-Position > Videolänge) |
-| Leere Ordner | Werden nur aufgeräumt wenn `folder_tags` aktiv ist |
-| SMTP leerer Wert | JSON-encoded leerer String `""` wird nicht als "nicht konfiguriert" erkannt |
-| `...jpg` Dateiname | `os.path.splitext("...jpg")` gibt keine Extension → still ignoriert |
-| Max-Retry nur bei Start | `retry_count > MAX_RETRIES` Check nur beim Container-Start, nicht im laufenden Betrieb |
-| Externe Datei-Race | Wenn ein **externer** Prozess eine Inbox-Datei mid-pipeline löscht/ersetzt (z.B. iCloud re-sync), wird der entsprechende ExifTool/upload_asset/safe_move-Fehler direkt durchgereicht — der atomic claim aus v2.28.2 schützt nur vor *internen* Doppel-Verarbeitungen, nicht vor externen Filesystem-Eingriffen |
+- **LIM-01:** GIF-Konvertierung — `convert` (ImageMagick) nicht im Container → GIF wird direkt an KI gesendet
+- **LIM-02:** Video < 1s — Thumbnail-Extraktion scheitert (Seek-Position > Videolänge)
+- **LIM-03:** Leere Ordner — Werden nur aufgeräumt wenn `folder_tags` aktiv ist
+- **LIM-04:** SMTP leerer Wert — JSON-encoded leerer String `""` wird nicht als "nicht konfiguriert" erkannt
+- **LIM-05:** `...jpg` Dateiname — `os.path.splitext("...jpg")` gibt keine Extension → still ignoriert
+- **LIM-06:** Max-Retry nur bei Start — `retry_count > MAX_RETRIES` Check nur beim Container-Start, nicht im laufenden Betrieb
+- **LIM-07:** Externe Datei-Race — Wenn ein **externer** Prozess eine Inbox-Datei mid-pipeline löscht/ersetzt (z.B. iCloud re-sync), wird der entsprechende ExifTool/upload_asset/safe_move-Fehler direkt durchgereicht — der atomic claim schützt nur vor *internen* Doppel-Verarbeitungen, nicht vor externen Filesystem-Eingriffen
 
 ## 13. Race-Condition-Tests
 
 > Code-Pfad-Tests gegen die `run_pipeline`/`retry_job`-Race-
 > Conditions. Ausführung siehe `TESTRESULTS.md`. Test-Skript:
 > `backend/test_duplicate_fix.py`.
-
-### Hintergrund
-
-In `v2.28.0`/`v2.28.1` traten ~30 Jobs/Tag mit doppelten Pipeline-Logs auf
-(verschiedene Tag-Counts für dieselbe `debug_key`), 120 Jobs mit
-inkonsistenten `error_message`-Feldern, sowie die wiederkehrenden Fehler
-`ExifTool Sidecar already exists`, `File disappeared before upload` und
-`ExifTool File not found`. Die Live-DB-Analyse bewies, dass `run_pipeline`
-von **5 verschiedenen Stellen** aufgerufen wird:
-
-| # | Aufrufer | Datei:Zeile |
-|---|---|---|
-| 1 | `_pipeline_worker` | `filewatcher.py:264` |
-| 2 | `_poll_immich` | `filewatcher.py:379` |
-| 3 | Startup-Resume | `filewatcher.py:503` |
-| 4 | `retry_job` | `pipeline/__init__.py:304` |
-| 5 | Duplikate-Router (Keep / Not-a-duplicate) | `routers/duplicates.py:815, 882` |
-
-Ohne Schutz konnten zwei Aufrufer denselben Job parallel verarbeiten und
-schrieben gleichzeitig in dieselben Dateien (`.xmp`, Quelldatei, Immich).
-
-### Fix-Architektur
-
-**v2.28.2 — `run_pipeline` atomarer Claim:**
-```python
-claim = await session.execute(
- update(Job)
-.where(Job.id == job_id, Job.status == "queued")
-.values(status="processing", started_at=datetime.now)
-)
-await session.commit
-if claim.rowcount == 0:
- return # someone else already claimed
-```
-
-**v2.28.3 — `retry_job` atomarer Claim mit transientem Lock:**
-```python
-claim = await session.execute(
- update(Job)
-.where(Job.id == job_id, Job.status == "error")
-.values(status="processing") # transient lock during cleanup
-)
-#... cleanup file move + step_result reset...
-job.status = "queued" # only now is the job claimable by run_pipeline
-await session.commit
-```
 
 ### Tests
 
@@ -576,7 +523,7 @@ await session.commit
 | IA-01 wurde frisch ausgeführt (kein stale `reason: stale`) | reason startswith "ExifTool" |
 | `system_logs`-Einträge ≤ 2 (kein Doppel-Processing) | ≤ 2 |
 
-**Beweis für den Fix-Wert:** Vor dem v2.28.3-Fix konnte `retry_job` zwischen seinen zwei Commits einen Worker reinrutschen lassen, der mit dem alten `step_result` (`{IA-01: {status: error, reason: stale}}`) gestartet ist und IA-01 übersprungen hat.
+**Beweis für den Fix-Wert:** Vor dem -Fix konnte `retry_job` zwischen seinen zwei Commits einen Worker reinrutschen lassen, der mit dem alten `step_result` (`{IA-01: {status: error, reason: stale}}`) gestartet ist und IA-01 übersprungen hat.
 
 #### RACE-08: 5 parallele `retry_job`-Aufrufe (Doppelklick-Schutz)
 **Setup:** Job in `error`, dann `asyncio.gather(*[retry_job(jid) for _ in range(5)])`.
@@ -587,39 +534,6 @@ await session.commit
 | `retry_job` returned False 4× | 4 |
 
 **Bedeutung:** Schutz gegen Doppelklick im UI, mehrere Browser-Tabs, oder API-Spam. Nur der erste Aufrufer flippt den Status atomar von `error` zu `processing`.
-
-### Pre-Fix-Forensik
-
-> Anonymisiert in `TESTRESULTS.md` unter "Historische Notizen".
-
-
-### Reproduktionsschritte (für künftige Regression-Tests)
-
-```bash
-# Im Dev-Container ausführen:
-docker exec mediaassistant-dev python3 /app/test_duplicate_fix.py
-
-```
-
-Bei Code-Änderungen an:
-- `backend/pipeline/__init__.py` (`run_pipeline` oder `retry_job`)
-- `backend/filewatcher.py` (`_pipeline_worker` oder Startup-Resume)
-- `backend/routers/duplicates.py` (Keep/Not-a-duplicate Endpoints)
-
-→ **Pflicht-Durchlauf** der vollen Suite vor dem Commit, inkl. der Race-Tests 5–8.
-
-### Symptom-Pflaster, die mit v2.28.2 entfernt wurden
-
-Diese beiden Workarounds aus älteren Releases waren nach dem echten Fix
-nicht mehr nötig und wurden bewusst entfernt — sie hätten neue Race-Bugs
-maskiert:
-
-| Pflaster | Ursprung | Status |
-|---|---|---|
-| `step_ia07_exif_write.py`: `os.path.exists(sidecar_path) → os.remove` vor ExifTool | `00b1d5b` | ❌ entfernt |
-| `step_ia08_sort.py`: `os.path.exists(job.original_path)` vor Upload UND vor Move | `4a149f4` | ❌ entfernt |
-
-Falls echte Filesystem-Probleme auftreten (User löscht Datei manuell, NFS-Glitch), werden die Fehler aus `upload_asset` oder `safe_move` direkt durchgereicht — mit präziseren Meldungen als die irreführende `file may still be copying or was moved by another process`.
 
 ## 14. Test-Matrix — Vollständige Coverage-Karte
 
@@ -659,7 +573,7 @@ Falls echte Filesystem-Probleme auftreten (User löscht Datei manuell, NFS-Glitc
 | **GPS-Status** | mit GPS / ohne GPS | beeinflusst IA-03-Geocoding, Album-Tags, Pfad-Templates |
 | **Pre-Retry-Status** (nur Retry-Pfad) | done+Warnungen / error / duplicate | aus welchem Job-Zustand kommt der Retry |
 | **Pre-Retry-File-Location** (nur Retry-Pfad) | inbox / library / library/error / library/duplicates / `/tmp/ma_immich_*` / nowhere | wo liegt die Datei beim Retry-Klick |
-| **immich_asset_id gesetzt** | yes / no | beeinflusst IA-08-Branch (webhook vs upload) und (vor Fix v2.28.28) IA-10-Cleanup |
+| **immich_asset_id gesetzt** | yes / no | beeinflusst IA-08-Branch (webhook vs upload) und IA-10-Cleanup |
 | **Sorting Rule** | match / kein match / "skip"-Rule | IA-08 entscheidet Kategorie statisch vor KI-Override |
 | **dry_run** | on / off | IA-08 macht Move/Upload oder nur Report |
 | **Module aktiviert** | ki_analyse, geocoding, ocr, ordner_tags, smtp, filewatcher, immich (jeweils on/off) | überspringt einzelne Steps |
@@ -783,7 +697,7 @@ Container restart mit Jobs in `status='processing'` (z.B. nach Crash).
 | N7.3 | retry_job + 5 parallele run_pipeline auf demselben Job | nur retry's pipeline läuft, 5 blocked | ✅ `test_duplicate_fix.py` Test 7 |
 | N7.4 | 5 parallele retry_job auf demselben Job | exakt 1 succeeded, 4 returnen False | ✅ `test_duplicate_fix.py` Test 8 |
 | N7.5 | run_pipeline auf done/processing-Job (Idempotenz-Check) | no-op | ✅ `test_duplicate_fix.py` Test 6 |
-| N7.6 | Bulk-Retry-All triggert 30+ parallele Pipeline-Tasks | DB-Pool reicht (20/40 nach v2.28.7), keine "QueuePool limit"-Errors | ⚠️ **Lücke** (Pool-Tuning ist da, kein automatischer Test) |
+| N7.6 | Bulk-Retry-All triggert 30+ parallele Pipeline-Tasks | DB-Pool reicht (20/40), keine "QueuePool limit"-Errors | ⚠️ **Lücke** (Pool-Tuning ist da, kein automatischer Test) |
 
 ### Test-Matrix: Retry-Job (Entry 4)
 
