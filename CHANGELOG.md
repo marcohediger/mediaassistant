@@ -1,5 +1,75 @@
 # Changelog
 
+## v2.28.35 — 2026-04-08
+
+### Fix: Cascade-Drop griff nicht wenn IA-05 keinen `status: warning` mehr hatte (Live-Vorfall MA-2026-28121)
+
+User-Bericht nach v2.28.34: Retry für MA-2026-28121 lief durch,
+Detail-Page zeigte korrekt das frische KI-Resultat
+(`type: 'Persönliches Foto'`, Tags Metallteil/Maschinenteil/...),
+**aber IA-07.keywords_written und IA-08.immich_tags_written hatten
+weiterhin die alten `["unknown", "Schweiz", "Aargau", "Lupfig"]`
+drinstehen.** In Immich landeten also die alten stale Tags, nicht
+die neue KI-Analyse.
+
+**Ursache:** v2.28.33 cascade-droppt nur Steps deren `status` in
+`{"error", "warning"}` ist. Aber ein erfolgreicher IA-05-Lauf
+returnt ein dict OHNE `status` field — `IA-05.status` ist nur
+gesetzt, wenn der Pipeline-Error-Handler den Step nach einer
+Exception markiert hat.
+
+Im Live-Fall MA-2026-28121: Vorgänger-Retries (vor v2.28.33) liefen
+IA-05 frisch durch und überschrieben die "warning"-Markierung mit
+einem erfolgreichen Result OHNE status field. IA-07/IA-08 blieben
+aber stale (weil das pre-cascade-Code IA-07/IA-08 nicht droppte).
+Die `error_message="Warnungen in: IA-05"` blieb stehen, weil sie
+beim ersten warning-Run aggregiert wurde und kein späterer Lauf
+sie korrigieren konnte.
+
+Konsequenz: jeder spätere Retry mit v2.28.33 cascade fand bei
+IA-05 keinen warning-Status mehr, droppte gar nichts, IA-05/06/07/08
+blieben alle gecacht. Die alten Tags klebten für immer am Job.
+
+**Fix in `pipeline/__init__.py:reset_job_for_retry()`:** parst
+`error_message="Warnungen in: IA-XX, IA-YY"` und gibt die
+gefundenen Step-Codes als neuen Parameter `drop_step_codes` an
+`prepare_job_for_reprocess()`. `_reset_step_results()` matcht jetzt
+auf BEIDE — Status-basiert UND explizit per Code — und triggert
+den Cascade in beiden Fällen.
+
+`error_message` ist die einzig verlässliche Quelle der Wahrheit
+für "was muss repariert werden", weil sie nicht von späteren
+partiellen Retries überschrieben wird.
+
+### Test-Coverage: User-Vorschlag, direkte Immich-API-Verifikation
+
+Bisher prüften die Tests nur das `step_result` in der DB — also
+"was wir denken geschrieben zu haben". Auf User-Vorschlag fragt
+der Test jetzt **direkt aus Immich via API** ab welche Tags
+tatsächlich am Asset hängen. Das ist deutlich stärker, weil es
+auch zwischen "DB sagt OK aber Immich hat's nie übernommen" und
+"alles wirklich propagiert" unterscheidet.
+
+Neue Asserts in `test_retry_file_lifecycle.py`:
+- `_run_lifecycle_test`: "immich-API confirms 'unknown' is NOT
+  on the live asset (sidecar/direct)"
+- `_run_stale_warning_state_retry_test` (NEU, reproduziert
+  MA-2026-28121): erstellt einen Job mit IA-05 success-without-status
+  + stale IA-07/IA-08 + `error_message="Warnungen in: IA-05"`,
+  triggered Retry, prüft per DB-Step-Result UND per Immich-API-Call
+  dass IA-07/IA-08 frisch durchgelaufen sind und die stale 'unknown'
+  und 'STALE_GEO_TAG' weg sind.
+
+Vor v2.28.35 wäre der `_run_stale_warning_state_retry_test` rot.
+Post-Fix: **99/99 grün** (`test_retry_file_lifecycle.py`),
+26/26 (`test_duplicate_fix.py`).
+
+**Was du jetzt tun solltest:** auf live nach `docker compose pull`
++ Restart (v2.28.35) MA-2026-28121 nochmal "Erneut verarbeiten"
+klicken. Diesmal sollten die echten KI-Tags (Metallteil,
+Maschinenteil, Nahaufnahme, Gestrichene Oberfläche, Geschliffene
+Kanten) auch in Immich landen.
+
 ## v2.28.34 — 2026-04-08
 
 ### Performance: IA-08 wartet nicht mehr 120s auf Immich-Tag-Extraktion wenn IA-07 nichts geschrieben hat

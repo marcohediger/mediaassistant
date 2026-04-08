@@ -197,6 +197,7 @@ def _reset_step_results(
     *,
     keep_steps: set[str] | None,
     drop_step_statuses: set[str] | None,
+    drop_step_codes: set[str] | None = None,
     inject_steps: dict[str, dict] | None,
 ) -> None:
     """Apply the chosen step_result reset policy in-place on `job`.
@@ -205,29 +206,41 @@ def _reset_step_results(
     - keep_steps: if set, keep ONLY these step codes (drop everything else)
     - drop_step_statuses: drop step codes whose result has one of these
       statuses (e.g. {"error", "warning"} for retry of soft failures).
-      **Cascade**: when a step X is dropped this way, every step that
-      runs *after* X in the pipeline order is dropped too. Otherwise the
-      cached downstream results would still reflect the OLD output of
-      step X — IA-07 (writes EXIF/sidecar tags) and IA-08 (uploads to
-      Immich + writes Immich tags) consume IA-05's classification, so
-      a re-run of IA-05 alone is not enough; the downstream cached
-      results would still carry the old keywords. Live-Vorfall
-      MA-2026-28111 vor v2.28.33.
+    - drop_step_codes: drop these step codes regardless of status — used
+      by `reset_job_for_retry()` to act on `error_message="Warnungen in:
+      IA-XX"` even when the cached step_result no longer carries the
+      warning status (e.g. because a previous partial retry overwrote
+      it with a successful result). Live-Vorfall MA-2026-28121 vor
+      v2.28.35.
     - inject_steps: merge these synthetic step results in last (e.g.
       {"IA-02": {"status": "skipped", "reason": "..."}})
+
+    **Cascade**: when ANY step is dropped (via either status or explicit
+    code), every step that runs *after* it in the pipeline order is
+    dropped too. Otherwise the cached downstream results would still
+    reflect the OLD output of the dropped step — IA-07 (writes
+    EXIF/sidecar tags) and IA-08 (uploads to Immich + writes Immich
+    tags) consume IA-05's classification, so a re-run of IA-05 alone
+    is not enough; the downstream cached results would still carry the
+    old keywords. Live-Vorfälle MA-2026-28111 (v2.28.33), MA-2026-28121
+    (v2.28.35).
     """
     current = dict(job.step_result or {})
 
     if keep_steps is not None:
         current = {k: v for k, v in current.items() if k in keep_steps}
 
+    matched: set[str] = set()
     if drop_step_statuses:
-        # First pass: figure out which step codes match the drop statuses.
-        matched = []
         for step_code, r in current.items():
             if isinstance(r, dict) and r.get("status") in drop_step_statuses:
-                matched.append(step_code)
+                matched.add(step_code)
+    if drop_step_codes:
+        for step_code in drop_step_codes:
+            if step_code in current:
+                matched.add(step_code)
 
+    if matched:
         # Cascade: for each matched step, drop the step itself plus
         # everything that runs after it in the pipeline order.
         to_drop = set(matched)
@@ -253,6 +266,7 @@ async def prepare_job_for_reprocess(
     *,
     keep_steps: set[str] | None = None,
     drop_step_statuses: set[str] | None = None,
+    drop_step_codes: set[str] | None = None,
     inject_steps: dict[str, dict] | None = None,
     move_file: bool = True,
     commit: bool = True,
@@ -287,6 +301,7 @@ async def prepare_job_for_reprocess(
         job,
         keep_steps=keep_steps,
         drop_step_statuses=drop_step_statuses,
+        drop_step_codes=drop_step_codes,
         inject_steps=inject_steps,
     )
 
