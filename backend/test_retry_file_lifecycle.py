@@ -286,6 +286,141 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
             await _cleanup_job_artifacts(job_id, extra_cleanup, asset_ids)
 
 
+async def _run_filestorage_test(source_heic: str):
+    """File-storage variant: use_immich=False so IA-08 moves into /library/.
+
+    The bug class is the same as the immich case: on retry the file is
+    moved into reprocess/, IA-08's cached step result keeps it from
+    re-running, so the file never makes it back to its library target.
+    Post-fix: file must end up at a known location (target_path or
+    reprocess), not be lost.
+    """
+    print(f"\n── Test: retry file lifecycle [file-storage / use_immich=False] ──")
+    await config_manager.set("metadata.write_mode", "direct")
+
+    test_name = f"__retry_lifecycle_filestore_{int(datetime.now().timestamp())}.HEIC"
+    inbox_path = os.path.join(INBOX, test_name)
+    job_id: int | None = None
+
+    try:
+        _stage_inbox_file(source_heic, test_name)
+
+        async with async_session() as session:
+            job = Job(
+                filename=test_name,
+                original_path=inbox_path,
+                debug_key=f"MA-LIFECYCLE-FS-{int(datetime.now().timestamp())}",
+                status="queued",
+                source_label="Default Inbox",
+                source_inbox_path=INBOX,
+                use_immich=False,  # ← file-storage path, no Immich
+                step_result={},
+            )
+            session.add(job)
+            await session.commit()
+            job_id = job.id
+
+        await run_pipeline(job_id)
+
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            first_status = job.status
+            first_target = job.target_path
+            first_immich = job.immich_asset_id
+
+        report("first run reached terminal state",
+               first_status in ("done", "review"),
+               f"status={first_status}")
+        report("first run did NOT touch immich",
+               first_immich is None,
+               f"asset={first_immich}")
+        report(
+            "first run set target_path to a /library/ path",
+            bool(first_target and first_target.startswith(LIBRARY_BASE)),
+            f"target={first_target}",
+        )
+
+        if not (first_target and first_target.startswith(LIBRARY_BASE)):
+            return
+
+        first_library_path = first_target
+
+        # Inject the synthetic warning state and trigger retry
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            sr = dict(job.step_result or {})
+            sr["IA-05"] = {
+                "status": "warning", "reason": "synthetic for test",
+                "type": "unknown", "tags": [], "description": "",
+                "mood": "", "people_count": 0, "quality": "unbekannt",
+                "confidence": 0.0,
+            }
+            job.step_result = sr
+            flag_modified(job, "step_result")
+            job.error_message = "Warnungen in: IA-05"
+            await session.commit()
+
+        ok = await reset_job_for_retry(job_id)
+        report("reset_job_for_retry accepted file-storage job", ok)
+        await run_pipeline(job_id)
+
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            after_status = job.status
+            after_target = job.target_path
+            after_orig = job.original_path
+            after_step_result = dict(job.step_result or {})
+
+        ia10 = after_step_result.get("IA-10", {})
+        ia10_removed = ia10.get("removed") or []
+
+        report(
+            "IA-10 did NOT delete the file (no immich, no cleanup)",
+            first_library_path not in ia10_removed and after_orig not in ia10_removed,
+            f"removed={ia10_removed}",
+        )
+
+        # The file MUST live somewhere predictable on disk after retry
+        candidates = []
+        if after_target and not after_target.startswith("immich:"):
+            candidates.append(after_target)
+        if after_orig and not after_orig.startswith("immich:"):
+            candidates.append(after_orig)
+        candidates.append(first_library_path)
+        candidates.append(os.path.join(REPROCESS_DIR, test_name))
+
+        existing = [p for p in candidates if os.path.exists(p)]
+        report(
+            "file still exists somewhere on disk after retry",
+            bool(existing),
+            f"checked={candidates} → existing={existing}",
+        )
+
+        # Strong guarantee: target_path should be a valid local path post-retry
+        report(
+            "target_path points to an existing file post-retry",
+            bool(after_target and not after_target.startswith("immich:") and os.path.exists(after_target)),
+            f"target={after_target}",
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        report("unexpected exception in file-storage test", False, repr(e))
+    finally:
+        if job_id is not None:
+            extras = [
+                inbox_path,
+                os.path.join(REPROCESS_DIR, test_name),
+                os.path.join(REPROCESS_DIR, test_name + ".xmp"),
+            ]
+            # Try to also clean up any /library/ artifacts the test created
+            async with async_session() as session:
+                job = await session.get(Job, job_id)
+                if job and job.target_path and not job.target_path.startswith("immich:"):
+                    extras.append(job.target_path)
+            await _cleanup_job_artifacts(job_id, extras, [])
+
+
 async def _run_missing_file_test(source_heic: str):
     """Negative case: file is gone before retry → retry must abort cleanly."""
     print(f"\n── Test: retry with missing source file ──")
@@ -401,6 +536,7 @@ async def main():
     try:
         await _run_lifecycle_test(mode="sidecar", source_heic=source)
         await _run_lifecycle_test(mode="direct", source_heic=source)
+        await _run_filestorage_test(source_heic=source)
         await _run_missing_file_test(source_heic=source)
     finally:
         await config_manager.set("metadata.write_mode", saved_write_mode)

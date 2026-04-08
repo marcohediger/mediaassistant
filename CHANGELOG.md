@@ -1,5 +1,47 @@
 # Changelog
 
+## v2.28.29 — 2026-04-08
+
+### Fix: Retry verliert Datei auch im File-Storage-Modus (`use_immich=False`)
+
+Nachzügler-Fix zu v2.28.28: der vorherige Patch hat das Datei-Verlust-
+Problem für Immich-gestützte Jobs gefixt, aber im **reinen File-
+Storage-Modus** (`use_immich=False`, IA-08 verschiebt nach
+`/library/photos/...`) blieb derselbe Pathologie-Pfad offen.
+
+**Was passierte:**
+
+`_move_file_for_reprocess` verschiebt die Datei aus `target_path`
+(z.B. `/library/photos/2024/.../X.jpg`) nach `/app/data/reprocess/`.
+Da IA-08 sein Step-Result aus dem ersten erfolgreichen Lauf
+gecacht hat, läuft IA-08 beim Retry **nicht** erneut — der Move
+zurück nach `/library/` passiert nie. Die Datei strandet in
+`reprocess/`, `target_path` ist `None`, und der User findet seine
+Datei nicht mehr im erwarteten Library-Ordner.
+
+**Fix in zwei Stellen:**
+
+1. `pipeline/__init__.py:reset_job_for_retry` — vor dem
+   Reprocess-Move wird das alte `target_path` festgehalten. War es
+   ein lokaler Pfad (kein `immich:`-Ref), wird IA-08 aus dem
+   Step-Result entfernt, sodass der nächste Pipeline-Pass den
+   Move-to-Library erneut ausführt und `target_path` auf die neue,
+   gültige Library-Location setzt. Für `immich:`-Refs bleibt
+   IA-08 weiterhin gecacht (Asset überlebt, Re-Upload unnötig).
+
+2. `pipeline/reprocess.py:_move_file_for_reprocess` — beim
+   Verschieben des `.xmp`-Sidecars wird auch die gecachte
+   `IA-07.sidecar_path` im Step-Result auf den neuen Pfad
+   aktualisiert. Sonst würde IA-08 beim Re-Run die Sidecar-Datei
+   am alten (jetzt leeren) Inbox-Pfad suchen und ein orphan
+   `.xmp` in `reprocess/` zurücklassen.
+
+**Test-Coverage:** `test_retry_file_lifecycle.py` um den
+file-storage-Fall erweitert. Pre-Fix scheiterte die neue Assertion
+"target_path points to an existing file post-retry", post-Fix
+**31/31 grün** (Sidecar Immich, Direct Immich, File-Storage,
+verschwundene Quelldatei).
+
 ## v2.28.28 — 2026-04-08
 
 ### Fix: Retry löscht die Datei (Live-Bug MA-2026-28123 / -15415)
