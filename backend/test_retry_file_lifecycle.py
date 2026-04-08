@@ -421,6 +421,151 @@ async def _run_filestorage_test(source_heic: str):
             await _cleanup_job_artifacts(job_id, extras, [])
 
 
+async def _run_error_retry_test(source_heic: str):
+    """Real-error retry: status='error' instead of 'done'+Warnungen.
+
+    Mirrors what happens when a critical step (e.g. IA-08 upload) fails:
+    pipeline error handler moves the file to /library/error/, sets
+    target_path to that location, status='error'. User clicks Retry.
+    The fix must work the same way it does for the warning path.
+    """
+    print(f"\n── Test: retry file lifecycle [status='error' (Fehler-Retry)] ──")
+    await config_manager.set("metadata.write_mode", "direct")
+
+    test_name = f"__retry_lifecycle_error_{int(datetime.now().timestamp())}.HEIC"
+    inbox_path = os.path.join(INBOX, test_name)
+    error_dir = os.path.join(LIBRARY_BASE, "error")
+    error_path = os.path.join(error_dir, test_name)
+    asset_ids: list[str] = []
+    job_id: int | None = None
+
+    try:
+        # Stage the file in the error/ folder directly — this mimics the
+        # state left behind after the pipeline error handler called
+        # _move_to_error() on a critical failure (e.g. IA-08 upload error).
+        os.makedirs(error_dir, exist_ok=True)
+        shutil.copy2(source_heic, error_path)
+
+        async with async_session() as session:
+            job = Job(
+                filename=test_name,
+                # original_path points at the (now-empty) inbox spot, just
+                # like the live error path leaves it
+                original_path=inbox_path,
+                target_path=error_path,
+                debug_key=f"MA-LIFECYCLE-ERR-{int(datetime.now().timestamp())}",
+                status="error",
+                error_message="[IA-08] RuntimeError: Immich upload failed (synthetic for test)",
+                source_label="Default Inbox",
+                source_inbox_path=INBOX,
+                use_immich=True,
+                step_result={
+                    "IA-01": {
+                        "make": "Apple", "model": "iPhone", "date": "2022:12:01 12:00:00",
+                        "gps_lat": None, "gps_lon": None, "gps": False,
+                        "software": None, "width": 4032, "height": 3024,
+                        "file_type": "HEIC", "mime_type": "image/heic",
+                        "orientation": 1, "has_exif": True, "file_size": 1889263,
+                    },
+                    "IA-02": {"status": "ok", "phash": None},
+                    "IA-08": {
+                        "status": "error",
+                        "reason": "RuntimeError: Immich upload failed (synthetic for test)",
+                    },
+                },
+            )
+            session.add(job)
+            await session.commit()
+            job_id = job.id
+
+        report("staged error file exists at /library/error/",
+               os.path.exists(error_path), error_path)
+
+        # Trigger retry
+        ok = await reset_job_for_retry(job_id)
+        report("reset_job_for_retry accepted error job", ok)
+        await run_pipeline(job_id)
+
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            after_status = job.status
+            after_target = job.target_path
+            after_orig = job.original_path
+            after_immich = job.immich_asset_id
+            after_step_result = dict(job.step_result or {})
+
+        if after_immich:
+            asset_ids.append(after_immich)
+
+        ia10 = after_step_result.get("IA-10", {})
+        ia10_removed = ia10.get("removed") or []
+
+        report(
+            "IA-10 did NOT delete the reprocess copy on error-retry",
+            os.path.join(REPROCESS_DIR, test_name) not in ia10_removed
+            and error_path not in ia10_removed,
+            f"removed={ia10_removed}",
+        )
+
+        # The file MUST end up somewhere reachable post-retry: either in
+        # Immich (target_path is an `immich:` ref) OR on disk at one of
+        # the known locations. Both are valid outcomes — Immich-hosted
+        # files don't need a local copy.
+        in_immich = bool(after_target and after_target.startswith("immich:"))
+        local_candidates = []
+        if after_target and not after_target.startswith("immich:"):
+            local_candidates.append(after_target)
+        if after_orig and not after_orig.startswith("immich:"):
+            local_candidates.append(after_orig)
+        local_candidates.append(error_path)
+        local_candidates.append(os.path.join(REPROCESS_DIR, test_name))
+        existing_local = [p for p in local_candidates if os.path.exists(p)]
+        report(
+            "file is reachable post-error-retry (immich asset OR disk copy)",
+            in_immich or bool(existing_local),
+            f"in_immich={in_immich} existing_local={existing_local}",
+        )
+
+        report(
+            "error-retry job ended cleanly (done/review)",
+            after_status in ("done", "review"),
+            f"status={after_status}",
+        )
+
+        # Either the immich upload finally succeeded → target_path is
+        # immich:..., OR the job reached a terminal state with a valid
+        # local target. Both are acceptable post-retry outcomes.
+        valid_target = bool(
+            after_target
+            and (
+                after_target.startswith("immich:")
+                or os.path.exists(after_target)
+            )
+        )
+        report(
+            "error-retry leaves a meaningful target_path",
+            valid_target,
+            f"target={after_target}",
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        report("unexpected exception in error-retry test", False, repr(e))
+    finally:
+        if job_id is not None:
+            extras = [
+                inbox_path,
+                error_path,
+                os.path.join(REPROCESS_DIR, test_name),
+                os.path.join(REPROCESS_DIR, test_name + ".xmp"),
+            ]
+            async with async_session() as session:
+                job = await session.get(Job, job_id)
+                if job and job.target_path and not job.target_path.startswith("immich:"):
+                    extras.append(job.target_path)
+            await _cleanup_job_artifacts(job_id, extras, asset_ids)
+
+
 async def _run_missing_file_test(source_heic: str):
     """Negative case: file is gone before retry → retry must abort cleanly."""
     print(f"\n── Test: retry with missing source file ──")
@@ -537,6 +682,7 @@ async def main():
         await _run_lifecycle_test(mode="sidecar", source_heic=source)
         await _run_lifecycle_test(mode="direct", source_heic=source)
         await _run_filestorage_test(source_heic=source)
+        await _run_error_retry_test(source_heic=source)
         await _run_missing_file_test(source_heic=source)
     finally:
         await config_manager.set("metadata.write_mode", saved_write_mode)
