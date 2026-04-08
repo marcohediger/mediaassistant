@@ -1,5 +1,64 @@
 # Changelog
 
+## v2.28.34 — 2026-04-08
+
+### Performance: IA-08 wartet nicht mehr 120s auf Immich-Tag-Extraktion wenn IA-07 nichts geschrieben hat
+
+User-Beobachtung: "wieso geht IA-08 im dev system so lange?" — Im
+dev mit echtem Immich brauchten Pipeline-Läufe pro Job 60-130s,
+verglichen mit 7-30s im File-Storage-Modus. Der Unterschied
+kommt komplett von `_wait_for_immich_tags()` in
+`pipeline/step_ia08_sort.py`, das nach jedem Upload alle 3s pollt
+ob Immich die Tags aus dem File extrahiert hat — bis zu 120s
+lang.
+
+**Warum die Wartezeit überhaupt:** wir wollen wissen welche Tags
+Immich aus dem hochgeladenen File schon selbst extrahiert hat,
+damit wir sie nicht doppelt via API anhängen. Auf einem Synology
+NAS dauert die Tag-Extraktion laut Original-Commit-Kommentar
+"30-90s, especially for PNG files".
+
+**Warum es jetzt erst auffällt:** der Code lebt seit 2026-04-01.
+Im Live-Betrieb pro Job einmal 60-130s warten merkt der User
+nicht — der Filewatcher arbeitet im Hintergrund. Erst die Test-
+Suite ab v2.28.28+ macht 18+ Pipeline-Läufe in Folge → die
+kumulierte Wartezeit wird sofort sichtbar (~36 Min Worst-Case).
+
+**Fix (Option 3 vom User-Vote):** `_tag_immich_asset()` bekommt
+einen neuen Parameter `ia07_wrote_tags: bool`. Nur wenn IA-07
+tatsächlich Keywords ins File (oder die `.xmp`-Sidecar)
+geschrieben hat, läuft die Wait-Schleife. Sonst hat Immich gar
+nichts zum Extrahieren — wir machen einen einzigen GET um zu
+sehen welche Tags der Asset eventuell aus einem früheren Import
+hat, und schreiben alles via API. Die Immich-Tag-API ist auf
+Tag-Namen-Ebene idempotent (duplicate POST → 400/409), das
+fängt der bestehende Code schon ab.
+
+Beide Aufrufer in `pipeline/step_ia08_sort.py` (webhook-Branch
++ first-upload-Branch) übergeben jetzt
+`ia07_wrote_tags=bool(ia07_result.get("keywords_written"))`.
+
+**Messung auf dev (echtes Immich, kein Mock):**
+- Fast path (`ia07_wrote_tags=False`): **0.1s** (1 GET)
+- Slow path (`ia07_wrote_tags=True`): **3.1s** (Immich extracts
+  fast hier)
+- Speedup: **41× schneller**
+- Auf einem Synology-NAS wäre der Slow-Path im Worst Case 30-120s
+  → Speedup zwischen **300× und 1200×**
+
+**Test-Coverage:** neuer Test
+`_run_immich_tag_wait_skip_test` in `test_retry_file_lifecycle.py`
+lädt eine echte HEIC ins Dev-Immich hoch, ruft `_tag_immich_asset`
+einmal mit `ia07_wrote_tags=False` und einmal mit `True` auf,
+misst die Zeit und assertiert dass der Fast-Path in <10s
+fertig ist. Beide Pfade müssen funktionieren (kein Crash, Tags
+korrekt geschrieben).
+
+Vor v2.28.34 wäre der Fast-Path-Test rot (würde wie der Slow-Path
+auf den Wait warten). Post-Fix:
+- 89/89 grün (`test_retry_file_lifecycle.py`)
+- 26/26 grün (`test_duplicate_fix.py`)
+
 ## v2.28.33 — 2026-04-08
 
 ### Fix: Retry läuft, schreibt aber nichts in Immich (Live-Vorfall MA-2026-28111 Folge)
