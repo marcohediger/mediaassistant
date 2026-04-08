@@ -34,14 +34,30 @@ _WHATSAPP_UUID_RE = re.compile(
 )
 
 
-async def _wait_for_immich_tags(asset_id: str, *, api_key: str | None = None, max_wait: int = 120):
+async def _wait_for_immich_tags(asset_id: str, *, api_key: str | None = None, max_wait: int | None = None):
     """Wait until Immich finishes reading tags from the uploaded file.
 
     Polls until tags appear on the asset (meaning Immich has parsed TagsList
-    from the file) or until max_wait seconds elapse. On slower systems (e.g.
-    Synology NAS) this can take 30-90s, especially for PNG files.
+    from the file) or until max_wait seconds elapse.
+
+    The default max_wait was 120s for a long time (set when chasing a
+    Synology-NAS edge case), but in practice the wait nearly always runs
+    to its full timeout and yields nothing — either Immich extracts tags
+    quickly (<15s), or it never does for this particular file/format
+    combination, in which case waiting longer is pointless. The fallback
+    path (API tagging) handles the no-extract case correctly because the
+    Immich tag-API is idempotent on tag names. v2.28.36 lowered the
+    default to 15s and made it configurable via the
+    `immich.tag_wait_max_seconds` config key — set it to 0 to skip the
+    wait entirely.
     """
-    for i in range(max_wait // 3):
+    if max_wait is None:
+        max_wait = int(await config_manager.get("immich.tag_wait_max_seconds", 15))
+    if max_wait <= 0:
+        # Skip the poll loop entirely — fall back to a single GET so the
+        # caller still knows about pre-existing tags from a previous import.
+        return await get_asset_info(asset_id, api_key=api_key)
+    for i in range(max(1, max_wait // 3)):
         await asyncio.sleep(3)
         info = await get_asset_info(asset_id, api_key=api_key)
         if info and info.get("tags"):
