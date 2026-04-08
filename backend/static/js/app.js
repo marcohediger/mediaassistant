@@ -107,12 +107,15 @@
   }
 
   function updateJobDetail(job) {
-    // Status badge
-    const badges = document.querySelectorAll(".status-badge");
-    badges.forEach((b) => {
-      b.className = `status-badge status-${job.status}`;
-      b.textContent = job.status;
-    });
+    // Status badge — only the main one tagged data-field="status".
+    // Other .status-badge elements (e.g. the dry_run "Preview" badge)
+    // must NOT be overwritten or the user sees them flipping to the
+    // job status text on each poll cycle.
+    const statusBadge = document.querySelector("[data-field='status']");
+    if (statusBadge) {
+      statusBadge.className = `status-badge status-${job.status}`;
+      statusBadge.textContent = job.status;
+    }
 
     // Current step (use data-field attribute)
     const stepEl = document.querySelector("[data-field='current_step']");
