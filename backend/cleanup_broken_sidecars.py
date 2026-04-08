@@ -47,10 +47,26 @@ def is_broken_sidecar(path: str) -> tuple[bool, str]:
     if head.startswith(b"\xff\xd8\xff"):
         return True, "JPEG binary"
 
-    # HEIC/HEIF: bytes 4..11 contain "ftyp" + brand
+    # ISO-BMFF container: bytes 4..11 contain "ftyp" + brand.
+    # Same byte pattern is used by HEIC/HEIF, MP4, MOV, AVIF, …
+    # so map the brand to a human-readable container family.
     if len(head) >= 12 and head[4:8] == b"ftyp":
         brand = head[8:12].decode("ascii", errors="replace")
-        return True, f"HEIF container (brand={brand})"
+        # Brand → family map (covers what IA-07 actually writes via
+        # WRITABLE_EXTENSIONS: heic, heif, mp4, mov)
+        _BRAND_FAMILY = {
+            "heic": "HEIC", "heix": "HEIC", "heim": "HEIC", "heis": "HEIC",
+            "hevc": "HEIC", "hevx": "HEIC",
+            "mif1": "HEIF", "msf1": "HEIF",
+            "avif": "AVIF", "avis": "AVIF",
+            "qt  ": "MOV (QuickTime)",
+            "mp41": "MP4", "mp42": "MP4", "mp4 ": "MP4",
+            "isom": "MP4", "iso2": "MP4", "iso4": "MP4", "iso5": "MP4",
+            "dash": "MP4", "M4V ": "MP4", "M4VH": "MP4", "M4VP": "MP4",
+            "f4v ": "MP4",
+        }
+        family = _BRAND_FAMILY.get(brand, "ISO-BMFF")
+        return True, f"{family} binary (brand={brand!r})"
 
     # PNG
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
