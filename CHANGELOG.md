@@ -1,5 +1,58 @@
 # Changelog
 
+## v2.28.38 — 2026-04-08
+
+### Performance: `_tag_immich_asset` Wait-Loop komplett entfernt
+
+User-Frage: "wenn man Tags direkt via API schreibt, braucht man den
+Wait überhaupt?" Richtig — die Wait-Schleife war von Anfang an eine
+Mikro-Optimierung: sie wartete darauf dass Immich die Tags aus der
+XMP-Sidecar selbst extrahiert, um doppelte API-Calls zu vermeiden.
+
+Die Rechnung war nie zugunsten der Optimierung:
+- Gesparte API-Calls: ~10 pro Job × ~50ms = **~0.5s**
+- Kosten im Worst-Case: **bis zu 120s pro Job** (Wait-Timeout wenn
+  Immich die Tags nicht parst)
+
+Zusätzlich ist die Immich Tag-API `POST /api/tags` auf Tag-Namen
+**idempotent** — duplicate POSTs werden mit 400/409 abgewiesen und
+vom bestehenden `tag_asset()`-Code abgefangen. Doppelte Calls sind
+also harmlos, nicht einmal warnings-würdig.
+
+**Fix:** `_wait_for_immich_tags()` ist weg. `_tag_immich_asset()`
+macht jetzt:
+1. Einen einzigen GET `get_asset_info()` (nur für Dedup-Reporting —
+   unterscheiden zwischen "schon da" und "neu geschrieben")
+2. Für jeden fehlenden Tag direkt POST via API
+
+Kein Poll, kein Sleep, kein Timeout. IA-08 upload-to-tagged ist
+jetzt von der Anzahl API-Calls bounded statt von einem Wait-Timer.
+
+**Messung** (gegen echtes Dev-Immich, voller Test-Lauf):
+
+| Version | Total | Avg pro Immich-Job |
+|---|---|---|
+| v2.28.32 (vor perf-work) | 401s | ~130s (R5/R6) |
+| v2.28.36 (max_wait 120s → 15s) | 230s | ~22s (R5/R6) |
+| **v2.28.38 (Wait raus)** | **180s** | **~8s (R5/R6)** |
+
+Gesamt-Speedup v2.28.32 → v2.28.38: **55% schneller pro Job, 2.2×
+höherer Durchsatz**. Live sollte der User von ~2-3 Files/Min (in
+der Durchsatz-Regression ab 2026-04-08 ~16:00) zurück auf **6+
+Files/Min** kommen.
+
+**Test:** 106/106 grün (`test_retry_file_lifecycle.py`), 26/26
+(`test_duplicate_fix.py`).
+
+**Offene Architektur-Frage für v2.28.39+:** im Modus
+`use_immich=True` könnte IA-07's lokale Sidecar-Erzeugung komplett
+entfallen und alle Tags nur via Immich-API geschrieben werden.
+Würde IA-07 vollständig skippen, pro Job nochmal ~10s sparen
+(kein ExifTool-Call). Nachteil: Tags nur noch in Immichs DB, nicht
+in einer lokalen .xmp. Bruch des v2.18.0-Versprechens "Sidecar-
+Mode = file-hash preserving mit lokaler Tag-Preservation".
+Zurückhalten bis User-Entscheidung.
+
 ## v2.28.37 — 2026-04-08
 
 ### Fix: Nuclear retry — drop ALL step results, period (15 stuck Live-Jobs)

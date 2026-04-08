@@ -34,70 +34,46 @@ _WHATSAPP_UUID_RE = re.compile(
 )
 
 
-async def _wait_for_immich_tags(asset_id: str, *, api_key: str | None = None, max_wait: int | None = None):
-    """Wait until Immich finishes reading tags from the uploaded file.
-
-    Polls until tags appear on the asset (meaning Immich has parsed TagsList
-    from the file) or until max_wait seconds elapse.
-
-    The default max_wait was 120s for a long time (set when chasing a
-    Synology-NAS edge case), but in practice the wait nearly always runs
-    to its full timeout and yields nothing — either Immich extracts tags
-    quickly (<15s), or it never does for this particular file/format
-    combination, in which case waiting longer is pointless. The fallback
-    path (API tagging) handles the no-extract case correctly because the
-    Immich tag-API is idempotent on tag names. v2.28.36 lowered the
-    default to 15s and made it configurable via the
-    `immich.tag_wait_max_seconds` config key — set it to 0 to skip the
-    wait entirely.
-    """
-    if max_wait is None:
-        max_wait = int(await config_manager.get("immich.tag_wait_max_seconds", 15))
-    if max_wait <= 0:
-        # Skip the poll loop entirely — fall back to a single GET so the
-        # caller still knows about pre-existing tags from a previous import.
-        return await get_asset_info(asset_id, api_key=api_key)
-    for i in range(max(1, max_wait // 3)):
-        await asyncio.sleep(3)
-        info = await get_asset_info(asset_id, api_key=api_key)
-        if info and info.get("tags"):
-            logger.info("Immich processed asset %s tags after %ds", asset_id, (i + 1) * 3)
-            return info
-    logger.warning("Immich did not populate tags for %s within %ds", asset_id, max_wait)
-    return await get_asset_info(asset_id, api_key=api_key)
-
-
 async def _tag_immich_asset(
     asset_id: str,
     tag_keywords: list[str],
     *,
     api_key: str | None = None,
-    ia07_wrote_tags: bool = False,
+    ia07_wrote_tags: bool = False,  # kept for compat, unused since v2.28.38
 ) -> tuple[list, list]:
-    """Tag an Immich asset, skipping tags that Immich already read from the file.
+    """Tag an Immich asset via the Immich API.
 
-    The wait for Immich's auto-extraction is **only** triggered if IA-07
-    actually wrote tags into the file (or its `.xmp` sidecar). When IA-07
-    wrote nothing — typical for jobs with `keywords_written=[]` or jobs
-    that bypass IA-07 entirely — Immich has nothing to extract and the
-    wait would always run to its timeout for nothing. In that case we
-    skip the poll loop and tag everything via API directly. The API
-    side is idempotent on tag names, so a duplicate would be a no-op.
+    Before v2.28.38 this function polled `_wait_for_immich_tags` for up
+    to 120s (later 15s) to see which tags Immich had already extracted
+    from the uploaded file's XMP sidecar, then skipped those to avoid
+    "double tagging". That was always a micro-optimisation (at most ~10
+    API calls saved, ~0.5s total) and regularly cost up to 120s per job
+    in the worst case because Immich's tag extraction was unreliable.
+    The wait has been removed entirely.
+
+    New behaviour:
+      1. One GET `get_asset_info()` to discover pre-existing tags from
+         previous imports (reported back as `already` so the job result
+         still correctly lists them as written). No poll, no wait.
+      2. For every tag NOT already present, POST `tag_asset()` via the
+         Immich API. The API handles "tag name already exists" with
+         400/409 which `tag_asset()` catches, so concurrent / duplicate
+         writes are harmless.
+
+    Net effect: IA-08 upload-to-tagged is bounded by the number of API
+    calls instead of a timeout, which on our setup means ~0.5s-2s per
+    job instead of up to 120s.
     """
-    if ia07_wrote_tags:
-        info = await _wait_for_immich_tags(asset_id, api_key=api_key)
-    else:
-        # No tags in file → no point polling. Single GET is enough to
-        # know whether the asset already has unrelated tags from a
-        # previous import.
-        info = await get_asset_info(asset_id, api_key=api_key)
-    existing_tags = set()
+    # Single GET — no poll. Only to de-duplicate reporting ("already"
+    # vs "newly written"), not a performance-critical path.
+    info = await get_asset_info(asset_id, api_key=api_key)
+    existing_tags: set[str] = set()
     if info:
-        existing_tags = {t["value"] for t in info.get("tags", [])}
+        existing_tags = {t["value"] for t in (info.get("tags") or [])}
 
     missing = [t for t in tag_keywords if t not in existing_tags]
-    tags_written = []
-    tags_failed = []
+    tags_written: list[str] = []
+    tags_failed: list[str] = []
     for tag_name in missing:
         try:
             await tag_asset(asset_id, tag_name, api_key=api_key)
