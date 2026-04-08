@@ -225,6 +225,71 @@ async def retry_all_errors_endpoint(request: Request):
     return RedirectResponse(url=return_url, status_code=303)
 
 
+@router.post("/jobs/retry-all-warnings")
+async def retry_all_warnings_endpoint(request: Request):
+    """Reset every job that finished with a soft warning to 'queued'.
+
+    A "warning" job is `status='done'` (or `'review'`) with
+    `error_message LIKE 'Warnungen in:%'` — typically because IA-02..IA-06
+    threw a non-critical exception that did not stop the pipeline. The
+    user can fix the underlying cause (e.g. AI backend back online) and
+    rerun all of them in one click.
+
+    Same architecture as /jobs/retry-all-errors: bulk reset via
+    reset_job_for_retry() in a single sequential background task to
+    avoid hammering the DB pool. Returns JSON for fetch callers and a
+    303 redirect for classic form-POSTs.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job.id, Job.debug_key).where(
+                Job.status.in_(("done", "review")),
+                Job.error_message.like("Warnungen in:%"),
+            )
+        )
+        rows = result.all()
+
+    count = len(rows)
+    debug_keys = [row.debug_key for row in rows[:20]]
+    job_ids = [row.id for row in rows]
+
+    if job_ids:
+        asyncio.create_task(_bulk_reset_errors_in_background(job_ids))
+
+    try:
+        await log_info(
+            "api",
+            f"Retry-All-Warnings triggered: {count} warning jobs scheduled for sequential reset",
+            ", ".join(debug_keys) + (" ..." if count > len(debug_keys) else ""),
+        )
+    except Exception:
+        pass
+
+    accept = request.headers.get("accept", "")
+    requested_with = request.headers.get("x-requested-with", "")
+    is_fetch = "application/json" in accept or requested_with == "fetch"
+
+    if is_fetch:
+        return JSONResponse({
+            "status": "ok",
+            "count": count,
+            "debug_keys": debug_keys,
+            "truncated": count > len(debug_keys),
+        })
+
+    return_url = None
+    try:
+        form = await request.form()
+        return_url = form.get("return_url")
+    except Exception:
+        pass
+    if not return_url:
+        return_url = request.headers.get("referer")
+    if not return_url or "/logs" not in (return_url or ""):
+        return_url = "/logs?tab=jobs&status=warning"
+    return RedirectResponse(url=return_url, status_code=303)
+
+
 @router.post("/jobs/cleanup-orphans")
 async def cleanup_orphans_endpoint(request: Request):
     """Scan all settled jobs (done/duplicate/review) and mark those whose

@@ -1,5 +1,70 @@
 # Changelog
 
+## v2.28.30 — 2026-04-08
+
+### Feature: "Alle Warnungen retry" Button im Verarbeitungs-Log
+
+Analog zum bestehenden "Alle Fehler retry"-Button gibt es jetzt einen
+zweiten Bulk-Action-Button im Logs-Header, der alle Jobs im Status
+`done` mit `error_message='Warnungen in: ...'` (also Soft-Failures
+aus IA-02..IA-06, häufigster Fall: kurzer KI-Backend-Aussetzer) in
+einem Klick neu queued.
+
+- Neuer Endpoint `POST /api/jobs/retry-all-warnings` (`routers/api.py`).
+  Selbe Architektur wie `retry-all-errors`: ein einzelner sequentieller
+  Background-Task, kein Pool-Exhaustion.
+- Button im Logs-Header (`templates/logs.html`), JS-Handler in einen
+  gemeinsamen `_bulkRetry()`-Helper refaktoriert (kein Copy-Paste).
+- i18n: `retry_all_warnings` + `retry_all_warnings_confirm` in
+  `i18n/de.json` und `i18n/en.json`.
+
+### Fix: AI-Prompt fällt nach "Reset" nicht auf Source-Default zurück
+
+`pipeline/step_ia05_ai.py:105` las den Prompt mit
+`config_manager.get("ai.prompt", DEFAULT_SYSTEM_PROMPT)`. Der Default
+greift aber **nur** wenn der Key komplett fehlt — wenn der Settings-UI
+"Reset"-Button den Wert auf `""` setzte (so dass die Audit-Row in der
+DB erhalten bleibt), bekam die KI einen leeren System-Prompt und
+halluzinierte. Fix: zusätzlich `or DEFAULT_SYSTEM_PROMPT`, sodass auch
+ein leerer String auf den Source-Default zurückfällt.
+
+### Test-Coverage: Stufe 1 Retry-Matrix (R5/R6/R10/R11)
+
+`test_retry_file_lifecycle.py` `_run_error_retry_test` parametrisiert
+über die zwei Achsen `mode` ∈ {direct, sidecar} × `use_immich` ∈
+{True, False}. Damit deckt der Test jetzt alle vier
+Sektion-14-Szenarien für Error-Retries ab:
+
+- R5  = Immich + direct + IA-08-Error retry  (war schon)
+- R6  = Immich + sidecar + IA-08-Error retry  (NEU)
+- R10 = File-Storage + direct + IA-08-Error retry  (NEU)
+- R11 = File-Storage + sidecar + IA-08-Error retry  (NEU)
+
+Sidecar-Varianten checken zusätzlich, dass die `.xmp` weder in
+`/library/error/` noch in `reprocess/` strandet, sondern korrekt
+zum finalen Target-Pfad wandert. File-Storage-Varianten checken,
+dass das `target_path` aus `/library/error/` heraus in eine echte
+Kategorie (`/library/photos/...`) wandert.
+
+### Test-Verhalten: Tests laufen wie normale Files durch (kein Cleanup)
+
+Die `_cleanup_job_artifacts()`-Funktion ist komplett entfernt. Test-
+Files bleiben jetzt nach dem Lauf in `/library/`, in Immich, und als
+Job-Rows in der DB — genau wie ein vom User reingelegter File. Damit
+sind die Tests im Verarbeitungs-Log sichtbar (zuvor wurden die
+Job-Rows gelöscht und waren weg).
+
+Zwei Konsequenzen, die im `main()`-Setup adressiert sind:
+- `duplikat_erkennung` wird zusätzlich zum `filewatcher` während der
+  Tests **temporär deaktiviert**, weil die pHash-Detektion sonst die
+  Test-Files vom n-ten Run als Duplikate des n-1-ten Runs flaggen
+  würde (jeder Run nutzt zwar einen unique-content Source via
+  `_make_unique_source()`, das ändert aber nur SHA256, nicht pHash).
+- Beide Module + `metadata.write_mode` werden im `finally`-Block
+  garantiert auf den Vor-Test-Stand zurückgesetzt.
+
+Test-Resultat post-Stufe-1: **73/73 grün** gegen echtes Dev-Immich.
+
 ## v2.28.29 — 2026-04-08
 
 ### Fix: Retry verliert Datei auch im File-Storage-Modus (`use_immich=False`)

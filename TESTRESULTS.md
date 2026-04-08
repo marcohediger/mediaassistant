@@ -561,13 +561,13 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `R2` | – | – | – | ✅ | Immich direct |
 | `R3` | – | – | – | ✅ | File-Storage direct |
 | `R4` | – | – | – | ✅ | File-Storage sidecar |
-| `R5` | – | – | – | ✅ | Immich direct |
-| `R6` | – | – | – | – | Immich sidecar |
+| `R5` | – | – | – |  ✅  | Immich direct |
+| `R6` | – | – | – |  ✅  | Immich sidecar |
 | `R7` | – | – | – | – | Immich direct |
 | `R8` | – | – | – | – | Immich sidecar |
 | `R9` | – | – | – | – | Immich direct |
-| `R10` | – | – | – | – | File-Storage direct |
-| `R11` | – | – | – | – | File-Storage sidecar |
+| `R10` | – | – | – |  ✅  | File-Storage direct |
+| `R11` | – | – | – |  ✅  | File-Storage sidecar |
 | `R12` | – | – | – | – | Immich direct |
 | `R13` | – | – | – | – | Immich sidecar |
 | `R14` | – | – | – | – | Immich direct |

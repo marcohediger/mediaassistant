@@ -53,6 +53,8 @@
     "filter": "Filter",
     "retry_all_errors": "Retry all errors",
     "retry_all_confirm": "Really retry all jobs in 'error' state?",
+    "retry_all_warnings": "Retry all warnings",
+    "retry_all_warnings_confirm": "Really retry all jobs with warnings?",
     "cleanup_orphans": "Cleanup orphans",
     "cleanup_orphans_confirm": "Scan all settled jobs and mark those whose file no longer exists as 'orphan'? (Status only — data preserved)",
     "cleanup_orphans_immich": "Also check Immich assets? (Slower — makes API calls for each immich:* job)",

@@ -8,14 +8,15 @@
         <a href="#" class="btn btn-small btn-secondary"
            onclick="retryAllErrors(event)">{{ t.logs.retry_all_errors }}</a>
         <a href="#" class="btn btn-small btn-secondary"
+           onclick="retryAllWarnings(event)">{{ t.logs.retry_all_warnings }}</a>
+        <a href="#" class="btn btn-small btn-secondary"
            onclick="cleanupOrphans(event)">{{ t.logs.cleanup_orphans }}</a>
     </div>
 </div>
 
 <script>
-async function retryAllErrors(ev) {
+async function _bulkRetry(ev, endpoint, confirmMsg, emptyMsg) {
     ev.preventDefault();
-    const confirmMsg = {{ t.logs.retry_all_confirm | tojson }};
     const returnUrl = {{ ('/logs?' + current_query) | tojson }};
     if (!confirm(confirmMsg)) return;
 
@@ -25,7 +26,7 @@ async function retryAllErrors(ev) {
     btn.style.pointerEvents = 'none';
 
     try {
-        const resp = await fetch('/api/jobs/retry-all-errors', {
+        const resp = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Accept': 'application/json',
@@ -44,7 +45,7 @@ async function retryAllErrors(ev) {
         const sample = (data.debug_keys || []).slice(0, 5).join(', ');
         const more = data.truncated ? ' …' : '';
         if (count === 0) {
-            alert('Keine Jobs im Status "error" gefunden — nichts zu tun.');
+            alert(emptyMsg);
             btn.textContent = origText;
             btn.style.pointerEvents = '';
             return;
@@ -59,6 +60,24 @@ async function retryAllErrors(ev) {
         btn.textContent = origText;
         btn.style.pointerEvents = '';
     }
+}
+
+async function retryAllErrors(ev) {
+    return _bulkRetry(
+        ev,
+        '/api/jobs/retry-all-errors',
+        {{ t.logs.retry_all_confirm | tojson }},
+        'Keine Jobs im Status "error" gefunden — nichts zu tun.'
+    );
+}
+
+async function retryAllWarnings(ev) {
+    return _bulkRetry(
+        ev,
+        '/api/jobs/retry-all-warnings',
+        {{ t.logs.retry_all_warnings_confirm | tojson }},
+        'Keine Jobs mit Warnungen gefunden — nichts zu tun.'
+    );
 }
 
 async function cleanupOrphans(ev) {

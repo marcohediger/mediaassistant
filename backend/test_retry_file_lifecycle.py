@@ -76,6 +76,23 @@ def _stage_inbox_file(src_path: str, dst_name: str) -> str:
     return dst
 
 
+def _make_unique_source(src_path: str) -> str:
+    """Create a unique copy of `src_path` in /tmp by appending random bytes.
+
+    Each test run uses its own unique source file so IA-02 (duplicate
+    detection by SHA256) doesn't flag this run as a duplicate of a file
+    left over from a previous run. The dev system intentionally keeps
+    test artifacts in /library and Immich, so duplicate-by-content is
+    expected without per-run salt.
+    """
+    base = os.path.basename(src_path)
+    dst = f"/tmp/__source_unique_{int(datetime.now().timestamp() * 1000)}_{base}"
+    shutil.copy2(src_path, dst)
+    with open(dst, "ab") as f:
+        f.write(os.urandom(64))
+    return dst
+
+
 async def _wait_for_job(job_id: int, predicate, *, timeout: float = 90.0):
     """Re-fetch the job until predicate(job) is True or timeout."""
     deadline = asyncio.get_event_loop().time() + timeout
@@ -89,31 +106,16 @@ async def _wait_for_job(job_id: int, predicate, *, timeout: float = 90.0):
         await asyncio.sleep(0.5)
 
 
-async def _delete_immich_asset_safe(asset_id: str | None):
-    if not asset_id:
-        return
-    try:
-        await delete_asset(asset_id)
-        print(f"     ↳ cleaned up immich asset {asset_id}")
-    except Exception as e:
-        print(f"     ↳ WARN: failed to delete immich asset {asset_id}: {e}")
-
-
-async def _cleanup_job_artifacts(job_id: int, extra_paths: list[str], asset_ids: list[str]):
-    """Best-effort cleanup so reruns of the test start clean."""
-    for asset_id in asset_ids:
-        await _delete_immich_asset_safe(asset_id)
-    for p in extra_paths:
-        try:
-            if p and os.path.exists(p):
-                os.remove(p)
-        except Exception:
-            pass
-    async with async_session() as session:
-        job = await session.get(Job, job_id)
-        if job:
-            await session.delete(job)
-            await session.commit()
+# NOTE: Tests run on the dev system, which IS a test system. Test files
+# are intentionally left in place after a run — they live in /library/,
+# in Immich, and as Job rows in the DB just like any normal file. The
+# user wants to see them in the Verarbeitungs-Log UI and in Immich.
+# Each test run uses a unique timestamp in its filename and debug_key,
+# so reruns never collide.
+#
+# Real cleanup only happens for the **negative** missing-file test,
+# which explicitly deletes the inbox file before retry to prove the
+# abort-logic works.
 
 
 async def _run_lifecycle_test(*, mode: str, source_heic: str):
@@ -130,6 +132,9 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
     extra_cleanup: list[str] = [inbox_path]
 
     try:
+        # Each run uses a unique-content source so duplicate detection
+        # doesn't flag this against artifacts from previous test runs.
+        source_heic = _make_unique_source(source_heic)
         # 2. Stage inbox file + create job (mimic filewatcher)
         _stage_inbox_file(source_heic, test_name)
         report("staged inbox file exists", os.path.exists(inbox_path), inbox_path)
@@ -274,16 +279,6 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
     except Exception as e:
         traceback.print_exc()
         report(f"unexpected exception in {mode} test", False, repr(e))
-    finally:
-        # Cleanup: delete immich assets, the inbox/reprocess files, and the job row
-        if job_id is not None:
-            extra_cleanup += [
-                inbox_path,
-                os.path.join(REPROCESS_DIR, test_name),
-                os.path.join(REPROCESS_DIR, test_name + ".xmp"),
-                inbox_path + ".xmp",
-            ]
-            await _cleanup_job_artifacts(job_id, extra_cleanup, asset_ids)
 
 
 async def _run_filestorage_test(source_heic: str, *, mode: str = "direct"):
@@ -307,6 +302,7 @@ async def _run_filestorage_test(source_heic: str, *, mode: str = "direct"):
     job_id: int | None = None
 
     try:
+        source_heic = _make_unique_source(source_heic)
         _stage_inbox_file(source_heic, test_name)
 
         async with async_session() as session:
@@ -426,45 +422,60 @@ async def _run_filestorage_test(source_heic: str, *, mode: str = "direct"):
     except Exception as e:
         traceback.print_exc()
         report("unexpected exception in file-storage test", False, repr(e))
-    finally:
-        if job_id is not None:
-            extras = [
-                inbox_path,
-                os.path.join(REPROCESS_DIR, test_name),
-                os.path.join(REPROCESS_DIR, test_name + ".xmp"),
-            ]
-            # Try to also clean up any /library/ artifacts the test created
-            async with async_session() as session:
-                job = await session.get(Job, job_id)
-                if job and job.target_path and not job.target_path.startswith("immich:"):
-                    extras.append(job.target_path)
-            await _cleanup_job_artifacts(job_id, extras, [])
 
 
-async def _run_error_retry_test(source_heic: str):
+async def _run_error_retry_test(source_heic: str, *, mode: str = "direct",
+                                use_immich: bool = True,
+                                scenario_id: str = "R5"):
     """Real-error retry: status='error' instead of 'done'+Warnungen.
 
     Mirrors what happens when a critical step (e.g. IA-08 upload) fails:
     pipeline error handler moves the file to /library/error/, sets
     target_path to that location, status='error'. User clicks Retry.
-    The fix must work the same way it does for the warning path.
-    """
-    print(f"\n── Test: retry file lifecycle [status='error' (Fehler-Retry)] ──")
-    await config_manager.set("metadata.write_mode", "direct")
 
-    test_name = f"__retry_lifecycle_error_{int(datetime.now().timestamp())}.HEIC"
+    Parameterized on the two axes that mattered for the v2.28.28/29 fix:
+      - `mode`: 'direct' or 'sidecar' (`metadata.write_mode`)
+      - `use_immich`: True (Immich upload branch) or False (file-storage)
+
+    Covers Sektion-14 matrix scenarios:
+      - R5  = Immich + direct + IA-08 error retry
+      - R6  = Immich + sidecar + IA-08 error retry
+      - R10 = File-Storage + direct + IA-08 error retry
+      - R11 = File-Storage + sidecar + IA-08 error retry
+    """
+    label = f"{scenario_id}: {'Immich' if use_immich else 'File-Storage'} + {mode}"
+    print(f"\n── Test: error-retry [{label}] ──")
+    await config_manager.set("metadata.write_mode", mode)
+
+    test_name = f"__retry_err_{scenario_id}_{int(datetime.now().timestamp())}.HEIC"
     inbox_path = os.path.join(INBOX, test_name)
     error_dir = os.path.join(LIBRARY_BASE, "error")
     error_path = os.path.join(error_dir, test_name)
+    sidecar_at_error = error_path + ".xmp"
     asset_ids: list[str] = []
     job_id: int | None = None
 
     try:
-        # Stage the file in the error/ folder directly — this mimics the
-        # state left behind after the pipeline error handler called
-        # _move_to_error() on a critical failure (e.g. IA-08 upload error).
+        source_heic = _make_unique_source(source_heic)
+        # Stage the file in /library/error/ — mimics _move_to_error()
         os.makedirs(error_dir, exist_ok=True)
         shutil.copy2(source_heic, error_path)
+        # In sidecar mode IA-07 would have written a .xmp companion that
+        # the error handler also moved. Stage it so IA-08 finds it.
+        if mode == "sidecar":
+            with open(sidecar_at_error, "w") as f:
+                f.write('<?xml version="1.0"?><x:xmpmeta xmlns:x="adobe:ns:meta/"/>')
+
+        # Build IA-07 step result reflecting the write_mode
+        ia07_result = {
+            "keywords_written": ["unknown"],
+            "description_written": "",
+            "ocr_text_written": "",
+            "tags_count": 1,
+            "write_mode": mode,
+        }
+        if mode == "sidecar":
+            ia07_result["sidecar_path"] = sidecar_at_error
 
         async with async_session() as session:
             job = Job(
@@ -473,12 +484,12 @@ async def _run_error_retry_test(source_heic: str):
                 # like the live error path leaves it
                 original_path=inbox_path,
                 target_path=error_path,
-                debug_key=f"MA-LIFECYCLE-ERR-{int(datetime.now().timestamp())}",
+                debug_key=f"MA-LIFECYCLE-{scenario_id}-{int(datetime.now().timestamp())}",
                 status="error",
-                error_message="[IA-08] RuntimeError: Immich upload failed (synthetic for test)",
+                error_message=f"[IA-08] RuntimeError: synthetic IA-08 fail for {scenario_id}",
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
-                use_immich=True,
+                use_immich=use_immich,
                 step_result={
                     "IA-01": {
                         "make": "Apple", "model": "iPhone", "date": "2022:12:01 12:00:00",
@@ -488,9 +499,10 @@ async def _run_error_retry_test(source_heic: str):
                         "orientation": 1, "has_exif": True, "file_size": 1889263,
                     },
                     "IA-02": {"status": "ok", "phash": None},
+                    "IA-07": ia07_result,
                     "IA-08": {
                         "status": "error",
-                        "reason": "RuntimeError: Immich upload failed (synthetic for test)",
+                        "reason": f"RuntimeError: synthetic IA-08 fail for {scenario_id}",
                     },
                 },
             )
@@ -498,12 +510,15 @@ async def _run_error_retry_test(source_heic: str):
             await session.commit()
             job_id = job.id
 
-        report("staged error file exists at /library/error/",
+        report(f"{scenario_id}: staged error file exists at /library/error/",
                os.path.exists(error_path), error_path)
+        if mode == "sidecar":
+            report(f"{scenario_id}: staged .xmp sidecar exists at /library/error/",
+                   os.path.exists(sidecar_at_error), sidecar_at_error)
 
         # Trigger retry
         ok = await reset_job_for_retry(job_id)
-        report("reset_job_for_retry accepted error job", ok)
+        report(f"{scenario_id}: reset_job_for_retry accepted error job", ok)
         await run_pipeline(job_id)
 
         async with async_session() as session:
@@ -521,69 +536,85 @@ async def _run_error_retry_test(source_heic: str):
         ia10_removed = ia10.get("removed") or []
 
         report(
-            "IA-10 did NOT delete the reprocess copy on error-retry",
+            f"{scenario_id}: IA-10 did NOT delete the reprocess copy",
             os.path.join(REPROCESS_DIR, test_name) not in ia10_removed
             and error_path not in ia10_removed,
             f"removed={ia10_removed}",
         )
 
-        # The file MUST end up somewhere reachable post-retry: either in
-        # Immich (target_path is an `immich:` ref) OR on disk at one of
-        # the known locations. Both are valid outcomes — Immich-hosted
-        # files don't need a local copy.
         in_immich = bool(after_target and after_target.startswith("immich:"))
         local_candidates = []
         if after_target and not after_target.startswith("immich:"):
             local_candidates.append(after_target)
         if after_orig and not after_orig.startswith("immich:"):
             local_candidates.append(after_orig)
-        local_candidates.append(error_path)
-        local_candidates.append(os.path.join(REPROCESS_DIR, test_name))
+        local_candidates += [error_path, os.path.join(REPROCESS_DIR, test_name)]
         existing_local = [p for p in local_candidates if os.path.exists(p)]
         report(
-            "file is reachable post-error-retry (immich asset OR disk copy)",
+            f"{scenario_id}: file is reachable post-retry (immich OR disk)",
             in_immich or bool(existing_local),
             f"in_immich={in_immich} existing_local={existing_local}",
         )
 
         report(
-            "error-retry job ended cleanly (done/review)",
+            f"{scenario_id}: job ended cleanly (done/review)",
             after_status in ("done", "review"),
             f"status={after_status}",
         )
 
-        # Either the immich upload finally succeeded → target_path is
-        # immich:..., OR the job reached a terminal state with a valid
-        # local target. Both are acceptable post-retry outcomes.
         valid_target = bool(
             after_target
-            and (
-                after_target.startswith("immich:")
-                or os.path.exists(after_target)
-            )
+            and (after_target.startswith("immich:") or os.path.exists(after_target))
         )
         report(
-            "error-retry leaves a meaningful target_path",
+            f"{scenario_id}: target_path is meaningful post-retry",
             valid_target,
             f"target={after_target}",
         )
 
+        # File-storage variants: target MUST be a local /library/ path
+        if not use_immich:
+            target_in_library = bool(
+                after_target
+                and not after_target.startswith("immich:")
+                and after_target.startswith(LIBRARY_BASE)
+                and not after_target.startswith(error_dir)
+            )
+            report(
+                f"{scenario_id}: target_path moved out of /library/error/ "
+                f"into a real category (not back into error)",
+                target_in_library,
+                f"target={after_target}",
+            )
+
+        # Sidecar variants: .xmp must travel with the file to the final
+        # location, NOT be stranded in /library/error/ or in reprocess/.
+        if mode == "sidecar":
+            stranded_in_error = os.path.exists(sidecar_at_error)
+            stranded_in_reprocess = os.path.exists(
+                os.path.join(REPROCESS_DIR, test_name + ".xmp")
+            )
+            report(
+                f"{scenario_id}: sidecar .xmp is NOT stranded in /library/error/",
+                not stranded_in_error,
+                f"checked={sidecar_at_error}",
+            )
+            report(
+                f"{scenario_id}: sidecar .xmp is NOT stranded in reprocess/",
+                not stranded_in_reprocess,
+            )
+            # If file ended up at a local target, the .xmp should be next to it
+            if after_target and not after_target.startswith("immich:") and os.path.exists(after_target):
+                sidecar_at_target = after_target + ".xmp"
+                report(
+                    f"{scenario_id}: sidecar .xmp landed next to file at target",
+                    os.path.exists(sidecar_at_target),
+                    f"checked={sidecar_at_target}",
+                )
+
     except Exception as e:
         traceback.print_exc()
-        report("unexpected exception in error-retry test", False, repr(e))
-    finally:
-        if job_id is not None:
-            extras = [
-                inbox_path,
-                error_path,
-                os.path.join(REPROCESS_DIR, test_name),
-                os.path.join(REPROCESS_DIR, test_name + ".xmp"),
-            ]
-            async with async_session() as session:
-                job = await session.get(Job, job_id)
-                if job and job.target_path and not job.target_path.startswith("immich:"):
-                    extras.append(job.target_path)
-            await _cleanup_job_artifacts(job_id, extras, asset_ids)
+        report(f"{scenario_id}: unexpected exception", False, repr(e))
 
 
 async def _run_missing_file_test(source_heic: str):
@@ -595,6 +626,7 @@ async def _run_missing_file_test(source_heic: str):
     job_id: int | None = None
 
     try:
+        source_heic = _make_unique_source(source_heic)
         # First run to get a real immich_asset_id
         await config_manager.set("metadata.write_mode", "sidecar")
         _stage_inbox_file(source_heic, test_name)
@@ -660,13 +692,6 @@ async def _run_missing_file_test(source_heic: str):
     except Exception as e:
         traceback.print_exc()
         report("unexpected exception in missing-file test", False, repr(e))
-    finally:
-        if job_id is not None:
-            await _cleanup_job_artifacts(
-                job_id,
-                [inbox_path, os.path.join(REPROCESS_DIR, test_name)],
-                asset_ids,
-            )
 
 
 async def main():
@@ -687,33 +712,61 @@ async def main():
         )
         return 1
 
-    # Backup write_mode + disable filewatcher so it doesn't race against the test
+    # Backup write_mode + disable filewatcher and duplikat_erkennung so they
+    # don't race / mis-flag the test runs:
+    #   - filewatcher would scan the inbox and pick up our staged files
+    #     before the test creates its own Job for them
+    #   - duplikat_erkennung uses pHash which sees identical visual content
+    #     across test runs (appending random bytes only changes SHA256, not
+    #     pHash), so the second run onwards would be flagged as duplicate
     saved_write_mode = await config_manager.get("metadata.write_mode", "direct")
     saved_filewatcher = await config_manager.is_module_enabled("filewatcher")
+    saved_dupdet = await config_manager.is_module_enabled("duplikat_erkennung")
 
     async with async_session() as session:
         from models import Module
-        mod = await session.get(Module, "filewatcher")
-        if mod:
-            mod.enabled = False
-            await session.commit()
+        for mod_name in ("filewatcher", "duplikat_erkennung"):
+            mod = await session.get(Module, mod_name)
+            if mod:
+                mod.enabled = False
+        await session.commit()
 
     try:
         await _run_lifecycle_test(mode="sidecar", source_heic=source)
         await _run_lifecycle_test(mode="direct", source_heic=source)
         await _run_filestorage_test(source_heic=source, mode="direct")
         await _run_filestorage_test(source_heic=source, mode="sidecar")
-        await _run_error_retry_test(source_heic=source)
+        # Sektion-14 R5/R6/R10/R11: error-retry per Storage × Write-Mode
+        await _run_error_retry_test(
+            source_heic=source, mode="direct", use_immich=True, scenario_id="R5",
+        )
+        await _run_error_retry_test(
+            source_heic=source, mode="sidecar", use_immich=True, scenario_id="R6",
+        )
+        await _run_error_retry_test(
+            source_heic=source, mode="direct", use_immich=False, scenario_id="R10",
+        )
+        await _run_error_retry_test(
+            source_heic=source, mode="sidecar", use_immich=False, scenario_id="R11",
+        )
         await _run_missing_file_test(source_heic=source)
     finally:
         await config_manager.set("metadata.write_mode", saved_write_mode)
         async with async_session() as session:
             from models import Module
-            mod = await session.get(Module, "filewatcher")
-            if mod:
-                mod.enabled = bool(saved_filewatcher)
-                await session.commit()
-        print(f"\nRestored metadata.write_mode = {saved_write_mode!r}, filewatcher = {saved_filewatcher!r}")
+            for mod_name, saved in (
+                ("filewatcher", saved_filewatcher),
+                ("duplikat_erkennung", saved_dupdet),
+            ):
+                mod = await session.get(Module, mod_name)
+                if mod:
+                    mod.enabled = bool(saved)
+            await session.commit()
+        print(
+            f"\nRestored metadata.write_mode = {saved_write_mode!r}, "
+            f"filewatcher = {saved_filewatcher!r}, "
+            f"duplikat_erkennung = {saved_dupdet!r}"
+        )
 
     print("\n" + "=" * 70)
     print(f"Result: {PASS} passed, {FAIL} failed")

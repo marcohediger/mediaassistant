@@ -102,7 +102,11 @@ async def execute(job, session) -> dict:
     Nutzt alle bisher gesammelten Metadaten (EXIF, Geocoding, Dateigrösse)
     für eine bestmögliche Klassifikation.
     """
-    system_prompt = await config_manager.get("ai.prompt", DEFAULT_SYSTEM_PROMPT)
+    # Fall back to source default when the value is missing OR empty.
+    # The Settings UI "Reset" button stores an empty string in the DB
+    # (so the row stays for audit), so the get(..., DEFAULT) form alone
+    # would return "" and ship an empty system prompt to the AI.
+    system_prompt = await config_manager.get("ai.prompt", "") or DEFAULT_SYSTEM_PROMPT
 
     # Mindestgrösse prüfen — zu kleine Bilder erzeugen AI-Halluzinationen
     exif = (job.step_result or {}).get("IA-01", {})
