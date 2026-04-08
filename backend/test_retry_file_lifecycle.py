@@ -825,7 +825,23 @@ async def _run_stuck_state_retry_test(source_heic: str):
 
         await run_pipeline(job_id)
 
-        # Mutate to the stuck state — exactly like MA-2026-28121 in live DB
+        # Grab the real Immich asset id from the first run
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            real_asset_id = job.immich_asset_id
+
+        # Simulate the stale state END-TO-END: not just in the DB, but
+        # actually push the stale tags onto the real Immich asset via
+        # the API. Only then can we later assert they were REMOVED.
+        from immich_client import tag_asset
+        stale_tags_on_immich = ["unknown", "STUCK_STALE_GEO"]
+        for t in stale_tags_on_immich:
+            try:
+                await tag_asset(real_asset_id, t)
+            except Exception as exc:
+                print(f"     WARN: failed to pre-tag {t!r}: {exc}")
+
+        # Mutate the DB step_result to match MA-2026-28121 exactly
         async with async_session() as session:
             job = await session.get(Job, job_id)
             sr = dict(job.step_result or {})
@@ -851,6 +867,8 @@ async def _run_stuck_state_retry_test(source_heic: str):
                 "moved": False, "immich_upload": True,
                 "immich_id": (job.immich_asset_id or ""),
                 "immich_albums_added": [],
+                # Declare that the previous run "wrote" these stale tags
+                # so the retry knows which to remove.
                 "immich_tags_written": ["unknown", "STUCK_STALE_GEO", "Persönliches Foto"],
                 "immich_tags_failed": [],
             }
@@ -862,6 +880,21 @@ async def _run_stuck_state_retry_test(source_heic: str):
             _stage_inbox_file(source_heic, test_name)
             job.original_path = inbox_path
             await session.commit()
+
+        # Verify the stale tags are actually on the asset in Immich now
+        from immich_client import get_asset_info
+        pre_info = await get_asset_info(real_asset_id)
+        pre_live = {t.get("value") for t in (pre_info.get("tags") or [])} if pre_info else set()
+        report(
+            "stuck-state: pre-retry, stale 'unknown' is really on the Immich asset",
+            "unknown" in pre_live,
+            f"pre_live={sorted(pre_live)}",
+        )
+        report(
+            "stuck-state: pre-retry, stale 'STUCK_STALE_GEO' is really on the Immich asset",
+            "STUCK_STALE_GEO" in pre_live,
+            f"pre_live={sorted(pre_live)}",
+        )
 
         # Trigger retry. Pre-v2.28.37 this would do absolutely nothing
         # because no cascade signal exists. Post-v2.28.37 it drops
@@ -1116,7 +1149,7 @@ async def _run_immich_tag_wait_skip_test(source_heic: str):
 
         # Fast path: ia07_wrote_tags=False → no poll, just one GET
         t0 = time.monotonic()
-        tags_written, tags_failed = await _tag_immich_asset(
+        tags_written, tags_failed, _tags_removed = await _tag_immich_asset(
             asset_id, ["TagWaitSkipTest_Fast"], ia07_wrote_tags=False,
         )
         fast_dur = time.monotonic() - t0
@@ -1133,7 +1166,7 @@ async def _run_immich_tag_wait_skip_test(source_heic: str):
         # fast path; this one is just a smoke test that we didn't
         # break the existing wait branch.
         t0 = time.monotonic()
-        tags_written2, tags_failed2 = await _tag_immich_asset(
+        tags_written2, tags_failed2, _tags_removed2 = await _tag_immich_asset(
             asset_id, ["TagWaitSkipTest_Slow"], ia07_wrote_tags=True,
         )
         slow_dur = time.monotonic() - t0

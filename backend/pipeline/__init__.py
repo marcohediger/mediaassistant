@@ -394,10 +394,32 @@ async def reset_job_for_retry(job_id: int) -> bool:
             "IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06",
             "IA-07", "IA-08", "IA-09", "IA-10", "IA-11",
         }
+
+        # Before the nuke: capture the previous IA-08 immich_tags_written
+        # so the next IA-08 run can DELETE any tag that was in the old
+        # set but not in the new one. Without this, stale tags (like
+        # 'unknown' from a previous pre-classification) would stick
+        # around forever on the Immich asset.
+        previous_sr = job.step_result or {}
+        previous_ia08 = previous_sr.get("IA-08") or {}
+        previous_immich_tags = previous_ia08.get("immich_tags_written") or []
+
+        inject = None
+        if previous_immich_tags:
+            # Stash under a leading-underscore key. The pipeline's
+            # main loop iterates MAIN_STEPS by code (IA-01..IA-08),
+            # so this extra key is invisible to the "skip if already
+            # done" check. IA-08 reads + deletes it at the end of its
+            # run to keep the final step_result clean.
+            inject = {
+                "_retry_previous_immich_tags": list(previous_immich_tags),
+            }
+
         moved_or_skipped = await prepare_job_for_reprocess(
             session,
             job,
             drop_step_codes=nuke_steps,
+            inject_steps=inject,
             move_file=True,
             commit=False,
         )

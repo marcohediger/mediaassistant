@@ -1,5 +1,73 @@
 # Changelog
 
+## v2.28.39 — 2026-04-08
+
+### Fix: Retry entfernt jetzt die alten Tags aus Immich bevor neue geschrieben werden
+
+User: "das retry funktioniert jetzt aber es müssen zuerst noch die
+alten tags entfernt werden". Stimmt — die `_tag_immich_asset()`
+Funktion fügte bisher nur neue Tags **hinzu**, entfernte aber keine
+stale Tags, die im vorherigen Lauf geschrieben wurden. Nach einem
+Retry landeten die neuen Tags zusätzlich auf dem Asset, die alten
+(z.B. `'unknown'` von einem Pre-Classification-Stall) blieben
+kleben.
+
+**Fix in drei Teilen:**
+
+1. **`immich_client.untag_asset()`** — neuer Helper der via
+   `DELETE /api/tags/{tag_id}/assets` die Tag-Asset-Beziehung
+   entfernt. Nicht-existente Tags gelten als No-op.
+
+2. **`pipeline/__init__.py:reset_job_for_retry()`** — vor dem
+   Nuclear-Drop des step_result wird die bisherige
+   `IA-08.immich_tags_written`-Liste aufgehoben und per
+   `inject_steps={"_retry_previous_immich_tags": [...]}` in den
+   frisch gestarteten Pipeline-Run mitgegeben. Der führende
+   Underscore sorgt dafür dass der Pipeline-Main-Loop
+   (`if step_code in existing_results: continue`) die Sentinel-
+   Liste ignoriert — nur IA-08 liest sie explizit aus.
+
+3. **`pipeline/step_ia08_sort.py`** — `_tag_immich_asset()` bekommt
+   einen neuen `previous_tags`-Parameter und gibt jetzt ein
+   3-Tupel zurück: `(tags_written, tags_failed, tags_removed)`.
+   Nach dem normalen Tagging-Loop wird jeder Tag, der in
+   `previous_tags` war aber NICHT im neuen `tag_keywords`-Set,
+   via `untag_asset()` entfernt. **Wichtig:** nur Tags aus der
+   previous-Liste werden angefasst — Tags die der User manuell in
+   der Immich-UI hinzugefügt hat bleiben unangetastet.
+
+   Beide Aufrufer in `step_ia08_sort.py:execute()` (webhook-Branch
+   + first-upload-Branch) übergeben die Sentinel weiter und
+   schreiben das Resultat in `IA-08.immich_tags_removed`. Der
+   Sentinel wird am Ende aus dem step_result entfernt, damit er
+   beim nächsten Lauf nicht als "from previous retry" wieder
+   auftaucht.
+
+**Test-Coverage:** `_run_stuck_state_retry_test` (existierend)
+wurde erweitert. Vor dem Retry werden die stale Tags jetzt nicht
+nur in der DB-step_result eingetragen, sondern **wirklich via
+API** auf den Immich-Asset geschrieben. Die bestehenden
+Immich-API-Asserts prüfen danach dass sie echt aus Immich
+entfernt wurden — nicht nur aus der DB-Sicht.
+
+Pre-Retry-Asserts (neu):
+- "pre-retry, stale 'unknown' is really on the Immich asset" ✓
+- "pre-retry, stale 'STUCK_STALE_GEO' is really on the Immich asset" ✓
+
+Post-Retry-Asserts (bestehend, jetzt aussagekräftig):
+- "Immich-API confirms 'unknown' is gone" ✓
+- "Immich-API confirms 'STUCK_STALE_GEO' is gone" ✓
+
+108/108 grün (`test_retry_file_lifecycle.py`), 26/26
+(`test_duplicate_fix.py`).
+
+**Was du jetzt tun solltest:** nach `docker compose pull` und
+Restart (v2.28.39) einmal auf deine problematischen Jobs (MA-2026-
+28111, -28115, -28121, ...) "Erneut verarbeiten" klicken. Diesmal:
+- v2.28.37 Nuclear-Retry droppt IA-01..IA-11 und läuft alle Steps frisch
+- v2.28.39 vergleicht die neuen Tags mit den alten und **entfernt** die stale
+- In Immich bleiben nur die echten, neuen Tags über
+
 ## v2.28.38 — 2026-04-08
 
 ### Performance: `_tag_immich_asset` Wait-Loop komplett entfernt
