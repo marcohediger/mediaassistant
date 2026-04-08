@@ -54,7 +54,7 @@
 - **IA02-02:** Ähnliches Bild (z.B. leicht beschnitten) → pHash-Match unter Schwellwert
 - **IA02-03:** Unterschiedliches Bild → kein Match, `status: ok`
 - **IA02-04:** RAW-Format (DNG/CR2) → pHash via ExifTool PreviewImage berechnet
-- **IA02-05:** Modul deaktiviert → `status: skipped, reason: module disabled`
+- **IA02-05:** Modul `duplikat_erkennung` deaktiviert → IA-02 `status: skipped, reason: module disabled`
 - **IA02-06:** Duplikat eines Immich-Assets → korrekt erkannt
 - **IA02-07:** Orphaned Job (Original-Datei gelöscht) → Match wird übersprungen
 - **IA02-08:** JPG+DNG Paar mit keep_both=true → beide unabhängig verarbeitet
@@ -68,7 +68,7 @@
 - **IA03-01:** Bild mit GPS-Koordinaten → Land, Stadt, Stadtteil aufgelöst
 - **IA03-02:** Bild ohne GPS → `status: skipped`
 - **IA03-03:** Nominatim-Provider → korrekte Ergebnisse
-- **IA03-04:** Modul deaktiviert → `status: skipped, reason: module disabled`
+- **IA03-04:** Modul `geocoding` deaktiviert → IA-03 `status: skipped, reason: module disabled`
 - **IA03-05:** Geocoding-Server nicht erreichbar → Fehler gefangen, Step übersprungen, Pipeline läuft weiter
 - **IA03-06:** DJI-Drohne GPS → korrekt aufgelöst
 - **IA03-07:** Video GPS (ffprobe ISO 6709) → korrekt geocodiert
@@ -90,7 +90,7 @@
 - **IA05-02:** Screenshot → `type: screenshot` (Statusleiste, Navigationsbar erkannt)
 - **IA05-03:** Internet-Bild → `type: sourceless` (generierte PNG/WebP/TIFF, : kein internet_image mehr)
 - **IA05-04:** KI-Backend nicht erreichbar → Fehler gefangen, Fallback-Werte gesetzt
-- **IA05-05:** Modul deaktiviert → `status: skipped, reason: module disabled`
+- **IA05-05:** Modul `ki_analyse` deaktiviert → IA-05 `status: skipped, reason: module disabled`
 - **IA05-06:** Metadata-Kontext (EXIF, Geo, Dateigrösse) wird an KI übergeben
 - **IA05-07:** Kategorien aus DB werden im Prompt übergeben
 - **IA05-08:** Statische Regel-Vorklassifikation wird der KI als Kontext mitgegeben: Persönliches Video")
@@ -108,7 +108,7 @@
 - **IA06-02:** Foto ohne Text (Smart-Modus) → OCR übersprungen (`type=personal, OCR nicht nötig`)
 - **IA06-03:** Smart-Modus: Screenshot → OCR ausgeführt
 - **IA06-04:** Always-Modus → OCR wird immer ausgeführt (auch für normale Fotos)
-- **IA06-05:** Modul deaktiviert → `status: skipped, reason: module disabled`
+- **IA06-05:** Modul `ocr` deaktiviert → IA-06 `status: skipped, reason: module disabled`
 
 ### IA-07: EXIF-Tags schreiben
 - **IA07-01:** AI-Tags werden als Keywords geschrieben
@@ -172,7 +172,7 @@
 ### IA-09: Benachrichtigung
 - **IA09-01:** Fehler vorhanden → E-Mail gesendet
 - **IA09-02:** Kein Fehler → keine E-Mail
-- **IA09-03:** Modul deaktiviert → `status: skipped, reason: module disabled`
+- **IA09-03:** Modul `smtp` deaktiviert → IA-09 `status: skipped, reason: module disabled`
 
 ### IA-10: Cleanup
 - **IA10-01:** Temp JPEG aus IA-04 gelöscht (DNG-Konvertierung + Video-Thumbnails)
@@ -245,32 +245,30 @@
 ### Review (Manuelle Klassifikation)
 - **WEB-33:** Alle Jobs mit Status "review" angezeigt
 - **WEB-34:** Thumbnail (lokal oder Immich)
-- **WEB-35:** Lightbox: Klick auf Thumbnail öffnet Originalbild als Overlay
-- **WEB-36:** AI-Beschreibung, Tags, Metadaten angezeigt
-- **WEB-37:** Dateigrösse angezeigt (Immich API Fallback wenn lokal nicht verfügbar)
-- **WEB-38:** Datum angezeigt mit Fallback auf FileModifyDate bzw. job.created_at
-- **WEB-39:** Bildabmessungen (Auflösung) angezeigt
-- **WEB-40:** Metadatenfelder bedingt (Datum/Kamera nur wenn vorhanden)
-- **WEB-41:** Kategorie-Buttons dynamisch aus DB geladen
-- **WEB-42:** Löschen-Button entfernt Review-Datei
-- **WEB-43:** Lokal: Datei in richtigen Zielordner verschoben (Review → Photo)
-- **WEB-44:** Immich: Archivierung per Kategorie-Flag `immich_archive` aus DB (verifiziert: screenshot+sourceless archived)
-- **WEB-45:** Batch: "Alle → Sourceless" funktioniert (beide lokale und Immich-Items)
+- **WEB-35:** AI-Beschreibung, Tags, Metadaten angezeigt
+- **WEB-36:** Dateigrösse angezeigt (Immich API Fallback wenn lokal nicht verfügbar)
+- **WEB-37:** Datum angezeigt mit Fallback auf FileModifyDate bzw. job.created_at
+- **WEB-38:** Bildabmessungen (Auflösung) angezeigt
+- **WEB-39:** Metadatenfelder bedingt (Datum/Kamera nur wenn vorhanden)
+- **WEB-40:** Kategorie-Buttons dynamisch aus DB geladen
+- **WEB-41:** Löschen-Button entfernt Review-Datei
+- **WEB-42:** Lokal: Datei in richtigen Zielordner verschoben (Review → Photo)
+- **WEB-43:** Batch: "Alle → Sourceless" funktioniert (beide lokale und Immich-Items)
 
 ### Log Viewer
-- **WEB-46:** System-Log mit Level-Filter (Info/Warning/Error)
-- **WEB-47:** System-Log Detail mit vollem Traceback
-- **WEB-48:** Verarbeitungs-Log mit Status-Filter
-- **WEB-49:** Verarbeitungs-Log zeigt Dauer an
-- **WEB-50:** Suche nach Dateiname und Debug-Key
-- **WEB-51:** Pagination funktioniert
-- **WEB-52:** Job-Detail: alle Step-Results, Pfade, Timestamps, Hashes
-- **WEB-53:** Job-Detail: voller Traceback bei Fehlern
-- **WEB-54:** Job-Detail: Immich-Thumbnail bei Immich-Assets
-- **WEB-55:** Job-Detail: Lightbox — Klick auf Thumbnail öffnet Originalbild
-- **WEB-56:** Job-Detail: Zurück-Button geht zu Verarbeitungs-Log
-- **WEB-57:** Job löschen und Retry funktioniert (API-Endpunkte getestet)
-- **WEB-58:** Preview-Badge bei Dry-Run-Jobs angezeigt
+- **WEB-44:** System-Log mit Level-Filter (Info/Warning/Error)
+- **WEB-45:** System-Log Detail mit vollem Traceback
+- **WEB-46:** Verarbeitungs-Log mit Status-Filter
+- **WEB-47:** Verarbeitungs-Log zeigt Dauer an
+- **WEB-48:** Suche nach Dateiname und Debug-Key
+- **WEB-49:** Pagination funktioniert
+- **WEB-50:** Job-Detail: alle Step-Results, Pfade, Timestamps, Hashes
+- **WEB-51:** Job-Detail: voller Traceback bei Fehlern
+- **WEB-52:** Job-Detail: Immich-Thumbnail bei Immich-Assets
+- **WEB-53:** Job-Detail: Lightbox — Klick auf Thumbnail öffnet Originalbild
+- **WEB-54:** Job-Detail: Zurück-Button geht zu Verarbeitungs-Log
+- **WEB-55:** Job löschen und Retry funktioniert (API-Endpunkte getestet)
+- **WEB-56:** Preview-Badge bei Dry-Run-Jobs angezeigt
 
 ## 4. Filewatcher-Stabilität
 
