@@ -218,7 +218,14 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
     write pattern eliminates that race entirely.
     """
     sidecar_path = job.original_path + ".xmp"
-    tmp_sidecar = f"{sidecar_path}.{job.debug_key}.tmp"
+    # IMPORTANT: the temp file MUST end in `.xmp`. ExifTool's `-o` flag
+    # decides the output format by extension: `.xmp` → plain-text XMP
+    # sidecar (what we want); any unrecognised suffix like `.tmp` →
+    # ExifTool falls back to "copy source file with XMP embedded",
+    # which means a FULL JPEG/HEIC clone gets written and then
+    # renamed to `foo.jpg.xmp`. That bug was live between v2.28.13
+    # and v2.28.40 and turned every sidecar into a binary image file.
+    tmp_sidecar = f"{job.original_path}.{job.debug_key}.tmp.xmp"
 
     # Clean up any leftover tmp from a crashed previous run of THIS job
     if os.path.exists(tmp_sidecar):

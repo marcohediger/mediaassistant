@@ -1,5 +1,90 @@
 # Changelog
 
+## v2.28.40 — 2026-04-08
+
+### Fix: XMP-Sidecars waren seit v2.28.13 binäre JPEG/HEIC-Klone statt Text-XML
+
+User: "@…01bb4f56-…jpg.xmp sind die daten so in ordnung?". Nach
+Inspektion: nein — die Datei war 250 KB groß und begann mit
+`\xff\xd8\xff\xe0` (JPEG SOI). Eine echte XMP-Sidecar ist Text-XML
+(`<?xpacket … <x:xmpmeta …`) und ~2 KB groß.
+
+**Root cause:** v2.28.13 (`dca6437`) führte das atomic-write-Pattern
+für Sidecars ein:
+
+```python
+tmp_sidecar = f"{sidecar_path}.{job.debug_key}.tmp"  # FALSCH
+exiftool -o {tmp_sidecar} … {original}
+os.replace(tmp_sidecar, sidecar_path)
+```
+
+ExifTool entscheidet anhand der **Endung** des `-o`-Targets, was es
+schreibt. `.xmp` → Text-XML-Sidecar. **Alles andere** (`.tmp`,
+`.tmp.something`, …) → "kopiere die Source-Datei und betten XMP
+ein", d.h. ein vollständiger JPEG/HEIC-Klon mit XMP-Block landet
+unter dem Tempfile-Namen — wird dann atomic auf `foo.jpg.xmp`
+verschoben. So entstanden 27 Monate lang riesige Binärdateien
+mit `.xmp`-Endung statt echter Sidecars.
+
+**Fix in `step_ia07_exif_write.py:228`:**
+
+```python
+# IMPORTANT: temp file MUST end in `.xmp`
+tmp_sidecar = f"{job.original_path}.{job.debug_key}.tmp.xmp"
+```
+
+Plus ausführlicher Kommentar warum die Endung kritisch ist.
+
+### Fix: Immich Tag-Asset Race — zweiter PUT verschwindet ~1s später
+
+Beim Stuck-State-Test (`STUCK_STALE_GEO`) blieb der Tag hartnäckig
+am Asset, obwohl `untag_asset()` "untagged" zurückgab. Isolierter
+Test mit zwei rapid `PUT /api/tags/{id}/assets`-Calls hat die
+Ursache identifiziert: Immich verarbeitet die Tag-Association
+asynchron und der zweite PUT "isst" den ersten, wenn beide innerhalb
+weniger Millisekunden eintreffen.
+
+**Fix in `step_ia08_sort.py:_tag_immich_asset()`:**
+
+1. `IMMICH_TAG_WRITE_DELAY_S = 0.1` Sekunden Pause zwischen
+   sequentiellen Tag-Operationen.
+2. **Verify-Retry:** nach allen PUTs/DELETEs wird das Asset noch
+   einmal via `GET /api/assets/{id}` gelesen. Tags die "gegessen"
+   wurden landen erneut im PUT, stale Tags die wieder aufgetaucht
+   sind landen erneut im DELETE.
+
+### Tooling: `cleanup_broken_sidecars.py`
+
+Neues Standalone-Cleanup-Script (`backend/cleanup_broken_sidecars.py`)
+um die durch den v2.28.13-Bug erzeugten korrupten `.xmp`-Dateien
+aufzuspüren und zu löschen. Erkennungs-Heuristik: liest die ersten
+32 Bytes jeder `.xmp`-Datei. Echte XMP beginnt mit `<?xpacket`,
+`<x:xmpmeta`, `<?xml` oder `<rdf:`. JPEG (`\xff\xd8\xff`), HEIF
+(`ftyp` an Offset 4), PNG und andere Binär-Formate werden als
+"broken" markiert.
+
+**Usage:**
+
+```bash
+# Dry-run (nur reporten)
+docker exec mediaassistant-dev python /app/cleanup_broken_sidecars.py /library
+
+# Wirklich löschen
+docker exec mediaassistant-dev python /app/cleanup_broken_sidecars.py --delete /library
+```
+
+Nach dem Löschen die betroffenen Jobs retryen — IA-07 schreibt
+dann eine korrekte Text-XMP.
+
+### Test-Coverage
+
+`test_retry_file_lifecycle.py` hat einen neuen Regression-Guard:
+nach jedem Sidecar-Write wird verifiziert, dass die ersten Bytes
+XML-Marker enthalten und die Datei <50 KB ist. So bleibt der
+v2.28.13-Bug künftig unmöglich.
+
+110/110 Lifecycle-Tests grün, 26/26 Duplicate-Tests grün.
+
 ## v2.28.39 — 2026-04-08
 
 ### Fix: Retry entfernt jetzt die alten Tags aus Immich bevor neue geschrieben werden

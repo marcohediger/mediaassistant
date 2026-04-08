@@ -458,6 +458,27 @@ async def _run_filestorage_test(source_heic: str, *, mode: str = "direct"):
                 not os.path.exists(sidecar_in_reprocess),
                 f"checked={sidecar_in_reprocess}",
             )
+            # Regression guard for the v2.28.13..v2.28.39 bug where
+            # ExifTool wrote a binary JPEG clone to the .xmp file
+            # because the temp-file extension was .tmp (not .xmp).
+            # A real XMP sidecar is plain text XML, ~2-10 KB, starts
+            # with `<?xpacket` or `<x:xmpmeta`, and NEVER begins with
+            # JPEG/HEIC magic bytes.
+            if os.path.exists(sidecar_at_target):
+                with open(sidecar_at_target, "rb") as f:
+                    head = f.read(16)
+                size_kb = os.path.getsize(sidecar_at_target) / 1024
+                report(
+                    "sidecar .xmp is plain text XML, not a binary image clone",
+                    head.startswith(b"<?xpacket") or head.startswith(b"<x:xmpmeta")
+                    or head.startswith(b"<?xml"),
+                    f"first_bytes={head[:8]!r} size={size_kb:.1f}KB",
+                )
+                report(
+                    "sidecar .xmp has sane size (<50 KB)",
+                    size_kb < 50,
+                    f"size={size_kb:.1f}KB",
+                )
 
     except Exception as e:
         traceback.print_exc()
