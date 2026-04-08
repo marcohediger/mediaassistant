@@ -375,24 +375,14 @@ async def reset_job_for_retry(job_id: int) -> bool:
         if not job:
             return False
 
-        # Capture the pre-move target_path so we can decide whether
-        # IA-08's cached step result still references a valid disk
-        # location. If target_path was a local file path (not an
-        # `immich:` reference), the upcoming `_move_file_for_reprocess`
-        # will move that file into /app/data/reprocess/ — leaving the
-        # cached IA-08 result pointing at a now-empty library path.
-        # In that case we MUST drop IA-08 so the next pipeline pass
-        # re-runs the move-to-library logic. For `immich:` references
-        # the cached result is fine to keep (the asset survives).
-        pre_move_target = job.target_path
-        target_was_local = bool(
-            pre_move_target and not pre_move_target.startswith("immich:")
-        )
-
         # Drop both 'error' and 'warning' step results so soft failures
-        # (e.g. IA-08 immich_tags_failed) get a fresh attempt. Finalizer
-        # steps (IA-09/10/11) are dropped unconditionally so notification,
-        # cleanup and sqlite-log re-run for the new attempt.
+        # (e.g. IA-08 immich_tags_failed) get a fresh attempt. The
+        # downstream cascade in _reset_step_results then drops every
+        # step that runs after the dropped one in pipeline order, so
+        # IA-07/IA-08 results that depend on IA-05's classification
+        # are also re-computed. Finalizer steps (IA-09/10/11) are
+        # dropped unconditionally so notification, cleanup and
+        # sqlite-log re-run for the new attempt.
         # File move + sidecar handling + status flip is done by the helper.
         from pipeline.reprocess import prepare_job_for_reprocess
         finalizer_skip = {code: None for code in ("IA-09", "IA-10", "IA-11")}
@@ -419,17 +409,12 @@ async def reset_job_for_retry(job_id: int) -> bool:
             await session.commit()
             return False
         # Finalizer reset is retry-specific — apply after the helper.
+        # The cascade in _reset_step_results already removes IA-06/07/08
+        # whenever any earlier step matched the drop-statuses, so we
+        # only need to nuke the finalizers here.
         current = dict(job.step_result or {})
         for code in finalizer_skip:
             current.pop(code, None)
-        # Drop IA-08 too if the file lived on local storage before the
-        # retry: the cached IA-08 result references a stale library
-        # path, and unless IA-08 re-runs the file will stay stranded
-        # in /app/data/reprocess/ forever. (Immich-backed jobs keep
-        # their cached IA-08 result — the asset is still valid and
-        # the webhook branch in IA-08 is idempotent on tagging.)
-        if target_was_local:
-            current.pop("IA-08", None)
         job.step_result = current
         flag_modified(job, "step_result")
         await session.commit()

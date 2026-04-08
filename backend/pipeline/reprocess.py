@@ -184,6 +184,14 @@ async def _move_file_for_reprocess(job) -> bool:
     return True
 
 
+# Pipeline order — used for cascade-dropping downstream steps. Mirrors
+# MAIN_STEPS in pipeline/__init__.py without importing it (avoids circular).
+_PIPELINE_ORDER = [
+    "IA-01", "IA-02", "IA-03", "IA-04", "IA-05",
+    "IA-06", "IA-07", "IA-08",
+]
+
+
 def _reset_step_results(
     job,
     *,
@@ -196,7 +204,15 @@ def _reset_step_results(
     Policies (combinable, applied in order):
     - keep_steps: if set, keep ONLY these step codes (drop everything else)
     - drop_step_statuses: drop step codes whose result has one of these
-      statuses (e.g. {"error", "warning"} for retry of soft failures)
+      statuses (e.g. {"error", "warning"} for retry of soft failures).
+      **Cascade**: when a step X is dropped this way, every step that
+      runs *after* X in the pipeline order is dropped too. Otherwise the
+      cached downstream results would still reflect the OLD output of
+      step X — IA-07 (writes EXIF/sidecar tags) and IA-08 (uploads to
+      Immich + writes Immich tags) consume IA-05's classification, so
+      a re-run of IA-05 alone is not enough; the downstream cached
+      results would still carry the old keywords. Live-Vorfall
+      MA-2026-28111 vor v2.28.33.
     - inject_steps: merge these synthetic step results in last (e.g.
       {"IA-02": {"status": "skipped", "reason": "..."}})
     """
@@ -206,10 +222,23 @@ def _reset_step_results(
         current = {k: v for k, v in current.items() if k in keep_steps}
 
     if drop_step_statuses:
-        for step_code in list(current.keys()):
-            r = current[step_code]
+        # First pass: figure out which step codes match the drop statuses.
+        matched = []
+        for step_code, r in current.items():
             if isinstance(r, dict) and r.get("status") in drop_step_statuses:
-                del current[step_code]
+                matched.append(step_code)
+
+        # Cascade: for each matched step, drop the step itself plus
+        # everything that runs after it in the pipeline order.
+        to_drop = set(matched)
+        for matched_code in matched:
+            if matched_code in _PIPELINE_ORDER:
+                idx = _PIPELINE_ORDER.index(matched_code)
+                for downstream in _PIPELINE_ORDER[idx + 1:]:
+                    to_drop.add(downstream)
+
+        for step_code in to_drop:
+            current.pop(step_code, None)
 
     if inject_steps:
         current.update(inject_steps)

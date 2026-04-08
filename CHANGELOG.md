@@ -1,5 +1,59 @@
 # Changelog
 
+## v2.28.33 — 2026-04-08
+
+### Fix: Retry läuft, schreibt aber nichts in Immich (Live-Vorfall MA-2026-28111 Folge)
+
+User-Bericht: nach v2.28.32 lief der Retry für MA-2026-28111 zwar
+durch (Status `done`), aber **in Immich landete kein neuer Tag**.
+Der KI-Lauf hatte korrekt "Persönliches Foto" mit Tags Metall,
+Nahaufnahme, Gewinde, Seil, Maschine erkannt, die Detail-Seite
+zeigte das auch — aber `IA-07.keywords_written = [unknown,
+Schweiz, Aargau, Lupfig]` und `IA-08.immich_tags_written =
+[unknown, Schweiz, Aargau, Lupfig, Persönliches Foto]`. Die alten
+"unknown"-Tags vom Pre-Retry-Zustand sind in der Pipeline hängen
+geblieben.
+
+**Ursache:** `_reset_step_results()` in `pipeline/reprocess.py`
+hat beim Retry nur die Steps mit `status='warning'`/`'error'` aus
+dem `step_result` gedroppt. Dropping `IA-05` aber war zu wenig:
+**IA-07 (schreibt Tags ins File) und IA-08 (lädt zu Immich +
+schreibt Immich-Tags) konsumieren beide IA-05's Output.** Da
+ihre Step-Results aber unverändert blieben, hat die Pipeline sie
+beim erneuten Lauf als "schon erledigt" übersprungen, mit dem
+ALTEN Output. Das frische IA-05-Resultat ging nirgendwo hin.
+
+**Fix:** `_reset_step_results()` macht jetzt **Cascade-Drop**:
+wenn ein Step nach Status gedroppt wird, werden alle Steps die
+**nach** ihm in der Pipeline-Reihenfolge laufen ebenfalls
+gedroppt. Konkret: bei `IA-05`-Warning droppt der Reset jetzt
+auch `IA-06`, `IA-07`, `IA-08` — und alle vier laufen frisch
+durch beim Retry. Die neue KI-Klassifikation propagiert über
+IA-07 in die EXIF/Sidecar-Tags und über IA-08 in Immich.
+
+Pipeline-Reihenfolge ist als `_PIPELINE_ORDER` in
+`pipeline/reprocess.py` hartcodiert (parallel zu MAIN_STEPS in
+`pipeline/__init__.py`, ohne Import-Cycle).
+
+**Bonus-Cleanup:** der `target_was_local`-IA-08-Drop in
+`reset_job_for_retry()` (aus v2.28.29) ist jetzt redundant —
+der Cascade erledigt das automatisch in beiden Pfaden (warning
++ error retry, immich + file-storage). Entfernt.
+
+**Test-Coverage:** `_run_lifecycle_test` hat drei neue Asserts
+unter "F) Cascade-reset":
+- IA-05 ran with non-'unknown' classification
+- IA-07 keywords no longer carry the synthetic 'unknown'
+- IA-08 immich_tags no longer carry the synthetic 'unknown'
+
+Vor v2.28.33 wären alle drei rot. Post-Fix: 86/86 grün
+(`test_retry_file_lifecycle.py`), 26/26 (`test_duplicate_fix.py`).
+
+**Was du jetzt tun solltest:** auf live nach dem Pull und Restart
+(v2.28.33) MA-2026-28111 nochmal "Erneut verarbeiten" klicken.
+Diesmal landen die echten KI-Tags (Metall, Nahaufnahme, Gewinde,
+Seil, Maschine) auch in Immich.
+
 ## v2.28.32 — 2026-04-08
 
 ### Fix: Retry bricht ab obwohl Datei in Immich noch lebt (MA-2026-28111)
