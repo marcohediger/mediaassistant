@@ -1,5 +1,55 @@
 # Changelog
 
+## v2.28.31 — 2026-04-08
+
+### Fix: Doppelter Status-Badge auf der Job-Detail-Seite
+
+User-Bericht: "Im Verarbeitungs-Log zeigt eine Datei zuerst den
+einen Status (z.B. `review`), und nach ein paar Sekunden erscheint
+ein zweiter Status (z.B. `duplicate`) daneben."
+
+Ursache: `static/js/app.js:111` selektierte mit
+`document.querySelectorAll(".status-badge")` ALLE Elemente mit
+dieser Klasse und überschrieb deren Text mit `job.status`. Bei
+`dry_run=True` rendert `templates/log_detail.html` aber ZWEI
+Badges mit derselben Klasse: das normale Status-Badge plus ein
+"Preview"-Badge. Beim Polling-Refresh wurde das Preview-Badge
+also auch zum Status-Badge, und der User sah zwei identische
+Badges nebeneinander.
+
+Fix in zwei Stellen:
+- `templates/log_detail.html`: das Status-Badge bekommt
+  `data-field="status"`, das Preview-Badge eine eigene Klasse
+  `status-preview`.
+- `static/js/app.js:updateJobDetail()`: aktualisiert nur noch
+  `[data-field="status"]`, lässt alle anderen `.status-badge`
+  Elemente in Ruhe.
+
+### Fix: IA-02 Duplicate-Handler löscht stale `error_message`
+
+Beim Aufräumen der Test-DB fielen 8 Job-Rows mit intern
+inkonsistentem Zustand auf: `status='duplicate'` UND
+`error_message='Warnungen in: IA-05'`. Das ist semantisch
+unmöglich (ein Duplikat bricht die Pipeline nach IA-02 ab,
+kommt nie bis IA-05).
+
+Wie der Zustand entstanden war: bei einem Retry, der zwischen
+zwei Pipeline-Läufen einen Soft-Warning erbte, hat IA-02 im
+zweiten Lauf das Duplikat erkannt und `job.status='duplicate'`
+gesetzt — die alte `error_message="Warnungen in: ..."` aus dem
+ersten Lauf blieb aber stehen. Live-DB ist davon nicht
+betroffen (geprüft: 0 Treffer), nur die Dev-DB durch die
+Test-Pollution.
+
+Defensiver Fix in `pipeline/step_ia02_duplicates.py:_handle_duplicate()`:
+beim Setzen von `status='duplicate'` wird `error_message` jetzt
+explizit auf `None` zurückgesetzt — sowohl im Dry-Run-Pfad als
+auch im normalen Pfad. Damit kann der inkonsistente Zustand
+nicht mehr entstehen, egal woher der Job kommt.
+
+Dev-DB Cleanup: 8 Test-Jobs hatten ihre stale `error_message`
+geleert, Status bleibt `duplicate`.
+
 ## v2.28.30 — 2026-04-08
 
 ### Feature: "Alle Warnungen retry" Button im Verarbeitungs-Log

@@ -315,6 +315,11 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     # Dry-run: detect but don't move
     if job.dry_run:
         job.status = "duplicate"
+        # Clear any pre-existing warning message left over from a prior
+        # run (e.g. retry where the previous run had a soft warning) —
+        # a duplicate aborts the pipeline before the steps that produce
+        # warnings, so the message is no longer truthful.
+        job.error_message = None
         await log_info("IA-02", f"{job.debug_key} [dry-run] {desc}")
         return
 
@@ -351,6 +356,10 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     # Update job status
     job.status = "duplicate"
     job.target_path = dup_path
+    # Clear any pre-existing warning message — a duplicate aborts the
+    # pipeline before the steps that produce warnings, so the message
+    # would otherwise outlive its referent.
+    job.error_message = None
 
     await log_info("IA-02", f"{job.debug_key} {desc}")
 

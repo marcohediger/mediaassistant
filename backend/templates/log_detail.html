@@ -31,7 +31,7 @@
     </div>
     <div class="detail-card">
         <h3>{{ t.job_detail.status }}</h3>
-        <span class="status-badge status-{{ job.status }}">{{ job.status }}</span>{% if job.dry_run %} <span class="status-badge" style="background: var(--accent-blue, #0078d4); color: #fff; font-size: 0.7rem;">Preview</span>{% endif %}
+        <span class="status-badge status-{{ job.status }}" data-field="status">{{ job.status }}</span>{% if job.dry_run %} <span class="status-badge status-preview" style="background: var(--accent-blue, #0078d4); color: #fff; font-size: 0.7rem;">Preview</span>{% endif %}
     </div>
     <div class="detail-card">
         <h3>{{ t.job_detail.current_step }}</h3>
