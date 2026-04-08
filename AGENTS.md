@@ -72,7 +72,7 @@ MediaAssistant/
 ├── docker-compose.local.yml    # gitignored — lokale Overrides
 ├── docs/
 │   ├── sorting-flow.md
-│   └── retry-test-matrix.md    # Vollständige Retry-Coverage-Matrix
+│   └── test-matrix.md          # Vollständige Pipeline-Coverage-Matrix (normal + retry + reprocess)
 ├── CHANGELOG.md                # Pflicht: jedem Release ein Eintrag
 ├── REQUIREMENTS.md             # Original-Spec, eher historisch
 ├── TESTPLAN.md                 # Umfangreich, älterer Stand (>900 Zeilen)
@@ -182,7 +182,7 @@ Wenn ein Live-Bug gemeldet wird, ist die Pflicht-Reihenfolge:
 4. Bestehende Tests ALLE laufen lassen — keine Regressionen erlaubt.
 5. Erst dann Version bumpen + commit + push.
 
-Siehe auch [`docs/retry-test-matrix.md`](docs/retry-test-matrix.md)
+Siehe auch [`docs/test-matrix.md`](docs/test-matrix.md)
 für ein konkretes Beispiel einer vollständig kartografierten Test-
 Matrix mit explizit markierten Lücken.
 
