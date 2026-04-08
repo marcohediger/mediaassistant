@@ -1,5 +1,30 @@
 # Changelog
 
+## v2.28.41 — 2026-04-08
+
+### Cleanup-Tool: praezise Container-Brand-Erkennung
+
+`cleanup_broken_sidecars.py` hat den ISO-BMFF-Detection-Pfad
+(`head[4:8] == b"ftyp"`) bisher pauschal als "HEIF container"
+gemeldet, obwohl genau dieselben Bytes auch fuer MOV, MP4, AVIF
+und Co. verwendet werden — der v2.28.13-Bug hat schliesslich auch
+HEIC-/MOV-/MP4-Sources zu binaeren `.xmp`-Klonen gemacht.
+
+Der Reason-String unterscheidet die Familien jetzt anhand des
+Brand-Codes (Bytes 8..11):
+
+- `heic`/`heix`/`heim`/`heis`/`hevc`/`hevx` → `HEIC binary`
+- `mif1`/`msf1` → `HEIF binary`
+- `qt  ` → `MOV (QuickTime) binary`
+- `mp41`/`mp42`/`mp4 `/`isom`/`iso2`/`iso4`/`iso5`/`dash`/`M4V*`/`f4v ` → `MP4 binary`
+- `avif`/`avis` → `AVIF binary`
+- alles andere → `ISO-BMFF binary`
+
+**Reine Kosmetik im Reporting** — die Detection-Entscheidung
+(`return True` fuer alle ISO-BMFF-Brands) bleibt 1:1 identisch,
+keine echten XMP-Dateien werden faelschlich getroffen. Verifiziert
+mit 10 Test-Payloads (JPEG, alle ISO-BMFF-Brands, echte XMPs).
+
 ## v2.28.40 — 2026-04-08
 
 ### Fix: XMP-Sidecars waren seit v2.28.13 binäre JPEG/HEIC-Klone statt Text-XML
