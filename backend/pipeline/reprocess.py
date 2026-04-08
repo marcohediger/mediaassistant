@@ -100,6 +100,18 @@ async def _move_file_for_reprocess(job) -> bool:
                 pass
         await asyncio.to_thread(safe_move, sidecar_src, sidecar_dst, job.debug_key)
 
+        # The cached IA-07 step result still points at the old sidecar
+        # location. Update it so any step that re-runs after the move
+        # (e.g. IA-08 picking up the sidecar to upload alongside the
+        # asset) sees the new path instead of looking at a stale one.
+        sr = job.step_result or {}
+        ia07 = sr.get("IA-07")
+        if isinstance(ia07, dict) and ia07.get("sidecar_path"):
+            ia07["sidecar_path"] = sidecar_dst
+            sr["IA-07"] = ia07
+            job.step_result = sr
+            flag_modified(job, "step_result")
+
     # Defensive: drop any leftover `.xmp.{debug_key}.tmp` from an interrupted
     # ExifTool run at the new location.
     stale_tmp = f"{dst}.xmp.{job.debug_key}.tmp"
