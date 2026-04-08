@@ -83,6 +83,13 @@ async def _tag_immich_asset(
     missing = [t for t in tag_keywords if t not in existing_tags]
     tags_written: list[str] = []
     tags_failed: list[str] = []
+    # Small delay between sequential PUT/DELETE calls: empirically
+    # confirmed that Immich's tag-association handler has a race when
+    # two tag-asset writes hit the same asset within ~500ms — the
+    # second one silently overwrites/loses the first. 100ms is enough
+    # on our setup. Workaround for a real Immich server bug.
+    IMMICH_TAG_WRITE_DELAY_S = 0.1
+
     for tag_name in missing:
         try:
             await tag_asset(asset_id, tag_name, api_key=api_key)
@@ -90,6 +97,7 @@ async def _tag_immich_asset(
         except Exception as exc:
             tags_failed.append(tag_name)
             logger.warning("Failed to tag asset %s with '%s': %s", asset_id, tag_name, exc)
+        await asyncio.sleep(IMMICH_TAG_WRITE_DELAY_S)
 
     # Remove any tag that this job WROTE last time but is NOT in the
     # new desired set. Limited to `previous_tags` specifically so that
@@ -105,6 +113,38 @@ async def _tag_immich_asset(
                     tags_removed.append(tag_name)
             except Exception as exc:
                 logger.warning("Failed to untag asset %s from '%s': %s", asset_id, tag_name, exc)
+            await asyncio.sleep(IMMICH_TAG_WRITE_DELAY_S)
+
+    # Verify: re-fetch the asset and check that every tag that should
+    # be present is actually there, and every tag that should be gone
+    # really is gone. If the Immich race ate any writes, retry them
+    # once. This is defence-in-depth on top of the inter-call delay.
+    if missing or (previous_tags and any(t for t in previous_tags if t not in set(tag_keywords))):
+        info2 = await get_asset_info(asset_id, api_key=api_key)
+        final_set = {t["value"] for t in ((info2 or {}).get("tags") or [])}
+        # Re-add any missing tag_keywords that got eaten by the race
+        for tag_name in tag_keywords:
+            if tag_name not in final_set:
+                try:
+                    await tag_asset(asset_id, tag_name, api_key=api_key)
+                    if tag_name not in tags_written:
+                        tags_written.append(tag_name)
+                    await asyncio.sleep(IMMICH_TAG_WRITE_DELAY_S)
+                except Exception as exc:
+                    if tag_name not in tags_failed:
+                        tags_failed.append(tag_name)
+                    logger.warning("Retry-tag asset %s with '%s' failed: %s", asset_id, tag_name, exc)
+        # Re-delete any stale tag that came back
+        if previous_tags:
+            for tag_name in previous_tags:
+                if tag_name and tag_name not in set(tag_keywords) and tag_name in final_set:
+                    try:
+                        await untag_asset(asset_id, tag_name, api_key=api_key)
+                        if tag_name not in tags_removed:
+                            tags_removed.append(tag_name)
+                        await asyncio.sleep(IMMICH_TAG_WRITE_DELAY_S)
+                    except Exception as exc:
+                        logger.warning("Retry-untag asset %s from '%s' failed: %s", asset_id, tag_name, exc)
 
     # Include pre-existing tags in written list for reporting
     already = [t for t in tag_keywords if t in existing_tags]
