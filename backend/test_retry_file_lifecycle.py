@@ -303,6 +303,19 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
             f"ia08.immich_tags_written={ia08_tags}",
         )
 
+        # G) Strong assert: query Immich directly via API to verify
+        #    that 'unknown' is really not on the live asset.
+        if after_asset:
+            from immich_client import get_asset_info
+            info = await get_asset_info(after_asset)
+            if info:
+                live_tags = {t.get("value") for t in (info.get("tags") or [])}
+                report(
+                    f"immich-API confirms 'unknown' is NOT on the live asset ({mode})",
+                    "unknown" not in live_tags,
+                    f"live={sorted(live_tags)}",
+                )
+
     except Exception as e:
         traceback.print_exc()
         report(f"unexpected exception in {mode} test", False, repr(e))
@@ -767,6 +780,166 @@ async def _run_immich_only_retry_test(source_heic: str):
         report("unexpected exception in immich-only retry test", False, repr(e))
 
 
+async def _run_stale_warning_state_retry_test(source_heic: str):
+    """Reproduce MA-2026-28121: Retry triggered on a job whose IA-05
+    cached result no longer carries `status: warning` (because a
+    previous partial retry overwrote it with a successful result),
+    but `error_message` still says "Warnungen in: IA-05".
+
+    The cascade-by-status from v2.28.33 alone does NOT fix this — it
+    finds nothing to drop. The v2.28.35 fix parses `error_message` for
+    explicit step codes and feeds them to the cascade as well.
+
+    Pre-fix expectation (v2.28.33/.34): IA-07/IA-08 stay cached with
+    stale 'unknown' tags. Live evidence: MA-2026-28121.
+    Post-fix expectation: cascade drops IA-05+IA-06+IA-07+IA-08 via
+    `drop_step_codes={IA-05}`, all four re-run on retry.
+    """
+    print(f"\n── Test: stale-warning-state retry (MA-2026-28121 repro) ──")
+    test_name = f"__retry_stale_{int(datetime.now().timestamp())}.HEIC"
+    inbox_path = os.path.join(INBOX, test_name)
+    job_id: int | None = None
+
+    try:
+        source_heic = _make_unique_source(source_heic)
+        await config_manager.set("metadata.write_mode", "sidecar")
+        _stage_inbox_file(source_heic, test_name)
+
+        # First run via normal pipeline so we have real IA-05/07/08
+        # results to mutate.
+        async with async_session() as session:
+            job = Job(
+                filename=test_name,
+                original_path=inbox_path,
+                debug_key=f"MA-LIFECYCLE-STALE-{int(datetime.now().timestamp())}",
+                status="queued",
+                source_label="Default Inbox",
+                source_inbox_path=INBOX,
+                use_immich=True,
+                step_result={},
+            )
+            session.add(job)
+            await session.commit()
+            job_id = job.id
+
+        await run_pipeline(job_id)
+
+        # Mutate the step_result so it looks like a job that's been
+        # partially retried before: IA-05 has a SUCCESSFUL fresh result
+        # (no status field), IA-07/IA-08 still carry the OLD synthetic
+        # 'unknown' tags from before the partial retry, error_message
+        # still references "Warnungen in: IA-05".
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            sr = dict(job.step_result or {})
+            # Successful IA-05 (no status field) — like a normal AI run
+            sr["IA-05"] = {
+                "type": "Persönliches Foto",
+                "source": "Kamerafoto",
+                "tags": ["FreshTag1", "FreshTag2"],
+                "description": "fresh AI run",
+                "mood": "indoor", "people_count": 0,
+                "quality": "good", "confidence": 0.9,
+            }
+            # Stale IA-07 with the synthetic 'unknown' keyword
+            sr["IA-07"] = {
+                "keywords_written": ["unknown", "STALE_GEO_TAG"],
+                "description_written": "stale", "ocr_text_written": "",
+                "tags_count": 2, "sidecar_path": "/inbox/old.xmp",
+                "write_mode": "sidecar",
+            }
+            # Stale IA-08 with the same stale tags
+            sr["IA-08"] = {
+                "category": "personliches_foto",
+                "target_path": job.target_path,
+                "moved": False, "immich_upload": True,
+                "immich_id": (job.immich_asset_id or ""),
+                "immich_albums_added": [],
+                "immich_tags_written": ["unknown", "STALE_GEO_TAG", "Persönliches Foto"],
+                "immich_tags_failed": [],
+            }
+            job.step_result = sr
+            flag_modified(job, "step_result")
+            # The poison pill: error_message still says IA-05 had a warning,
+            # even though step_result.IA-05 is a clean success.
+            job.error_message = "Warnungen in: IA-05"
+            # Re-stage inbox file (gone after first run's IA-08 upload)
+            _stage_inbox_file(source_heic, test_name)
+            job.original_path = inbox_path
+            await session.commit()
+
+        # Trigger retry. Pre-v2.28.35 the cascade would not drop IA-07
+        # or IA-08 because IA-05 has no warning status. Post-fix the
+        # error_message parse picks up "IA-05" and drops it, then the
+        # cascade drops IA-06/07/08 too.
+        ok = await reset_job_for_retry(job_id)
+        report("stale-warning: reset_job_for_retry accepted", ok)
+        await run_pipeline(job_id)
+
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            after = dict(job.step_result or {})
+
+        ia05 = after.get("IA-05", {})
+        ia07 = after.get("IA-07", {})
+        ia08 = after.get("IA-08", {})
+        ia07_keywords = ia07.get("keywords_written", []) or []
+        ia08_tags = ia08.get("immich_tags_written", []) or []
+
+        report(
+            "stale-warning: IA-05 ran fresh (still has classification)",
+            bool(ia05.get("type") and ia05.get("type") != "unknown"),
+            f"ia05.type={ia05.get('type')!r}",
+        )
+        report(
+            "stale-warning: IA-07 keywords no longer carry stale 'unknown'",
+            "unknown" not in ia07_keywords,
+            f"ia07.keywords_written={ia07_keywords}",
+        )
+        report(
+            "stale-warning: IA-07 keywords no longer carry stale 'STALE_GEO_TAG'",
+            "STALE_GEO_TAG" not in ia07_keywords,
+            f"ia07.keywords_written={ia07_keywords}",
+        )
+        report(
+            "stale-warning: IA-08 immich_tags no longer carry stale 'unknown'",
+            "unknown" not in ia08_tags,
+            f"ia08.immich_tags_written={ia08_tags}",
+        )
+        report(
+            "stale-warning: IA-08 immich_tags no longer carry stale 'STALE_GEO_TAG'",
+            "STALE_GEO_TAG" not in ia08_tags,
+            f"ia08.immich_tags_written={ia08_tags}",
+        )
+
+        # ── STRONG ASSERT: query Immich directly via API ──
+        # The DB step_result tells us what *we* think we wrote.
+        # The Immich API tells us what is *actually* on the asset
+        # right now. If both agree, the retry truly propagated.
+        from immich_client import get_asset_info
+        async with async_session() as session:
+            j = await session.get(Job, job_id)
+            asset_id = j.immich_asset_id
+        if asset_id:
+            info = await get_asset_info(asset_id)
+            if info:
+                live_tags = {t.get("value") for t in (info.get("tags") or [])}
+                report(
+                    "stale-warning: Immich-API confirms 'unknown' is NOT on the asset",
+                    "unknown" not in live_tags,
+                    f"immich live tags={sorted(live_tags)}",
+                )
+                report(
+                    "stale-warning: Immich-API confirms 'STALE_GEO_TAG' is NOT on the asset",
+                    "STALE_GEO_TAG" not in live_tags,
+                    f"immich live tags={sorted(live_tags)}",
+                )
+
+    except Exception as e:
+        traceback.print_exc()
+        report("stale-warning: unexpected exception", False, repr(e))
+
+
 async def _run_immich_tag_wait_skip_test(source_heic: str):
     """Verify v2.28.34 fix: _tag_immich_asset skips the wait-loop entirely
     when IA-07 wrote no keywords into the file.
@@ -958,6 +1131,7 @@ async def main():
             source_heic=source, mode="sidecar", use_immich=False, scenario_id="R11",
         )
         await _run_immich_only_retry_test(source_heic=source)
+        await _run_stale_warning_state_retry_test(source_heic=source)
         await _run_immich_tag_wait_skip_test(source_heic=source)
         await _run_truly_missing_test()
     finally:

@@ -375,14 +375,37 @@ async def reset_job_for_retry(job_id: int) -> bool:
         if not job:
             return False
 
-        # Drop both 'error' and 'warning' step results so soft failures
-        # (e.g. IA-08 immich_tags_failed) get a fresh attempt. The
-        # downstream cascade in _reset_step_results then drops every
-        # step that runs after the dropped one in pipeline order, so
-        # IA-07/IA-08 results that depend on IA-05's classification
-        # are also re-computed. Finalizer steps (IA-09/10/11) are
-        # dropped unconditionally so notification, cleanup and
-        # sqlite-log re-run for the new attempt.
+        # Figure out which steps need to be re-run.
+        #
+        # Two complementary sources of truth:
+        #   1) `step_result[code].status in {"error","warning"}` — set by
+        #      the pipeline's error handler when a step raised an exception
+        #      mid-run. Reliable.
+        #   2) `error_message="Warnungen in: IA-XX, IA-YY"` — aggregated by
+        #      the pipeline at the end of a run from the same statuses.
+        #      This catches the case where step_result[X].status was
+        #      OVERWRITTEN by a later partial retry to a successful state
+        #      WITHOUT clearing the error_message — so the user still sees
+        #      "Warnungen in: IA-05" but step_result['IA-05'].status no
+        #      longer has any flag. The cascade by status alone would not
+        #      drop anything in that case, leaving downstream steps stale
+        #      forever (live: MA-2026-28121).
+        explicit_drops: set[str] = set()
+        msg = job.error_message or ""
+        if msg.startswith("Warnungen in:"):
+            tail = msg[len("Warnungen in:"):]
+            for piece in tail.split(","):
+                code = piece.strip()
+                if code:
+                    explicit_drops.add(code)
+
+        # Drop both 'error' and 'warning' step results AND any step that
+        # error_message names explicitly. The downstream cascade in
+        # _reset_step_results then drops every step that runs after the
+        # dropped ones in pipeline order, so IA-07/IA-08 results that
+        # depend on IA-05's classification are also re-computed.
+        # Finalizer steps (IA-09/10/11) are dropped unconditionally so
+        # notification, cleanup and sqlite-log re-run for the new attempt.
         # File move + sidecar handling + status flip is done by the helper.
         from pipeline.reprocess import prepare_job_for_reprocess
         finalizer_skip = {code: None for code in ("IA-09", "IA-10", "IA-11")}
@@ -390,6 +413,7 @@ async def reset_job_for_retry(job_id: int) -> bool:
             session,
             job,
             drop_step_statuses={"error", "warning"},
+            drop_step_codes=explicit_drops,
             move_file=True,
             commit=False,
         )
