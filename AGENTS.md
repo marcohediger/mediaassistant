@@ -15,8 +15,11 @@
    `/app/data`). Mocks sind die Ausnahme, nicht die Regel.
 2. **Dev-Container nach Tests NICHT stoppen.** Er bleibt laufend.
 3. **Bei Feature- oder Bug-Änderungen: Version bumpen, CHANGELOG
-   schreiben, committen + pushen.** In genau dieser Reihenfolge, in
-   einem Schub. Siehe "Release-Workflow" unten.
+   schreiben, committen + pushen + git-tag + GitHub/Gitea-Release
+   erstellen.** In genau dieser Reihenfolge, in einem Schub. **Beide
+   Remotes** (origin/Gitea + github) bekommen Commit, Tag UND
+   Release-Eintrag — sonst bleibt das `Latest`-Badge auf der alten
+   Version stehen. Siehe "Release-Workflow" unten.
 4. **Vor dem Coden recherchieren und verifizieren.** Lieber 5 Minuten
    Logs/DB lesen als einen Fix raten. Siehe "Vor jedem Fix" unten.
 5. **Dev muss alle Live-Szenarien abdecken.** Wenn ein Bug auf live
@@ -278,8 +281,49 @@ Mantra:
 5. Commit-Message als HEREDOC, signiert mit
    `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
    wenn der Code per AI-Agent kam.
-6. `git push origin master`.
-7. **Niemals** `--no-verify`, `--force`, `--amend` ohne explizite
+6. **Beide Remotes pushen** — origin (Gitea) UND github:
+   ```bash
+   git push origin master
+   git push github master
+   ```
+7. **Tag erstellen + auf BEIDE Remotes pushen**:
+   ```bash
+   git tag -a v2.X.Y -m "kurze Release-Notes hier"
+   git push origin v2.X.Y
+   git push github v2.X.Y
+   ```
+   Der GitHub-Action `docker-publish.yml` baut bei jedem `v*`-Tag-Push
+   automatisch das Docker-Image und published es als `:2.X.Y` UND
+   `:latest` auf `ghcr.io/marcohediger/mediaassistant`. Ohne Tag passiert
+   nichts — git-Push allein reicht nicht.
+8. **GitHub Release UND Gitea Release erstellen** (Pflicht — sonst bleibt
+   das `Latest`-Badge auf der alten Version stehen). Ein Tag-Push allein
+   reicht nicht; Releases sind eine separate API-Resource.
+
+   GitHub via API (Token aus `git remote get-url github` parsen):
+   ```bash
+   TOKEN=$(git remote get-url github | sed -n 's|.*://[^:]*:\([^@]*\)@.*|\1|p')
+   curl -X POST https://api.github.com/repos/marcohediger/mediaassistant/releases \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Accept: application/vnd.github+json" \
+     -d '{"tag_name":"v2.X.Y","name":"v2.X.Y","body":"<changelog-text>",
+          "draft":false,"prerelease":false,"make_latest":"true"}'
+   ```
+
+   Gitea via API (Credentials aus `git remote get-url origin`):
+   ```bash
+   CREDS=$(git remote get-url origin | sed -n 's|.*://\([^@]*\)@.*|\1|p')
+   curl -X POST https://git.marcohediger.ch/api/v1/repos/MediaAssistant/ma-core/releases \
+     -u "$CREDS" -H "Content-Type: application/json" \
+     -d '{"tag_name":"v2.X.Y","name":"v2.X.Y","body":"<changelog-text>",
+          "draft":false,"prerelease":false}'
+   ```
+
+   Tipp: lass dir vom CHANGELOG.md per Python den passenden Body
+   extrahieren statt manuell zu kopieren. Dann sind beide Releases
+   konsistent mit dem CHANGELOG.
+
+9. **Niemals** `--no-verify`, `--force`, `--amend` ohne explizite
    User-Erlaubnis. Niemals interaktive git-Modi (`-i`).
 
 ## Was NICHT tun
