@@ -52,25 +52,34 @@ def _resolve_reprocess_path(filename: str, debug_key: str) -> str:
     return candidate
 
 
+def _is_immich_target(target_path: str | None) -> bool:
+    """True if `target_path` is an `immich:<asset_id>` reference (not a disk path)."""
+    return bool(target_path and target_path.startswith("immich:"))
+
+
 async def _move_file_for_reprocess(job) -> bool:
     """Move the job's current file (+ sidecar, - log) into REPROCESS_DIR.
 
     Picks `target_path` if it exists on disk, otherwise falls back to
     `original_path`. Updates `job.original_path` to the new location and
-    clears `job.target_path`. Returns True if a file was moved, False if
-    no source file could be located on disk.
+    clears `job.target_path` **only when it pointed to a now-stale local
+    file location**. An `immich:<asset_id>` reference is preserved across
+    the retry, because the asset itself survives — clearing it would
+    leave the job orphaned even though Immich still has the data.
+    Returns True if a file was moved, False if no source file could be
+    located on disk.
     """
     src = None
-    if job.target_path and os.path.exists(job.target_path):
+    if job.target_path and not _is_immich_target(job.target_path) and os.path.exists(job.target_path):
         src = job.target_path
     elif job.original_path and os.path.exists(job.original_path):
         src = job.original_path
 
     if not src:
         # Nothing to move — caller decides whether to fail or continue.
-        # We still clear target_path so the job doesn't reference a
-        # potentially-stale library location after requeue.
-        job.target_path = None
+        # Clear a stale local target_path; preserve immich: references.
+        if not _is_immich_target(job.target_path):
+            job.target_path = None
         return False
 
     await asyncio.to_thread(os.makedirs, REPROCESS_DIR, exist_ok=True)
@@ -110,7 +119,13 @@ async def _move_file_for_reprocess(job) -> bool:
             pass
 
     job.original_path = dst
-    job.target_path = None
+    # Only clear target_path if it pointed to a now-stale local file
+    # location. An `immich:<asset_id>` reference still points to a valid
+    # asset that survives the retry — keep it so the job remains linked
+    # to its Immich data even when IA-08's cached step result skips
+    # re-running on retry.
+    if not _is_immich_target(job.target_path):
+        job.target_path = None
     return True
 
 
@@ -199,7 +214,12 @@ async def prepare_job_for_reprocess(
         # of that path.
         pass
     else:
-        job.target_path = None
+        # Only clear target_path if it was a now-stale local file path.
+        # An `immich:<asset_id>` reference still points to a valid asset
+        # — preserve it so the job stays linked to its Immich data after
+        # IA-08's cached step result skips re-execution on retry.
+        if not _is_immich_target(job.target_path):
+            job.target_path = None
 
     if commit:
         await session.commit()

@@ -382,13 +382,28 @@ async def reset_job_for_retry(job_id: int) -> bool:
         # File move + sidecar handling + status flip is done by the helper.
         from pipeline.reprocess import prepare_job_for_reprocess
         finalizer_skip = {code: None for code in ("IA-09", "IA-10", "IA-11")}
-        await prepare_job_for_reprocess(
+        moved_or_skipped = await prepare_job_for_reprocess(
             session,
             job,
             drop_step_statuses={"error", "warning"},
             move_file=True,
             commit=False,
         )
+        if not moved_or_skipped:
+            # No source file could be located on disk — neither at
+            # target_path nor at original_path. Requeueing now would
+            # spin the job through the pipeline forever, each pass
+            # failing at IA-01/IA-08 with the same FileNotFoundError
+            # (this is exactly what happened on the live system before
+            # the fix — see MA-2026-15415, -23077). Stop the loop and
+            # surface a clear error to the user instead.
+            job.status = "error"
+            job.error_message = (
+                "Datei nicht auffindbar — Retry abgebrochen. Weder "
+                f"target_path noch original_path existieren auf der Disk."
+            )
+            await session.commit()
+            return False
         # Finalizer reset is retry-specific — apply after the helper.
         current = dict(job.step_result or {})
         for code in finalizer_skip:
