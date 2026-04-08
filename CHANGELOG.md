@@ -1,5 +1,50 @@
 # Changelog
 
+## v2.28.36 — 2026-04-08
+
+### Performance: `_wait_for_immich_tags` max_wait von 120s → 15s + konfigurierbar
+
+User-Beobachtung in den Test-Läufen: trotz v2.28.34 (Skip-Wait wenn
+IA-07 nichts schreibt) brauchten R5/R6-Tests immer noch **128-129
+Sekunden pro Job** — exakt der `max_wait=120s`-Timeout aus
+`_wait_for_immich_tags`.
+
+**Ursache:** mein v2.28.34 Skip-Wait greift nur wenn
+`keywords_written=[]`. Aber sobald IA-07 EGAL WAS schreibt — auch
+ein einzelnes Wort wie "unknown" — läuft der Wait. Wenn Immich
+diese Keywords aus irgendeinem Grund nicht extracten kann
+(falsches XMP-Format, langsame Worker-Queue, große Datei,
+unsupported Codec), läuft der Poll bis zum vollen Timeout. Im
+Live-System passiert das genauso wie im Test, nur dass der User
+es im einzelnen Job-Background nicht merkt.
+
+**Fix:** `max_wait` Default von 120s auf **15s** reduziert. Plus
+**konfigurierbar** via Config-Setting `immich.tag_wait_max_seconds`:
+
+- `15` (Default): poll 5× im 3s-Intervall
+- `0`: kompletter Skip — direkt zum API-Tagging
+- größere Werte: für extrem langsame Setups (Synology mit ML-
+  Worker-Queue), via Settings-UI oder DB änderbar
+
+Begründung für 15s als Default: der Original-Commit-Kommentar
+behauptete "30-90s, especially for PNG files" auf Synology — aber
+in der Praxis (gemessen auf dev mit echtem Immich) extrahiert
+Immich entweder innerhalb der ersten 3-6s oder gar nicht. Wenn es
+nach 15s noch nichts hat, ist die Wahrscheinlichkeit dass es noch
+passiert minimal — und der Fallback auf API-Tagging übernimmt es
+sauber, weil die Immich-Tag-API auf Tag-Namen-Ebene idempotent ist
+(duplicate POST → 400/409, vom Code abgefangen).
+
+**Messung im Test-Lauf:**
+
+| | Vor v2.28.36 | Nach v2.28.36 | Speedup |
+|---|---|---|---|
+| R5 (Immich+direct error retry) | 128s | 22s | 6× |
+| R6 (Immich+sidecar error retry) | 129s | 22s | 6× |
+| **Total `test_retry_file_lifecycle.py`** | **401s** | **230s** | **43%** |
+
+99/99 grün, 26/26 grün im Regression-Suite.
+
 ## v2.28.35 — 2026-04-08
 
 ### Fix: Cascade-Drop griff nicht wenn IA-05 keinen `status: warning` mehr hatte (Live-Vorfall MA-2026-28121)
