@@ -10,7 +10,7 @@ from sqlalchemy import select
 from config import config_manager
 from database import async_session as _async_session
 from safe_file import safe_move
-from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, get_asset_info, get_user_api_key
+from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, untag_asset, get_asset_info, get_user_api_key
 
 
 async def _is_folder_tags_active(job) -> bool:
@@ -40,7 +40,8 @@ async def _tag_immich_asset(
     *,
     api_key: str | None = None,
     ia07_wrote_tags: bool = False,  # kept for compat, unused since v2.28.38
-) -> tuple[list, list]:
+    previous_tags: list[str] | None = None,
+) -> tuple[list, list, list]:
     """Tag an Immich asset via the Immich API.
 
     Before v2.28.38 this function polled `_wait_for_immich_tags` for up
@@ -51,21 +52,29 @@ async def _tag_immich_asset(
     in the worst case because Immich's tag extraction was unreliable.
     The wait has been removed entirely.
 
-    New behaviour:
-      1. One GET `get_asset_info()` to discover pre-existing tags from
-         previous imports (reported back as `already` so the job result
-         still correctly lists them as written). No poll, no wait.
-      2. For every tag NOT already present, POST `tag_asset()` via the
-         Immich API. The API handles "tag name already exists" with
-         400/409 which `tag_asset()` catches, so concurrent / duplicate
-         writes are harmless.
+    v2.28.39: also accepts `previous_tags` — a list of tag names that
+    this job previously wrote to the asset. Any tag that's in the
+    previous set but NOT in the new `tag_keywords` set is REMOVED from
+    the Immich asset via `untag_asset()`. This is how a retry with a
+    corrected IA-05 classification can replace the old 'unknown' tag
+    with the fresh classification: the nuclear retry saves the old
+    immich_tags_written list under a sentinel key in step_result, and
+    reset_job_for_retry passes it back in here via IA-08 → this call.
 
-    Net effect: IA-08 upload-to-tagged is bounded by the number of API
-    calls instead of a timeout, which on our setup means ~0.5s-2s per
-    job instead of up to 120s.
+    Tags that are on the asset but were NOT in `previous_tags` are
+    preserved — those are assumed to be user-added via the Immich UI
+    and we don't touch them.
+
+    Behaviour:
+      1. GET `get_asset_info()` — de-dup reporting.
+      2. For every tag in `tag_keywords` NOT already on asset: POST.
+      3. For every tag in `previous_tags` NOT in `tag_keywords`:
+         DELETE via `untag_asset()`.
+
+    Returns (tags_written, tags_failed, tags_removed).
     """
-    # Single GET — no poll. Only to de-duplicate reporting ("already"
-    # vs "newly written"), not a performance-critical path.
+    # Single GET — no poll. Used for dedup reporting + to know which
+    # tags currently live on the asset.
     info = await get_asset_info(asset_id, api_key=api_key)
     existing_tags: set[str] = set()
     if info:
@@ -82,9 +91,24 @@ async def _tag_immich_asset(
             tags_failed.append(tag_name)
             logger.warning("Failed to tag asset %s with '%s': %s", asset_id, tag_name, exc)
 
+    # Remove any tag that this job WROTE last time but is NOT in the
+    # new desired set. Limited to `previous_tags` specifically so that
+    # user-added tags (via Immich UI) are preserved untouched.
+    tags_removed: list[str] = []
+    if previous_tags:
+        new_set = set(tag_keywords)
+        stale = [t for t in previous_tags if t and t not in new_set]
+        for tag_name in stale:
+            try:
+                result = await untag_asset(asset_id, tag_name, api_key=api_key)
+                if result.get("status") == "untagged":
+                    tags_removed.append(tag_name)
+            except Exception as exc:
+                logger.warning("Failed to untag asset %s from '%s': %s", asset_id, tag_name, exc)
+
     # Include pre-existing tags in written list for reporting
     already = [t for t in tag_keywords if t in existing_tags]
-    return already + tags_written, tags_failed
+    return already + tags_written, tags_failed, tags_removed
 
 
 def _parse_date(date_str: str) -> datetime | None:
@@ -307,6 +331,10 @@ async def execute(job, session) -> dict:
     exif = step_results.get("IA-01", {})
     ai_result = step_results.get("IA-05", {})
     geo_result = step_results.get("IA-03", {})
+    # Sentinel list injected by reset_job_for_retry() — tags this job
+    # wrote on its PREVIOUS run, so we can delete any that are no
+    # longer in the current set (= real stale removal).
+    previous_immich_tags = list(step_results.get("_retry_previous_immich_tags") or [])
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
 
@@ -504,11 +532,13 @@ async def execute(job, session) -> dict:
                     raise
             job.target_path = f"immich:{job.immich_asset_id}"
 
-        # Tag the asset in Immich. Only wait for Immich's auto-extraction
-        # if IA-07 actually wrote keywords into the file (or sidecar).
-        tags_written, tags_failed = await _tag_immich_asset(
+        # Tag the asset in Immich. Also removes any stale tag that was
+        # in the PREVIOUS retry's immich_tags_written set but is no
+        # longer desired (e.g. 'unknown' from before an IA-05 fix).
+        tags_written, tags_failed, tags_removed = await _tag_immich_asset(
             job.immich_asset_id, tag_keywords, api_key=user_api_key,
             ia07_wrote_tags=bool(ia07_result.get("keywords_written")),
+            previous_tags=previous_immich_tags,
         )
 
         # NSFW: move to locked folder
@@ -548,10 +578,13 @@ async def execute(job, session) -> dict:
             "immich_albums_added": upload_result.get("albums_added", []) if immich_replaced else [],
             "immich_tags_written": tags_written,
             "immich_tags_failed": tags_failed,
+            "immich_tags_removed": tags_removed,
         }
         if tags_failed:
             result["status"] = "warning"
             result["reason"] = f"Immich-Tags fehlgeschlagen: {', '.join(tags_failed)}"
+        # Drop the retry sentinel so it doesn't leak into next run's step_result
+        step_results.pop("_retry_previous_immich_tags", None)
         return result
 
     # Route: Immich upload or target directory
@@ -577,14 +610,17 @@ async def execute(job, session) -> dict:
 
         asset_id = immich_result.get("id", "")
 
-        # Tag asset in Immich. Only wait for Immich's auto-extraction
-        # if IA-07 actually wrote keywords into the file (or sidecar).
+        # Tag asset in Immich. Also removes any stale tag that was in
+        # the PREVIOUS retry's immich_tags_written set but is no longer
+        # desired (e.g. 'unknown' from before an IA-05 fix).
         tags_written = []
         tags_failed = []
+        tags_removed = []
         if asset_id:
-            tags_written, tags_failed = await _tag_immich_asset(
+            tags_written, tags_failed, tags_removed = await _tag_immich_asset(
                 asset_id, tag_keywords, api_key=user_api_key,
                 ia07_wrote_tags=bool(ia07_result.get("keywords_written")),
+                previous_tags=previous_immich_tags,
             )
 
         # NSFW: move to locked folder in Immich
@@ -637,6 +673,7 @@ async def execute(job, session) -> dict:
             "immich_albums_added": immich_result.get("albums_added", []),
             "immich_tags_written": tags_written,
             "immich_tags_failed": tags_failed,
+            "immich_tags_removed": tags_removed,
         }
         # Surface immich tag failures as a soft warning so the job UI shows
         # "Warnungen in: IA-08" instead of silently hiding the failure in
@@ -644,6 +681,8 @@ async def execute(job, session) -> dict:
         if tags_failed:
             result["status"] = "warning"
             result["reason"] = f"Immich-Tags fehlgeschlagen: {', '.join(tags_failed)}"
+        # Drop the retry sentinel so it doesn't leak into next run's step_result
+        step_results.pop("_retry_previous_immich_tags", None)
         return result
 
     # Move file to library (safe: copy → verify → delete)

@@ -219,6 +219,53 @@ async def lock_asset(asset_id: str, *, api_key: str | None = None) -> dict:
     return {"status": "locked", "asset_id": asset_id}
 
 
+async def untag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None) -> dict:
+    """Remove a tag-asset association in Immich.
+
+    Looks up the tag by name (no lookup or listing needed if the tag
+    exists — Immich's `GET /api/tags` is cheap), then issues a
+    `DELETE /api/tags/{tag_id}/assets` with the asset id in the body.
+    Non-existing tags are a no-op (status='missing'). Never raises on
+    "tag not found" because removing a tag that isn't there is the
+    goal of this call anyway.
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Find the tag by name
+        list_resp = await client.get(f"{url}/api/tags", headers=headers)
+        if list_resp.status_code != 200:
+            raise RuntimeError(
+                f"List tags failed: HTTP {list_resp.status_code} — {list_resp.text[:200]}"
+            )
+        tag_id = next(
+            (t["id"] for t in list_resp.json() if t.get("name") == tag_name),
+            None,
+        )
+        if not tag_id:
+            return {"status": "missing", "tag_name": tag_name, "asset_id": asset_id}
+
+        # DELETE /api/tags/{id}/assets — removes the tag-asset association.
+        # httpx supports DELETE with body via request("DELETE", ...).
+        resp = await client.request(
+            "DELETE",
+            f"{url}/api/tags/{tag_id}/assets",
+            headers=headers,
+            json={"ids": [asset_id]},
+        )
+
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(
+            f"Untag '{tag_name}' failed: HTTP {resp.status_code} — {resp.text[:200]}"
+        )
+
+    return {"status": "untagged", "tag_name": tag_name, "tag_id": tag_id, "asset_id": asset_id}
+
+
 async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None) -> dict:
     """Add a tag to an asset in Immich. Creates the tag if it doesn't exist."""
     url, api_key = await _resolve_api_key(api_key)
