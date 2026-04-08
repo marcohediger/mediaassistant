@@ -1,5 +1,70 @@
 # Changelog
 
+## v2.28.28 — 2026-04-08
+
+### Fix: Retry löscht die Datei (Live-Bug MA-2026-28123 / -15415)
+
+Drei eng zusammenhängende Bugs im Retry-Pfad führten dazu, dass ein
+Klick auf „Retry" auf einem Job mit `Warnungen in: IA-05` die Datei
+permanent von der Disk gelöscht hat — obwohl sie kurz vor dem Klick
+nachweislich noch vorhanden war.
+
+**1) `pipeline/step_ia10_cleanup.py` — IA-10 löscht zu aggressiv**
+
+IA-10 räumte `job.original_path` immer dann ab, wenn `immich_asset_id`
+gesetzt war. Diese Bedingung sollte ursprünglich nur die Tempdirs des
+Immich-Pollers (`/tmp/ma_immich_xxxxxxxx/`) treffen — feuerte aber
+auch auf Inbox-Jobs, sobald der erste erfolgreiche IA-08-Upload eine
+`immich_asset_id` gesetzt hatte. Folge: nach einem Retry verschob
+`_move_file_for_reprocess` die Inbox-Datei nach
+`/app/data/reprocess/`, IA-10 löschte sie dort weg, und nichts blieb
+auf der Disk übrig. Die einzige Spur war die Immich-Kopie.
+
+Fix: zusätzlich `source_label == "Immich"` UND
+`original_path.startswith("/tmp/ma_immich_")` prüfen, sodass nur
+echte Poller-Tempdirs geräumt werden.
+
+**2) `pipeline/__init__.py:reset_job_for_retry` — Endlos-Retry bei
+verschwundener Quelldatei**
+
+`prepare_job_for_reprocess` gab `False` zurück, wenn weder
+`target_path` noch `original_path` auf der Disk existierten — der
+Aufrufer hat den Rückgabewert aber ignoriert und den Job trotzdem
+auf `queued` gesetzt. Damit lief jeder Retry-Versuch in dieselbe
+`FileNotFoundError`-Schleife (siehe MA-2026-15415, -23077, -22930
+auf live).
+
+Fix: Rückgabewert wird jetzt geprüft. Bei `False` wird der Job auf
+`status='error'` gesetzt mit klarer Meldung „Datei nicht
+auffindbar — Retry abgebrochen", statt blind requeued zu werden.
+
+**3) `pipeline/reprocess.py:_move_file_for_reprocess` — `target_path`
+wird beim Retry zerstört**
+
+`_move_file_for_reprocess` und `prepare_job_for_reprocess` haben
+`job.target_path` unbedingt auf `None` gesetzt. Bei Inbox-Jobs ist
+`target_path` aber bereits beim Retry-Zeitpunkt eine
+`immich:<asset_id>`-Referenz. Da IA-08 sein Step-Result aus dem
+ersten Lauf gecacht hat und beim Retry NICHT erneut läuft, wurde
+das gecleared `target_path` nie wieder gesetzt — der Job stand am
+Ende mit `target_path=None` da, obwohl das Immich-Asset weiterhin
+existierte.
+
+Fix: ein neuer Helper `_is_immich_target()` erkennt
+`immich:`-Referenzen, und das Cleanup erfolgt nur noch für lokale
+Disk-Pfade. `immich:`-Referenzen werden über den Retry hinweg
+erhalten.
+
+**Test-Coverage:**
+
+`backend/test_retry_file_lifecycle.py` reproduziert das Live-Szenario
+1:1 gegen das echte Dev-Immich (Sidecar + Direct Mode + Negativ-Fall
+für verschwundene Quelldatei). Vor dem Fix 8 Asserts rot, nach dem
+Fix 24/24 grün. `test_duplicate_fix.py` Tests 7+8 (Race-Conditions
+für `retry_job`) wurden auf reale Dummy-Files (0-Byte) umgestellt,
+weil der neue `reset_job_for_retry`-Vertrag eine existierende
+Quelldatei voraussetzt.
+
 ## v2.28.27 — 2026-04-07
 
 ### UI: Header-Buttons mit Title oben bündig statt vertikal zentriert

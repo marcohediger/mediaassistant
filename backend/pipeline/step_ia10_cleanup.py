@@ -40,8 +40,22 @@ async def execute(job, session) -> dict:
     google_json_path = ia01_result.get("google_json_path")
     _safe_remove(google_json_path, "Google JSON")
 
-    # Remove downloaded file and temp dir from Immich webhook
-    if job.immich_asset_id and job.original_path:
+    # Remove downloaded file and temp dir from the Immich poller.
+    #
+    # IMPORTANT: this MUST only fire for files the Immich poller downloaded
+    # into its own tempdir (filewatcher.py uses
+    # `tempfile.mkdtemp(prefix="ma_immich_")` and tags the job with
+    # source_label="Immich"). Earlier versions checked only
+    # `job.immich_asset_id`, which is also set on inbox-sourced jobs after
+    # the very first successful upload — so a manual retry would move the
+    # inbox file into /app/data/reprocess/ and IA-10 would happily delete
+    # the only remaining copy. Cf. live incident MA-2026-28123.
+    if (
+        job.immich_asset_id
+        and job.original_path
+        and job.source_label == "Immich"
+        and job.original_path.startswith("/tmp/ma_immich_")
+    ):
         _safe_remove(job.original_path, "Immich download")
         # Remove temp directory if empty
         parent = os.path.dirname(job.original_path)

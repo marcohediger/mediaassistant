@@ -437,10 +437,17 @@ async def test_retry_job_blocks_parallel_run_pipeline():
 
     await _cleanup_keys("RACE-C-")
 
+    # reset_job_for_retry now refuses to requeue a job whose source file is
+    # gone (prevents the infinite retry loop seen on live, MA-2026-15415).
+    # Stage a real-but-broken file so IA-01 still errors out the way the
+    # race assertions below expect.
+    race_file = "/tmp/__race_c_broken.jpg"
+    open(race_file, "wb").close()  # 0-byte file → ExifTool errors with "File is empty"
+
     async with async_session() as s:
         j = Job(
             filename="race_c.jpg",
-            original_path="/tmp/__race_c_nofile.jpg",
+            original_path=race_file,
             debug_key="RACE-C-1",
             status="error",
             error_message="[IA-01] previous failure",
@@ -472,10 +479,14 @@ async def test_retry_job_blocks_parallel_run_pipeline():
     async with async_session() as s:
         j = await s.get(Job, jid)
         ia01 = (j.step_result or {}).get("IA-01", {})
-        # Stale 'reason: stale' must be replaced with a fresh ExifTool error
+        # Stale 'reason: stale' must be replaced with a fresh ExifTool error.
+        # The pipeline error handler stores reason as "<ExceptionType>: <msg>",
+        # so the new message contains "ExifTool" somewhere even though it
+        # doesn't start with it.
+        reason = ia01.get("reason", "") if isinstance(ia01, dict) else ""
         report("IA-01 was re-executed (no stale reason)",
-               isinstance(ia01, dict) and ia01.get("reason", "").startswith("ExifTool"),
-               f"got {ia01.get('reason', '')[:60]}")
+               "ExifTool" in reason,
+               f"got {reason[:80]}")
         result = await s.execute(
             select(SystemLog).where(SystemLog.message.like("%RACE-C-1%"))
         )
@@ -483,6 +494,10 @@ async def test_retry_job_blocks_parallel_run_pipeline():
         report("only 1-2 system_logs entries (no duplicate processing)", n <= 2, f"got {n}")
 
     await _cleanup_keys("RACE-C-")
+    try:
+        os.remove(race_file)
+    except OSError:
+        pass
 
 
 async def test_parallel_retry_job_calls():
@@ -493,10 +508,15 @@ async def test_parallel_retry_job_calls():
 
     await _cleanup_keys("RACE-D-")
 
+    # Same reason as Test 7: reset_job_for_retry refuses retries when the
+    # source file is missing, so stage a real-but-broken file.
+    race_file = "/tmp/__race_d_broken.jpg"
+    open(race_file, "wb").close()  # 0-byte file → ExifTool errors with "File is empty"
+
     async with async_session() as s:
         j = Job(
             filename="race_d.jpg",
-            original_path="/tmp/__race_d_nofile.jpg",
+            original_path=race_file,
             debug_key="RACE-D-1",
             status="error",
             error_message="[IA-01] previous failure",
@@ -516,6 +536,11 @@ async def test_parallel_retry_job_calls():
     n_false = sum(1 for r in results if r is False)
     report("exactly 1 retry_job succeeded", n_true == 1, f"true={n_true}")
     report("4 retry_job returned False", n_false == 4, f"false={n_false}")
+    await _cleanup_keys("RACE-D-")
+    try:
+        os.remove(race_file)
+    except OSError:
+        pass
 
     await _cleanup_keys("RACE-D-")
 
