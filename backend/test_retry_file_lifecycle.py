@@ -276,6 +276,33 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
             f"target={after_target}",
         )
 
+        # F) Cascade-reset: IA-07 and IA-08 step results must reflect the
+        #    NEW IA-05 run (not the synthetic 'unknown' from the warning
+        #    state we injected). The cascade in _reset_step_results drops
+        #    all downstream steps when IA-05 is dropped → IA-07/IA-08
+        #    re-run with the fresh AI output and write the real tags.
+        ia05 = after_step_result.get("IA-05", {})
+        ia07 = after_step_result.get("IA-07", {})
+        ia08 = after_step_result.get("IA-08", {})
+        ia05_type = ia05.get("type", "")
+        ia07_keywords = ia07.get("keywords_written", []) or []
+        ia08_tags = ia08.get("immich_tags_written", []) or []
+        report(
+            "cascade: IA-05 re-ran with non-'unknown' classification",
+            ia05_type and ia05_type != "unknown",
+            f"ia05.type={ia05_type!r}",
+        )
+        report(
+            "cascade: IA-07 keywords no longer carry the synthetic 'unknown'",
+            "unknown" not in ia07_keywords,
+            f"ia07.keywords_written={ia07_keywords}",
+        )
+        report(
+            "cascade: IA-08 immich_tags no longer carry the synthetic 'unknown'",
+            "unknown" not in ia08_tags,
+            f"ia08.immich_tags_written={ia08_tags}",
+        )
+
     except Exception as e:
         traceback.print_exc()
         report(f"unexpected exception in {mode} test", False, repr(e))
