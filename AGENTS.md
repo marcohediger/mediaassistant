@@ -71,8 +71,7 @@ MediaAssistant/
 ├── docker-compose.build.yml    # Build-only
 ├── docker-compose.local.yml    # gitignored — lokale Overrides
 ├── docs/
-│   ├── sorting-flow.md
-│   └── test-matrix.md          # Vollständige Pipeline-Coverage-Matrix (normal + retry + reprocess)
+│   └── sorting-flow.md
 ├── CHANGELOG.md                # Pflicht: jedem Release ein Eintrag
 ├── REQUIREMENTS.md             # Original-Spec, eher historisch
 ├── TESTPLAN.md                 # Umfangreich, älterer Stand (>900 Zeilen)
@@ -182,9 +181,10 @@ Wenn ein Live-Bug gemeldet wird, ist die Pflicht-Reihenfolge:
 4. Bestehende Tests ALLE laufen lassen — keine Regressionen erlaubt.
 5. Erst dann Version bumpen + commit + push.
 
-Siehe auch [`docs/test-matrix.md`](docs/test-matrix.md)
-für ein konkretes Beispiel einer vollständig kartografierten Test-
-Matrix mit explizit markierten Lücken.
+Siehe auch [`TESTPLAN.md` Sektion 15](TESTPLAN.md#15-test-matrix--vollständige-coverage-karte-v22829)
+für die vollständig kartografierte Test-Matrix aller Pipeline-
+Entry-Points (Filewatcher, Immich-Poller, Retry, Duplikat-Review)
+mit explizit markierten Lücken.
 
 ### Test-Schreibung — Konventionen
 
