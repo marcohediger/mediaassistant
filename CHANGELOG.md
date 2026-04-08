@@ -1,5 +1,69 @@
 # Changelog
 
+## v2.28.37 — 2026-04-08
+
+### Fix: Nuclear retry — drop ALL step results, period (15 stuck Live-Jobs)
+
+User-Aussage: "es kann doch nicht so schwer sein, beim retry einfach
+alle alten daten zu verwerfen und das einfach neu abzuarbeiten".
+Hat komplett recht. Meine v2.28.33-36 cascade-Logik war zu schlau
+und scheiterte an einem Live-Zustand mit 15 betroffenen Jobs:
+
+- `status='done'`
+- `error_message=None`  ← gecleart durch einen früheren partiellen Retry
+- `step_result.IA-05` = success **ohne** status field (frische Klassifikation)
+- `step_result.IA-07/IA-08` = stale, mit `'unknown'` aus der Pre-Fix-Zeit
+
+In dem Zustand griff KEIN Cascade:
+- by-status (v2.28.33): IA-05 hat keinen warning-Status
+- by-error_message (v2.28.35): error_message ist None
+- Selbst wenn der User auf "Erneut verarbeiten" klickte, refused
+  das Retry-Endpoint die Annahme, weil `is_warning` nur für
+  `error_message LIKE "Warnungen in:%"` matched. Auf der Detail-
+  Page war der Button gar nicht sichtbar wenn `error_message=None`.
+- Die Jobs hingen für immer fest. Nichts konnte sie reparieren.
+
+**Drei zusammenhängende Fixes:**
+
+1. **Nuclear drop in `pipeline/__init__.py:reset_job_for_retry()`**:
+   `drop_step_codes = {IA-01, IA-02, ..., IA-11}`. Komplett alles.
+   Keine Cleverness, keine Cascade-Versuche, keine Optimierungen.
+   IA-01 (EXIF) ist deterministisch und schnell — kein Verlust.
+
+2. **Atomic-Claim erweitert** in `reset_job_for_retry()`: akzeptiert
+   jetzt jeden terminal-Status (`error`, `done`, `review`,
+   `duplicate`, `skipped`, `orphan`). Nur `queued`/`processing`
+   werden abgelehnt (Race-Schutz).
+
+3. **Retry-Endpoint + Detail-Page-Button** in `routers/api.py` und
+   `templates/log_detail.html`: der "Erneut verarbeiten"-Button
+   ist jetzt für jeden non-running Job sichtbar und das Endpoint
+   akzeptiert ihn. Damit können die 15 stuck-Live-Jobs gefixt
+   werden ohne SQL-Migration — User klickt einmal auf jeden,
+   fertig.
+
+**Test-Coverage:** neuer Test `_run_stuck_state_retry_test`
+reproduziert MA-2026-28115/28121 exakt:
+- Job mit `status='done'`, `error_message=None`
+- IA-05 success-without-status, IA-07/IA-08 mit stale `'unknown'`
+- Trigger Retry → muss akzeptiert werden, IA-07/IA-08 müssen
+  fresh sein, Immich-API-Verifikation der echten Tags
+
+Pre-v2.28.37 wäre der Test rot (reset_job_for_retry refused).
+Post-Fix: **106/106 grün** (`test_retry_file_lifecycle.py`),
+26/26 (`test_duplicate_fix.py`).
+
+**Was du jetzt tun solltest:**
+1. `docker compose pull && docker compose up -d` auf live (v2.28.37)
+2. Auf jede der 15 stuck-Jobs (MA-2026-28111, -28115, -28121, ...)
+   "Erneut verarbeiten" klicken — diesmal wird ALLES neu verarbeitet
+3. Neue Tags landen sauber in Immich
+
+Falls du eine Liste der betroffenen Jobs willst, kann ich die aus
+der Live-DB extrahieren — alle Jobs mit `IA-05.type != 'unknown'`
+aber `'unknown' in IA-07.keywords_written`. Das ist die exakte
+Smoking-Gun-Signatur.
+
 ## v2.28.36 — 2026-04-08
 
 ### Performance: `_wait_for_immich_tags` max_wait von 120s → 15s + konfigurierbar

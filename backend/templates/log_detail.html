@@ -55,8 +55,17 @@
 <div class="detail-section">
     <h2>{{ t.job_detail.error }}</h2>
     <div class="alert alert-error" style="white-space: pre-wrap; font-family: monospace; font-size: 0.85rem;">{{ job.error_message }}</div>
-    {% if job.status == 'error' or (job.status == 'done' and job.error_message and job.error_message.startswith('Warnungen in:')) %}
-    <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
+</div>
+{% endif %}
+
+{# Retry/Delete actions are available for any terminal job state.
+   The user is the source of truth for "this needs redoing" — even
+   jobs that look fine in the UI may have stale internal step_result
+   (live: MA-2026-28115/28121 had error_message=None but stale IA-07/
+   IA-08 tags). Only hide for jobs currently being processed. #}
+{% if job.status not in ('queued', 'processing') %}
+<div class="detail-section">
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
         <form method="post" action="/api/job/{{ job.debug_key }}/retry">
             <button type="submit" class="btn btn-primary">{{ t.job_detail.retry }}</button>
         </form>
@@ -65,7 +74,6 @@
             <button type="submit" class="btn btn-danger">{{ t.job_detail.delete }}</button>
         </form>
     </div>
-    {% endif %}
 </div>
 {% endif %}
 

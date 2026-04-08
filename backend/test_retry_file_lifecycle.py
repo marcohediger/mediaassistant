@@ -780,6 +780,149 @@ async def _run_immich_only_retry_test(source_heic: str):
         report("unexpected exception in immich-only retry test", False, repr(e))
 
 
+async def _run_stuck_state_retry_test(source_heic: str):
+    """Reproduce MA-2026-28115/28121: a job that has been retried at
+    least once before, leaving it in a stuck state where:
+      - status='done'
+      - error_message=None  ← cleared by a previous partial retry
+      - step_result.IA-05 = success without status field (fresh classification)
+      - step_result.IA-07 = stale, contains 'unknown' from before the IA-05 fix
+      - step_result.IA-08 = stale, immich_tags_written = ['unknown', ...]
+
+    Pre-v2.28.37 NO retry mechanism could fix this:
+      - cascade-by-status (v2.28.33): IA-05 has no warning status → no drop
+      - cascade-by-error_message (v2.28.35): error_message is None → no drop
+      - the user's retry click was a complete no-op
+
+    v2.28.37 nuclear retry: drops IA-02..IA-08 unconditionally, period.
+    Verified by querying the live Immich asset for the actual tags.
+    """
+    print(f"\n── Test: stuck-state retry (MA-2026-28115/28121 repro) ──")
+    test_name = f"__retry_stuck_{int(datetime.now().timestamp())}.HEIC"
+    inbox_path = os.path.join(INBOX, test_name)
+    job_id: int | None = None
+
+    try:
+        source_heic = _make_unique_source(source_heic)
+        await config_manager.set("metadata.write_mode", "sidecar")
+        _stage_inbox_file(source_heic, test_name)
+
+        # First run via real pipeline so we have a real Immich asset
+        async with async_session() as session:
+            job = Job(
+                filename=test_name,
+                original_path=inbox_path,
+                debug_key=f"MA-LIFECYCLE-STUCK-{int(datetime.now().timestamp())}",
+                status="queued",
+                source_label="Default Inbox",
+                source_inbox_path=INBOX,
+                use_immich=True,
+                step_result={},
+            )
+            session.add(job)
+            await session.commit()
+            job_id = job.id
+
+        await run_pipeline(job_id)
+
+        # Mutate to the stuck state — exactly like MA-2026-28121 in live DB
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            sr = dict(job.step_result or {})
+            # IA-05 success (no status) — like a fresh re-run
+            sr["IA-05"] = {
+                "type": "Persönliches Foto",
+                "source": "Kamerafoto",
+                "tags": ["FreshTag1", "FreshTag2", "FreshTag3"],
+                "description": "fresh AI run",
+                "mood": "indoor", "people_count": 0,
+                "quality": "good", "confidence": 0.9,
+            }
+            # IA-07 stale, with the dreaded 'unknown'
+            sr["IA-07"] = {
+                "keywords_written": ["unknown", "STUCK_STALE_GEO"],
+                "description_written": "stale", "ocr_text_written": "",
+                "tags_count": 2, "sidecar_path": "/inbox/old.xmp",
+                "write_mode": "sidecar",
+            }
+            sr["IA-08"] = {
+                "category": "personliches_foto",
+                "target_path": job.target_path,
+                "moved": False, "immich_upload": True,
+                "immich_id": (job.immich_asset_id or ""),
+                "immich_albums_added": [],
+                "immich_tags_written": ["unknown", "STUCK_STALE_GEO", "Persönliches Foto"],
+                "immich_tags_failed": [],
+            }
+            job.step_result = sr
+            flag_modified(job, "step_result")
+            # ← KEY DIFFERENCE from _run_stale_warning_state_retry_test:
+            # error_message is None. No "Warnungen in: IA-05" hint.
+            job.error_message = None
+            _stage_inbox_file(source_heic, test_name)
+            job.original_path = inbox_path
+            await session.commit()
+
+        # Trigger retry. Pre-v2.28.37 this would do absolutely nothing
+        # because no cascade signal exists. Post-v2.28.37 it drops
+        # IA-02..IA-08 unconditionally.
+        ok = await reset_job_for_retry(job_id)
+        report("stuck-state: reset_job_for_retry accepted", ok)
+        await run_pipeline(job_id)
+
+        async with async_session() as session:
+            job = await session.get(Job, job_id)
+            after = dict(job.step_result or {})
+            after_asset = job.immich_asset_id
+
+        ia07 = after.get("IA-07", {})
+        ia08 = after.get("IA-08", {})
+        kw = ia07.get("keywords_written", []) or []
+        tags = ia08.get("immich_tags_written", []) or []
+
+        report(
+            "stuck-state: IA-07 keywords no longer carry 'unknown'",
+            "unknown" not in kw,
+            f"ia07.keywords_written={kw}",
+        )
+        report(
+            "stuck-state: IA-07 keywords no longer carry 'STUCK_STALE_GEO'",
+            "STUCK_STALE_GEO" not in kw,
+            f"ia07.keywords_written={kw}",
+        )
+        report(
+            "stuck-state: IA-08 immich_tags no longer carry 'unknown'",
+            "unknown" not in tags,
+            f"ia08.immich_tags_written={tags}",
+        )
+        report(
+            "stuck-state: IA-08 immich_tags no longer carry 'STUCK_STALE_GEO'",
+            "STUCK_STALE_GEO" not in tags,
+            f"ia08.immich_tags_written={tags}",
+        )
+
+        # Strong assert: query Immich directly
+        if after_asset:
+            from immich_client import get_asset_info
+            info = await get_asset_info(after_asset)
+            if info:
+                live_tags = {t.get("value") for t in (info.get("tags") or [])}
+                report(
+                    "stuck-state: Immich-API confirms 'unknown' is gone",
+                    "unknown" not in live_tags,
+                    f"live={sorted(live_tags)}",
+                )
+                report(
+                    "stuck-state: Immich-API confirms 'STUCK_STALE_GEO' is gone",
+                    "STUCK_STALE_GEO" not in live_tags,
+                    f"live={sorted(live_tags)}",
+                )
+
+    except Exception as e:
+        traceback.print_exc()
+        report("stuck-state: unexpected exception", False, repr(e))
+
+
 async def _run_stale_warning_state_retry_test(source_heic: str):
     """Reproduce MA-2026-28121: Retry triggered on a job whose IA-05
     cached result no longer carries `status: warning` (because a
@@ -1132,6 +1275,7 @@ async def main():
         )
         await _run_immich_only_retry_test(source_heic=source)
         await _run_stale_warning_state_retry_test(source_heic=source)
+        await _run_stuck_state_retry_test(source_heic=source)
         await _run_immich_tag_wait_skip_test(source_heic=source)
         await _run_truly_missing_test()
     finally:
