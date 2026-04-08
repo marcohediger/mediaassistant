@@ -1,34 +1,23 @@
 # Testplan — MediaAssistant
 
-> **Letzter Test-Stand: v2.28.29 — 2026-04-08**
-> - **Sektion 15** (Test-Matrix, neu in v2.28.29): 28 von 72 Pipeline-Szenarien
->   abgedeckt, 44 Lücken explizit dokumentiert. Siehe Abschnitt 15.
-> - `backend/test_retry_file_lifecycle.py`: **37/37 grün** gegen echtes Dev-Immich
->   (Retry+Reprocess File-Lifecycle, sidecar+direct, immich+file-storage,
->   error+warning, missing-file).
-> - `backend/test_duplicate_fix.py`: **26/26 grün** (Duplikat-Fix #38 + Race-Conditions Test 5–8).
-> - `backend/test_testplan_final.py`: **59/0** (1 Block: HEIC-Testdatei fehlt im
->   Container — preexisting). Sektionen 1, 2, 3, 4, 6, 7, 8, 9, 12.
-> - Sektion 5 (Immich Replace), Sektion 11 (DJI Daten) nicht erneut getestet —
->   keine relevante Code-Änderung seit v2.28.3.
+> Dieses Dokument beschreibt **was** zu testen ist (Szenarien, erwartete
+> Ergebnisse, Test-Skripte). Konkrete Test-**Resultate** eines bestimmten
+> Releases gehören in den jeweiligen Commit / `CHANGELOG.md` — nicht hierhin,
+> weil sie sonst beim nächsten Release sofort veraltet sind.
 >
-> **Letzter vollständiger Testlauf vor v2.28.29: v2.28.3 — 2026-04-07 — 92/92** (Dev-Container)
+> **Wie ausführen:**
+> ```bash
+> docker exec mediaassistant-dev python /app/test_duplicate_fix.py
+> docker exec mediaassistant-dev python /app/test_retry_file_lifecycle.py
+> docker exec mediaassistant-dev python /app/test_testplan_final.py
+> ```
 >
-> Letzter Race-Condition-Testlauf: **v2.28.3 — 2026-04-07** (26/26 bestanden, alle Tests in `backend/test_duplicate_fix.py`)
-> Letzter vollständiger Testlauf vor v2.28.x: **v2.17.1 — 2026-04-02** (296/305 bestanden, 9 nicht testbar)
-> Exotische Tests: 42 Zusatztests, 3 Bugs gefunden und behoben
-> Slow-System Test: 0.5 CPU / 512MB RAM (Synology-Simulation) bestanden
-> Testdaten: Panasonic DMC-GF2 JPGs, DJI FC7203 JPGs, iPhone 12 Pro HEIC/MOV, Casio EX-S600 JPGs, generierte PNG/GIF/WebP/TIFF, UUID Messenger-Dateien
-> Container: v2.9.0, Docker 2GB RAM / 2 CPUs, SQLite mit 7 Indexes
-> Testlauf: 19 Jobs verarbeitet (16 done, 3 duplicate, 0 error, 0 review), Inbox leer nach Abschluss
+> Test-Daten: Panasonic DMC-GF2 JPGs, DJI FC7203 JPGs, iPhone 12 Pro
+> HEIC/MOV, Casio EX-S600 JPGs, generierte PNG/GIF/WebP/TIFF, UUID
+> Messenger-Dateien.
 >
-> **v2.8.0 Änderungen**: Kategorien sind dynamisch aus DB (library_categories). Statische Regeln primär, KI verifies/korrigiert. AI gibt type (DB-Key), source (Herkunft), tags (beschreibend) zurück. Review-Buttons dynamisch. EXIF-Tags: IA-07 schreibt AI-Tags+Source, IA-08 schreibt Kategorie-Label+Source. Noch nicht regressionsgetestet.
->
-> **v2.9.0 Änderungen**: Sorting Rules mit media_type Filter (Bilder/Videos/Alle). Video-pHash Duplikaterkennung (Durchschnitt aus IA-04 Frames). Separate Kategorien sourceless_foto/sourceless_video/personliches_video. Duplikat-"Behalten" startet volle Pipeline nach. Inbox-Garantie: keine Datei bleibt unbeachtet. Retry-Counter (max 3) gegen Crash-Loops. Immich Tag-Fix (HTTP 400). Config JSON-Crash Resilience.
->
-> **v2.28.2 Änderungen**: Atomarer Claim am Anfang von `run_pipeline` via `UPDATE jobs SET status='processing' WHERE id=? AND status='queued'`. Verhindert die Race, dass derselbe Job von zwei Pipeline-Instanzen parallel verarbeitet wird (Worker + retry_job + duplicates_router + immich_poll + startup-resume sind 5 Aufrufer). Symptom-Pflaster aus älteren Releases (XMP pre-delete in IA-07, exists-Check vor Upload in IA-08) wurden entfernt, weil nicht mehr nötig. Startup-Resume setzt Status nun auf `queued` vor `run_pipeline`-Aufruf.
->
-> **v2.28.3 Änderungen**: `retry_job` hatte ein Folge-TOCTOU-Window zwischen seinen zwei Commits (1. status=queued, 2. step_result aufgeräumt). Fix: transienter Lock-State `error → processing → queued` nach Cleanup. 4 neue Race-Condition-Tests (Test 5–8) zu `backend/test_duplicate_fix.py` hinzugefügt — alle 26 Tests grün.
+> **Versions-Änderungen, die Tests betreffen**, gehören in `CHANGELOG.md` —
+> nicht in dieses Dokument.
 
 ## 1. Pipeline-Steps
 
@@ -822,154 +811,7 @@ maskiert:
 
 Falls echte Filesystem-Probleme auftreten (User löscht Datei manuell, NFS-Glitch), werden die Fehler aus `upload_asset()` oder `safe_move()` direkt durchgereicht — mit präziseren Meldungen als die irreführende `file may still be copying or was moved by another process`.
 
-## 14. Vollständiger Testlauf — v2.28.3 — 2026-04-07
-
-> Dev-Container `mediaassistant-dev`, durchgeführt nach v2.28.2/v2.28.3 Race-Condition-Fixes
-> Gesamt: **92/92 Tests bestanden, 0 Fehler, 0 geblockt**
-
-### Test 1: `backend/test_duplicate_fix.py` (26 Tests)
-
-`docker exec mediaassistant-dev python3 /app/test_duplicate_fix.py`
-
-| Bereich | Tests | Resultat |
-|---|---|---|
-| Test 1: `_handle_duplicate` Cleanup-Fehler-Resilienz (Fix #38) | 4 | ✅ |
-| Test 2: Pipeline-Fallback bei IA-02 Exception (Fix #38) | 4 | ✅ |
-| Test 3: Normaler Duplikat-Flow | 4 | ✅ |
-| Test 4: Nicht-Duplikat läuft bis IA-08 | 3 | ✅ |
-| **Test 5 (NEU v2.28.2):** 10× parallel `run_pipeline` → atomic claim blockiert 9 | 3 | ✅ |
-| **Test 6 (NEU v2.28.2):** `run_pipeline` auf done Job → no-op | 2 | ✅ |
-| **Test 7 (NEU v2.28.3):** `retry_job` + 5× `run_pipeline` → frischer IA-01 | 4 | ✅ |
-| **Test 8 (NEU v2.28.3):** 5× parallel `retry_job` → exakt 1× True | 2 | ✅ |
-| **Total** | **26** | **✅ 26/26** |
-
-### Test 2: TESTPLAN-Sektionen (66 Tests in `/tmp/testplan_final.py`)
-
-#### Sektion 9 — Performance
-| Test | Resultat |
-|---|---|
-| 7+ DB-Indexes vorhanden (R4) | ✅ 10 indexes |
-| Dashboard GROUP BY query (R2) | ✅ 3.3ms (< 100ms) |
-| `MAX_FILE_SIZE = 10 GB` (S7) | ✅ 10737418240 |
-
-#### Sektion 8 — Security
-| Test | Resultat |
-|---|---|
-| `_validate_target_path('/library/../etc')` → ValueError | ✅ |
-| `_validate_target_path('/library/photos/2026')` → akzeptiert | ✅ |
-| `_sanitize_filename('../../etc/passwd')` → `'passwd'` | ✅ |
-| `_sanitize_filename('/etc/passwd')` → `'passwd'` | ✅ |
-| `_sanitize_filename('photo_2026.jpg')` → unverändert | ✅ |
-| `_sanitize_filename('')` → `'asset.jpg'` (Fallback) | ✅ |
-| `_sanitize_filename(None)` → `'asset.jpg'` (Fallback) | ✅ |
-
-#### Sektion 4 — Filewatcher-Stabilität
-| Test | Resultat |
-|---|---|
-| Stabile Datei (Größe stimmt) → True | ✅ |
-| Leere Datei (0 Bytes) → unstable (current_size > 0 Check) | ✅ |
-| Größen-Mismatch → unstable nach 1.0s Wartezeit | ✅ |
-| 24/24 Extensions registriert | ✅ |
-| Synology SKIP_DIRS = `{'@eadir', '.synology', '#recycle'}` | ✅ |
-
-#### Sektion 7 — Edge Cases
-| Test | Resultat |
-|---|---|
-| `.txt` wird vom Filewatcher ignoriert | ✅ |
-| Job mit Leerzeichen-Name | ✅ |
-| Job mit Umlauten (`Umläüten_äöü.jpg`) | ✅ |
-| Job mit CJK (`测试照片_テスト.jpg`) | ✅ |
-| Job mit Emoji (`🏔️_Berge.jpg`) | ✅ |
-| Job mit Klammern (`DJI_0061 (2).JPG`) | ✅ |
-| Job mit doppelter Extension (`photo.jpg.jpg`) | ✅ |
-
-#### Sektion 2 — Pipeline-Fehlerbehandlung
-| Test | Resultat |
-|---|---|
-| Critical IA-01 Fehler → status=error | ✅ |
-| `error_message` enthält IA-01-Marker | ✅ |
-| Finalizer (IA-09/10/11) liefen nach kritischem Fehler | ✅ |
-
-#### Sektion 1 + 6 — Pipeline-Steps & Dateiformate
-> Reale Dateien aus `/home/marcohediger/claude/Testbilder/iphone/`, synthetische via PIL.
-
-**HEIC** (iPhone 12 Pro, IMG_2410.HEIC, 759KB):
-| Step | Resultat |
-|---|---|
-| IA-01: `file_type=HEIC`, EXIF Apple iPhone 12 Pro | ✅ |
-| IA-02: status=ok | ✅ |
-| IA-04: konvertiert → temp JPEG | ✅ |
-| IA-05: `Persönliches Foto`, confidence 1.00 | ✅ |
-| IA-07 dry_run: 9 Tags geplant | ✅ |
-| IA-08 dry_run: target `/library/photos/2022/2022-12/...` | ✅ |
-| Final status: `done` | ✅ |
-
-**MOV** (iPhone Video, IMG_2539.MOV, 1.4MB, 1.02s):
-| Step | Resultat |
-|---|---|
-| IA-01: `file_type=MOV`, mime=`video/quicktime`, ffprobe-Daten | ✅ |
-| IA-02: status=ok | ✅ |
-| IA-04: `converted=False` (Video-Thumbnail im Test deaktiviert) | ✅ |
-| IA-05: type=unknown (kein Thumbnail) | ✅ |
-| IA-07 dry_run: 4 Tags | ✅ |
-| IA-08 dry_run: target `/library/videos/2022/2022-12/...` | ✅ |
-| Final status: `done` | ✅ |
-
-**PNG / WEBP / TIFF / GIF / JPEG / BMP** (synthetische Bilder via PIL):
-| Format | IA-01 | IA-02 | Final |
-|---|---|---|---|
-| PNG | ✅ PNG | ✅ duplicate | ✅ duplicate |
-| WEBP | ✅ WEBP | ✅ duplicate | ✅ duplicate |
-| TIFF | ✅ TIFF | ✅ duplicate | ✅ duplicate |
-| GIF | ✅ GIF | ✅ duplicate | ✅ duplicate |
-| JPEG | ✅ JPEG | ✅ duplicate | ✅ duplicate |
-| BMP | ✅ BMP | ✅ duplicate | ✅ duplicate |
-
-> Synthetische Mini-Bilder werden korrekt von der Duplikat-Erkennung erfasst (pHash-Match mit existierenden Test-Bildern in der DB) — IA-01 läuft trotzdem korrekt durch.
-
-#### Sektion 12 — Stress / Concurrent
-| Test | Resultat |
-|---|---|
-| 10 Dateien parallel via `asyncio.gather` → alle 10 verarbeitet in 1.1s | ✅ |
-
-#### Sektion 3 — Web Interface (Endpoint-Reachability)
-| Endpoint | Status | Antwortzeit |
-|---|---|---|
-| `/api/version` | 200 | 5ms |
-| `/api/dashboard` | 200 | 4ms |
-| `/` | 200 | 3ms |
-| `/login` | 200 | 4ms |
-| `/review` | 200 | 4ms |
-| `/logs` | 200 | 3ms |
-| `/settings` | 200 | 3ms |
-| `/duplicates` | 200 | 4ms |
-
-> Alle Endpoints redirecten zu `/login` (Auth aktiv) und liefern HTTP 200 — Browser-UI-Tests selbst wurden nicht durchgeführt (manuelle Validierung erforderlich).
-
-### Nicht erneut getestete Sektionen (keine Code-Änderung in v2.28.x)
-
-| Sektion | Begründung |
-|---|---|
-| **5 — Immich-Integration** | Erfordert echte Immich-Instanz; bereits in v2.17.1 grün |
-| **10 — Nicht testbar (Photon, CR2/NEF/ARW)** | Infrastruktur fehlt |
-| **11 — DJI-Testdaten Ergebnisse** | Historische Tests, weiterhin gültig |
-
-### Reproduktionsschritte
-
-```bash
-# Race-Condition-Tests
-docker exec mediaassistant-dev python3 /app/test_duplicate_fix.py
-
-# Konsolidierter TESTPLAN-Lauf (66 Tests, ~30s)
-docker cp /tmp/testplan_final.py mediaassistant-dev:/tmp/
-docker exec mediaassistant-dev python3 /tmp/testplan_final.py
-```
-
-**Erwartetes Ergebnis:**
-- `test_duplicate_fix.py`: `26/26 Tests bestanden`
-- `testplan_final.py`: `PASS: 66, FAIL: 0, BLOCK: 0`
-
-## 15. Test-Matrix — Vollständige Coverage-Karte (v2.28.29)
+## 14. Test-Matrix — Vollständige Coverage-Karte
 
 > Vollständige Coverage-Karte aller Code-Pfade, die `run_pipeline()` oder
 > `prepare_job_for_reprocess()` auslösen — von der ersten Erkennung einer
@@ -978,11 +820,9 @@ docker exec mediaassistant-dev python3 /tmp/testplan_final.py
 > Verhalten, automatisierter Test (oder explizit markierte Lücke).
 >
 > Diese Matrix ist eine **strukturelle Ergänzung** zu den älteren
-> Sektionen 1–14: wo die Sektionen 1–12 die Tests **per Pipeline-Step**
-> auflisten, kartografiert Sektion 15 die Tests **per Code-Pfad** durch
+> Sektionen 1–13: wo die Sektionen 1–12 die Tests **per Pipeline-Step**
+> auflisten, kartografiert Sektion 14 die Tests **per Code-Pfad** durch
 > die Pipeline-Entry-Points. Beide Sichten sind komplementär.
->
-> Stand v2.28.29 (commit `b54587f`).
 >
 > **Test-Skripte:**
 > - [`backend/test_retry_file_lifecycle.py`](backend/test_retry_file_lifecycle.py)
@@ -1219,26 +1059,28 @@ Welche Pipeline-Steps können einen Job in `error` oder `done+Warnungen` schicke
 | `immich.poll_enabled` | true/false | Immich-Poller läuft als zweite Job-Quelle | false in dev |
 | `metadata.write_mode` | direct/sidecar | IA-07 schreibt in Datei oder als `.xmp` | beide getestet |
 
-### Zusammenfassung
+### Bereichs-Index
 
-| Bereich | Szenarien | Abgedeckt | Lücken |
-|---|---|---|---|
-| **Normal: Inbox → Immich** (N1.1–N1.15) | 15 | ~12 ✅ | N1.3 (sidecar+inbox first-run), N1.11 (Live-Photo), N1.14 (EXIF ohne GPS) |
-| **Normal: Inbox → File-Storage** (N2.1–N2.4) | 4 | ⚠️ 0 (nur via Retry-Test indirekt) | alle 4 |
-| **Normal: Immich-Poller → Pipeline** (N3.1–N3.5) | 5 | ❌ 0 | alle 5 |
-| **Normal: Modul-Variationen** (N4.1–N4.8) | 8 | ⚠️ 1 (smtp aus = Default) | 7 von 8 |
-| **Normal: Spezielle Outcomes** (N5.1–N5.8) | 8 | ✅ 3 (duplicate, similar, video-phash) | review, skip, dry_run, beide Auto-Pause |
-| **Normal: Startup-Resume** (N6.1–N6.3) | 3 | ❌ 0 | alle 3 |
-| **Normal: Concurrency** (N7.1–N7.6) | 6 | ✅ 5 | bulk-retry pool exhaustion |
-| **Retry-Job, Inbox-Source, Warnungs-Retry** (R1–R4) | 4 | ✅ 4 | – |
-| **Retry-Job, Inbox-Source, Error-Retry** (R5–R11) | 7 | ✅ 1 (R5) | R6–R11 |
-| **Retry-Job, Immich-Poller-Source** (R12–R14) | 3 | ❌ 0 | alle 3 |
-| **Retry-Job, Negativ-Fall** (R15) | 1 | ✅ 1 | – |
-| **Retry-Job, Race-Conditions** (R16) | 1 | ✅ 1 | – |
-| **Retry-All Bulk** (RA1) | 1 | ❌ 0 | – |
-| **Duplikat-Review** (D1–D5) | 5 | ❌ 0 | alle 5 |
-| **`move_file=False`** (M1) | 1 | ❌ 0 (kein Caller im Code) | – |
-| **TOTAL** | **72** | **~28 ✅** | **~44 offen** |
+Strukturelle Übersicht über die Sub-Serien dieser Sektion (für Navigation).
+Coverage-Stand pro Test-Funktion siehe `TESTRESULTS.md`.
+
+| Bereich | Szenarien | Primäres Test-Skript |
+|---|---|---|
+| Normal: Inbox → Immich (N1.1–N1.15) | 15 | `test_testplan_final.py` |
+| Normal: Inbox → File-Storage (N2.1–N2.4) | 4 | (offen / via Retry-Test indirekt) |
+| Normal: Immich-Poller → Pipeline (N3.1–N3.5) | 5 | (offen) |
+| Normal: Modul-Variationen (N4.1–N4.8) | 8 | (offen außer N4.6 = Default) |
+| Normal: Spezielle Outcomes (N5.1–N5.8) | 8 | `test_duplicate_fix.py` (N5.1–N5.3) |
+| Normal: Startup-Resume (N6.1–N6.3) | 3 | (offen) |
+| Normal: Concurrency (N7.1–N7.6) | 6 | `test_duplicate_fix.py` Tests 5–8, `test_testplan_final.py` Sektion 12 |
+| Retry-Job, Warnungs-Retry (R1–R4) | 4 | `test_retry_file_lifecycle.py` |
+| Retry-Job, Error-Retry (R5–R11) | 7 | `test_retry_file_lifecycle.py` (R5), Rest offen |
+| Retry-Job, Immich-Poller-Source (R12–R14) | 3 | (offen) |
+| Retry-Job, Negativ-Fall (R15) | 1 | `test_retry_file_lifecycle.py` |
+| Retry-Job, Race-Conditions (R16) | 1 | `test_duplicate_fix.py` Tests 7+8 |
+| Retry-All Bulk (RA1) | 1 | (offen) |
+| Duplikat-Review (D1–D5) | 5 | (offen) |
+| `move_file=False` (M1) | 1 | (kein Caller im Code) |
 
 ### Empfohlene nächste Tests
 
