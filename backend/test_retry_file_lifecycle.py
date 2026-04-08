@@ -286,7 +286,7 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
             await _cleanup_job_artifacts(job_id, extra_cleanup, asset_ids)
 
 
-async def _run_filestorage_test(source_heic: str):
+async def _run_filestorage_test(source_heic: str, *, mode: str = "direct"):
     """File-storage variant: use_immich=False so IA-08 moves into /library/.
 
     The bug class is the same as the immich case: on retry the file is
@@ -294,11 +294,15 @@ async def _run_filestorage_test(source_heic: str):
     re-running, so the file never makes it back to its library target.
     Post-fix: file must end up at a known location (target_path or
     reprocess), not be lost.
-    """
-    print(f"\n── Test: retry file lifecycle [file-storage / use_immich=False] ──")
-    await config_manager.set("metadata.write_mode", "direct")
 
-    test_name = f"__retry_lifecycle_filestore_{int(datetime.now().timestamp())}.HEIC"
+    Runs in either `direct` or `sidecar` write_mode. The sidecar variant
+    also exercises the `.xmp` companion-file path through reprocess and
+    back into /library/.
+    """
+    print(f"\n── Test: retry file lifecycle [file-storage / use_immich=False / {mode}] ──")
+    await config_manager.set("metadata.write_mode", mode)
+
+    test_name = f"__retry_lifecycle_filestore_{mode}_{int(datetime.now().timestamp())}.HEIC"
     inbox_path = os.path.join(INBOX, test_name)
     job_id: int | None = None
 
@@ -402,6 +406,22 @@ async def _run_filestorage_test(source_heic: str):
             bool(after_target and not after_target.startswith("immich:") and os.path.exists(after_target)),
             f"target={after_target}",
         )
+
+        # Sidecar mode: the .xmp must travel with the file all the way
+        # back to its library home — not be left orphaned in reprocess/.
+        if mode == "sidecar" and after_target and os.path.exists(after_target):
+            sidecar_at_target = after_target + ".xmp"
+            sidecar_in_reprocess = os.path.join(REPROCESS_DIR, test_name + ".xmp")
+            report(
+                "sidecar .xmp ended up next to the file in /library/",
+                os.path.exists(sidecar_at_target),
+                f"checked={sidecar_at_target}",
+            )
+            report(
+                "sidecar .xmp is NOT stranded in reprocess/",
+                not os.path.exists(sidecar_in_reprocess),
+                f"checked={sidecar_in_reprocess}",
+            )
 
     except Exception as e:
         traceback.print_exc()
@@ -681,7 +701,8 @@ async def main():
     try:
         await _run_lifecycle_test(mode="sidecar", source_heic=source)
         await _run_lifecycle_test(mode="direct", source_heic=source)
-        await _run_filestorage_test(source_heic=source)
+        await _run_filestorage_test(source_heic=source, mode="direct")
+        await _run_filestorage_test(source_heic=source, mode="sidecar")
         await _run_error_retry_test(source_heic=source)
         await _run_missing_file_test(source_heic=source)
     finally:
