@@ -1199,6 +1199,60 @@ async def batch_clean_quality(request: Request):
             best = max(member_jobs, key=lambda j: _quality_score(j))
             kept += 1
 
+            # Merge metadata from all others into the best before deleting.
+            # Collects GPS, date, keywords, description from worse members
+            # and fills gaps in the best member's step_result.
+            best_sr = best.step_result or {}
+            best_ia01 = best_sr.get("IA-01") or {}
+            best_ia07 = best_sr.get("IA-07") or {}
+            merged_fields = []
+
+            for donor in member_jobs:
+                if donor.id == best.id:
+                    continue
+                donor_sr = donor.step_result or {}
+                donor_ia01 = donor_sr.get("IA-01") or {}
+                donor_ia03 = donor_sr.get("IA-03") or {}
+                donor_ia07 = donor_sr.get("IA-07") or {}
+
+                # GPS: if best has none but donor does
+                if not best_ia01.get("gps") and donor_ia01.get("gps"):
+                    best_ia01["gps"] = True
+                    best_ia01["gps_lat"] = donor_ia01.get("gps_lat")
+                    best_ia01["gps_lon"] = donor_ia01.get("gps_lon")
+                    # Also copy geocoding result
+                    if donor_ia03 and donor_ia03.get("status") != "skipped":
+                        best_sr["IA-03"] = donor_ia03
+                    merged_fields.append("GPS")
+
+                # Date: if best has none but donor does
+                if not best_ia01.get("date") and donor_ia01.get("date"):
+                    best_ia01["date"] = donor_ia01["date"]
+                    merged_fields.append("date")
+
+                # Keywords: merge unique keywords from donor
+                best_kw = best_ia07.get("keywords_written") or []
+                donor_kw = donor_ia07.get("keywords_written") or []
+                new_kw = [k for k in donor_kw if k and k not in best_kw]
+                if new_kw:
+                    best_kw.extend(new_kw)
+                    best_ia07["keywords_written"] = best_kw
+                    best_ia07["tags_count"] = len(best_kw)
+                    merged_fields.append(f"keywords(+{len(new_kw)})")
+
+                # Description: if best has none but donor does
+                best_desc = best_ia07.get("description_written") or ""
+                donor_desc = donor_ia07.get("description_written") or ""
+                if not best_desc and donor_desc:
+                    best_ia07["description_written"] = donor_desc
+                    merged_fields.append("description")
+
+            if merged_fields:
+                best_sr["IA-01"] = best_ia01
+                best_sr["IA-07"] = best_ia07
+                best.step_result = best_sr
+                flag_modified(best, "step_result")
+
             # Delete all others
             for job in member_jobs:
                 if job.id == best.id:
@@ -1226,6 +1280,9 @@ async def batch_clean_quality(request: Request):
             if best.status == "duplicate":
                 best.status = "done"
                 best.error_message = "Promoted to original (best quality in group)"
+            if merged_fields:
+                merge_note = f" + merged: {', '.join(merged_fields)}"
+                best.error_message = (best.error_message or "") + merge_note
 
         await session.commit()
 
