@@ -885,6 +885,21 @@ async def keep_file(request: Request):
                     move_file=True,
                 )
 
+                # Inject IA-02 as skipped so the pipeline does NOT re-run
+                # duplicate detection. The user explicitly chose to keep
+                # this file — re-flagging it as duplicate would undo their
+                # decision (especially when other jobs with matching pHash
+                # still exist in the DB).
+                sr = kept_job.step_result or {}
+                sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review"}
+                # Preserve folder_tags if they were saved earlier
+                old_ia02 = (job.step_result or {}).get("IA-02") or {}
+                if old_ia02.get("folder_tags"):
+                    sr["IA-02"]["folder_tags"] = old_ia02["folder_tags"]
+                kept_job.step_result = sr
+                flag_modified(kept_job, "step_result")
+                await session.commit()
+
                 # Re-run pipeline in background
                 from pipeline import run_pipeline
                 asyncio.create_task(run_pipeline(kept_job.id))
