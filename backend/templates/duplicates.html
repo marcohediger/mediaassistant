@@ -5,6 +5,10 @@
     <h1>{{ t.duplicates.title }}</h1>
     <div class="dup-header-actions">
         <span class="dup-count">{{ total_groups }} {{ t.duplicates.groups if total_groups != 1 else t.duplicates.group }}</span>
+        <form method="post" action="/api/duplicates/re-evaluate-quality" class="inline-form"
+              onsubmit="return dupConfirm('Qualitaets-Re-Evaluate: Alle Duplikat-Paare pruefen und bei besserer Qualitaet die Rollen tauschen?')">
+            <button type="submit" class="btn btn-small btn-secondary">Re-Evaluate Qualitaet</button>
+        </form>
         {% if exact_groups > 0 %}
         <form method="post" action="/api/duplicates/batch-clean" class="inline-form"
               onsubmit="return dupConfirm('{{ t.duplicates.batch_confirm | replace('{n}', exact_groups|string) }}')">
