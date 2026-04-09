@@ -412,12 +412,20 @@ async def _build_group_index() -> tuple[list[dict], dict[str, "Job"]]:
                 (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("match_type") in ("exact", "raw_jpg_pair", None)
                 for k in valid_keys
             )
+            # Safe for batch-clean: exact SHA256, RAW+JPG pair, OR pHash
+            # with distance=0 (100% visually identical)
+            safe_for_batch = all_exact or all(
+                (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("match_type") in ("exact", "raw_jpg_pair", None)
+                or (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("phash_distance", 99) == 0
+                for k in valid_keys
+            )
 
             groups.append({
                 "original_key": group_key,
                 "member_keys": valid_keys,
                 "count": len(valid_keys),
                 "all_exact": all_exact,
+                "safe_for_batch": safe_for_batch,
                 "is_immich_duplicate": has_immich,
             })
 
@@ -531,7 +539,7 @@ async def api_duplicate_groups(request: Request):
 
     group_index, jobs_by_key = await _build_group_index()
     total = len(group_index)
-    exact_count = sum(1 for g in group_index if g["all_exact"])
+    exact_count = sum(1 for g in group_index if g.get("safe_for_batch", g.get("all_exact")))
 
     start = (page - 1) * per_page
     page_groups = group_index[start:start + per_page]
@@ -575,7 +583,7 @@ async def duplicates_page(request: Request):
 
     group_index, jobs_by_key = await _build_group_index()
     total = len(group_index)
-    exact_count = sum(1 for g in group_index if g["all_exact"])
+    exact_count = sum(1 for g in group_index if g.get("safe_for_batch", g.get("all_exact")))
     total_pages = max(1, (total + per_page - 1) // per_page)
     page = max(1, min(page, total_pages))
 
@@ -1243,8 +1251,8 @@ async def batch_clean_quality(request: Request):
 
     async with async_session() as session:
         for g in page_groups:
-            if not g["all_exact"]:
-                continue  # only exact matches for auto-clean
+            if not g.get("safe_for_batch", g.get("all_exact")):
+                continue  # only exact or pHash-100% for auto-clean
 
             # Load all members and compute quality scores
             member_jobs = []
