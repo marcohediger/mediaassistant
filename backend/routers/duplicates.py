@@ -413,10 +413,12 @@ async def _build_group_index() -> tuple[list[dict], dict[str, "Job"]]:
                 for k in valid_keys
             )
             # Safe for batch-clean: exact SHA256, RAW+JPG pair, OR pHash
-            # with distance=0 (100% visually identical)
+            # with distance=0 (100% visually identical).
+            # Default phash_distance=0 matches the UI display (which also
+            # defaults to 0 when the field is missing from old IA-02 results).
             safe_for_batch = all_exact or all(
                 (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("match_type") in ("exact", "raw_jpg_pair", None)
-                or (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("phash_distance", 99) == 0
+                or (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("phash_distance", 0) == 0
                 for k in valid_keys
             )
 
