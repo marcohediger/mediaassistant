@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.28.47 — 2026-04-09
+
+### Feature: Batch Re-Evaluate Qualitaet fuer bestehende Duplikate (#46)
+
+Neuer Button "Re-Evaluate Qualitaet" auf der Duplikat-Review-Seite.
+Prueft alle bestehenden Duplikat-Paare und tauscht die Rollen, wenn
+das Duplikat bessere Qualitaet hat als das aktuelle Original. Nutzt
+denselben `_quality_score()` wie IA-02 (Format > Pixel > Groesse >
+Metadaten).
+
+Damit koennen Duplikate, die VOR v2.28.44 erkannt wurden (ohne
+Qualitaets-Swap), nachtraeglich korrigiert werden. Nach dem
+Re-Evaluate zeigt ein anschliessendes Batch-Clean die richtige
+(qualitativ bessere) Datei als Original.
+
+Neuer Endpoint: `POST /api/duplicates/re-evaluate-quality`
+
+Dry-Run auf Dev: 55 von 110 Duplikaten wuerden getauscht.
+
+Refs #46
+
 ## v2.28.46 — 2026-04-09
 
 ### Feature: CSV-Retry Input (#42)

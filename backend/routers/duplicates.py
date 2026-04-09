@@ -1069,6 +1069,91 @@ async def merge_metadata(request: Request):
     return JSONResponse({"status": "ok", "merged": merged_fields})
 
 
+@router.post("/api/duplicates/re-evaluate-quality")
+async def re_evaluate_quality():
+    """Re-evaluate all duplicate pairs and swap roles where the duplicate
+    has better quality than the original.
+
+    Uses the same _quality_score() as IA-02 (format > pixels > file_size >
+    metadata_count). For each swap, the former original is demoted to
+    duplicate and the former duplicate is promoted to original (status=done).
+
+    This is a one-time batch operation for duplicates that were detected
+    before v2.28.44 (which added quality-aware detection for new files).
+    """
+    from pipeline.step_ia02_duplicates import _quality_score
+
+    swapped = 0
+    skipped = 0
+    errors = 0
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.status == "duplicate")
+        )
+        dups = result.scalars().all()
+
+        for dup in dups:
+            dup_info = (dup.step_result or {}).get("IA-02", {})
+            orig_key = dup_info.get("original_debug_key")
+            if not orig_key:
+                skipped += 1
+                continue
+
+            # Load the original job
+            orig_result = await session.execute(
+                select(Job).where(Job.debug_key == orig_key)
+            )
+            orig = orig_result.scalar()
+            if not orig:
+                skipped += 1
+                continue
+
+            # Compare quality scores
+            score_dup = _quality_score(dup)
+            score_orig = _quality_score(orig)
+
+            if score_dup <= score_orig:
+                # Original is already the better file — no swap needed
+                skipped += 1
+                continue
+
+            # Swap: promote duplicate → done, demote original → duplicate
+            try:
+                # Update the duplicate → promote to done
+                dup.status = "done"
+                dup.error_message = (
+                    f"Promoted: better quality than {orig_key} "
+                    f"(score {list(score_dup)} > {list(score_orig)})"
+                )
+
+                # Update the original → demote to duplicate
+                orig.status = "duplicate"
+                orig.error_message = None
+                sr = orig.step_result or {}
+                sr["IA-02"] = {
+                    "status": "duplicate",
+                    "match_type": dup_info.get("match_type", "exact"),
+                    "original_debug_key": dup.debug_key,
+                    "quality_swap": True,
+                    "quality_score_self": list(score_orig),
+                    "quality_score_winner": list(score_dup),
+                }
+                orig.step_result = sr
+                flag_modified(orig, "step_result")
+
+                await session.commit()
+                swapped += 1
+            except Exception as e:
+                errors += 1
+                await session.rollback()
+
+    summary = (f"Quality Re-Evaluate: {swapped} swapped, "
+               f"{skipped} already correct, {errors} errors")
+    await log_info("duplicates", summary)
+    return RedirectResponse(url="/duplicates", status_code=303)
+
+
 @router.post("/api/duplicates/batch-clean")
 async def batch_clean():
     """Auto-delete all exact SHA256 duplicates (keep original)."""
