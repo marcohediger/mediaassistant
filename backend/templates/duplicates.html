@@ -51,11 +51,7 @@
     <a href="/duplicates?page={{ current_page + 1 }}" class="btn btn-small btn-secondary">&raquo;</a>
     {% endif %}
 
-    <select onchange="window.location.href='/duplicates?page='+this.value" style="margin-left:8px; padding:4px 6px; font-size:0.85rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-card); color:var(--text)">
-        {% for p in range(1, total_pages + 1) %}
-        <option value="{{ p }}" {{ 'selected' if p == current_page else '' }}>{{ p }}</option>
-        {% endfor %}
-    </select>
+    <select onchange="window.location.href='/duplicates?page='+this.value" style="margin-left:8px;padding:4px 6px;font-size:0.85rem;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);width:auto;display:inline-block">{% for p in range(1, total_pages + 1) %}<option value="{{ p }}"{{ ' selected' if p == current_page else '' }}>{{ p }}</option>{% endfor %}</select>
 </div>
 {% endif %}
 
