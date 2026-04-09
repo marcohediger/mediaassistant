@@ -214,9 +214,9 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 
 | File | Was | Aufruf |
 |---|---|---|
-| `backend/test_duplicate_fix.py` | 26 Tests: Duplikat-Fix #38 + Race-Conditions für `run_pipeline`/`retry_job` | `docker exec mediaassistant-dev python /app/test_duplicate_fix.py` |
-| `backend/test_retry_file_lifecycle.py` | 37+ Asserts: kompletter Retry-File-Lifecycle gegen echtes Immich (sidecar+direct, immich+file-storage, error+warning, missing-file) | `docker exec mediaassistant-dev python /app/test_retry_file_lifecycle.py` |
-| `backend/test_testplan_final.py` | 60 Asserts: API/UI Smoke-Tests | `docker exec mediaassistant-dev python /app/test_testplan_final.py` |
+| `backend/test_duplicate_fix.py` | 34 Tests: Duplikat-Fix #38 + Race-Conditions + Quality-Swap + zirkuläre Duplikate | `docker exec mediaassistant-dev python /app/test_duplicate_fix.py` |
+| `backend/test_retry_file_lifecycle.py` | 110 Asserts: kompletter Retry-File-Lifecycle gegen echtes Immich (sidecar+direct, immich+file-storage, error+warning, missing-file, stale-warning, stuck-state) | `docker exec mediaassistant-dev python /app/test_retry_file_lifecycle.py` |
+| `backend/test_testplan_final.py` | 68 Asserts: API/UI Smoke-Tests | `docker exec mediaassistant-dev python /app/test_testplan_final.py` |
 | `backend/test_ai_backends.py` | AI-Backend-Loadbalancer | `docker exec mediaassistant-dev python /app/test_ai_backends.py` |
 
 ### Vor einem Bug-Fix: Reproducer auf dev bauen
@@ -399,5 +399,47 @@ Mantra:
 | Bulk-Retry exhausted DB-Pool (33 parallele tasks → pool=15) | Pool-Tuning auf 20/40, sequentiell statt parallel | v2.28.7 |
 | Race: 5 Aufrufer von `run_pipeline` | atomic claim via `UPDATE … WHERE status='queued'` | v2.28.2 |
 | Folge-TOCTOU bei `retry_job` zwei Commits | transienter Lock-State `error → processing → queued` | v2.28.3 |
+| `MA-2026-28103` (IMG_2499.HEIC) | Zirkuläre Duplikat-Erkennung: Retry wurde Duplikat seines eigenen Duplikats | v2.28.43 |
+| `MA-2026-0209` | "Dieses behalten" → IA-02 flaggte Job sofort wieder als Duplikat | v2.28.61 |
+| 6554 defekte Sidecars | v2.28.13-Bug: ExifTool `.tmp` Extension → binäre Bild-Kopien statt XMP | Ext. Tool `ma-sidecar-repair` |
 
 Weitere Details siehe `CHANGELOG.md`.
+
+## Duplikat-System (v2.28.44–v2.28.66)
+
+### Quality-Score (`_quality_score()` in `step_ia02_duplicates.py`)
+Vergleichbarer Tuple-Score für Duplikat-Paare:
+```
+(format_score, file_size_log, pixel_count, metadata_score, -job_id)
+```
+- **Format:** RAW(5) > HEIC(4) > TIFF(3) > JPEG(2) > PNG/WebP(1)
+- **Dateigrösse:** log2-skaliert (~7% Toleranz), grösser = besser
+- **Pixel:** width × height
+- **Metadaten:** GPS(+2), EXIF(+1), Datum(+1), Kamera(+1), Keywords(+1-5), Description(+2)
+- **Job-ID:** negativ → älterer Job (Original) gewinnt bei Gleichstand
+
+### Batch-Clean Quality (`POST /api/duplicates/batch-clean-quality`)
+- Verarbeitet exakte SHA256 UND pHash-100% Matches
+- Behält pro Gruppe den besten Quality-Score
+- Merged Metadaten (GPS, Datum, Keywords, Description) von schlechteren
+- Behaltene Duplikate: Analyse-Steps vom Original kopiert → nur IA-07/08 läuft
+- `prepare_job_for_reprocess` verschiebt Datei korrekt
+- IA-02 wird als `skipped` injiziert (folder_tags erhalten)
+
+### CSV-Retry Input (`/app/data/csv-retry/`)
+- CSV mit `filename`-Spalte → Filewatcher erkennt → passende Jobs auf `queued`
+- Verarbeitete CSVs werden nach `csv-retry/done/` verschoben
+- Generischer Bulk-Retry-Mechanismus (nicht nur für Ghost-Tags)
+
+### Externe Tools
+| Tool | Repo | Zweck |
+|---|---|---|
+| `ma-sidecar-repair` | [GitHub](https://github.com/marcohediger/ma-sidecar-repair) / [Gitea](https://git.marcohediger.ch/MediaAssistant/ma-tools-sidecar-repair) | Defekte XMP-Sidecars reparieren (v2.28.13-Bug) |
+| `ma-ghost-tag-detect` | [GitHub](https://github.com/marcohediger/ma-ghost-tag-detect) / [Gitea](https://git.marcohediger.ch/MediaAssistant/ma-tools-ghost-tag-detect) | Ghost-Tags erkennen → CSV für csv-retry |
+
+### Immich Sidecar-Sync (getestet April 2026, Immich v2.6.3)
+| Richtung | Verhalten |
+|---|---|
+| .xmp → Immich DB (Force Sync) | **ERSETZEND** — Tags aus .xmp ersetzen DB-Tags |
+| Immich DB → .xmp (SidecarWrite) | Nur Description, NICHT dc:subject (Tags) |
+| Unveränderte .xmp + Sync | Übersprungen (mtime-Check) |

@@ -32,14 +32,14 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 
 ### Release-Übersicht (Test-Skript-Roll-ups)
 
-| Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 |
-|---|---|---|---|---|
-| **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 |
-| **Commit** | – | – | – | aktueller HEAD |
-| `test_duplicate_fix.py` | – | – | 26/26 ✅ | 26/26 ✅ |
-| `test_retry_file_lifecycle.py` | – | – | – | 46/46 ✅ |
-| `test_testplan_final.py` | – | 296/305 | 66/66 ✅ | 59/60 ⚠️ (1 BLOCK) |
-| `test_ai_backends.py` | – | – | – | – |
+| Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | 2026-04-09 |
+|---|---|---|---|---|---|
+| **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 | v2.28.66 |
+| **Commit** | – | – | – | – | `8ffc4c5` |
+| `test_duplicate_fix.py` | – | – | 26/26 ✅ | 26/26 ✅ | 34/34 ✅ |
+| `test_retry_file_lifecycle.py` | – | – | – | 46/46 ✅ | 110/110 ✅ |
+| `test_testplan_final.py` | – | 296/305 | 66/66 ✅ | 59/60 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) |
+| `test_ai_backends.py` | – | – | – | – | – |
 
 ### IA01 — IA-01 EXIF auslesen (26 Tests)
 

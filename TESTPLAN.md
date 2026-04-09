@@ -237,10 +237,20 @@
 - **WEB-26:** "Dieses behalten" bei Immich-Gruppe → KI + Tags + Upload zu Immich (MA-2026-0073 → immich:5866e694...)
 - **WEB-27:** "Dieses behalten" bei lokaler Gruppe → KI + Tags + lokale Ablage
 - **WEB-28:** Badge (ORIGINAL/EXAKT) ist klickbarer Link (Immich → öffnet Immich, lokal → Download)
-- **WEB-29:** Batch-Clean → alle exakten SHA256-Duplikate gelöscht, ähnliche (pHash) behalten
+- **WEB-29:** Batch-Clean Quality → exakte + pHash-100% Duplikate, qualitätsbasiert (bester Score bleibt)
 - **WEB-30:** Immich-Duplikate: Thumbnail aus Immich, "In Immich ansehen"
 - **WEB-31:** Immich-Delete funktioniert korrekt (httpx DELETE mit request body)
 - **WEB-32:** Keep/Delete mit JPG+DNG Paar funktioniert korrekt
+- **WEB-33b:** ⭐ Beste-Qualität-Badge auf dem Member mit dem höchsten Quality-Score
+- **WEB-34b:** ORIGINAL-Badge = ältester Job (niedrigste ID), nicht DB-Status
+- **WEB-35b:** Pagination mit Seitenzahlen + Dropdown statt Lazy-Loading
+- **WEB-36b:** Drei Buttons: Re-Evaluate Qualität / Batch-Clean (diese Seite) / Batch-Clean Alle
+- **WEB-37b:** Batch-Clean merged Metadaten (GPS, Datum, Keywords, Description) von schlechteren
+- **WEB-38b:** Batch-Clean promoted Duplikate: Analyse-Steps kopiert, reprocess + IA-07/08
+- **WEB-39b:** "Dieses behalten" merged Metadaten vor dem Löschen
+- **WEB-40b:** "Dieses behalten" injiziert IA-02=skipped (kein Re-Duplicate)
+- **WEB-41b:** pHash vergleicht nur innerhalb Medientyp (Bilder vs Bilder, Videos vs Videos)
+- **WEB-42b:** Quality-Score: Format > Dateigrösse(log) > Pixel > Metadaten > Original-Bias
 
 ### Review (Manuelle Klassifikation)
 - **WEB-33:** Alle Jobs mit Status "review" angezeigt
@@ -532,6 +542,28 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 | `retry_job` returned False 4× | 4 |
 
 **Bedeutung:** Schutz gegen Doppelklick im UI, mehrere Browser-Tabs, oder API-Spam. Nur der erste Aufrufer flippt den Status atomar von `error` zu `processing`.
+
+#### RACE-09: Retry darf nicht zirkulär als Duplikat enden (v2.28.43)
+**Setup:** Job A (done, file_hash=X), Job B (duplicate von A, file_hash=X). Nuclear-Retry von A → IA-02 sucht nach file_hash=X.
+
+| Assertion | Erwartet |
+| --- | --- |
+| IA-02 returned `status != "duplicate"` | `ok` oder `skipped` |
+| job_a.status bleibt `processing` (wird nicht auf `duplicate` geflippt) | `processing` |
+
+**Beweis:** Vor v2.28.43 hat IA-02 `duplicate`-Status-Jobs als Match akzeptiert → A wurde als Duplikat seines eigenen Duplikats B markiert (Live: MA-2026-28103).
+
+#### RACE-10: Quality-Swap bei Duplikaten (v2.28.44)
+**Setup:** Job A (done, 640×480, 50KB), Job B (processing, 4032×3024, 5MB), gleicher file_hash.
+
+| Assertion | Erwartet |
+| --- | --- |
+| `_quality_score(B) > _quality_score(A)` | True |
+| IA-02 returned `status=ok, quality_swap=True` | B wird Original |
+| A demoted to `status=duplicate` | `duplicate` |
+| B bleibt `status=processing` (Pipeline läuft weiter) | `processing` |
+
+**Beweis:** Vor v2.28.44 wurde immer der ZUERST verarbeitete Job als Original behalten, unabhängig von der Qualität.
 
 ## 14. Test-Matrix — Vollständige Coverage-Karte
 
