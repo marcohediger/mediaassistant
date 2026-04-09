@@ -40,7 +40,7 @@ _FORMAT_SCORE = {
 
 
 def _quality_score(job) -> tuple:
-    """Compute a comparable quality score from IA-01 data.
+    """Compute a comparable quality score from IA-01 + IA-07 data.
 
     Returns a tuple that can be compared with > to determine which file
     is "better". Higher values win. The tuple elements are compared
@@ -48,13 +48,20 @@ def _quality_score(job) -> tuple:
 
       1. format_score   — RAW > HEIC > TIFF > JPEG > PNG/WebP
       2. pixel_count    — width × height (resolution)
-      3. file_size      — larger = less compressed (at same format)
-      4. metadata_count — more EXIF/GPS/date/camera info = preferred
-                          (tiebreaker when quality is equal)
+      3. metadata_score — richer metadata = preferred (GPS, date, camera,
+                          keywords, description). This comes BEFORE file
+                          size so that a file with GPS+keywords wins over
+                          a slightly larger file without metadata.
+      4. file_size      — larger = less compressed (tiebreaker)
 
-    Available at IA-02 time because IA-01 runs first.
+    Available at IA-02 time because IA-01 runs first. IA-07 data is
+    used opportunistically (available on retries / re-evaluations but
+    not on first-time processing).
     """
-    ia01 = (job.step_result or {}).get("IA-01", {})
+    sr = job.step_result or {}
+    ia01 = sr.get("IA-01") or {}
+    ia07 = sr.get("IA-07") or {}
+
     w = ia01.get("width") or 0
     h = ia01.get("height") or 0
     pixels = w * h
@@ -62,21 +69,36 @@ def _quality_score(job) -> tuple:
     ext = os.path.splitext(job.filename)[1].lower() if job.filename else ""
     fmt = _FORMAT_SCORE.get(ext, 0)
 
-    # Count available metadata fields — more metadata = richer file,
-    # preferred as original when image quality is otherwise equal.
-    meta_count = 0
+    # Metadata richness score — counts available metadata fields.
+    # A file with GPS+date+camera+keywords is clearly more valuable
+    # than a bare file with the same pixels.
+    meta = 0
     if ia01.get("has_exif"):
-        meta_count += 1
+        meta += 1
     if ia01.get("gps"):
-        meta_count += 1
+        meta += 2  # GPS is particularly valuable
     if ia01.get("date"):
-        meta_count += 1
+        meta += 1
     if ia01.get("make") or ia01.get("model"):
-        meta_count += 1
-    if ia01.get("software"):
-        meta_count += 1
+        meta += 1
+    # Keywords and description from IA-07 (if pipeline has run)
+    kw = ia07.get("keywords_written") or []
+    if len(kw) > 0:
+        meta += min(len(kw), 5)  # cap at 5 to not over-weight
+    if ia07.get("description_written"):
+        meta += 2
 
-    return (fmt, pixels, size, meta_count)
+    # Round file_size to 100KB blocks — tiny differences (50KB on a
+    # 1.6MB file) should not flip the winner. When everything else is
+    # equal, the older job (lower ID = the original in the library)
+    # wins via the negative-ID tiebreaker.
+    size_rounded = (size // 100000) * 100000
+
+    # Negative job ID: lower ID = older = processed first = preferred
+    # as tiebreaker when all other scores are equal.
+    job_id = -(job.id or 0)
+
+    return (fmt, pixels, meta, size_rounded, job_id)
 
 
 def _compute_phash(filepath: str) -> str | None:
