@@ -474,6 +474,39 @@ async def _swap_duplicate(job, session, existing, match_type: str, distance: int
     )
 
 
+def _extract_folder_tags(job) -> list[str]:
+    """Extract folder-based tags from the job's inbox path.
+
+    Same logic as step_ia07_exif_write.py:74-87, but called at IA-02 time
+    so the tags are preserved in step_result even after the file moves to
+    /library/error/duplicates/ (which breaks the relative-path calculation).
+
+    Stored in step_result['IA-02']['folder_tags'] and picked up by IA-07
+    when the duplicate is later kept via the review UI and re-processed.
+    """
+    if not job.source_inbox_path or not job.original_path:
+        return []
+    try:
+        rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
+    except ValueError:
+        return []
+    if not rel or rel == ".":
+        return []
+    folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
+    if not folder_parts:
+        return []
+
+    tags = []
+    for part in folder_parts:
+        for word in part.split():
+            if word and word not in tags:
+                tags.append(word)
+    combined = " ".join(folder_parts)
+    if combined not in tags:
+        tags.append(combined)
+    return tags
+
+
 async def _handle_duplicate(job, session, original, match_type: str, distance: int):
     """Move duplicate file to duplicates/ directory and write .log file."""
     original_path = original.target_path or original.original_path
@@ -481,6 +514,9 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
         desc = f"Exact duplicate of: {original_path} ({original.debug_key})"
     else:
         desc = f"Similar to: {original_path} ({original.debug_key}, pHash distance: {distance})"
+
+    # Preserve folder tags before the file moves (path breaks after move)
+    folder_tags = _extract_folder_tags(job)
 
     # Dry-run: detect but don't move
     if job.dry_run:
@@ -531,7 +567,22 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     # would otherwise outlive its referent.
     job.error_message = None
 
-    await log_info("IA-02", f"{job.debug_key} {desc}")
+    # Store folder tags in step_result so they survive the file move
+    # and can be picked up by IA-07 when this job is later kept via
+    # the duplicate review UI and re-processed.
+    if folder_tags:
+        sr = job.step_result or {}
+        ia02 = sr.get("IA-02", {})
+        if not isinstance(ia02, dict):
+            ia02 = {}
+        ia02["folder_tags"] = folder_tags
+        sr["IA-02"] = ia02
+        job.step_result = sr
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(job, "step_result")
+
+    await log_info("IA-02", f"{job.debug_key} {desc}"
+                   + (f" [folder_tags: {', '.join(folder_tags)}]" if folder_tags else ""))
 
     # Clean up empty parent directories in inbox (best-effort, file is already moved)
     try:
