@@ -161,6 +161,53 @@ ausgeführt; sie öffnen ihre eigene DB-Session.
 **WICHTIG: Den Dev-Container nach Tests NICHT stoppen.** Er bleibt
 laufend, der nächste Test/Lauf erwartet ihn als ready.
 
+### Dev-Umgebung — verfügbare Services
+
+In der Dev-Umgebung sind neben dem MediaAssistant-Container auch eine
+vollständige **Immich-Instanz** und alle Hilfsdienste verfügbar:
+
+| Container | Zugang | Zweck |
+|---|---|---|
+| `mediaassistant-dev` | `http://localhost:8000` | MA Dev (hot-reload) |
+| `immich_server` | `http://192.168.0.104:2283` | Immich API + Web-UI |
+| `immich_machine_learning` | intern | Immich ML |
+| `immich_redis` | intern | Redis für Immich |
+| `immich_postgres` | intern | PostgreSQL für Immich |
+
+**Immich API-Key:** In der MA-Dev-DB verschlüsselt gespeichert
+(`config.immich.api_key`). Entschlüsselung:
+```python
+from cryptography.fernet import Fernet
+import sqlite3, json
+con = sqlite3.connect('data/mediaassistant.db')
+val = con.execute("SELECT value FROM config WHERE key='immich.api_key'").fetchone()[0]
+key = open('data/.secret_key', 'rb').read()
+api_key = json.loads(Fernet(key).decrypt(val.encode()).decode())
+```
+
+**Immich Storage auf dem Host:**
+```
+Host-Pfad:       /home/marcohediger/claude/Bilder/
+Im Container:    /data/  (immich_server)
+Asset-Pfade:     /data/library/<User>/<Year>/<Year-Month>/<filename>
+Sidecar-Pfade:   <asset_path>.xmp (falls vorhanden)
+```
+
+Dateien im Immich-Storage gehören `root:root` (Docker). Schreiben
+in den Storage geht über `docker cp` oder `docker exec`:
+```bash
+docker cp /tmp/test.xmp "immich_server:/data/library/Marco Hediger/2026/..."
+```
+
+**Immich Jobs API** (getestet April 2026, Immich v2.6.3):
+```bash
+# Sidecar-Job triggern (Discover + Sync)
+PUT /api/jobs/sidecar  {"command": "start"}              # nur neue/geänderte
+PUT /api/jobs/sidecar  {"command": "start", "force": true}  # alle neu einlesen
+# Metadata-Extraction
+PUT /api/jobs/metadataExtraction  {"command": "start"}
+```
+
 ## Tests
 
 ### Bestehende Test-Skripte
