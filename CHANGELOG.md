@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.28.44 — 2026-04-09
+
+### Feature: Qualitaetsbasierte Duplikat-Erkennung (#46)
+
+IA-02 bevorzugt bei Duplikaten jetzt die Datei mit der besten Qualitaet
+als Original. Wenn ein Duplikat erkannt wird (SHA256-exakt oder pHash-
+aehnlich) und die **neue** Datei bessere Qualitaet hat als die
+existierende, werden die Rollen getauscht: die existierende wird zum
+Duplikat degradiert, die neue laeuft weiter als Original.
+
+Qualitaets-Score (absteigend nach Prioritaet):
+1. **Format**: RAW (5) > HEIC (4) > TIFF (3) > JPEG (2) > PNG/WebP (1)
+2. **Aufloesung**: width x height (mehr Pixel = besser)
+3. **Dateigroesse**: groesser = weniger komprimiert
+4. **Metadaten-Reichtum**: EXIF, GPS, Datum, Kamera, Software
+   (Tiebreaker bei sonst gleicher Qualitaet)
+
+Die degradierte Datei wird in `/library/error/duplicates/` verschoben
+und referenziert den neuen Original-Job in ihrem `step_result['IA-02']`.
+
+Bei Immich-Assets bleibt die Referenz (`immich:<asset_id>`) erhalten;
+der Status wird auf `duplicate` gesetzt.
+
+Tests: 34/34 Duplikat-Tests PASS (inkl. Test 10: Quality-Swap).
+
+Refs #46
+
 ## v2.28.43 — 2026-04-09
 
 ### Fix: Zirkulaere Duplikat-Erkennung bei Retry

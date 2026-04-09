@@ -28,6 +28,57 @@ RAW_EXTENSIONS = {".dng", ".cr2", ".nef", ".arw"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp"}
 
 
+# Format quality preference for duplicate resolution.
+# Higher = preferred as original. RAW > HEIC > TIFF > JPEG > others.
+_FORMAT_SCORE = {
+    ".dng": 5, ".cr2": 5, ".nef": 5, ".arw": 5,   # RAW
+    ".heic": 4, ".heif": 4,                          # Apple native, less lossy
+    ".tiff": 3, ".tif": 3,                           # lossless
+    ".jpg": 2, ".jpeg": 2,                           # lossy but standard
+    ".png": 1, ".webp": 1, ".gif": 1, ".bmp": 1,    # often screenshots
+}
+
+
+def _quality_score(job) -> tuple:
+    """Compute a comparable quality score from IA-01 data.
+
+    Returns a tuple that can be compared with > to determine which file
+    is "better". Higher values win. The tuple elements are compared
+    left-to-right (most important first):
+
+      1. format_score   — RAW > HEIC > TIFF > JPEG > PNG/WebP
+      2. pixel_count    — width × height (resolution)
+      3. file_size      — larger = less compressed (at same format)
+      4. metadata_count — more EXIF/GPS/date/camera info = preferred
+                          (tiebreaker when quality is equal)
+
+    Available at IA-02 time because IA-01 runs first.
+    """
+    ia01 = (job.step_result or {}).get("IA-01", {})
+    w = ia01.get("width") or 0
+    h = ia01.get("height") or 0
+    pixels = w * h
+    size = ia01.get("file_size") or 0
+    ext = os.path.splitext(job.filename)[1].lower() if job.filename else ""
+    fmt = _FORMAT_SCORE.get(ext, 0)
+
+    # Count available metadata fields — more metadata = richer file,
+    # preferred as original when image quality is otherwise equal.
+    meta_count = 0
+    if ia01.get("has_exif"):
+        meta_count += 1
+    if ia01.get("gps"):
+        meta_count += 1
+    if ia01.get("date"):
+        meta_count += 1
+    if ia01.get("make") or ia01.get("model"):
+        meta_count += 1
+    if ia01.get("software"):
+        meta_count += 1
+
+    return (fmt, pixels, size, meta_count)
+
+
 def _compute_phash(filepath: str) -> str | None:
     """Compute perceptual hash for an image file.
 
@@ -122,6 +173,17 @@ async def execute(job, session) -> dict:
         candidates = result.scalars().all()
         for existing in candidates:
             if await _file_exists(existing):
+                # Quality-aware: if the current file is better quality
+                # than the existing one, swap roles — demote the existing
+                # to duplicate and let the current continue as original.
+                if _quality_score(job) > _quality_score(existing):
+                    await _swap_duplicate(job, session, existing, "exact", 0)
+                    return {
+                        "status": "ok",
+                        "quality_swap": True,
+                        "demoted_debug_key": existing.debug_key,
+                        "reason": "current file has better quality, swapped roles",
+                    }
                 await _handle_duplicate(job, session, existing, "exact", 0)
                 return {
                     "status": "duplicate",
@@ -211,6 +273,17 @@ async def execute(job, session) -> dict:
                     # Load full Job object only for the match
                     candidate = await session.get(Job, row.id)
                     if candidate and await _file_exists(candidate):
+                        # Quality-aware: prefer the better file as original
+                        if _quality_score(job) > _quality_score(candidate):
+                            await _swap_duplicate(job, session, candidate, "similar", distance)
+                            found_duplicate = {
+                                "status": "ok",
+                                "quality_swap": True,
+                                "demoted_debug_key": candidate.debug_key,
+                                "phash_distance": distance,
+                                "reason": "current file has better quality, swapped roles",
+                            }
+                            break
                         await _handle_duplicate(job, session, candidate, "similar", distance)
                         found_duplicate = {
                             "status": "duplicate",
@@ -307,6 +380,98 @@ async def execute_video_phash(job, session) -> dict | None:
         offset += BATCH_SIZE
 
     return None
+
+
+async def _swap_duplicate(job, session, existing, match_type: str, distance: int):
+    """The current job has better quality than the existing one.
+
+    Demote the existing job to duplicate (move its file to duplicates/),
+    and let the current job continue through the pipeline as the new
+    original. The existing job's step_result['IA-02'] is updated to
+    reference the current job as the new original.
+    """
+    existing_path = existing.target_path or existing.original_path
+
+    if match_type == "exact":
+        desc_existing = f"Demoted: better quality duplicate arrived ({job.debug_key})"
+    else:
+        desc_existing = (f"Demoted: better quality similar file arrived "
+                         f"({job.debug_key}, pHash distance: {distance})")
+
+    cur_score = _quality_score(job)
+    ext_score = _quality_score(existing)
+
+    # Dry-run: only log, don't move
+    if job.dry_run:
+        await log_info(
+            "IA-02",
+            f"{job.debug_key} quality swap: keeping current "
+            f"(score={cur_score}) over {existing.debug_key} "
+            f"(score={ext_score})",
+        )
+        return
+
+    # Move the existing job's file to duplicates/
+    base_path = await config_manager.get("library.base_path", "/library")
+    dup_rel = await config_manager.get("library.path_duplicate", "error/duplicates/")
+    dup_dir = os.path.join(base_path, dup_rel)
+    await asyncio.to_thread(os.makedirs, dup_dir, exist_ok=True)
+
+    # Only move if the existing file is a local path (not immich:)
+    if existing_path and not existing_path.startswith("immich:") and os.path.exists(existing_path):
+        filename = os.path.basename(existing_path)
+        dup_path = os.path.join(dup_dir, filename)
+        if os.path.exists(dup_path):
+            name, ext = os.path.splitext(filename)
+            counter = 1
+            while os.path.exists(dup_path):
+                dup_path = os.path.join(dup_dir, f"{name}_{counter}{ext}")
+                counter += 1
+        await asyncio.to_thread(safe_move, existing_path, dup_path, existing.debug_key)
+        existing.target_path = dup_path
+    elif existing_path and existing_path.startswith("immich:"):
+        # Immich asset: keep the reference, just mark as duplicate.
+        # The file stays in Immich (user can clean up via Immich UI).
+        dup_path = existing_path
+
+    # Write log for the demoted file
+    if existing.target_path and not existing.target_path.startswith("immich:"):
+        log_lines = [
+            f"Debug-Key: {existing.debug_key}",
+            f"File: {existing.filename}",
+            f"Demoted by: {job.debug_key} (better quality)",
+            f"Quality scores: demoted={ext_score} winner={cur_score}",
+            f"Match type: {match_type}",
+            f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        ]
+        log_path = existing.target_path + ".log"
+        await asyncio.to_thread(_write_log, log_path, "\n".join(log_lines))
+
+    # Update the existing job's status and step_result
+    existing.status = "duplicate"
+    existing.error_message = None
+    sr = existing.step_result or {}
+    sr["IA-02"] = {
+        "status": "duplicate",
+        "match_type": match_type,
+        "original_debug_key": job.debug_key,
+        "original_path": job.original_path,
+        "quality_swap": True,
+        "quality_score_self": list(ext_score),
+        "quality_score_winner": list(cur_score),
+    }
+    if match_type == "similar" and distance > 0:
+        sr["IA-02"]["phash_distance"] = distance
+    existing.step_result = sr
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(existing, "step_result")
+    await session.commit()
+
+    await log_info(
+        "IA-02",
+        f"{existing.debug_key} {desc_existing}",
+        f"Scores: demoted={ext_score} winner={cur_score}",
+    )
 
 
 async def _handle_duplicate(job, session, original, match_type: str, distance: int):
