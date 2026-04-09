@@ -80,6 +80,9 @@
                     {% if ns.extra_count > 0 %}
                         <span class="match-badge match-meta-extra" title="{{ t.duplicates.has_more_metadata }}">+{{ t.duplicates.has_more_metadata }}</span>
                     {% endif %}
+                    {% if member.is_quality_best and not member.is_original %}
+                        <span class="match-badge match-quality-best" title="Beste Qualitaet — wird beim Batch-Clean bevorzugt">⭐ Beste Qualitaet</span>
+                    {% endif %}
                 </div>
 
                 <div class="dup-props">

@@ -1092,6 +1092,7 @@ select:focus {
 .match-exact { background: rgba(96, 165, 250, 0.15); color: var(--info); }
 .match-similar { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
 .match-immich { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+.match-quality-best { background: rgba(251, 191, 36, 0.2); color: #b45309; }
 a.dup-badge-link { text-decoration: none; cursor: pointer; }
 a.dup-badge-link:hover { opacity: 0.75; }
 

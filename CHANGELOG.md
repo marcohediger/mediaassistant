@@ -1,5 +1,35 @@
 # Changelog
 
+## v2.28.48 — 2026-04-09
+
+### Duplikat-Review: Qualitaets-Badge, Pagination, Medientyp-Filter (#46)
+
+Vier Aenderungen an der Duplikat-Erkennung und -Anzeige:
+
+1. **Qualitaets-Badge im Review-UI:** Das qualitativ beste Mitglied
+   einer Duplikat-Gruppe bekommt ein ⭐-Badge ("Beste Qualitaet").
+   Das Original-Badge bleibt auf dem zuerst verarbeiteten Bild —
+   es werden keine Rollen getauscht.
+
+2. **Batch-Clean ist qualitaetsbasiert:** Der neue Endpoint
+   `POST /api/duplicates/batch-clean-quality` behaelt bei jeder
+   exakten Duplikat-Gruppe die Datei mit dem besten Quality-Score
+   (Format > Pixel > Groesse > Metadaten), unabhaengig davon welche
+   als "Original" markiert ist.
+
+3. **Pagination statt Lazy-Loading:** "Weitere Gruppen laden"-Button
+   (der nicht funktionierte) durch echte Seitenzahlen ersetzt — gleiche
+   Darstellung wie im Job-Log, mit Seitennummern unten.
+
+4. **pHash: Bilder nicht mit Videos vergleichen:** Ein Video-Frame-
+   Thumbnail kann zufaellig einen aehnlichen pHash haben wie ein Foto.
+   IA-02 vergleicht jetzt nur innerhalb derselben Medientyp-Gruppe
+   (Bilder vs. Bilder, Videos vs. Videos).
+
+Tests: 34/34 PASS.
+
+Refs #46
+
 ## v2.28.47 — 2026-04-09
 
 ### Feature: Batch Re-Evaluate Qualitaet fuer bestehende Duplikate (#46)
