@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.28.49 — 2026-04-09
+
+### UI: Drei Batch-Buttons + seitenweise Bereinigung (#46)
+
+Drei Aktions-Buttons auf der Duplikat-Review-Seite:
+
+1. **Re-Evaluate Qualitaet** — informativ: zaehlt wieviele Gruppen
+   ein besseres Duplikat haben (loggt ins System-Log, aendert nichts)
+2. **Batch-Clean (diese Seite)** — bereinigt nur die exakten Duplikate
+   auf der aktuellen Seite (qualitaetsbasiert)
+3. **Batch-Clean Alle** — bereinigt alle exakten Duplikate auf einmal
+
+Alle Buttons sind zweisprachig (de/en) via i18n.
+
 ## v2.28.48 — 2026-04-09
 
 ### Duplikat-Review: Qualitaets-Badge, Pagination, Medientyp-Filter (#46)
