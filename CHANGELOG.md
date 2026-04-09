@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.45 — 2026-04-09
+
+### Feature: Folder-Tags bei Duplikaten erhalten (#46)
+
+Wenn eine Datei aus einem Inbox-Ordner mit `folder_tags=True` importiert
+und als Duplikat erkannt wird, gingen die Folder-Tags bisher verloren
+(Pipeline stoppt nach IA-02, IA-07/IA-08 laufen nie). Das bestehende
+Asset in Immich blieb ohne Album-Zuordnung, obwohl der Ordnername
+relevante Informationen enthielt (z.B. "Ferien2024/Spanien").
+
+**Fix:** `_handle_duplicate()` in IA-02 extrahiert jetzt die Folder-Tags
+**vor** dem File-Move und speichert sie in `step_result['IA-02']['folder_tags']`.
+IA-07 liest diese gespeicherten Tags und fuegt sie zu den Keywords hinzu,
+wenn der Duplikat-Job spaeter ueber die Review-UI als Original behalten
+und re-processed wird.
+
 ## v2.28.44 — 2026-04-09
 
 ### Feature: Qualitaetsbasierte Duplikat-Erkennung (#46)

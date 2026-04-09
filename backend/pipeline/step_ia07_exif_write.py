@@ -86,6 +86,18 @@ async def execute(job, session) -> dict:
             if combined not in keywords:
                 keywords.append(combined)
 
+    # Folder tags preserved from IA-02 duplicate detection: when a file was
+    # originally imported from an inbox folder (with folder_tags=True) but
+    # then marked as duplicate, the path-based extraction above fails after
+    # reprocess (the file moved to /library/error/duplicates/ → relative
+    # path is broken). IA-02 pre-computes the folder tags and stores them
+    # in step_result['IA-02']['folder_tags'] so they survive the move.
+    ia02_folder_tags = step_results.get("IA-02", {}).get("folder_tags", [])
+    if ia02_folder_tags:
+        for tag in ia02_folder_tags:
+            if tag and tag not in keywords:
+                keywords.append(tag)
+
     # From AI analysis (type + tags + source)
     # Skip the literal "unknown" type — it gets set as a default when IA-05
     # failed and would otherwise pollute the file/Immich with a useless tag.
