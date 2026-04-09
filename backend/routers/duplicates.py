@@ -259,7 +259,10 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
     """Build a member dict for a single job — all info read directly from the file."""
     filepath = _resolve_filepath(job)
     dup_info = (job.step_result or {}).get("IA-02", {})
-    is_dup = dup_info.get("status") == "duplicate"
+    # Use the actual job status, not step_result — after a quality
+    # re-evaluate or swap, step_result['IA-02'] may still say
+    # "duplicate" even though the job was promoted to "done".
+    is_dup = job.status == "duplicate"
     exists = os.path.exists(filepath)
 
     # Check if this job's target is in Immich
