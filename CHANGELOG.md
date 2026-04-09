@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.28.50 — 2026-04-09
+
+### Fix: Original-Badge + Stern bei getauschten Duplikaten (#46)
+
+`is_original` wurde aus `step_result['IA-02']['status']` abgeleitet,
+nicht aus dem echten Job-Status. Nach einem Quality-Swap hatten beide
+Members `step_result.IA-02.status = 'duplicate'` → weder Original-
+noch Stern-Badge wurde angezeigt.
+
+**Fix:** `is_original` basiert jetzt auf `job.status != 'duplicate'`
+(dem echten DB-Status). Stern-Badge wird auch beim Original angezeigt
+(nicht nur bei Duplikaten) — der User soll immer sehen, welches die
+beste Qualitaet hat.
+
 ## v2.28.49 — 2026-04-09
 
 ### UI: Drei Batch-Buttons + seitenweise Bereinigung (#46)
