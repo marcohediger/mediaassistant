@@ -1358,8 +1358,7 @@ async def batch_clean_quality(request: Request):
                     for step in ("IA-03", "IA-04", "IA-05", "IA-06"):
                         if orig_sr.get(step):
                             best_sr[step] = orig_sr[step]
-                    # Skip IA-02 (user chose to keep this file)
-                    # Preserve folder_tags from the kept duplicate's original IA-02
+                    # Skip IA-02 — preserve folder_tags
                     old_ia02 = best_sr.get("IA-02") or {}
                     new_ia02 = {"status": "skipped", "reason": "kept via batch-clean"}
                     if old_ia02.get("folder_tags"):
@@ -1368,17 +1367,48 @@ async def batch_clean_quality(request: Request):
                     best.step_result = best_sr
                     flag_modified(best, "step_result")
 
-                    # Queue for re-processing (IA-07 + IA-08 will run,
-                    # IA-01..IA-06 are already filled → skipped by pipeline)
+                    # Move file from /library/error/duplicates/ to reprocess/
+                    # so the pipeline can sort it into the library or upload
+                    # to Immich via IA-08.
+                    from pipeline.reprocess import prepare_job_for_reprocess
+                    kept_filepath = best.target_path or best.original_path
+                    if kept_filepath and not kept_filepath.startswith("immich:") and os.path.exists(kept_filepath):
+                        await prepare_job_for_reprocess(
+                            session,
+                            best,
+                            keep_steps={"IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06"},
+                            move_file=True,
+                            commit=False,
+                        )
+
                     best.status = "queued"
                     best.error_message = (
                         f"Promoted (best quality). Analysis copied from {original.debug_key}."
                         + (f" Merged: {', '.join(merged_fields)}" if merged_fields else "")
                     )
                 else:
-                    # No original with analysis data found — just mark done
-                    best.status = "done"
-                    best.error_message = "Promoted to original (best quality in group)"
+                    # No original with analysis data found — queue for full
+                    # re-processing (AI will run)
+                    from pipeline.reprocess import prepare_job_for_reprocess
+                    kept_filepath = best.target_path or best.original_path
+                    if kept_filepath and not kept_filepath.startswith("immich:") and os.path.exists(kept_filepath):
+                        await prepare_job_for_reprocess(
+                            session,
+                            best,
+                            keep_steps={"IA-01"},
+                            move_file=True,
+                            commit=False,
+                        )
+                        # Skip IA-02 — preserve folder_tags
+                        sr = best.step_result or {}
+                        old_ia02 = sr.get("IA-02") or {}
+                        sr["IA-02"] = {"status": "skipped", "reason": "kept via batch-clean"}
+                        if old_ia02.get("folder_tags"):
+                            sr["IA-02"]["folder_tags"] = old_ia02["folder_tags"]
+                        best.step_result = sr
+                        flag_modified(best, "step_result")
+                    best.status = "queued"
+                    best.error_message = "Promoted (best quality, full re-processing)"
                     if merged_fields:
                         best.error_message += f" + merged: {', '.join(merged_fields)}"
             elif merged_fields:
