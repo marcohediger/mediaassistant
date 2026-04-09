@@ -50,6 +50,12 @@
     {% if current_page < total_pages %}
     <a href="/duplicates?page={{ current_page + 1 }}" class="btn btn-small btn-secondary">&raquo;</a>
     {% endif %}
+
+    <select class="btn btn-small btn-secondary" onchange="window.location.href='/duplicates?page='+this.value" style="margin-left:12px; min-width:80px">
+        {% for p in range(1, total_pages + 1) %}
+        <option value="{{ p }}" {{ 'selected' if p == current_page else '' }}>{{ p }} / {{ total_pages }}</option>
+        {% endfor %}
+    </select>
 </div>
 {% endif %}
 
