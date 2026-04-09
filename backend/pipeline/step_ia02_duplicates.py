@@ -93,16 +93,17 @@ def _quality_score(job) -> tuple:
     # JPEG at 100KB is heavily compressed and worse than a 2048x1536
     # JPEG at 500KB. File size comes BEFORE pixels in the score.
     #
-    # Round to 100KB blocks so tiny differences (50KB on a 1.6MB file)
-    # don't flip the winner. Pixels break the tie when file sizes are
-    # in the same 100KB block.
-    size_rounded = (size // 100000) * 100000
+    # Logarithmic scaling: files within ~7% of each other get the
+    # same bucket (log2 * 10). This is percentage-based, so 50KB
+    # difference matters at 200KB (25%) but not at 10MB (0.5%).
+    import math
+    size_log = int(math.log2(max(size, 1)) * 10)
 
     # Negative job ID: lower ID = older = processed first = preferred
     # as tiebreaker when all other scores are equal.
     job_id = -(job.id or 0)
 
-    return (fmt, size_rounded, pixels, meta, job_id)
+    return (fmt, size_log, pixels, meta, job_id)
 
 
 def _compute_phash(filepath: str) -> str | None:
