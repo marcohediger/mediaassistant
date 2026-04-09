@@ -1340,13 +1340,44 @@ async def batch_clean_quality(request: Request):
                 )
                 deleted += 1
 
-            # Ensure the best one is marked as done (not duplicate)
+            # If the best was a duplicate, it never ran IA-03..IA-08.
+            # Copy the analysis results (IA-03 geocoding, IA-05 AI tags,
+            # IA-06 OCR) from the original so we don't need to re-run
+            # the slow AI step. Then queue for re-processing — only
+            # IA-07 (tag write) and IA-08 (sort/upload) need to run.
             if best.status == "duplicate":
-                best.status = "done"
-                best.error_message = "Promoted to original (best quality in group)"
-            if merged_fields:
-                merge_note = f" + merged: {', '.join(merged_fields)}"
-                best.error_message = (best.error_message or "") + merge_note
+                # Find the original (the done member with the most complete step_result)
+                original = next(
+                    (j for j in member_jobs if j.id != best.id and j.status != "duplicate"
+                     and (j.step_result or {}).get("IA-05")),
+                    None,
+                )
+                if original:
+                    orig_sr = original.step_result or {}
+                    # Copy analysis steps from original
+                    for step in ("IA-03", "IA-04", "IA-05", "IA-06"):
+                        if orig_sr.get(step):
+                            best_sr[step] = orig_sr[step]
+                    # Skip IA-02 (user chose to keep this file)
+                    best_sr["IA-02"] = {"status": "skipped", "reason": "kept via batch-clean"}
+                    best.step_result = best_sr
+                    flag_modified(best, "step_result")
+
+                    # Queue for re-processing (IA-07 + IA-08 will run,
+                    # IA-01..IA-06 are already filled → skipped by pipeline)
+                    best.status = "queued"
+                    best.error_message = (
+                        f"Promoted (best quality). Analysis copied from {original.debug_key}."
+                        + (f" Merged: {', '.join(merged_fields)}" if merged_fields else "")
+                    )
+                else:
+                    # No original with analysis data found — just mark done
+                    best.status = "done"
+                    best.error_message = "Promoted to original (best quality in group)"
+                    if merged_fields:
+                        best.error_message += f" + merged: {', '.join(merged_fields)}"
+            elif merged_fields:
+                best.error_message = (best.error_message or "") + f" + merged: {', '.join(merged_fields)}"
 
         await session.commit()
 
