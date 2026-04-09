@@ -111,7 +111,12 @@ async def execute(job, session) -> dict:
             select(Job).where(
                 Job.file_hash == file_hash,
                 Job.id != job.id,
-                Job.status.in_(("done", "duplicate", "review", "processing", "error")),  # excludes 'orphan' & 'queued' & 'deleted' & 'skipped'
+                # A job in 'duplicate' status is itself a copy — never use
+                # it as the "original" for dedup. This prevents circular
+                # references on retry: job A was done, poller created
+                # duplicate B of A, then retrying A would match B and
+                # mark A as duplicate of its own duplicate.
+                Job.status.in_(("done", "review", "processing", "error")),  # excludes 'duplicate', 'orphan', 'queued', 'deleted', 'skipped'
             ).limit(10)
         )
         candidates = result.scalars().all()
@@ -151,7 +156,7 @@ async def execute(job, session) -> dict:
             result = await session.execute(
                 select(Job).where(
                     Job.id != job.id,
-                    Job.status.in_(("done", "duplicate", "review", "processing", "error")),  # excludes 'orphan' & 'queued' & 'deleted' & 'skipped'
+                    Job.status.in_(("done", "review", "processing", "error")),  # excludes 'duplicate', 'orphan', 'queued', 'deleted', 'skipped'
                     Job.filename.like(f"{basename}.%"),
                 )
             )
@@ -188,7 +193,7 @@ async def execute(job, session) -> dict:
                 select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id).where(
                     Job.phash.isnot(None),
                     Job.id != job.id,
-                    Job.status.in_(("done", "duplicate", "review", "processing", "error")),  # excludes 'orphan' & 'queued' & 'deleted' & 'skipped'
+                    Job.status.in_(("done", "review", "processing", "error")),  # excludes 'duplicate', 'orphan', 'queued', 'deleted', 'skipped'
                 ).offset(offset).limit(BATCH_SIZE)
             )
             rows = result.all()
@@ -273,7 +278,7 @@ async def execute_video_phash(job, session) -> dict | None:
             select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id).where(
                 Job.phash.isnot(None),
                 Job.id != job.id,
-                Job.status.in_(("done", "duplicate", "review", "processing", "error")),  # excludes 'orphan' & 'queued' & 'deleted' & 'skipped'
+                Job.status.in_(("done", "review", "processing", "error")),  # excludes 'duplicate', 'orphan', 'queued', 'deleted', 'skipped'
             ).offset(offset).limit(BATCH_SIZE)
         )
         rows = result.all()

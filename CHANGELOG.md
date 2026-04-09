@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.28.43 — 2026-04-09
+
+### Fix: Zirkulaere Duplikat-Erkennung bei Retry
+
+Wenn ein Job retried wurde, konnte IA-02 ihn als Duplikat seines
+**eigenen** Duplikats markieren. Szenario:
+
+1. Job A verarbeitet `IMG.HEIC` aus der Inbox → Upload nach Immich → done
+2. Immich-Poller findet dasselbe Asset → Job B → IA-02 erkennt korrekt:
+   "B ist Duplikat von A" → B landet in `/library/error/duplicates/`
+3. User retried Job A → Nuclear Retry droppt alle Steps → IA-02 laeuft
+   neu → findet Job B (Status `duplicate`, aber Datei existiert unter
+   `/library/error/duplicates/`) → markiert A als Duplikat von B
+
+**Problem:** IA-02 hat Jobs mit `status='duplicate'` als gueltige
+"Originale" akzeptiert. Ein Duplikat ist per Definition selbst eine
+Kopie und darf nie als Referenz fuer eine Duplikat-Erkennung dienen.
+
+**Fix:** `duplicate` aus dem Status-Filter in allen 4 IA-02-Suchqueries
+entfernt (SHA256-exakt, RAW+JPG-Paar, pHash exact, pHash near).
+Nur `done`, `review`, `processing` und `error` Jobs werden als
+potentielle Originale betrachtet.
+
+Live-Vorfall: MA-2026-28103 (IMG_2499.HEIC) — nach Retry als Duplikat
+von MA-2026-48417 markiert, obwohl 48417 selbst das Duplikat war.
+
 ## v2.28.42 — 2026-04-09
 
 ### Fix: Retry im Sidecar-Mode liefert frische XMP nach Immich
