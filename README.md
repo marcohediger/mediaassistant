@@ -13,12 +13,12 @@ New files in inbox directories are automatically detected and processed through 
 | Step | Name | Description |
 |------|------|-------------|
 | IA-01 | Read EXIF | Extract metadata via ExifTool; videos additionally via ffprobe (date, GPS with ISO 6709 parser, duration + formatted, resolution, megapixels, codec, framerate, bitrate, rotation) |
-| IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar) for images and videos, incl. Immich-uploaded files. Video pHash is computed as average from IA-04 frames (post-IA-04 check) |
+| IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar) for images and videos, incl. Immich-uploaded files. Video pHash is computed as average from IA-04 frames (post-IA-04 check). Quality-aware: better quality file becomes original (format > file size > pixels > metadata). Media-type filter: images only match images, videos only match videos |
 | IA-03 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
 | IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis; video thumbnail extraction via ffmpeg (configurable number of frames evenly distributed across video duration) |
 | IA-05 | AI Analysis | Classify image (type from DB categories, source, tags, description) with all collected metadata + static rule pre-classification |
 | IA-06 | OCR | Text recognition (screenshots, documents) |
-| IA-07 | Write EXIF Tags | Write AI tags, source, description, geocoding and folder-tags back to file |
+| IA-07 | Write EXIF Tags | Write AI tags, source, description, geocoding and folder-tags back to file. Supports direct (in-file) and sidecar (.xmp) mode. Folder-tags preserved from IA-02 for duplicates |
 | IA-08 | Sort | Static rules + AI verification → category; write category tag; move to library or upload to Immich |
 | IA-09 | Notification | Email on errors (SMTP, Office 365 / Gmail) |
 | IA-10 | Cleanup | Remove temporary files |
@@ -176,10 +176,25 @@ All system log messages are always written in English, regardless of the UI lang
 - Per file: all keywords/tags and description from file
 - Per file: similarity score (SHA256 exact / pHash %)
 - Per file: badge (ORIGINAL/EXACT) is a clickable link — Immich assets open in Immich, local files download
+- **Quality badges**: ORIGINAL = first processed file (oldest job). ⭐ Beste Qualität = highest quality score (format > file size > pixels > metadata)
 - **Immich duplicates**: Thumbnail fetched from Immich, "View in Immich" button, "Delete local copy" for the local file
-- Actions: "Keep this" on all group members — triggers full pipeline re-run (AI analysis, tag writing, sorting/Immich upload) so the kept file gets all metadata before being filed
-- Batch-Clean: auto-delete all exact SHA256 duplicates
+- **Pagination**: Page numbers with dropdown for direct navigation (efficient for 5000+ duplicates)
+- **Metadata merge**: When keeping/cleaning duplicates, GPS, date, keywords and description are automatically merged from worse into best file
+- Actions: "Keep this" on all group members — triggers full pipeline re-run (AI analysis, tag writing, sorting/Immich upload) so the kept file gets all metadata before being filed. Merges metadata from deleted files first. IA-02 is skipped on re-processing to prevent re-flagging as duplicate
+- **Three batch actions**:
+  - **Re-Evaluate Quality**: informational — counts how many groups have a better-quality duplicate
+  - **Batch-Clean (this page)**: quality-aware clean for exact + pHash-100% groups on current page only
+  - **Batch-Clean All**: same for all groups. For promoted duplicates: analysis data (IA-03..06) is copied from original, only IA-07/08 run (fast, no AI needed)
 - Orphaned entries: if a referenced original file no longer exists on disk (or was deleted from Immich), the match is skipped and the new file is treated as a fresh original
+
+### CSV-Retry Input
+Bulk retry mechanism: place a CSV file with a `filename` column in `/app/data/csv-retry/`. The file watcher detects it automatically and queues all matching jobs for re-processing. Processed CSVs are moved to `csv-retry/done/`. Works with any file that lists filenames — not limited to ghost-tag cleanup.
+
+### Companion Tools
+| Tool | Repository | Purpose |
+|------|-----------|---------|
+| **Sidecar Repair** | [ma-sidecar-repair](https://github.com/marcohediger/ma-sidecar-repair) | Standalone GUI to repair broken XMP sidecars from the v2.28.13 bug |
+| **Ghost-Tag Detect** | [ma-ghost-tag-detect](https://github.com/marcohediger/ma-ghost-tag-detect) | Standalone GUI to find hallucinated AI tags, outputs CSV for csv-retry |
 
 ### Review
 - Manual classification of unclear files (AI uncertain, no EXIF, messenger files)
@@ -329,6 +344,7 @@ When enabled:
 - On first activation, the timestamp is set to "now" — existing assets are not processed
 - New assets are downloaded, processed (AI, OCR, Geocoding), tags are written to the file via EXIF, and the asset is replaced in Immich with the tagged version
 - Assets uploaded from an inbox are automatically skipped (no double processing)
+- **Sidecar mode retry** (v2.28.42+): On retry, the file + fresh sidecar are re-uploaded to Immich via Upload+Copy+Delete workflow. The old asset is replaced with the new one (asset ID changes, albums/favorites/faces are copied)
 
 **Archiving & Locked Folder:**
 - Each library category has a configurable `immich_archive` flag (Settings → Library Categories)
