@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.28.46 — 2026-04-09
+
+### Feature: CSV-Retry Input (#42)
+
+Neuer generischer Bulk-Retry-Mechanismus: CSV-Dateien mit einer
+`filename`-Spalte koennen in `/app/data/csv-retry/` abgelegt werden.
+Der Filewatcher erkennt sie automatisch und setzt alle passenden Jobs
+auf `queued`, sodass der Pipeline-Worker sie erneut verarbeitet.
+
+Mehrere Jobs mit identischem Dateinamen werden alle retried.
+Verarbeitete CSVs werden nach `csv-retry/done/` verschoben.
+
+Primaer fuer das Ghost-Tag-Cleanup (#42) gedacht — das externe
+Detection-Tool (`ma-ghost-tag-detect`) generiert die CSV —, aber
+multifunktional einsetzbar fuer jeden Bulk-Retry-Use-Case.
+
+End-to-End getestet auf Dev: CSV → Filewatcher → reset_job_for_retry
+→ Pipeline re-run → CSV nach done/ verschoben.
+
+Refs #42
+
 ## v2.28.45 — 2026-04-09
 
 ### Feature: Folder-Tags bei Duplikaten erhalten (#46)
