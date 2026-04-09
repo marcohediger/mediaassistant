@@ -586,6 +586,14 @@ async def duplicates_page(request: Request):
             "is_immich_duplicate": g["is_immich_duplicate"],
         })
 
+    # Build pagination page numbers (efficient — only the visible ones)
+    page_numbers = []
+    for p in range(1, total_pages + 1):
+        if p <= 2 or p > total_pages - 1 or abs(p - page) <= 2:
+            page_numbers.append(p)
+        elif page_numbers and page_numbers[-1] != "...":
+            page_numbers.append("...")
+
     return await render(request, "duplicates.html", {
         "groups": groups,
         "total_groups": total,
@@ -594,6 +602,7 @@ async def duplicates_page(request: Request):
         "current_page": page,
         "total_pages": total_pages,
         "per_page": per_page,
+        "page_numbers": page_numbers,
     })
 
 

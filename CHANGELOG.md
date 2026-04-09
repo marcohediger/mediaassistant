@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.51 — 2026-04-09
+
+### Fix: Pagination fuer grosse Duplikat-Mengen (5000+)
+
+Seitenzahlen werden im Backend berechnet (nicht im Template-Loop).
+Bei 250 Seiten zeigt die Pagination: [1] [2] ... [123] [124] [125] ... [250]
+statt 250 Buttons zu rendern.
+
 ## v2.28.50 — 2026-04-09
 
 ### Fix: Original-Badge + Stern bei getauschten Duplikaten (#46)
