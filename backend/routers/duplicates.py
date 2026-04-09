@@ -1359,7 +1359,12 @@ async def batch_clean_quality(request: Request):
                         if orig_sr.get(step):
                             best_sr[step] = orig_sr[step]
                     # Skip IA-02 (user chose to keep this file)
-                    best_sr["IA-02"] = {"status": "skipped", "reason": "kept via batch-clean"}
+                    # Preserve folder_tags from the kept duplicate's original IA-02
+                    old_ia02 = best_sr.get("IA-02") or {}
+                    new_ia02 = {"status": "skipped", "reason": "kept via batch-clean"}
+                    if old_ia02.get("folder_tags"):
+                        new_ia02["folder_tags"] = old_ia02["folder_tags"]
+                    best_sr["IA-02"] = new_ia02
                     best.step_result = best_sr
                     flag_modified(best, "step_result")
 
