@@ -285,6 +285,10 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
     else:
         img_info = _empty_img_info()
 
+    # Quality score for ⭐ badge (best-quality recommendation)
+    from pipeline.step_ia02_duplicates import _quality_score
+    q_score = _quality_score(job)
+
     return {
         "job_id": job.id,
         "debug_key": job.debug_key,
@@ -296,6 +300,7 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
         "phash_distance": dup_info.get("phash_distance", 0),
         "immich_link": immich_link,
         "immich_asset_id": immich_asset_id,
+        "quality_score": q_score,
         **img_info,
     }
 
@@ -469,6 +474,12 @@ async def _build_group_detail(member_keys: list[str], jobs_by_key: dict) -> list
                 prefetched = immich_info[key]
             members.append(await _build_member(job, session, prefetched_info=prefetched))
 
+    # Mark the member with the best quality score with ⭐
+    if members:
+        best_idx = max(range(len(members)), key=lambda i: members[i].get("quality_score", ()))
+        for i, m in enumerate(members):
+            m["is_quality_best"] = (i == best_idx)
+
     return members
 
 
@@ -543,14 +554,24 @@ async def duplicates_page(request: Request):
 
     skip_confirm = await config_manager.get("duplikat.skip_confirm", False)
 
-    # Load first page via API logic for initial render
+    # Pagination
+    try:
+        page = int(request.query_params.get("page", 1))
+    except ValueError:
+        page = 1
+    per_page = 10
+
     group_index, jobs_by_key = await _build_group_index()
     total = len(group_index)
     exact_count = sum(1 for g in group_index if g["all_exact"])
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
 
-    first_page = group_index[:10]
+    start = (page - 1) * per_page
+    page_groups = group_index[start:start + per_page]
+
     groups = []
-    for g in first_page:
+    for g in page_groups:
         members = await _build_group_detail(g["member_keys"], jobs_by_key)
         if len(members) < 2:
             continue
@@ -567,8 +588,9 @@ async def duplicates_page(request: Request):
         "total_groups": total,
         "exact_groups": exact_count,
         "skip_confirm": skip_confirm,
-        "has_more": total > 10,
-        "current_page": 1,
+        "current_page": page,
+        "total_pages": total_pages,
+        "per_page": per_page,
     })
 
 
@@ -1069,87 +1091,77 @@ async def merge_metadata(request: Request):
     return JSONResponse({"status": "ok", "merged": merged_fields})
 
 
-@router.post("/api/duplicates/re-evaluate-quality")
-async def re_evaluate_quality():
-    """Re-evaluate all duplicate pairs and swap roles where the duplicate
-    has better quality than the original.
+@router.post("/api/duplicates/batch-clean-quality")
+async def batch_clean_quality():
+    """Quality-aware batch clean: for each exact-match duplicate group,
+    keep the member with the best quality score and delete the rest.
 
-    Uses the same _quality_score() as IA-02 (format > pixels > file_size >
-    metadata_count). For each swap, the former original is demoted to
-    duplicate and the former duplicate is promoted to original (status=done).
-
-    This is a one-time batch operation for duplicates that were detected
-    before v2.28.44 (which added quality-aware detection for new files).
+    Unlike the basic batch-clean (which always keeps the 'original'),
+    this version compares quality scores and may delete the original
+    if the duplicate has better quality (higher resolution, better
+    format, more metadata).
     """
     from pipeline.step_ia02_duplicates import _quality_score
 
-    swapped = 0
-    skipped = 0
+    kept = 0
+    deleted = 0
     errors = 0
 
+    group_index, jobs_by_key = await _build_group_index()
+
     async with async_session() as session:
-        result = await session.execute(
-            select(Job).where(Job.status == "duplicate")
-        )
-        dups = result.scalars().all()
+        for g in group_index:
+            if not g["all_exact"]:
+                continue  # only exact matches for auto-clean
 
-        for dup in dups:
-            dup_info = (dup.step_result or {}).get("IA-02", {})
-            orig_key = dup_info.get("original_debug_key")
-            if not orig_key:
-                skipped += 1
+            # Load all members and compute quality scores
+            member_jobs = []
+            for key in g["member_keys"]:
+                job = jobs_by_key.get(key)
+                if job:
+                    result = await session.execute(select(Job).where(Job.id == job.id))
+                    fresh = result.scalar()
+                    if fresh:
+                        member_jobs.append(fresh)
+
+            if len(member_jobs) < 2:
                 continue
 
-            # Load the original job
-            orig_result = await session.execute(
-                select(Job).where(Job.debug_key == orig_key)
-            )
-            orig = orig_result.scalar()
-            if not orig:
-                skipped += 1
-                continue
+            # Find the best quality member
+            best = max(member_jobs, key=lambda j: _quality_score(j))
+            kept += 1
 
-            # Compare quality scores
-            score_dup = _quality_score(dup)
-            score_orig = _quality_score(orig)
+            # Delete all others
+            for job in member_jobs:
+                if job.id == best.id:
+                    continue
 
-            if score_dup <= score_orig:
-                # Original is already the better file — no swap needed
-                skipped += 1
-                continue
+                filepath = job.target_path or job.original_path
+                if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
+                    try:
+                        await asyncio.to_thread(os.remove, filepath)
+                        log_path = filepath + ".log"
+                        if os.path.exists(log_path):
+                            await asyncio.to_thread(os.remove, log_path)
+                    except OSError:
+                        errors += 1
+                        continue
 
-            # Swap: promote duplicate → done, demote original → duplicate
-            try:
-                # Update the duplicate → promote to done
-                dup.status = "done"
-                dup.error_message = (
-                    f"Promoted: better quality than {orig_key} "
-                    f"(score {list(score_dup)} > {list(score_orig)})"
+                job.status = "done"
+                job.error_message = (
+                    f"Duplicate deleted (Batch-Clean Quality). "
+                    f"Kept: {best.debug_key} (better quality)"
                 )
+                deleted += 1
 
-                # Update the original → demote to duplicate
-                orig.status = "duplicate"
-                orig.error_message = None
-                sr = orig.step_result or {}
-                sr["IA-02"] = {
-                    "status": "duplicate",
-                    "match_type": dup_info.get("match_type", "exact"),
-                    "original_debug_key": dup.debug_key,
-                    "quality_swap": True,
-                    "quality_score_self": list(score_orig),
-                    "quality_score_winner": list(score_dup),
-                }
-                orig.step_result = sr
-                flag_modified(orig, "step_result")
+            # Ensure the best one is marked as done (not duplicate)
+            if best.status == "duplicate":
+                best.status = "done"
+                best.error_message = "Promoted to original (best quality in group)"
 
-                await session.commit()
-                swapped += 1
-            except Exception as e:
-                errors += 1
-                await session.rollback()
+        await session.commit()
 
-    summary = (f"Quality Re-Evaluate: {swapped} swapped, "
-               f"{skipped} already correct, {errors} errors")
+    summary = f"Batch-Clean Quality: {kept} groups, {deleted} deleted, {errors} errors"
     await log_info("duplicates", summary)
     return RedirectResponse(url="/duplicates", status_code=303)
 

@@ -244,6 +244,12 @@ async def execute(job, session) -> dict:
         threshold = int(await config_manager.get("duplikat.phash_threshold", 3))
         current_hash = imagehash.hex_to_hash(phash_str)
 
+        # Only compare within the same media type: images vs images,
+        # videos vs videos. A video frame thumbnail and a photo can
+        # have similar pHash values but are fundamentally different files.
+        current_ext = os.path.splitext(job.filename)[1].lower() if job.filename else ""
+        current_is_video = current_ext in VIDEO_EXTENSIONS
+
         # Query only necessary columns for pHash comparison (not full Job objects)
         # Process in batches to avoid loading 150k+ rows into memory at once
         BATCH_SIZE = 5000
@@ -252,7 +258,7 @@ async def execute(job, session) -> dict:
 
         while not found_duplicate:
             result = await session.execute(
-                select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id).where(
+                select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id, Job.filename).where(
                     Job.phash.isnot(None),
                     Job.id != job.id,
                     Job.status.in_(("done", "review", "processing", "error")),  # excludes 'duplicate', 'orphan', 'queued', 'deleted', 'skipped'
@@ -270,6 +276,12 @@ async def execute(job, session) -> dict:
                     continue
 
                 if distance <= threshold:
+                    # Skip cross-media-type matches (image vs video)
+                    cand_ext = os.path.splitext(row.filename or "")[1].lower()
+                    cand_is_video = cand_ext in VIDEO_EXTENSIONS
+                    if current_is_video != cand_is_video:
+                        continue
+
                     # Load full Job object only for the match
                     candidate = await session.get(Job, row.id)
                     if candidate and await _file_exists(candidate):
@@ -339,7 +351,7 @@ async def execute_video_phash(job, session) -> dict | None:
     job.phash = phash_str
     await session.commit()
 
-    # Check against existing pHashes
+    # Check against existing pHashes — only compare videos with videos
     threshold = int(await config_manager.get("duplikat.phash_threshold", 3))
     current_hash = imagehash.hex_to_hash(phash_str)
 
@@ -348,7 +360,7 @@ async def execute_video_phash(job, session) -> dict | None:
 
     while True:
         result = await session.execute(
-            select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id).where(
+            select(Job.id, Job.phash, Job.debug_key, Job.target_path, Job.original_path, Job.immich_asset_id, Job.filename).where(
                 Job.phash.isnot(None),
                 Job.id != job.id,
                 Job.status.in_(("done", "review", "processing", "error")),  # excludes 'duplicate', 'orphan', 'queued', 'deleted', 'skipped'
@@ -366,6 +378,11 @@ async def execute_video_phash(job, session) -> dict | None:
                 continue
 
             if distance <= threshold:
+                # Only compare videos with videos (not with images)
+                cand_ext = os.path.splitext(row.filename or "")[1].lower()
+                if cand_ext not in VIDEO_EXTENSIONS:
+                    continue
+
                 candidate = await session.get(Job, row.id)
                 if candidate and await _file_exists(candidate):
                     await _handle_duplicate(job, session, candidate, "similar", distance)
