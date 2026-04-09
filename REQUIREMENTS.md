@@ -1,4 +1,4 @@
-# REQUIREMENTS — ImageAssistant
+# REQUIREMENTS — MediaAssistant
 
 ## Projektbeschreibung
 Dauerhafter Docker-Service der Fotos/Videos automatisch verarbeitet:
@@ -270,9 +270,32 @@ Eigene Seite im Webinterface zum Reviewen und Löschen von Duplikaten:
 - Pro Datei: Beschreibung aus Datei angezeigt
 - Aktionen pro Datei: "Dieses behalten" (verschiebt in Bibliothek, löscht alle anderen)
 - Ähnlichkeits-Score pro Datei anzeigen (SHA256 exakt / pHash %)
-- Batch-Clean: alle exakten SHA256 Duplikate ohne Review automatisch löschen
+- Batch-Clean: qualitaetsbasiert — beste Datei pro Gruppe behalten (Format > Dateigroesse > Pixel > Metadaten), exakte + pHash-100% Matches
+- Batch-Clean seitenweise oder alle auf einmal
+- Metadata-Merge: GPS, Datum, Keywords, Description von schlechteren Dateien ins Beste uebernommen vor dem Loeschen
+- Quality-Score: Format (RAW>HEIC>TIFF>JPEG>PNG) > Dateigroesse (log-skaliert, ~7% Toleranz) > Pixel > Metadaten (GPS, EXIF, Keywords, Description) > Original-Bias (aelterer Job gewinnt bei Gleichstand)
+- Quality-Badge (Stern) auf dem besten Mitglied jeder Gruppe
+- ORIGINAL-Badge = aeltester Job (zuerst verarbeitet), nicht DB-Status
+- Pagination mit Seitenzahlen + Dropdown (statt Lazy-Loading)
+- Re-Evaluate Quality: informativ, zaehlt wieviele Gruppen betroffen
+- pHash Medientyp-Filter: Bilder nur mit Bildern, Videos nur mit Videos
+- "Dieses behalten" → IA-02 wird als skipped injiziert (kein Re-Duplicate), Metadata-Merge, Folder-Tags erhalten
+- Promoted Duplicates: Analyse-Steps (IA-03..06) vom Original kopiert, nur IA-07/IA-08 laeuft (schnell, keine KI)
 - Anzahl offener Duplikat-Gruppen im Dashboard anzeigen
 - Dateinamen-Kollision: automatischer Index (_1, _2, ...) bei gleichem Namen im Zielordner
+
+### CSV-Retry Input
+Generischer Bulk-Retry-Mechanismus:
+- CSV mit `filename`-Spalte in `/app/data/csv-retry/` ablegen
+- Filewatcher erkennt CSV automatisch, setzt alle passenden Jobs auf `queued`
+- Verarbeitete CSVs werden nach `csv-retry/done/` verschoben
+- Multifunktional: Ghost-Tag-Cleanup, Sidecar-Repair-Nacharbeiten, beliebige Bulk-Retries
+
+### Externe Standalone-Tools
+| Tool | Repo | Zweck |
+|---|---|---|
+| **Sidecar Repair** | `ma-sidecar-repair` | Defekte XMP-Sidecars reparieren (v2.28.13-Bug), tkinter GUI |
+| **Ghost-Tag Detect** | `ma-ghost-tag-detect` | Ghost-Tags aus altem AI-Prompt erkennen, CSV fuer csv-retry |
 
 ## Logging & Debug
 
@@ -584,7 +607,7 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Filewatcher queued korrekt alle Dateien vor Verarbeitung (Phase 1: create, Phase 2: process)
 - [x] FEAT: Verwaiste DB-Einträge bei Duplikaterkennung — wenn Original-Datei gelöscht wurde, wird Match übersprungen und neue Datei als Original behandelt
 
-### Offen
+### Erledigt (nachträglich) ✅
 - [x] FEAT: Lightbox — Klick auf Thumbnail öffnet Originalbild als Fullscreen-Overlay (Review, Duplikate, Log-Detail); RAW/DNG via ExifTool PreviewImage oder Immich Preview, HEIC → JPEG
 - [x] FEAT: Review-Seite — Löschen-Button, Dateigrösse (Immich API Fallback), Datum-Fallback (FileModifyDate/created_at), Dimensionen, bedingte Metadatenfelder
 - [x] FEAT: Duplikat-Review — EXIF via Immich API, "Dieses behalten" auf allen Mitgliedern, Badge als klickbarer Link, Keep → Immich Upload, httpx DELETE Fix
@@ -598,11 +621,12 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Sortier-Regeln editierbar im Webinterface (Bedingung → Kategorie, Reihenfolge per Pfeile, KI hat Vorrang)
 - [x] FEAT: HTML-Report nach Dry-Run (Übersicht: Kategorien, Inbox, Dateien, Fehler)
 - [x] FEAT: Manueller Scan-Trigger im Dashboard ("Jetzt scannen" Button)
+### Offen
 - [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 
 ### Optional (v3)
-- [ ] SSO Login via OIDC (fastapi-sso)
+- [x] SSO Login via OIDC (Auth-Middleware, Authentik/Keycloak/Authelia) — umgesetzt in v2.28.x
 - [ ] KI-basierte Ortschätzung für Bilder ohne GPS (Vision → "estimated_location" Tag)
 - [ ] GeoCLIP für präzise GPS-Schätzung ohne GPS-EXIF
 - [ ] Google Vision API Landmark Detection (für alte Fotos ohne GPS)
@@ -640,7 +664,7 @@ Alle Dateiverschiebungen nutzen safe_move (Copy → SHA256-Verify → Delete) �
 - Unterstützte Formate konfigurierbar in config.yml
 
 ## Nicht umsetzen (v1)
-- Keine Authentifizierung im Webinterface (siehe Optional)
+- ~~Keine Authentifizierung im Webinterface~~ → **umgesetzt als OIDC/SSO in v2.28.x**
 - Keine Cloud-Anbindung
 - Keine Video-Analyse (nur Thumbnails/Metadaten)
 - Kein n8n-Workflow
@@ -671,11 +695,11 @@ Periodischer Abgleich zwischen Immich-DB und EXIF-Tags in den Originaldateien.
 - Geschätzte Performance: DB-Read 150k Assets ~4 Min, ExifTool ~230ms/Datei
 - Ziel: EXIF-Tags als portables Backup unabhängig von Immich
 
-### SSO Login (OIDC) (v3)
-- OIDC-kompatiblen Provider anbinden (z.B. Keycloak, Authelia, Authentik)
-- Bibliothek: `fastapi-sso` oder ähnlich
-- Alle FastAPI Endpoints hinter Login absichern
-- Nur sinnvoll wenn Webinterface von aussen erreichbar gemacht wird
+### ~~SSO Login (OIDC)~~ ✅ Umgesetzt (v2.28.x)
+- ✅ OIDC-kompatibler Provider (Authentik, Keycloak, Authelia)
+- ✅ Alle FastAPI-Endpoints hinter Login
+- ✅ Konfiguration via ENV-Variablen (AUTH_MODE, OIDC_ISSUER, etc.)
+- ✅ Benutzer-Allowlist, Session-Management, Logout
 
 ### Open-Source Veröffentlichung (GitHub)
 Repository-Struktur:
