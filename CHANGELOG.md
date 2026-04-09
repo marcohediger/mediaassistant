@@ -1,5 +1,39 @@
 # Changelog
 
+## v2.28.42 — 2026-04-09
+
+### Fix: Retry im Sidecar-Mode liefert frische XMP nach Immich
+
+Beim Retry eines bereits in Immich vorhandenen Assets hat IA-08 im
+Sidecar-Mode bisher den Re-Upload uebersprungen (`step_ia08_sort.py:529`),
+weil die Annahme war: "Originaldatei unveraendert, nur API-Tags
+aktualisieren." Die API-Tags wurden zwar korrekt gesetzt, aber die
+`.xmp`-Sidecar-Datei im Immich-Storage blieb die alte/veraltete Version.
+
+Da MediaAssistant keinen direkten Dateizugriff auf den Immich-Storage
+hat und Immichs eigener SidecarWrite-Mechanismus `dc:subject` (Keywords)
+nicht zurueckschreibt (nur `digiKam:TagsList`, getestet auf Immich v2.6.3),
+gibt es keinen anderen Weg die frische Sidecar nach Immich zu bringen
+als ein vollstaendiger Re-Upload.
+
+**Loesung:** Bei einem Retry (`retry_count > 0`) macht IA-08 jetzt auch
+im Sidecar-Mode den Upload+Copy+Delete-Workflow — identisch zum
+Direct-Mode, aber mit `sidecar_path` im `upload_asset()`-Aufruf:
+
+1. `upload_asset(original_path, sidecar_path=sidecar_path)` → neues
+   Asset mit frischer Sidecar
+2. `copy_asset_metadata(old, new)` → Albums, Favorites, Faces, Stacks
+3. `delete_asset(old)` → altes Asset entfernen
+
+**Konsequenz:** Die Asset-ID aendert sich beim Retry. Shared Links auf
+das alte Asset brechen. Fuer einen Retry-Vorgang (Ausnahmefall, nicht
+Massenoperation) ist das akzeptabel.
+
+**Erste Verarbeitung** (kein Retry) bleibt unveraendert: Sidecar-Mode
+taggt nur via API, kein Re-Upload.
+
+Refs #44
+
 ## v2.28.41 — 2026-04-08
 
 ### Cleanup-Tool: praezise Container-Brand-Erkennung

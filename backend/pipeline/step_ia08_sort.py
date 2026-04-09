@@ -520,31 +520,59 @@ async def execute(job, session) -> dict:
     sidecar_mode = ia07_result.get("write_mode") == "sidecar"
     sidecar_path = ia07_result.get("sidecar_path")
 
-    # Route: Immich webhook (upload tagged file, copy metadata, delete old)
+    # Route: asset already exists in Immich (came via poller or was
+    # previously uploaded). Two sub-cases:
+    #
+    #   1. First-time processing, sidecar mode → the original file is
+    #      unchanged, only a .xmp was written beside it. No need to
+    #      re-upload; just tag the existing asset via API.
+    #
+    #   2. Retry (retry_count > 0) OR direct mode → the file or sidecar
+    #      changed, so we upload a fresh copy (with sidecar if
+    #      applicable), copy metadata from old→new, and delete the old
+    #      asset. This is the Upload+Copy+Delete workflow.
+    #
+    # Before v2.28.42, retries in sidecar mode fell into case 1 — the
+    # API tags were updated correctly, but the .xmp sidecar in Immich's
+    # storage was never refreshed (IA-08 skipped the re-upload). Since
+    # MediaAssistant has no direct filesystem access to Immich's storage,
+    # the only way to deliver the fresh sidecar is a full re-upload.
+    # The asset-id changes as a consequence, but copy_asset_metadata
+    # preserves albums, favorites, faces, and stacks.
     if job.immich_asset_id:
         old_asset_id = job.immich_asset_id
         immich_replaced = False
         new_asset_id = None
+        upload_result = {}
 
-        if sidecar_mode:
-            # Sidecar mode: original file unchanged → no re-upload needed.
-            # Just tag the existing asset via API.
+        is_retry = (job.retry_count or 0) > 0
+        needs_reupload = not sidecar_mode or is_retry
+
+        if not needs_reupload:
+            # First-time processing, sidecar mode: original file unchanged,
+            # just tag the existing asset via API.
             job.target_path = f"immich:{job.immich_asset_id}"
         else:
-            # Direct mode: file was modified → upload new version, replace old
+            # Re-upload: direct mode (file modified) OR sidecar-mode retry
+            # (fresh .xmp needs to reach Immich).
             # Extract album name from inbox folder structure (re-check module + inbox at runtime)
-            webhook_album_names = None
+            reupload_album_names = None
             folder_tags_active = await _is_folder_tags_active(job)
             if folder_tags_active and job.source_inbox_path:
                 rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
                 if rel and rel != ".":
                     parts = [p for p in rel.split(os.sep) if p and p != "."]
                     if parts:
-                        webhook_album_names = [" ".join(parts)]
+                        reupload_album_names = [" ".join(parts)]
 
             try:
-                # Step 1: Upload tagged file as new asset
-                upload_result = await upload_asset(job.original_path, album_names=webhook_album_names, api_key=user_api_key)
+                # Step 1: Upload file as new asset (with sidecar if available)
+                upload_result = await upload_asset(
+                    job.original_path,
+                    album_names=reupload_album_names,
+                    sidecar_path=sidecar_path if sidecar_mode else None,
+                    api_key=user_api_key,
+                )
                 new_asset_id = upload_result.get("id")
 
                 if new_asset_id and upload_result.get("status") != "duplicate":
