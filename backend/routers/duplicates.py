@@ -259,9 +259,10 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
     """Build a member dict for a single job — all info read directly from the file."""
     filepath = _resolve_filepath(job)
     dup_info = (job.step_result or {}).get("IA-02", {})
-    # Use the actual job status, not step_result — after a quality
-    # re-evaluate or swap, step_result['IA-02'] may still say
-    # "duplicate" even though the job was promoted to "done".
+    # is_original is determined later in _build_group_detail by
+    # comparing job IDs — the oldest job (lowest ID) in the group is
+    # the original (= was in the library first). This placeholder is
+    # overridden below.
     is_dup = job.status == "duplicate"
     exists = os.path.exists(filepath)
 
@@ -389,9 +390,9 @@ async def _build_group_index() -> tuple[list[dict], dict[str, "Job"]]:
 
         groups = []
         for root_key, member_keys in merged.items():
+            # Sort by job ID (oldest first = original first in the UI)
             sorted_keys = sorted(member_keys, key=lambda k: (
-                1 if jobs_by_key.get(k) and jobs_by_key[k].status == "duplicate" else 0,
-                k,
+                jobs_by_key[k].id if k in jobs_by_key else float("inf"),
             ))
             valid_keys = [k for k in sorted_keys if k in jobs_by_key]
             if len(valid_keys) < 2:
@@ -476,6 +477,14 @@ async def _build_group_detail(member_keys: list[str], jobs_by_key: dict) -> list
             elif key in immich_info:
                 prefetched = immich_info[key]
             members.append(await _build_member(job, session, prefetched_info=prefetched))
+
+    # Mark the oldest member (lowest job_id) as the true original —
+    # this is the file that was in the library first, regardless of
+    # any status swaps from re-evaluate operations.
+    if members:
+        oldest_idx = min(range(len(members)), key=lambda i: members[i].get("job_id", float("inf")))
+        for i, m in enumerate(members):
+            m["is_original"] = (i == oldest_idx)
 
     # Mark the member with the best quality score with ⭐
     if members:
