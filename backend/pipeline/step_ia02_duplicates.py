@@ -88,17 +88,21 @@ def _quality_score(job) -> tuple:
     if ia07.get("description_written"):
         meta += 2
 
-    # Round file_size to 100KB blocks — tiny differences (50KB on a
-    # 1.6MB file) should not flip the winner. When everything else is
-    # equal, the older job (lower ID = the original in the library)
-    # wins via the negative-ID tiebreaker.
+    # File size is a better quality proxy than raw pixel count because
+    # it accounts for BOTH resolution AND compression. A 4032x3024
+    # JPEG at 100KB is heavily compressed and worse than a 2048x1536
+    # JPEG at 500KB. File size comes BEFORE pixels in the score.
+    #
+    # Round to 100KB blocks so tiny differences (50KB on a 1.6MB file)
+    # don't flip the winner. Pixels break the tie when file sizes are
+    # in the same 100KB block.
     size_rounded = (size // 100000) * 100000
 
     # Negative job ID: lower ID = older = processed first = preferred
     # as tiebreaker when all other scores are equal.
     job_id = -(job.id or 0)
 
-    return (fmt, pixels, meta, size_rounded, job_id)
+    return (fmt, size_rounded, pixels, meta, job_id)
 
 
 def _compute_phash(filepath: str) -> str | None:
