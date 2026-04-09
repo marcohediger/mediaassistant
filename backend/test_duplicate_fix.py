@@ -546,11 +546,123 @@ async def test_parallel_retry_job_calls():
 
 
 # ─────────────────────────────────────────────
+# Test 9: Retry darf nicht als Duplikat seines eigenen Duplikats enden
+# (v2.28.43 fix — zirkulaere Duplikat-Erkennung, MA-2026-28103)
+# ─────────────────────────────────────────────
+async def test_retry_not_circular_duplicate():
+    """Reproducer for the circular duplicate bug:
+    Job A processes a file → done. Immich poller creates Job B for the
+    same file → IA-02 correctly marks B as duplicate of A. User retries
+    A → nuclear retry drops all steps → IA-02 must NOT match B (a
+    duplicate) as the "original" and mark A as duplicate of B.
+    """
+    print("\n🧪 Test 9: Retry darf nicht zirkulaer als Duplikat enden (v2.28.43)")
+
+    from pipeline.step_ia02_duplicates import execute as ia02_execute
+
+    ts = f"{datetime.now().timestamp():.0f}"
+    content = f"circular-dup-test-{ts}".encode()
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    # Stage a real file so _file_exists returns True for the duplicate's target
+    dup_target = f"/library/error/duplicates/circular_test_{ts}.jpg"
+    os.makedirs(os.path.dirname(dup_target), exist_ok=True)
+    with open(dup_target, "wb") as f:
+        f.write(content)
+
+    # Also stage a file for the retried job (IA-02 reads job.original_path)
+    retry_file = f"/app/data/reprocess/circular_test_{ts}.jpg"
+    os.makedirs(os.path.dirname(retry_file), exist_ok=True)
+    with open(retry_file, "wb") as f:
+        f.write(content)
+
+    async with async_session() as session:
+        # Job A: the original, now being retried (status=processing after
+        # reset_job_for_retry, all step_results dropped)
+        job_a = Job(
+            filename=f"circular_test_{ts}.jpg",
+            original_path=retry_file,
+            debug_key=f"CIRC-A-{ts}",
+            status="processing",
+            file_hash=file_hash,
+            step_result={},
+            use_immich=True,
+            dry_run=False,
+            folder_tags=False,
+        )
+        session.add(job_a)
+
+        # Job B: the poller-generated duplicate of A, sitting in
+        # /library/error/duplicates/ with status='duplicate'
+        job_b = Job(
+            filename=f"circular_test_{ts}.jpg",
+            original_path=f"/tmp/ma_immich_gone/circular_test_{ts}.jpg",
+            target_path=dup_target,
+            debug_key=f"CIRC-B-{ts}",
+            status="duplicate",
+            file_hash=file_hash,
+            step_result={
+                "IA-02": {
+                    "status": "duplicate",
+                    "match_type": "exact",
+                    "original_debug_key": f"CIRC-A-{ts}",
+                },
+            },
+            use_immich=True,
+            dry_run=False,
+            folder_tags=False,
+        )
+        session.add(job_b)
+        await session.commit()
+
+        # Populate IA-01 result on job A (IA-02 reads file_hash from there)
+        job_a.step_result = {
+            "IA-01": {
+                "file_type": "JPEG",
+                "mime_type": "image/jpeg",
+                "has_exif": False,
+                "width": 100,
+                "height": 100,
+            },
+        }
+        job_a.file_hash = file_hash
+        flag_modified(job_a, "step_result")
+        await session.commit()
+
+        # Run IA-02 on job A (the retried job)
+        result = await ia02_execute(job_a, session)
+
+        ia02_status = result.get("status", "?")
+        report(
+            "IA-02 does NOT mark retried job as duplicate of its own duplicate",
+            ia02_status != "duplicate",
+            f"ia02_status={ia02_status}, expected 'ok' or 'skipped', got result={result}",
+        )
+        report(
+            "job_a.status is still 'processing' (not flipped to 'duplicate')",
+            job_a.status == "processing",
+            f"got status={job_a.status}",
+        )
+
+        # Cleanup
+        await session.delete(job_a)
+        await session.delete(job_b)
+        await session.commit()
+
+    for p in [dup_target, retry_file]:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+# ─────────────────────────────────────────────
 async def main():
     global PASS, FAIL
     print("=" * 60)
     print("  Test Suite: Fix #38 — Duplikat-Pipeline-Bug")
     print("                + v2.28.2 — Race-Condition (atomic claim)")
+    print("                + v2.28.43 — Zirkulaere Duplikat-Erkennung")
     print("=" * 60)
 
     try:
@@ -581,12 +693,13 @@ async def main():
         traceback.print_exc()
         FAIL += 1
 
-    # Race-condition tests (v2.28.2)
+    # Race-condition tests (v2.28.2) + circular duplicate (v2.28.43)
     for n, fn in (
         (5, test_atomic_claim_blocks_parallel_run_pipeline),
         (6, test_run_pipeline_skips_non_queued_job),
         (7, test_retry_job_blocks_parallel_run_pipeline),
         (8, test_parallel_retry_job_calls),
+        (9, test_retry_not_circular_duplicate),
     ):
         try:
             await fn()
