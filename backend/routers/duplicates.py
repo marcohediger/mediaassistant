@@ -1091,17 +1091,57 @@ async def merge_metadata(request: Request):
     return JSONResponse({"status": "ok", "merged": merged_fields})
 
 
-@router.post("/api/duplicates/batch-clean-quality")
-async def batch_clean_quality():
-    """Quality-aware batch clean: for each exact-match duplicate group,
-    keep the member with the best quality score and delete the rest.
-
-    Unlike the basic batch-clean (which always keeps the 'original'),
-    this version compares quality scores and may delete the original
-    if the duplicate has better quality (higher resolution, better
-    format, more metadata).
+@router.post("/api/duplicates/re-evaluate-quality")
+async def re_evaluate_quality():
+    """Informational: count how many duplicate groups have a better-quality
+    duplicate than their current original. Does NOT swap any statuses —
+    the quality badge in the UI shows the recommendation.
     """
     from pipeline.step_ia02_duplicates import _quality_score
+
+    would_swap = 0
+    already_best = 0
+
+    group_index, jobs_by_key = await _build_group_index()
+
+    for g in group_index:
+        member_keys = g["member_keys"]
+        members = [(k, jobs_by_key[k]) for k in member_keys if k in jobs_by_key]
+        if len(members) < 2:
+            continue
+        orig = next(((k, j) for k, j in members if j.status != "duplicate"), members[0])
+        best = max(members, key=lambda kj: _quality_score(kj[1]))
+        if best[0] != orig[0]:
+            would_swap += 1
+        else:
+            already_best += 1
+
+    summary = (f"Quality Re-Evaluate: {would_swap} Gruppen mit besserem Duplikat, "
+               f"{already_best} bereits korrekt")
+    await log_info("duplicates", summary)
+    return RedirectResponse(url="/duplicates", status_code=303)
+
+
+@router.post("/api/duplicates/batch-clean-quality")
+async def batch_clean_quality(request: Request):
+    """Quality-aware batch clean for the current page only.
+
+    Reads the 'page' form field to determine which groups to clean.
+    Only exact-match groups on that page are processed. The best
+    quality member per group is kept, the rest is deleted.
+
+    After cleaning, redirects back to the same page (or page 1 if
+    the current page is now empty).
+    """
+    from pipeline.step_ia02_duplicates import _quality_score
+
+    # Read page from form data (page=0 means "all pages")
+    try:
+        form = await request.form()
+        page = int(form.get("page", 1))
+    except (ValueError, Exception):
+        page = 1
+    per_page = 10
 
     kept = 0
     deleted = 0
@@ -1109,8 +1149,15 @@ async def batch_clean_quality():
 
     group_index, jobs_by_key = await _build_group_index()
 
+    # page=0 → all groups; page>0 → only that page
+    if page == 0:
+        page_groups = group_index
+    else:
+        start = (page - 1) * per_page
+        page_groups = group_index[start:start + per_page]
+
     async with async_session() as session:
-        for g in group_index:
+        for g in page_groups:
             if not g["all_exact"]:
                 continue  # only exact matches for auto-clean
 
@@ -1161,9 +1208,12 @@ async def batch_clean_quality():
 
         await session.commit()
 
-    summary = f"Batch-Clean Quality: {kept} groups, {deleted} deleted, {errors} errors"
+    page_label = "all" if page == 0 else f"page {page}"
+    summary = (f"Batch-Clean Quality ({page_label}): "
+               f"{kept} groups, {deleted} deleted, {errors} errors")
     await log_info("duplicates", summary)
-    return RedirectResponse(url="/duplicates", status_code=303)
+    redirect_url = "/duplicates" if page == 0 else f"/duplicates?page={page}"
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @router.post("/api/duplicates/batch-clean")

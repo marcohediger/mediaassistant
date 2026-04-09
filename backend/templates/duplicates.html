@@ -5,10 +5,20 @@
     <h1>{{ t.duplicates.title }}</h1>
     <div class="dup-header-actions">
         <span class="dup-count">{{ total_groups }} {{ t.duplicates.groups if total_groups != 1 else t.duplicates.group }}</span>
+        <form method="post" action="/api/duplicates/re-evaluate-quality" class="inline-form"
+              onsubmit="return dupConfirm('{{ t.duplicates.re_evaluate_confirm }}')">
+            <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.re_evaluate }}</button>
+        </form>
         {% if exact_groups > 0 %}
         <form method="post" action="/api/duplicates/batch-clean-quality" class="inline-form"
-              onsubmit="return dupConfirm('{{ t.duplicates.batch_confirm | replace('{n}', exact_groups|string) }}')">
-            <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.batch_clean }} ({{ exact_groups }} {{ t.duplicates.exact }})</button>
+              onsubmit="return dupConfirm('{{ t.duplicates.batch_confirm }}')">
+            <input type="hidden" name="page" value="{{ current_page }}">
+            <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.batch_clean }} ({{ t.duplicates.this_page }})</button>
+        </form>
+        <form method="post" action="/api/duplicates/batch-clean-quality" class="inline-form"
+              onsubmit="return dupConfirm('{{ t.duplicates.batch_all_confirm | replace('{n}', exact_groups|string) }}')">
+            <input type="hidden" name="page" value="0">
+            <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.batch_clean_all }} ({{ exact_groups }} {{ t.duplicates.exact }})</button>
         </form>
         {% endif %}
     </div>
