@@ -773,6 +773,55 @@ async def keep_file(request: Request):
             if job.status != "duplicate" and job.target_path and not job.target_path.startswith("immich:"):
                 library_path = job.target_path
 
+        # Merge metadata from all other members into the kept one
+        # before deleting them (GPS, date, keywords, description).
+        if kept_job:
+            kept_sr = kept_job.step_result or {}
+            kept_ia01 = kept_sr.get("IA-01") or {}
+            kept_ia07 = kept_sr.get("IA-07") or {}
+            merge_notes = []
+
+            for donor in group_jobs:
+                if donor.debug_key == keep_key:
+                    continue
+                d_sr = donor.step_result or {}
+                d_ia01 = d_sr.get("IA-01") or {}
+                d_ia03 = d_sr.get("IA-03") or {}
+                d_ia07 = d_sr.get("IA-07") or {}
+
+                if not kept_ia01.get("gps") and d_ia01.get("gps"):
+                    kept_ia01["gps"] = True
+                    kept_ia01["gps_lat"] = d_ia01.get("gps_lat")
+                    kept_ia01["gps_lon"] = d_ia01.get("gps_lon")
+                    if d_ia03 and d_ia03.get("status") != "skipped":
+                        kept_sr["IA-03"] = d_ia03
+                    merge_notes.append("GPS")
+
+                if not kept_ia01.get("date") and d_ia01.get("date"):
+                    kept_ia01["date"] = d_ia01["date"]
+                    merge_notes.append("date")
+
+                kept_kw = kept_ia07.get("keywords_written") or []
+                donor_kw = d_ia07.get("keywords_written") or []
+                new_kw = [k for k in donor_kw if k and k not in kept_kw]
+                if new_kw:
+                    kept_kw.extend(new_kw)
+                    kept_ia07["keywords_written"] = kept_kw
+                    kept_ia07["tags_count"] = len(kept_kw)
+                    merge_notes.append(f"keywords(+{len(new_kw)})")
+
+                kept_desc = kept_ia07.get("description_written") or ""
+                donor_desc = d_ia07.get("description_written") or ""
+                if not kept_desc and donor_desc:
+                    kept_ia07["description_written"] = donor_desc
+                    merge_notes.append("description")
+
+            if merge_notes:
+                kept_sr["IA-01"] = kept_ia01
+                kept_sr["IA-07"] = kept_ia07
+                kept_job.step_result = kept_sr
+                flag_modified(kept_job, "step_result")
+
         # Delete all except the kept one
         for job in group_jobs:
             if job.debug_key == keep_key:
