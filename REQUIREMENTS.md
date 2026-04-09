@@ -75,44 +75,41 @@ Dauerhafter Service, watched alle konfigurierten Eingangsverzeichnisse, verarbei
 - HTML-Report nach Dry-Run: Anzahl Dateien, Kategorien, erkannte Duplikate, Fehler
 - Nach Review: produktiv laufen lassen
 
-### Modus 2 — Immich Integration
+### Modus 2 — Immich Integration ✅ Umgesetzt
 Bidirektionale Verbindung mit Immich via REST API:
 
-**3a — Trigger-basierte Anreicherung:**
-```
-Tag "ia-process" in Immich vergeben
-     ↓
-ImageAssistant pollt Immich API (konfigurierbar, z.B. alle 5 Min)
-→ Asset herunterladen
-→ Kompletter Flow: EXIF, KI, OCR, Geocoding
-→ Ergebnisse via ExifTool direkt in Originaldatei schreiben
-→ Immich API: Asset rescan triggern → DB aktualisiert
-→ Tag "ia-process" → "ia-done"
-```
+**2a — Inbox → Immich (Upload):**
+- Pro Inbox-Verzeichnis konfigurierbar (`use_immich` Toggle)
+- IA-07 schreibt Tags in Datei (direct oder sidecar), IA-08 uploaded nach Immich
+- Album-Erstellung aus Folder-Tags (z.B. `/inbox/Ferien/Spanien/` → Album "Ferien Spanien")
+- NSFW-Erkennung → automatisch in Locked Folder
+- Archivierung pro Kategorie konfigurierbar (`immich_archive` Flag)
 
-**3b — Metadaten-Sync (Immich DB → Originaldateien):**
-```
-Alle Assets in Immich die Tags/Keywords in DB haben aber nicht in Datei
-     ↓
-ImageAssistant holt Metadaten via Immich API
-→ ExifTool schreibt direkt in Originaldatei
-→ Immich rescan triggern
-→ Originaldateien sind nun selbst-beschreibend (unabhängig von Immich DB)
-```
+**2b — Immich → Pipeline (Polling):**
+- Neue Assets in Immich (z.B. Mobile App) werden automatisch verarbeitet
+- Poll-Intervall = Filewatcher-Intervall, konfigurierbar
+- Asset wird heruntergeladen → Pipeline (KI, OCR, Geocoding, Tags)
+- Tags werden via Immich API gesetzt + optional als Sidecar geschrieben
+- Bei Retry: Upload+Copy+Delete Workflow (neues Asset mit frischer Sidecar)
 
-Verfügbare Trigger-Tags in Immich:
-| Tag | Aktion |
-|---|---|
-| `ia-process` | Kompletter Flow (KI, OCR, Geocoding, EXIF schreiben) |
-| `ia-location` | Nur Ortschätzung (Google Vision / GeoCLIP) |
-| `ia-ocr` | Nur OCR nochmal laufen lassen |
-| `ia-sync` | Immich DB Metadaten → Originaldatei schreiben |
+**2c — Metadata Write Mode:**
+- `direct` — Tags direkt in die Datei schreiben (EXIF)
+- `sidecar` — Tags in separate `.xmp`-Datei schreiben, Original unverändert
+- Konfigurierbar via `metadata.write_mode` Setting
+- Sidecar wird beim Upload als `sidecarData` mit nach Immich geschickt
+- Lokale Sidecar bleibt auch im Immich-Mode als Backup erhalten
+
+**Multi-User Support:**
+- Mehrere Immich-Benutzer konfigurierbar (`immich_users` Tabelle)
+- Pro Inbox-Verzeichnis einem Immich-User zuordnen
+- Jeder User hat eigenen API-Key (verschluesselt gespeichert)
 
 - Immich API URL + API-Key konfigurierbar im Webinterface
 - Poll-Intervall konfigurierbar
-- Kein Verschieben der Dateien (Immich behält Datei-Hoheit)
-- Nach ExifTool-Write: Immich rescan automatisch getriggert
+- Dashboard zeigt Immich-Verbindungsstatus
 
+~~Trigger-Tags (ia-process, ia-location, ia-ocr, ia-sync)~~ — nicht umgesetzt
+~~Metadaten-Sync (Immich DB → Originaldateien)~~ — geplant fuer v3
 
 
 ```
@@ -177,17 +174,24 @@ Jede Datei erhält so früh wie möglich einen SQLite-Eintrag — bereits beim E
 id              INTEGER PRIMARY KEY
 filename        TEXT
 original_path   TEXT
-target_path     TEXT        -- wird gesetzt wenn bekannt
-debug_key       TEXT        -- IA-YYYY-NNNN
-status          TEXT        -- queued / processing / done / error / duplicate / review
+target_path     TEXT        -- wird gesetzt wenn bekannt (oder "immich:<asset_id>")
+debug_key       TEXT UNIQUE -- MA-YYYY-NNNN
+status          TEXT        -- queued / processing / done / error / duplicate / review / orphan / skipped / deleted
 current_step    TEXT        -- IA-01 bis IA-11, null wenn queued
 step_result     JSON        -- Ergebnisse pro Step
 error_message   TEXT        -- Fehlermeldung wenn status=error
 source_label    TEXT        -- Label des Eingangsverzeichnisses
-source_inbox_path TEXT      -- Inbox-Basispfad (für Ordner-Tags)
-file_hash       TEXT        -- SHA256 Hash (Original, wird nie überschrieben)
-phash           TEXT        -- Perceptual Hash (für Ähnlichkeitserkennung)
+source_inbox_path TEXT      -- Inbox-Basispfad (fuer Ordner-Tags)
+dry_run         BOOLEAN     -- Dry-Run Modus (keine Datei-Aenderungen)
+use_immich      BOOLEAN     -- Upload nach Immich statt lokale Library
+immich_asset_id TEXT        -- Immich Asset-ID (bei Immich-Upload oder Poller)
+immich_user_id  INTEGER     -- Zugeordneter Immich-Benutzer
+file_hash       TEXT        -- SHA256 Hash des Originals
+phash           TEXT        -- Perceptual Hash (fuer Aehnlichkeitserkennung)
+folder_tags     BOOLEAN     -- Ordner-Tags aktiv fuer diesen Job
+retry_count     INTEGER     -- Anzahl automatischer Retries
 created_at      DATETIME
+started_at      DATETIME
 updated_at      DATETIME
 completed_at    DATETIME
 ```
@@ -213,24 +217,22 @@ completed_at    DATETIME
 | Status | Bedeutung |
 |---|---|
 | `queued` | Erkannt, wartet auf Verarbeitung |
-| `processing` | Läuft gerade (current_step zeigt wo) |
-| `done` | Komplett fertig, in Bibliothek |
-| `error` | Fehlgeschlagen, in /inbox/error/ |
+| `processing` | Laeuft gerade (current_step zeigt wo) |
+| `done` | Komplett fertig, in Bibliothek oder Immich |
+| `error` | Fehlgeschlagen, in /library/error/ |
 | `duplicate` | Duplikat erkannt, wartet auf Review |
-| `review` | KI unsicher, wartet auf manuelle Prüfung |
+| `review` | KI unsicher, wartet auf manuelle Pruefung |
+| `orphan` | Datei nicht mehr auffindbar (Disk + Immich) |
+| `skipped` | Uebersprungen (z.B. nicht unterstuetztes Format) |
+| `deleted` | Vom User explizit geloescht |
 
 ### Resume-Logik
-```python
-# Beim Start / nach Absturz:
-# Alle Jobs mit status="processing" oder status="error" prüfen
-# step_result JSON → welche Steps haben Ergebnis? → überspringen
-# Ab erstem fehlendem Step weitermachen
-```
-
+- Beim Start: alle Jobs mit `status=processing` werden resumed (max 3 Retries)
+- `step_result` JSON → Steps mit Ergebnis werden uebersprungen
+- Nuclear Retry (manuell via UI): alle step_results werden gedroppt, volle Pipeline
+- Retry bei Immich-Assets: Datei wird automatisch von Immich heruntergeladen
+- Sidecar-Mode Retry: Upload+Copy+Delete Workflow (frische Sidecar nach Immich)
 - Bei Migration: Fortschritt bleibt erhalten auch nach Neustart
-- Bei LM Studio Timeout: nur IA-05 wiederholen, nicht von vorne
-- Im Webinterface: "Ab diesem Step wiederholen" Button pro Job
-- Live-Ansicht: aktueller Step aller laufenden Jobs
 
 
 Zweistufige Erkennung, läuft vor der KI-Analyse:
@@ -621,8 +623,30 @@ Flach:               photos/{YYYY}/
 - [x] FEAT: Sortier-Regeln editierbar im Webinterface (Bedingung → Kategorie, Reihenfolge per Pfeile, KI hat Vorrang)
 - [x] FEAT: HTML-Report nach Dry-Run (Übersicht: Kategorien, Inbox, Dateien, Fehler)
 - [x] FEAT: Manueller Scan-Trigger im Dashboard ("Jetzt scannen" Button)
+### Erledigt (v2.28.x) ✅
+- [x] FEAT: SSO/OIDC Authentication (Authentik, Keycloak, Authelia) — AUTH_MODE=oidc
+- [x] FEAT: Immich Upload (pro Inbox, Album aus Folder-Tags, Archivierung, NSFW → Locked)
+- [x] FEAT: Immich Polling (neue Mobile-Uploads automatisch verarbeiten)
+- [x] FEAT: Multi-User Immich Support (pro Inbox ein Immich-User, verschluesselte API-Keys)
+- [x] FEAT: Sidecar-Mode (XMP-Sidecar statt direktes EXIF-Schreiben, konfigurierbar)
+- [x] FEAT: Sidecar-Mode Retry liefert frische XMP nach Immich (Upload+Copy+Delete)
+- [x] FEAT: Nuclear Retry — alle Steps droppen, volle Pipeline (v2.28.37)
+- [x] FIX: Zirkulaere Duplikat-Erkennung bei Retry (v2.28.43)
+- [x] FEAT: Qualitaetsbasierte Duplikat-Erkennung (Format > Dateigroesse > Pixel > Meta > Original-Bias)
+- [x] FEAT: Folder-Tags bei Duplikaten erhalten (in step_result['IA-02']['folder_tags'])
+- [x] FEAT: Batch-Clean Quality (qualitaetsbasiert, seitenweise, Metadata-Merge, Analyse-Steps kopieren)
+- [x] FEAT: Duplikat-UI: Quality-Badge, Pagination, Dropdown, Medientyp-Filter, 3 Buttons
+- [x] FEAT: CSV-Retry Input (/app/data/csv-retry/ → Bulk-Retry via Filewatcher)
+- [x] FEAT: Orphan-Cleanup Endpoint (settled Jobs mit fehlenden Dateien markieren)
+- [x] FEAT: Immich 5xx Upload-Retry mit Backoff (30/60/120s, max 3 Retries)
+- [x] FIX: ExifTool UnicodeDecodeError (capture_output + errors='replace')
+- [x] FIX: XMP-Sidecar tmp-Extension Bug (v2.28.40) — ExifTool schrieb binaere Kopien
+- [x] TOOL: Sidecar Repair (standalone GUI, 6554/6558 repariert, 27.6 GB zurueckgewonnen)
+- [x] TOOL: Ghost-Tag Detect (standalone GUI, CSV fuer csv-retry)
+
 ### Offen
-- [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, übernehmen)
+- [ ] FEAT: AI Playground (Bild hochladen, Prompt testen, live Antwort, uebernehmen)
+- [ ] FEAT: Ghost-Tag Cleanup durchfuehren (Tool + CSV-Retry, ~6300 betroffene Jobs)
 - [ ] DOCKER: Photon-Container optional in docker-compose.yml
 
 ### Optional (v3)
