@@ -10,7 +10,7 @@ from sqlalchemy import select
 from config import config_manager
 from database import async_session as _async_session
 from safe_file import safe_move
-from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, untag_asset, get_asset_info, get_user_api_key
+from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, untag_asset, get_asset_info, get_user_api_key, update_asset_description
 
 
 async def _is_folder_tags_active(job) -> bool:
@@ -555,6 +555,20 @@ async def execute(job, session) -> dict:
             # First-time processing, sidecar mode: original file unchanged,
             # just tag the existing asset via API.
             job.target_path = f"immich:{job.immich_asset_id}"
+            # Write description via Immich API — the XMP sidecar is not
+            # re-uploaded in this path, so the description from IA-07
+            # would otherwise be lost.  (Fix v2.28.72)
+            ia07_desc = ia07_result.get("description_written", "")
+            if ia07_desc:
+                try:
+                    await update_asset_description(
+                        job.immich_asset_id, ia07_desc, api_key=user_api_key,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to update description for asset %s: %s",
+                        job.immich_asset_id, exc,
+                    )
         else:
             # Re-upload: direct mode (file modified) OR sidecar-mode retry
             # (fresh .xmp needs to reach Immich).
@@ -693,6 +707,16 @@ async def execute(job, session) -> dict:
                 ia07_wrote_tags=bool(ia07_result.get("keywords_written")),
                 previous_tags=previous_immich_tags,
             )
+
+        # Write description via Immich API (belt-and-suspenders: XMP
+        # sidecar may or may not be parsed by Immich depending on version)
+        if asset_id:
+            ia07_desc = ia07_result.get("description_written", "")
+            if ia07_desc:
+                try:
+                    await update_asset_description(asset_id, ia07_desc, api_key=user_api_key)
+                except Exception as exc:
+                    logger.warning("Failed to update description for asset %s: %s", asset_id, exc)
 
         # NSFW: move to locked folder in Immich
         immich_locked = False
