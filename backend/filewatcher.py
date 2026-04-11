@@ -665,10 +665,17 @@ async def _pipeline_worker(shutdown_event: asyncio.Event):
     """
     from ai_backends import get_total_slots
 
+    STALE_TIMEOUT_S = 15 * 60  # 15 minutes without progress → stale
+    STALE_MAX_RETRIES = 3
+    STALE_CHECK_INTERVAL_S = 60
+
     logger.info("Pipeline worker started")
     running: set[asyncio.Task] = set()
+    # Map job_id → asyncio.Task so stale recovery can cancel hung tasks
+    running_jobs: dict[int, asyncio.Task] = {}
     jobs_since_gc = 0
     last_pause_log = 0  # rate-limit "paused" log to once per 60s
+    last_stale_check = 0.0
 
     while not shutdown_event.is_set():
         try:
@@ -676,6 +683,8 @@ async def _pipeline_worker(shutdown_event: asyncio.Event):
             done = {t for t in running if t.done()}
             for t in done:
                 running.discard(t)
+                # Remove from running_jobs map
+                running_jobs = {jid: task for jid, task in running_jobs.items() if task is not t}
                 exc = t.exception() if not t.cancelled() else None
                 if exc:
                     logger.error(f"Pipeline task failed: {exc}")
@@ -684,6 +693,67 @@ async def _pipeline_worker(shutdown_event: asyncio.Event):
             if jobs_since_gc >= 10:
                 gc.collect()
                 jobs_since_gc = 0
+
+            # ── Stale processing recovery ─────────────────────────────
+            # Detect jobs stuck in 'processing' for longer than
+            # STALE_TIMEOUT_S without any DB update (updated_at stale).
+            # Increment retry_count and requeue, or mark error after
+            # STALE_MAX_RETRIES attempts.
+            now_mono = time.monotonic()
+            if now_mono - last_stale_check >= STALE_CHECK_INTERVAL_S:
+                last_stale_check = now_mono
+                from datetime import timedelta as _td
+                cutoff = datetime.now() - _td(seconds=STALE_TIMEOUT_S)
+                async with async_session() as session:
+                    result = await session.execute(
+                        select(Job).where(
+                            Job.status == "processing",
+                            Job.updated_at < cutoff,
+                        )
+                    )
+                    stale_jobs = result.scalars().all()
+                    for job in stale_jobs:
+                        retry = (job.retry_count or 0) + 1
+                        if retry > STALE_MAX_RETRIES:
+                            job.status = "error"
+                            job.error_message = (
+                                f"Job hängt wiederholt bei {job.current_step} "
+                                f"({STALE_MAX_RETRIES}x Timeout) — aufgegeben"
+                            )
+                            await session.commit()
+                            await log_error(
+                                "pipeline",
+                                f"{job.debug_key} abandoned — stale {STALE_MAX_RETRIES}x",
+                                f"{job.filename} hing wiederholt bei {job.current_step}",
+                            )
+                            logger.error(
+                                "Job %s abandoned after %d stale timeouts at %s",
+                                job.debug_key, STALE_MAX_RETRIES, job.current_step,
+                            )
+                        else:
+                            job.status = "queued"
+                            job.retry_count = retry
+                            # Drop the stuck step so it re-runs from scratch
+                            sr = dict(job.step_result or {})
+                            sr.pop(job.current_step, None)
+                            job.step_result = sr
+                            from sqlalchemy.orm.attributes import flag_modified
+                            flag_modified(job, "step_result")
+                            await session.commit()
+                            await log_warning(
+                                "pipeline",
+                                f"{job.debug_key} stale recovery (attempt {retry}/{STALE_MAX_RETRIES})",
+                                f"{job.filename} hing >={STALE_TIMEOUT_S // 60} Min bei {job.current_step}",
+                            )
+                            logger.warning(
+                                "Stale job %s at %s — requeued (attempt %d/%d)",
+                                job.debug_key, job.current_step, retry, STALE_MAX_RETRIES,
+                            )
+                        # Cancel the hung asyncio task if we still track it
+                        hung_task = running_jobs.pop(job.id, None)
+                        if hung_task and not hung_task.done():
+                            hung_task.cancel()
+                            running.discard(hung_task)
 
             # Drain & pause: if pipeline.paused config is set, the worker
             # finishes its currently running tasks but does NOT pull new
@@ -721,6 +791,7 @@ async def _pipeline_worker(shutdown_event: asyncio.Event):
                         _run_job(job.id, job.filename, job.debug_key)
                     )
                     running.add(task)
+                    running_jobs[job.id] = task
                     # Staggered start: 0.3s apart so DB writes / atomic
                     # claims don't all fire in the same microsecond but
                     # parallelism still ramps up quickly. Was 2s in
