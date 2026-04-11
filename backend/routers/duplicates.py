@@ -1356,6 +1356,25 @@ async def batch_clean_quality(request: Request):
             # the slow AI step. Then queue for re-processing — only
             # IA-07 (tag write) and IA-08 (sort/upload) need to run.
             if best.status == "duplicate":
+                # Transfer Immich asset ID from deleted members to the
+                # promoted job. When the worse member was already uploaded
+                # to Immich, the promoted job needs its asset_id so IA-08
+                # does the Upload→Copy→Delete replace workflow instead of
+                # a bare new upload.  Without this, the promoted file
+                # stayed in /library/error/duplicates/ and Immich kept
+                # the lower-quality version.  (Fix for v2.28.69)
+                for donor_job in member_jobs:
+                    if donor_job.id == best.id:
+                        continue
+                    donor_immich_id = donor_job.immich_asset_id
+                    if not donor_immich_id:
+                        donor_target = donor_job.target_path or ""
+                        if donor_target.startswith("immich:"):
+                            donor_immich_id = donor_target[len("immich:"):]
+                    if donor_immich_id and not best.immich_asset_id:
+                        best.immich_asset_id = donor_immich_id
+                        break
+
                 # Find the original (the done member with the most complete step_result)
                 original = next(
                     (j for j in member_jobs if j.id != best.id and j.status != "duplicate"
