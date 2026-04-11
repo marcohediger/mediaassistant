@@ -628,7 +628,8 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
             logger.error(f"Scan error: {e}")
 
         try:
-            if await config_manager.is_module_enabled("immich"):
+            paused = await config_manager.get("pipeline.paused", False)
+            if not paused and await config_manager.is_module_enabled("immich"):
                 poll_enabled = await config_manager.get("immich.poll_enabled", False)
                 if poll_enabled:
                     if await _is_within_schedule() or _manual_trigger.is_set():
