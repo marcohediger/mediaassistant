@@ -198,6 +198,29 @@ async def archive_asset(asset_id: str, *, api_key: str | None = None) -> dict:
     return {"status": "archived", "asset_id": asset_id}
 
 
+async def update_asset_description(asset_id: str, description: str, *, api_key: str | None = None) -> dict:
+    """Update the description of an asset in Immich via PUT /api/assets/{id}.
+
+    Used by IA-08 for Immich-poller jobs in sidecar mode where the XMP
+    sidecar is not re-uploaded — the description would otherwise be lost
+    because only API tags (not the XMP content) reach Immich.
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"{url}/api/assets/{asset_id}",
+            headers=headers,
+            json={"description": description},
+        )
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"Immich update description failed: HTTP {resp.status_code} — {resp.text[:200]}")
+    return {"status": "updated", "asset_id": asset_id}
+
+
 async def lock_asset(asset_id: str, *, api_key: str | None = None) -> dict:
     """Move an asset to the locked folder in Immich (visibility: locked)."""
     url, api_key = await _resolve_api_key(api_key)
