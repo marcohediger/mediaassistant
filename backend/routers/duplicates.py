@@ -947,48 +947,92 @@ async def not_duplicate(request: Request):
         if not job:
             return RedirectResponse(url="/duplicates", status_code=303)
 
+        # ── Clear IA-02 duplicate flag on this job ────────────────
+        skip_result = {
+            "status": "skipped",
+            "reason": "manually marked as not a duplicate",
+        }
+
         filepath = job.target_path or job.original_path
-        if not filepath or not os.path.exists(filepath):
-            # File doesn't exist locally — if it's in Immich, just
+        if not filepath or not os.path.exists(filepath) or (filepath and filepath.startswith("immich:")):
+            # File doesn't exist locally or is an Immich asset — just
             # clear the duplicate flag so it disappears from the view.
-            if filepath and filepath.startswith("immich:"):
-                ia02 = (job.step_result or {}).get("IA-02", {})
-                sr = dict(job.step_result or {})
-                sr["IA-02"] = {
-                    "status": "skipped",
-                    "reason": "manually marked as not a duplicate",
-                }
-                job.step_result = sr
-                flag_modified(job, "step_result")
-                if job.status == "duplicate":
-                    job.status = "done"
-                await session.commit()
-                await log_info("duplicates", f"Not a duplicate (Immich): {debug_key}")
-                return RedirectResponse(url="/duplicates", status_code=303)
-            return RedirectResponse(url="/duplicates", status_code=303)
+            sr = dict(job.step_result or {})
+            sr["IA-02"] = skip_result
+            job.step_result = sr
+            flag_modified(job, "step_result")
+            if job.status == "duplicate":
+                job.status = "done"
+        else:
+            # File exists locally — reprocess through the pipeline.
+            from pipeline.reprocess import prepare_job_for_reprocess
+            await prepare_job_for_reprocess(
+                session,
+                job,
+                keep_steps={"IA-01"},
+                inject_steps={"IA-02": skip_result},
+                move_file=True,
+                commit=False,
+            )
+            # Re-run pipeline in background
+            from pipeline import run_pipeline
+            asyncio.create_task(run_pipeline(job.id))
 
-        # File move (incl. .xmp sidecar) + step_result reset (keep IA-01,
-        # inject IA-02 as skipped so the pipeline doesn't re-flag it as a
-        # duplicate) + status flip is delegated to the shared helper.
-        from pipeline.reprocess import prepare_job_for_reprocess
-        await prepare_job_for_reprocess(
-            session,
-            job,
-            keep_steps={"IA-01"},
-            inject_steps={
-                "IA-02": {
-                    "status": "skipped",
-                    "reason": "manually marked as not a duplicate",
-                }
-            },
-            move_file=True,
+        # ── Dissolve orphaned group members ───────────────────────
+        # When this job is removed from its duplicate group, any other
+        # member that referenced it (or was referenced by it) may now
+        # be the sole remaining member.  A group with only 1 member
+        # should not exist — dissolve those orphans too.
+        ia02 = (job.step_result or {}).get("IA-02", {})
+        partner_key = ia02.get("original_debug_key")
+
+        # Also find jobs that reference THIS job as their original
+        referencing = await session.execute(
+            select(Job).where(
+                Job.status == "duplicate",
+                Job.step_result.like(f'%"original_debug_key": "{debug_key}"%'),
+            )
         )
+        referencing_jobs = referencing.scalars().all()
 
-        # Re-run pipeline in background
-        from pipeline import run_pipeline
-        asyncio.create_task(run_pipeline(job.id))
+        # Collect all partner keys in this group
+        partner_keys = set()
+        if partner_key:
+            partner_keys.add(partner_key)
+        for rj in referencing_jobs:
+            partner_keys.add(rj.debug_key)
 
-    await log_info("duplicates", f"Not a duplicate: {debug_key} → re-processing")
+        # For each partner: check if they still have other duplicate
+        # links.  If not, they are orphaned → dissolve.
+        for pk in partner_keys:
+            # Count remaining duplicate jobs referencing this partner
+            remaining = await session.execute(
+                select(func.count(Job.id)).where(
+                    Job.status == "duplicate",
+                    Job.debug_key != debug_key,
+                    Job.step_result.like(f'%"original_debug_key": "{pk}"%'),
+                )
+            )
+            remaining_count = remaining.scalar()
+
+            # Also count if this partner itself references another
+            # duplicate that is still active
+            partner_result = await session.execute(
+                select(Job).where(Job.debug_key == pk)
+            )
+            partner_job = partner_result.scalars().first()
+
+            if remaining_count == 0 and partner_job and partner_job.status == "duplicate":
+                # This partner is now alone — dissolve it
+                psr = dict(partner_job.step_result or {})
+                psr["IA-02"] = skip_result
+                partner_job.step_result = psr
+                flag_modified(partner_job, "step_result")
+                partner_job.status = "done"
+
+        await session.commit()
+
+    await log_info("duplicates", f"Not a duplicate: {debug_key}")
     return RedirectResponse(url="/duplicates", status_code=303)
 
 
