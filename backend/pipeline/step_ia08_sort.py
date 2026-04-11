@@ -80,7 +80,10 @@ async def _tag_immich_asset(
     if info:
         existing_tags = {t["value"] for t in (info.get("tags") or [])}
 
-    missing = [t for t in tag_keywords if t not in existing_tags]
+    # Compare using the sanitised name (tag_asset replaces "/" with " - ")
+    def _sanitize(name: str) -> str:
+        return name.replace("/", " - ")
+    missing = [t for t in tag_keywords if _sanitize(t) not in existing_tags]
     tags_written: list[str] = []
     tags_failed: list[str] = []
     # Small delay between sequential PUT/DELETE calls: empirically
@@ -124,7 +127,7 @@ async def _tag_immich_asset(
         final_set = {t["value"] for t in ((info2 or {}).get("tags") or [])}
         # Re-add any missing tag_keywords that got eaten by the race
         for tag_name in tag_keywords:
-            if tag_name not in final_set:
+            if _sanitize(tag_name) not in final_set:
                 try:
                     await tag_asset(asset_id, tag_name, api_key=api_key)
                     if tag_name not in tags_written:
@@ -137,7 +140,7 @@ async def _tag_immich_asset(
         # Re-delete any stale tag that came back
         if previous_tags:
             for tag_name in previous_tags:
-                if tag_name and tag_name not in set(tag_keywords) and tag_name in final_set:
+                if tag_name and tag_name not in set(tag_keywords) and _sanitize(tag_name) in final_set:
                     try:
                         await untag_asset(asset_id, tag_name, api_key=api_key)
                         if tag_name not in tags_removed:
@@ -147,7 +150,7 @@ async def _tag_immich_asset(
                         logger.warning("Retry-untag asset %s from '%s' failed: %s", asset_id, tag_name, exc)
 
     # Include pre-existing tags in written list for reporting
-    already = [t for t in tag_keywords if t in existing_tags]
+    already = [t for t in tag_keywords if _sanitize(t) in existing_tags]
     return already + tags_written, tags_failed, tags_removed
 
 

@@ -235,6 +235,9 @@ async def untag_asset(asset_id: str, tag_name: str, *, api_key: str | None = Non
 
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
 
+    # Immich treats "/" as tag hierarchy separator — match the sanitisation in tag_asset()
+    safe_tag_name = tag_name.replace("/", " - ")
+
     async with httpx.AsyncClient(timeout=30) as client:
         # Find the tag by name
         list_resp = await client.get(f"{url}/api/tags", headers=headers)
@@ -243,7 +246,7 @@ async def untag_asset(asset_id: str, tag_name: str, *, api_key: str | None = Non
                 f"List tags failed: HTTP {list_resp.status_code} — {list_resp.text[:200]}"
             )
         tag_id = next(
-            (t["id"] for t in list_resp.json() if t.get("name") == tag_name),
+            (t["id"] for t in list_resp.json() if t.get("name") == safe_tag_name),
             None,
         )
         if not tag_id:
@@ -272,6 +275,10 @@ async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
+    # Immich treats "/" as tag hierarchy separator — replace with " - "
+    # to avoid broken tags (e.g. "Vaz/Obervaz" → "Vaz - Obervaz")
+    safe_tag_name = tag_name.replace("/", " - ")
+
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -279,7 +286,7 @@ async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None)
         resp = await client.post(
             f"{url}/api/tags",
             headers=headers,
-            json={"name": tag_name, "type": "OBJECT"},
+            json={"name": safe_tag_name, "type": "OBJECT"},
         )
         if resp.status_code in (200, 201):
             tag_id = resp.json().get("id")
@@ -287,12 +294,12 @@ async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None)
             # Tag already exists — Immich returns 400 (or 409) for duplicates
             list_resp = await client.get(f"{url}/api/tags", headers=headers)
             tags = list_resp.json() if list_resp.status_code == 200 else []
-            tag_id = next((t["id"] for t in tags if t.get("name") == tag_name), None)
+            tag_id = next((t["id"] for t in tags if t.get("name") == safe_tag_name), None)
         else:
-            raise RuntimeError(f"Create tag '{tag_name}' failed: HTTP {resp.status_code} — {resp.text[:200]}")
+            raise RuntimeError(f"Create tag '{safe_tag_name}' failed: HTTP {resp.status_code} — {resp.text[:200]}")
 
         if not tag_id:
-            raise RuntimeError(f"Tag '{tag_name}' not found after creation")
+            raise RuntimeError(f"Tag '{safe_tag_name}' not found after creation")
 
         # Assign tag to asset
         resp = await client.put(
