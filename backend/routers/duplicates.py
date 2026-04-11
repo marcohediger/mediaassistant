@@ -935,16 +935,36 @@ async def not_duplicate(request: Request):
         return RedirectResponse(url="/duplicates", status_code=303)
 
     async with async_session() as session:
+        # Accept "duplicate" (normal) and "done" (after Batch-Clean
+        # promoted the job but it still shows in the duplicates view).
         result = await session.execute(
-            select(Job).where(Job.debug_key == debug_key, Job.status == "duplicate")
+            select(Job).where(
+                Job.debug_key == debug_key,
+                Job.status.in_(("duplicate", "done")),
+            )
         )
         job = result.scalars().first()
         if not job:
             return RedirectResponse(url="/duplicates", status_code=303)
 
         filepath = job.target_path or job.original_path
-        if not filepath or filepath.startswith("immich:") or not os.path.exists(filepath):
-            # File doesn't exist locally — can't reprocess
+        if not filepath or not os.path.exists(filepath):
+            # File doesn't exist locally — if it's in Immich, just
+            # clear the duplicate flag so it disappears from the view.
+            if filepath and filepath.startswith("immich:"):
+                ia02 = (job.step_result or {}).get("IA-02", {})
+                sr = dict(job.step_result or {})
+                sr["IA-02"] = {
+                    "status": "skipped",
+                    "reason": "manually marked as not a duplicate",
+                }
+                job.step_result = sr
+                flag_modified(job, "step_result")
+                if job.status == "duplicate":
+                    job.status = "done"
+                await session.commit()
+                await log_info("duplicates", f"Not a duplicate (Immich): {debug_key}")
+                return RedirectResponse(url="/duplicates", status_code=303)
             return RedirectResponse(url="/duplicates", status_code=303)
 
         # File move (incl. .xmp sidecar) + step_result reset (keep IA-01,
