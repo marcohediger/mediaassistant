@@ -730,6 +730,25 @@ async def _pipeline_worker(shutdown_event: asyncio.Event):
                                 "Job %s abandoned after %d stale timeouts at %s",
                                 job.debug_key, STALE_MAX_RETRIES, job.current_step,
                             )
+                        elif not os.path.exists(job.original_path):
+                            # Source file gone (e.g. temp inbox file cleaned up
+                            # while the job was stuck) — requeueing would just
+                            # fail again at IA-01 or IA-08.
+                            job.status = "error"
+                            job.error_message = (
+                                f"Stale bei {job.current_step} — Quelldatei "
+                                f"nicht mehr vorhanden: {job.original_path}"
+                            )
+                            await session.commit()
+                            await log_error(
+                                "pipeline",
+                                f"{job.debug_key} stale + Datei fehlt",
+                                f"{job.filename}: {job.original_path} existiert nicht mehr",
+                            )
+                            logger.error(
+                                "Stale job %s — source file missing: %s",
+                                job.debug_key, job.original_path,
+                            )
                         else:
                             job.status = "queued"
                             job.retry_count = retry
