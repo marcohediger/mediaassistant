@@ -1,5 +1,71 @@
 # Changelog
 
+## v2.29.0 — 2026-04-13
+
+### Feature: Folder-Tags → Immich Album + Tags
+
+Dateien aus Inbox-Subfoldern (z.B. `/inbox/Ferien/Mallorca/`) werden
+automatisch dem Immich-Album `Ferien Mallorca` zugeordnet. Die Ordner-
+Bestandteile werden als Tags geschrieben (`Ferien`, `Mallorca`,
+`Ferien Mallorca`).
+
+**Funktioniert auch bei Duplikaten:** Folder-Tags werden in IA-02
+gespeichert und überleben Move, Duplicate-Detection, Keep und
+"Kein Duplikat". Bei "Behalten" werden folder_tags aller Members
+gemerged. Auch in Batch-Clean.
+
+**UI:** Neuer `📁 Album-Name` Badge in der Duplikat-Ansicht.
+Zeigt auch Immich-Alben für bereits hochgeladene Assets an
+(Fallback: IA-02 → IA-08 → Immich API).
+
+### Bugfixes
+
+- **Fix: "Keep this" löschte Immich-Asset bei identischen Dateien.**
+  Donor-Assets werden jetzt mit `force=True` permanent gelöscht
+  (nicht in den Papierkorb). Re-Upload bekommt kein "duplicate" mehr.
+- **Fix: folder_tags gingen bei "Keep this" verloren.**
+  `prepare_job_for_reprocess` löschte alle Steps inkl. IA-02.
+  folder_tags werden jetzt vorher gesichert.
+- **Fix: Pfad-Müll in Tags** (`app`, `..`, `data`, `reprocess`).
+  `..`-Pfad-Filter in IA-02, IA-07 und IA-08.
+
+### Refactoring: Code-Redundanzen eliminiert
+
+Grosses Aufräumen — alle doppelt implementierten Funktionen in
+shared Module konsolidiert:
+
+- **`file_operations.py`** (NEU): `sha256`, `resolve_filename_conflict`,
+  `safe_remove`, `safe_remove_with_log`, `get_duplicate_dir`,
+  `resolve_filepath`, `sanitize_path_component`, `validate_target_path`,
+  `parse_date`, `is_folder_tags_active`
+- **`thumbnail_utils.py`** (NEU): `generate_thumbnail`, `heic_to_jpeg`,
+  `video_to_jpeg`, `raw_to_jpeg`
+- **`immich_client.py`**: Neue Helper `get_asset_albums`,
+  `get_asset_original`. Alle raw httpx-Calls in Routers durch shared
+  Helper ersetzt (inkl. `delete_asset` mit `force=True`).
+
+**Ergebnis:** 0 Redundanzen, 0 raw `os.remove`, 0 raw Immich-Calls
+in Routers/Pipeline. Alles über shared Helper.
+
+### Dokumentation
+
+- **`SHARED_FUNCTIONS.md`** (NEU): Kompletter Funktionskatalog aller
+  200+ Funktionen mit Signaturen. Pflicht-Referenz vor jeder neuen
+  Funktion.
+- **`TESTRESULTS.md`**: Aktualisiert mit 6 Test-Suites, 255/256 grün.
+- **`TESTPLAN.md`**: FTAG-01..33 (Folder-Tags Tests).
+
+### Tests: 255/256 bestanden
+
+| Suite | Ergebnis |
+|---|---|
+| test_duplicate_fix.py | 34/34 ✅ |
+| test_ai_backends.py | 13/13 ✅ |
+| test_testplan_final.py | 63/64 ✅ (1 BLOCK) |
+| test_retry_file_lifecycle.py | 110/110 ✅ |
+| test_ftag_immich.py (E2E Immich) | 20/20 ✅ |
+| test_keep_flow.py | 15/15 ✅ |
+
 ## v2.28.51 — 2026-04-09
 
 ### Fix: Pagination fuer grosse Duplikat-Mengen (5000+)
