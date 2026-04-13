@@ -442,16 +442,8 @@ async def delete_file(request: Request):
 
         if immich_asset_id:
             try:
-                url, api_key = await get_immich_config()
-                if url and api_key:
-                    import httpx, json as _json
-                    async with httpx.AsyncClient(timeout=10) as client:
-                        await client.request(
-                            "DELETE",
-                            f"{url}/api/assets",
-                            headers={"x-api-key": api_key, "Content-Type": "application/json"},
-                            content=_json.dumps({"ids": [immich_asset_id]}),
-                        )
+                from immich_client import delete_asset
+                await delete_asset(immich_asset_id)
             except Exception:
                 pass
 
