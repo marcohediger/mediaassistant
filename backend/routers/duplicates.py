@@ -701,17 +701,12 @@ async def immich_original(asset_id: str):
             return Response(status_code=404)
 
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{url}/api/assets/{asset_id}/original",
-                headers={"x-api-key": api_key},
-                follow_redirects=True,
-            )
-            if resp.status_code != 200:
-                return Response(status_code=404)
-            content_type = resp.headers.get("content-type", "image/jpeg")
-            return Response(content=resp.content, media_type=content_type)
+        from immich_client import get_asset_original
+        result = await get_asset_original(asset_id, api_key=api_key)
+        if result:
+            data, content_type = result
+            return Response(content=data, media_type=content_type)
+        return Response(status_code=404)
     except Exception:
         return Response(status_code=404)
 
