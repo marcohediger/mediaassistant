@@ -4,7 +4,9 @@
 > MUSS dieses Dokument geprüft werden:
 > 1. Gibt es die Funktion schon? → **Benutzen, nicht neu schreiben.**
 > 2. Gehört sie in ein shared Modul? → **Dort erstellen, hier eintragen.**
-> 3. Ist sie mit `⚠️ REDUNDANT` markiert? → **Muss konsolidiert werden.**
+> 3. Neue Funktion nötig? → **Prüfen ob sie shared sein soll.** Wenn ja:
+>    in `file_operations.py`, `thumbnail_utils.py` oder `immich_client.py`
+>    anlegen — nicht lokal in einem Router/Step.
 
 ---
 
@@ -253,8 +255,8 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | IA-04 | `step_ia04_convert.py` | Format-Konvertierung (→ temp JPEG) | `_extract_video_frames`, `_ffmpeg_extract_frame`, `_glob_temp_files` |
 | IA-05 | `step_ia05_ai.py` | KI-Analyse (Tags, Description) | `_resize_for_ai` |
 | IA-06 | `step_ia06_ocr.py` | OCR-Texterkennung | — |
-| IA-07 | `step_ia07_exif_write.py` | Keywords/Description schreiben | `_write_direct`, `_write_sidecar`, `_is_folder_tags_active` ⚠️ |
-| IA-08 | `step_ia08_sort.py` | Sortierung / Immich-Upload | `_get_folder_album_names`, `_tag_immich_asset`, `_parse_date` ⚠️, `_sanitize_path_component` ⚠️, `_validate_target_path` ⚠️, `_resolve_path`, `_is_dir_empty`, `_force_remove_dir`, `_cleanup_empty_dirs`, `_eval_exif_expression`, `_eval_single_condition`, `_match_sorting_rules`, `_is_folder_tags_active` ⚠️ |
+| IA-07 | `step_ia07_exif_write.py` | Keywords/Description schreiben | `_write_direct`, `_write_sidecar` |
+| IA-08 | `step_ia08_sort.py` | Sortierung / Immich-Upload | `_get_folder_album_names`, `_tag_immich_asset`, `_resolve_path`, `_is_dir_empty`, `_force_remove_dir`, `_cleanup_empty_dirs`, `_eval_exif_expression`, `_eval_single_condition`, `_match_sorting_rules` |
 | IA-09 | `step_ia09_notify.py` | E-Mail-Benachrichtigung | — |
 | IA-10 | `step_ia10_cleanup.py` | Temp-Dateien aufräumen | — |
 | IA-11 | `step_ia11_log.py` | Job-Abschluss loggen | — |
@@ -310,16 +312,9 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | `_build_member` | Member-Dict für Duplikat-Gruppe bauen. |
 | `_build_group_index` / `_build_group_detail` | Gruppen-Index + Detail. |
 | `_build_duplicate_groups` | Transitive Gruppen-Zusammenführung. |
-| `_generate_thumbnail` ⚠️ | Thumbnail generieren. |
-| `_heic_to_jpeg` ⚠️ | HEIC → JPEG Konvertierung. |
-| `_video_to_jpeg` ⚠️ | Video-Frame → JPEG. |
-| `_resolve_filepath` ⚠️ | Dateipfad auflösen. |
 | `_get_image_info` / `_get_image_info_batch` | EXIF via ExifTool. |
 | `_img_info_from_immich` | EXIF via Immich-API. |
 | `_union_find_groups` | Union-Find für transitive Gruppen. |
-| `_raw_to_jpeg` | RAW PreviewImage extrahieren. |
-| `_sanitize_path_component` ⚠️ | Pfad-Traversal verhindern. |
-| `_validate_target_path` ⚠️ | Pfad innerhalb base_path prüfen. |
 | `_parse_exiftool_entry` | ExifTool JSON parsen. |
 
 ### routers/review.py — Review-UI
@@ -332,13 +327,6 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | `classify_all` | Alle als "sourceless" klassifizieren. |
 | `delete_file` | Review-Datei löschen. |
 | `_build_review_items` | Review-Items laden. |
-| `_generate_thumbnail` ⚠️ | Thumbnail generieren. |
-| `_heic_to_jpeg` ⚠️ | HEIC → JPEG. |
-| `_video_to_jpeg` ⚠️ | Video-Frame → JPEG. |
-| `_resolve_filepath` ⚠️ | Dateipfad auflösen. |
-| `_parse_date` ⚠️ | Datum parsen. |
-| `_sanitize_path_component` ⚠️ | Pfad-Traversal verhindern. |
-| `_validate_target_path` ⚠️ | Pfad innerhalb base_path. |
 
 ### routers/settings.py — Einstellungen
 
