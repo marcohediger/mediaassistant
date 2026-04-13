@@ -27,6 +27,42 @@ async def _is_folder_tags_active(job) -> bool:
         inbox_folder_tags = result.scalar()
     return bool(inbox_folder_tags)
 
+
+async def _get_folder_album_names(job) -> list[str] | None:
+    """Extract album name(s) from inbox folder structure, with fallback to IA-02.
+
+    Returns a list like ["Ferien Mallorca"] or None if folder tags are
+    inactive or no folder structure is available.  When the file has been
+    moved away from the inbox (e.g. duplicate → /reprocess/), the path-
+    based extraction fails.  In that case, fall back to the combined tag
+    stored in step_result['IA-02']['folder_tags'] by _handle_duplicate /
+    _swap_duplicate.
+    """
+    if not await _is_folder_tags_active(job):
+        return None
+
+    # Try path-based extraction first (only if file is still under inbox)
+    if job.source_inbox_path:
+        try:
+            rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
+        except ValueError:
+            rel = None
+        if rel and rel != "." and not rel.startswith(".."):
+            parts = [p for p in rel.split(os.sep) if p and p != "."]
+            if parts:
+                return [" ".join(parts)]
+
+    # Fallback: IA-02 preserved folder_tags (last entry is the combined tag)
+    ia02_ft = ((job.step_result or {}).get("IA-02") or {}).get("folder_tags") or []
+    if ia02_ft:
+        # The last entry is the combined tag (e.g. "Ferien Mallorca")
+        combined = ia02_ft[-1]
+        # If it contains spaces, it's the combined tag — use it as album name.
+        # If there's only one folder level, the single word IS the combined tag.
+        return [combined]
+
+    return None
+
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\w+$",
@@ -573,14 +609,7 @@ async def execute(job, session) -> dict:
             # Re-upload: direct mode (file modified) OR sidecar-mode retry
             # (fresh .xmp needs to reach Immich).
             # Extract album name from inbox folder structure (re-check module + inbox at runtime)
-            reupload_album_names = None
-            folder_tags_active = await _is_folder_tags_active(job)
-            if folder_tags_active and job.source_inbox_path:
-                rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
-                if rel and rel != ".":
-                    parts = [p for p in rel.split(os.sep) if p and p != "."]
-                    if parts:
-                        reupload_album_names = [" ".join(parts)]
+            reupload_album_names = await _get_folder_album_names(job)
 
             try:
                 # Step 1: Upload file as new asset (with sidecar if available)
@@ -675,14 +704,7 @@ async def execute(job, session) -> dict:
     # Route: Immich upload or target directory
     if job.use_immich:
         # Extract folder tags as single combined album name (re-check module + inbox at runtime)
-        album_names = None
-        folder_tags_active = await _is_folder_tags_active(job)
-        if folder_tags_active and job.source_inbox_path:
-            rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
-            if rel and rel != ".":
-                parts = [p for p in rel.split(os.sep) if p and p != "."]
-                if parts:
-                    album_names = [" ".join(parts)]
+        album_names = await _get_folder_album_names(job)
 
         try:
             immich_result = await upload_asset(job.original_path, album_names=album_names,

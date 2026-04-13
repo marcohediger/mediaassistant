@@ -461,6 +461,46 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 - **LIM-06:** Max-Retry nur bei Start — `retry_count > MAX_RETRIES` Check nur beim Container-Start, nicht im laufenden Betrieb
 - **LIM-07:** Externe Datei-Race — Wenn ein **externer** Prozess eine Inbox-Datei mid-pipeline löscht/ersetzt (z.B. iCloud re-sync), wird der entsprechende ExifTool/upload_asset/safe_move-Fehler direkt durchgereicht — der atomic claim schützt nur vor *internen* Doppel-Verarbeitungen, nicht vor externen Filesystem-Eingriffen
 
+## 12b. Folder-Tags & Album-Propagation (FTAG)
+
+> Testet die Weitergabe von Inbox-Ordnerstruktur als Album-Name durch
+> die Pipeline — insbesondere bei Duplikaten, wo die Datei aus dem Inbox
+> verschoben wird und der Pfad nicht mehr verfügbar ist.
+
+- **FTAG-01:** `_extract_folder_tags` extrahiert Ordner-Parts + kombinierten Tag aus Inbox-Subfolder-Pfad
+- **FTAG-02:** `_extract_folder_tags` bei flachem Inbox (keine Subfolder) → leere Liste
+- **FTAG-03:** `_extract_folder_tags` bei einzelner Ordner-Ebene → nur Ordnername
+- **FTAG-04:** `_handle_duplicate` gibt `list[str]` zurück (folder_tags)
+- **FTAG-05:** `_get_folder_album_names` extrahiert Album-Name aus Inbox-Pfad (path-basiert)
+- **FTAG-06:** `_get_folder_album_names` fällt auf IA-02 folder_tags zurück wenn Datei in `/reprocess/` liegt
+- **FTAG-07:** `_get_folder_album_names` bei flachem Inbox → `None`
+- **FTAG-08:** `_build_member` enthält `folder_tags` und `folder_album` Keys
+- **FTAG-09:** folder_tags preserved bei "Kein Duplikat" (IA-02 skip mit folder_tags)
+- **FTAG-10:** folder_tags preserved bei leerem IA-02 (kein folder_tags Key)
+- **FTAG-11:** folder_tags Merge bei "Behalten" — Donor-Tags werden dedupliziert übernommen
+- **FTAG-12:** folder_tags Merge — doppelte Einträge (z.B. "Mallorca") werden nicht verdoppelt
+- **FTAG-13:** folder_tags Merge — neue Tags aus zweitem Donor hinzugefügt
+- **FTAG-14:** folder_tags Merge — Ergebnis zurück in IA-02 persistiert
+- **FTAG-15:** `_swap_duplicate` speichert folder_tags im IA-02 step_result des demotierten Jobs
+- **FTAG-16:** Template `_dup_group.html` zeigt folder_album Badge mit CSS-Klasse `.match-folder-album`
+- **FTAG-17:** CSS enthält `.match-folder-album` Styling
+- **FTAG-18:** `de.json` enthält `folder_album_title` Übersetzung
+- **FTAG-19:** `en.json` enthält `folder_album_title` Übersetzung
+- **FTAG-20:** E2E Keep: Keywords vom Original-Donor in Kept-Job gemerged (echte Dateien)
+- **FTAG-21:** E2E Keep: folder_tags erhalten wenn Kept-Job sie schon hat
+- **FTAG-22:** E2E Keep: folder_tags überlebt IA-02 skip overwrite
+- **FTAG-23:** E2E Keep: skip overwrite folder_tags Werte korrekt
+- **FTAG-24:** E2E Keep: IA-08 `_get_folder_album_names` Album aus IA-02 Fallback (Datei in /reprocess/)
+- **FTAG-25:** E2E Keep: Album = korrekt kombinierter Tag ("Ferien Mallorca")
+- **FTAG-26:** E2E "Kein Duplikat": folder_tags ins skip_result kopiert
+- **FTAG-27:** E2E "Kein Duplikat": `prepare_job_for_reprocess` setzt status=queued
+- **FTAG-28:** E2E "Kein Duplikat": IA-02 injected mit folder_tags
+- **FTAG-29:** E2E "Kein Duplikat": IA-01 beibehalten (keep_steps)
+- **FTAG-30:** E2E "Kein Duplikat": IA-08 Album aus IA-02 Fallback
+- **FTAG-31:** E2E `_build_member`: folder_tags Key existiert in Member-Dict
+- **FTAG-32:** E2E `_build_member`: folder_album Key existiert in Member-Dict
+- **FTAG-33:** E2E `_build_member`: folder_album ist String (auch wenn leer)
+
 ## 13. Race-Condition-Tests
 
 > Code-Pfad-Tests gegen die `run_pipeline`/`retry_job`-Race-
