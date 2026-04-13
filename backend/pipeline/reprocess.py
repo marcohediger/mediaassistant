@@ -137,10 +137,8 @@ async def _move_file_for_reprocess(job) -> bool:
         # Avoid clobbering a leftover sidecar at the destination from
         # an interrupted prior reprocess of the same job.
         if os.path.exists(sidecar_dst):
-            try:
-                os.remove(sidecar_dst)
-            except OSError:
-                pass
+            from file_operations import safe_remove
+            safe_remove(sidecar_dst)
         await asyncio.to_thread(safe_move, sidecar_src, sidecar_dst, job.debug_key)
 
         # The cached IA-07 step result still points at the old sidecar
@@ -159,19 +157,15 @@ async def _move_file_for_reprocess(job) -> bool:
     # ExifTool run at the new location.
     stale_tmp = f"{dst}.xmp.{job.debug_key}.tmp"
     if os.path.exists(stale_tmp):
-        try:
-            os.remove(stale_tmp)
-        except OSError:
-            pass
+        from file_operations import safe_remove
+        safe_remove(stale_tmp)
 
     # Remove .log file at the source location (it described the previous
     # run; the next run will produce a fresh one if needed).
     log_src = src + ".log"
     if os.path.exists(log_src):
-        try:
-            os.remove(log_src)
-        except OSError:
-            pass
+        from file_operations import safe_remove
+        safe_remove(log_src)
 
     job.original_path = dst
     # Only clear target_path if it pointed to a now-stale local file

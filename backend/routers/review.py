@@ -444,21 +444,16 @@ async def delete_file(request: Request):
                 pass
 
         # Delete local files if they exist
+        from file_operations import safe_remove
         for path in [job.original_path, job.target_path]:
             if path and not path.startswith("immich:") and os.path.exists(path):
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
+                await asyncio.to_thread(safe_remove, path)
 
         # Delete temp converted file
         convert_result = (job.step_result or {}).get("IA-04", {})
         temp_path = convert_result.get("temp_path")
         if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+            await asyncio.to_thread(safe_remove, temp_path)
 
         # Mark job as deleted
         job.status = "deleted"

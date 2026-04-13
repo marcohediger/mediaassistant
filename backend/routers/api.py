@@ -426,12 +426,10 @@ async def delete_job_endpoint(debug_key: str):
             return RedirectResponse(url="/logs?tab=jobs", status_code=303)
 
         # Delete associated files
+        from file_operations import safe_remove_with_log
         for path in [job.target_path, job.original_path]:
             if path and os.path.exists(path):
-                await asyncio.to_thread(os.remove, path)
-                log_path = path + ".log"
-                if os.path.exists(log_path):
-                    await asyncio.to_thread(os.remove, log_path)
+                await asyncio.to_thread(safe_remove_with_log, path)
 
         await session.delete(job)
         await session.commit()

@@ -241,10 +241,8 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
 
     # Clean up any leftover tmp from a crashed previous run of THIS job
     if os.path.exists(tmp_sidecar):
-        try:
-            os.remove(tmp_sidecar)
-        except OSError:
-            pass
+        from file_operations import safe_remove
+        safe_remove(tmp_sidecar)
 
     # ExifTool -o file.xmp creates an XMP sidecar from the source file
     cmd = ["exiftool", "-o", tmp_sidecar, "-P", "-m"]
@@ -270,10 +268,8 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
 
     if result.returncode != 0:
         # Cleanup tmp on failure
-        try:
-            os.remove(tmp_sidecar)
-        except OSError:
-            pass
+        from file_operations import safe_remove
+        safe_remove(tmp_sidecar)
         stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
         raise RuntimeError(f"ExifTool Sidecar Fehler: {stderr.strip()}")
 
@@ -281,10 +277,8 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
     try:
         os.replace(tmp_sidecar, sidecar_path)
     except OSError as e:
-        try:
-            os.remove(tmp_sidecar)
-        except OSError:
-            pass
+        from file_operations import safe_remove
+        safe_remove(tmp_sidecar)
         raise RuntimeError(f"Sidecar atomic replace failed: {e}")
 
     return {

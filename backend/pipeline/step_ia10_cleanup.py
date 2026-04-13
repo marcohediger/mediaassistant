@@ -10,15 +10,7 @@ async def execute(job, session) -> dict:
     removed = []
     failed = []
 
-    def _safe_remove(path: str, label: str):
-        """Remove a file with error handling — never crash the pipeline."""
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-                removed.append(path)
-        except (OSError, PermissionError) as e:
-            logger.warning(f"Failed to remove {label}: {path} — {e}")
-            failed.append(path)
+    from file_operations import safe_remove
 
     # Remove temp JPEG(s) from IA-04 (Temp. Konvertierung für KI)
     convert_result = step_results.get("IA-04", {})
@@ -28,17 +20,20 @@ async def execute(job, session) -> dict:
         if single:
             temp_paths = [single]
     for temp_path in temp_paths:
-        _safe_remove(temp_path, "IA-04 temp")
+        if safe_remove(temp_path):
+            removed.append(temp_path)
 
     # Remove XMP sidecar file from IA-07 (if sidecar mode was used and file still exists)
     ia07_result = step_results.get("IA-07", {})
     sidecar_path = ia07_result.get("sidecar_path")
-    _safe_remove(sidecar_path, "IA-07 sidecar")
+    if safe_remove(sidecar_path):
+        removed.append(sidecar_path)
 
     # Remove Google Takeout JSON sidecar (if used and file was moved/processed)
     ia01_result = step_results.get("IA-01", {})
     google_json_path = ia01_result.get("google_json_path")
-    _safe_remove(google_json_path, "Google JSON")
+    if safe_remove(google_json_path):
+        removed.append(google_json_path)
 
     # Remove downloaded file and temp dir from the Immich poller.
     #
@@ -56,7 +51,8 @@ async def execute(job, session) -> dict:
         and job.source_label == "Immich"
         and job.original_path.startswith("/tmp/ma_immich_")
     ):
-        _safe_remove(job.original_path, "Immich download")
+        if safe_remove(job.original_path):
+            removed.append(job.original_path)
         # Remove temp directory if empty
         parent = os.path.dirname(job.original_path)
         if parent and os.path.isdir(parent):
