@@ -467,21 +467,13 @@ async def _swap_duplicate(job, session, existing, match_type: str, distance: int
         return
 
     # Move the existing job's file to duplicates/
-    base_path = await config_manager.get("library.base_path", "/library")
-    dup_rel = await config_manager.get("library.path_duplicate", "error/duplicates/")
-    dup_dir = os.path.join(base_path, dup_rel)
-    await asyncio.to_thread(os.makedirs, dup_dir, exist_ok=True)
+    from file_operations import get_duplicate_dir, resolve_filename_conflict
+    dup_dir = await get_duplicate_dir()
 
     # Only move if the existing file is a local path (not immich:)
     if existing_path and not existing_path.startswith("immich:") and os.path.exists(existing_path):
         filename = os.path.basename(existing_path)
-        dup_path = os.path.join(dup_dir, filename)
-        if os.path.exists(dup_path):
-            name, ext = os.path.splitext(filename)
-            counter = 1
-            while os.path.exists(dup_path):
-                dup_path = os.path.join(dup_dir, f"{name}_{counter}{ext}")
-                counter += 1
+        dup_path = resolve_filename_conflict(dup_dir, filename)
         await asyncio.to_thread(safe_move, existing_path, dup_path, existing.debug_key)
         existing.target_path = dup_path
     elif existing_path and existing_path.startswith("immich:"):
@@ -592,22 +584,10 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
         await log_info("IA-02", f"{job.debug_key} [dry-run] {desc}")
         return folder_tags
 
-    base_path = await config_manager.get("library.base_path", "/library")
-    dup_rel = await config_manager.get("library.path_duplicate", "error/duplicates/")
-    dup_dir = os.path.join(base_path, dup_rel)
-    await asyncio.to_thread(os.makedirs, dup_dir, exist_ok=True)
-
+    from file_operations import get_duplicate_dir, resolve_filename_conflict
+    dup_dir = await get_duplicate_dir()
     filename = os.path.basename(job.original_path)
-    dup_path = os.path.join(dup_dir, filename)
-
-    # Handle name conflicts
-    if os.path.exists(dup_path):
-        name, ext = os.path.splitext(filename)
-        counter = 1
-        while os.path.exists(dup_path):
-            dup_path = os.path.join(dup_dir, f"{name}_{counter}{ext}")
-            counter += 1
-
+    dup_path = resolve_filename_conflict(dup_dir, filename)
     await asyncio.to_thread(safe_move, job.original_path, dup_path, job.debug_key)
 
     # Write .log file

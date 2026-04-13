@@ -1273,14 +1273,8 @@ async def merge_metadata(request: Request):
             )
 
         # Update file hash in job
-        def _sha256(path):
-            h = hashlib.sha256()
-            with open(path, "rb") as f:
-                for chunk in iter(lambda: f.read(65536), b""):
-                    h.update(chunk)
-            return h.hexdigest()
-
-        new_hash = await asyncio.to_thread(_sha256, target_path)
+        from file_operations import sha256
+        new_hash = await asyncio.to_thread(sha256, target_path)
         target_job.file_hash = new_hash
         flag_modified(target_job, "step_result")
         await session.commit()

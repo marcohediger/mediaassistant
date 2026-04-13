@@ -293,16 +293,9 @@ async def _move_to_error(job, session):
     error_dir = os.path.join(base_path, "error")
     await asyncio.to_thread(os.makedirs, error_dir, exist_ok=True)
 
+    from file_operations import resolve_filename_conflict
     filename = os.path.basename(job.original_path)
-    error_path = os.path.join(error_dir, filename)
-
-    # Handle name conflicts
-    if os.path.exists(error_path):
-        name, ext = os.path.splitext(filename)
-        counter = 1
-        while os.path.exists(error_path):
-            error_path = os.path.join(error_dir, f"{name}_{counter}{ext}")
-            counter += 1
+    error_path = resolve_filename_conflict(error_dir, filename)
 
     await asyncio.to_thread(safe_move, job.original_path, error_path, job.debug_key)
 
