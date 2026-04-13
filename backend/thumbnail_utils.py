@@ -80,6 +80,8 @@ def video_to_jpeg(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
 
 def generate_thumbnail(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
     """Generate a JPEG thumbnail from an image or video file."""
+    if not filepath or not os.path.isfile(filepath):
+        return None
     ext = os.path.splitext(filepath)[1].lower()
 
     if ext in VIDEO_EXTENSIONS:
