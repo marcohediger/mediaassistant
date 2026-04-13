@@ -888,6 +888,9 @@ async def keep_file(request: Request):
                 kept_job.step_result = kept_sr
                 flag_modified(kept_job, "step_result")
 
+        # Collect asset IDs that the kept job will need (don't delete those)
+        kept_asset_id = kept_job.immich_asset_id if kept_job else None
+
         # Delete all except the kept one
         for job in group_jobs:
             if job.debug_key == keep_key:
@@ -901,12 +904,14 @@ async def keep_file(request: Request):
                 if os.path.exists(log_path):
                     await asyncio.to_thread(os.remove, log_path)
 
-            # Delete from Immich if applicable
+            # Delete from Immich if applicable — but NEVER delete the asset
+            # that the kept job references (they may share the same asset
+            # when the files are identical).
             asset_id = job.immich_asset_id or ""
             target = job.target_path or ""
             if target.startswith("immich:"):
                 asset_id = asset_id or target[7:]
-            if asset_id:
+            if asset_id and asset_id != kept_asset_id:
                 try:
                     from immich_client import get_immich_config
                     import httpx
