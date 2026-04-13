@@ -21,6 +21,11 @@
 | `safe_remove` | `(path, *, missing_ok=True) -> bool` | Datei löschen ohne Exception. `True` wenn gelöscht. |
 | `safe_remove_with_log` | `(path) -> list[str]` | Datei + `.log`-Sidecar löschen. Skippt `immich:`-Pfade. |
 | `get_duplicate_dir` | `async () -> str` | Duplikat-Verzeichnis aus Config, erstellt falls nötig. |
+| `resolve_filepath` | `(job) -> str` | Dateipfad auflösen (target → original → temp). |
+| `sanitize_path_component` | `(value) -> str` | Gefährliche Zeichen entfernen (Path-Traversal). |
+| `validate_target_path` | `(target_dir, base_path) -> str` | Pfad innerhalb base_path erzwingen. |
+| `parse_date` | `(date_str) -> datetime \| None` | EXIF-Datum parsen (diverse Formate + Timezone). |
+| `is_folder_tags_active` | `async (job) -> bool` | Folder-Tags Modul + Inbox-Setting prüfen. |
 
 ---
 
@@ -29,6 +34,21 @@
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
 | `safe_move` | `(src, dst, context="") -> str` | Copy+Hash-Verify+Delete. Wirft `RuntimeError` bei Fehler. |
+
+---
+
+## thumbnail_utils.py — Thumbnail-Erzeugung
+
+> **Pflicht:** Thumbnails und Bild-Konvertierung nur über diese Helper.
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `generate_thumbnail` | `(filepath, max_size=THUMB_SIZE) -> bytes \| None` | JPEG-Thumbnail generieren (HEIC, RAW, Video, PIL-Formate). |
+| `heic_to_jpeg` | `(filepath) -> bytes \| None` | HEIC → JPEG via heif-convert. |
+| `video_to_jpeg` | `(filepath, max_size=THUMB_SIZE) -> bytes \| None` | Video-Frame via ffmpeg extrahieren. |
+| `raw_to_jpeg` | `(filepath) -> bytes \| None` | RAW PreviewImage via ExifTool extrahieren. |
+| `THUMB_SIZE` | `(400, 400)` | Default Thumbnail-Grösse. |
+| `PREVIEW_SIZE` | `(1200, 1200)` | Preview-Grösse. |
 
 ---
 
@@ -361,18 +381,18 @@ Jeder Step hat: `async execute(job, session) -> dict`
 
 ---
 
-## ⚠️ Bekannte Redundanzen (noch zu konsolidieren)
+## ✅ Redundanzen bereinigt (v2.28.84)
 
-Diese Funktionen existieren **identisch in mehreren Dateien** und sollten
-in ein shared Modul extrahiert werden:
+Alle 8 Redundanzen wurden in shared Module konsolidiert:
 
-| Funktion | Dateien | Vorgeschlagenes Ziel |
+| Funktion | Jetzt in | Benutzt von |
 |---|---|---|
-| `_generate_thumbnail` | `duplicates.py`, `review.py` | `thumbnail_utils.py` |
-| `_heic_to_jpeg` | `duplicates.py`, `review.py` | `thumbnail_utils.py` |
-| `_video_to_jpeg` | `duplicates.py`, `review.py` | `thumbnail_utils.py` |
-| `_resolve_filepath` | `duplicates.py`, `review.py` | `file_operations.py` |
-| `_sanitize_path_component` | `duplicates.py`, `review.py` | `file_operations.py` |
-| `_validate_target_path` | `duplicates.py`, `review.py` | `file_operations.py` |
-| `_parse_date` | `step_ia08_sort.py`, `review.py` | `file_operations.py` |
-| `_is_folder_tags_active` | `step_ia07_exif_write.py`, `step_ia08_sort.py` | `file_operations.py` |
+| `generate_thumbnail` | `thumbnail_utils.py` | duplicates.py, review.py |
+| `heic_to_jpeg` | `thumbnail_utils.py` | duplicates.py, review.py |
+| `video_to_jpeg` | `thumbnail_utils.py` | duplicates.py, review.py |
+| `raw_to_jpeg` | `thumbnail_utils.py` | duplicates.py |
+| `resolve_filepath` | `file_operations.py` | duplicates.py, review.py |
+| `sanitize_path_component` | `file_operations.py` | duplicates.py, review.py, step_ia08 |
+| `validate_target_path` | `file_operations.py` | duplicates.py, review.py, step_ia08 |
+| `parse_date` | `file_operations.py` | step_ia08, review.py |
+| `is_folder_tags_active` | `file_operations.py` | step_ia07, step_ia08 |

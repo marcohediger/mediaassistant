@@ -1,27 +1,9 @@
 import asyncio
-import hashlib
 import os
 import subprocess
 
 from config import config_manager
-from database import async_session
-
-
-async def _is_folder_tags_active(job) -> bool:
-    """Check if folder tags should be applied — re-reads module AND inbox setting at runtime."""
-    if not await config_manager.is_module_enabled("ordner_tags"):
-        return False
-    if not job.source_inbox_path:
-        return False
-    # Re-read current inbox setting from DB (not the stale job.folder_tags)
-    from models import InboxDirectory
-    from sqlalchemy import select
-    async with async_session() as session:
-        result = await session.execute(
-            select(InboxDirectory.folder_tags).where(InboxDirectory.path == job.source_inbox_path)
-        )
-        inbox_folder_tags = result.scalar()
-    return bool(inbox_folder_tags)
+from file_operations import is_folder_tags_active as _is_folder_tags_active  # shared
 
 
 WRITABLE_EXTENSIONS = {

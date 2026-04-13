@@ -1,128 +1,24 @@
 import asyncio
-import io
 import os
-import re
-import subprocess
-import tempfile
 from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
-from PIL import Image
 from sqlalchemy import select
 
 from config import config_manager
 from database import async_session
+from file_operations import (
+    resolve_filepath, sanitize_path_component, validate_target_path, parse_date,
+)
 from models import Job
 from safe_file import safe_move
 from system_logger import log_info, log_warning
+from thumbnail_utils import generate_thumbnail, THUMB_SIZE, PREVIEW_SIZE
 
 from template_engine import render
 
-
-def _sanitize_path_component(value: str) -> str:
-    """Remove dangerous characters from path components to prevent path traversal."""
-    if not value:
-        return "unknown"
-    value = value.replace("..", "").replace("/", "_").replace("\\", "_")
-    value = re.sub(r'[\x00-\x1f]', '', value)
-    return value.strip() or "unknown"
-
-
-def _validate_target_path(target_dir: str, base_path: str) -> str:
-    """Ensure target directory is within base_path (defense in depth)."""
-    target_real = os.path.realpath(target_dir)
-    base_real = os.path.realpath(base_path)
-    if not target_real.startswith(base_real + os.sep) and target_real != base_real:
-        raise ValueError(
-            f"Security: target path escapes library boundary "
-            f"(target={target_dir}, base={base_path})"
-        )
-    return target_real
-
 router = APIRouter()
-
-THUMB_SIZE = (400, 400)
-PREVIEW_SIZE = (1600, 1600)
-HEIC_EXTENSIONS = {".heic", ".heif"}
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mts"}
-
-
-def _heic_to_jpeg(filepath: str) -> bytes | None:
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=True) as tmp:
-            subprocess.run(
-                ["heif-convert", "-q", "80", filepath, tmp.name],
-                capture_output=True, timeout=15, check=True,
-            )
-            with open(tmp.name, "rb") as f:
-                return f.read()
-    except Exception:
-        return None
-
-
-def _video_to_jpeg(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
-    """Extract a frame from a video file via ffmpeg."""
-    try:
-        w, h = max_size
-        result = subprocess.run(
-            ["ffmpeg", "-ss", "1", "-i", filepath,
-             "-frames:v", "1", "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease",
-             "-f", "image2", "-c:v", "mjpeg", "-q:v", "5", "pipe:1"],
-            capture_output=True, timeout=15,
-        )
-        if result.stdout and len(result.stdout) > 500:
-            return result.stdout
-    except Exception:
-        pass
-    return None
-
-
-def _generate_thumbnail(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
-    ext = os.path.splitext(filepath)[1].lower()
-
-    if ext in VIDEO_EXTENSIONS:
-        return _video_to_jpeg(filepath, max_size)
-
-    if ext in HEIC_EXTENSIONS:
-        jpeg_data = _heic_to_jpeg(filepath)
-        if not jpeg_data:
-            return None
-        img = Image.open(io.BytesIO(jpeg_data))
-    else:
-        try:
-            img = Image.open(filepath)
-        except Exception:
-            return None
-
-    img.thumbnail(max_size, Image.LANCZOS)
-    if img.mode in ("RGBA", "P"):
-        img = img.convert("RGB")
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=80)
-    return buf.getvalue()
-
-
-def _resolve_filepath(job) -> str:
-    for path in [job.target_path, job.original_path]:
-        if path and os.path.exists(path):
-            return path
-    convert_result = (job.step_result or {}).get("IA-04", {})
-    temp_path = convert_result.get("temp_path")
-    if temp_path and os.path.exists(temp_path):
-        return temp_path
-    return job.target_path or job.original_path
-
-
-def _parse_date(date_str: str) -> datetime | None:
-    if not date_str:
-        return None
-    for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(date_str, fmt)
-        except (ValueError, TypeError):
-            continue
-    return None
 
 
 async def _build_review_items() -> list[dict]:
@@ -135,7 +31,7 @@ async def _build_review_items() -> list[dict]:
 
         items = []
         for job in jobs:
-            filepath = _resolve_filepath(job)
+            filepath = resolve_filepath(job)
             exists = os.path.exists(filepath)
             step_results = job.step_result or {}
             exif = step_results.get("IA-01", {})
@@ -240,12 +136,12 @@ async def review_thumbnail(job_id: int, size: str = "thumbnail"):
     if not job:
         return Response(status_code=404)
 
-    filepath = _resolve_filepath(job)
+    filepath = resolve_filepath(job)
     if not os.path.exists(filepath):
         return Response(status_code=404)
 
     max_size = PREVIEW_SIZE if size == "preview" else THUMB_SIZE
-    data = await asyncio.to_thread(_generate_thumbnail, filepath, max_size)
+    data = await asyncio.to_thread(generate_thumbnail, filepath, max_size)
     if not data:
         return Response(status_code=404)
 
@@ -323,7 +219,7 @@ async def classify_file(request: Request):
             return RedirectResponse(url="/review", status_code=303)
 
         # ── Lokale Ablage ─────────────────────────────────────────
-        filepath = _resolve_filepath(job)
+        filepath = resolve_filepath(job)
         if not os.path.exists(filepath):
             job.status = "error"
             job.error_message = "Review: Datei nicht gefunden"
@@ -347,7 +243,7 @@ async def classify_file(request: Request):
         base_path = await config_manager.get("library.base_path", "/library")
 
         # Parse date
-        date = _parse_date(exif.get("date"))
+        date = parse_date(exif.get("date"))
         if not date:
             date = datetime.now()
 
@@ -362,10 +258,10 @@ async def classify_file(request: Request):
             "{MM}": date.strftime("%m"),
             "{DD}": date.strftime("%d"),
             "{YYYY-MM}": date.strftime("%Y-%m"),
-            "{CAMERA}": _sanitize_path_component(camera),
-            "{TYPE}": _sanitize_path_component(exif.get("type", "unknown")),
-            "{COUNTRY}": _sanitize_path_component(exif.get("country", "")),
-            "{CITY}": _sanitize_path_component(exif.get("city", "")),
+            "{CAMERA}": sanitize_path_component(camera),
+            "{TYPE}": sanitize_path_component(exif.get("type", "unknown")),
+            "{COUNTRY}": sanitize_path_component(exif.get("country", "")),
+            "{CITY}": sanitize_path_component(exif.get("city", "")),
         }
         relative_dir = path_template
         for key, value in replacements.items():
@@ -375,7 +271,7 @@ async def classify_file(request: Request):
 
         # Security: ensure target stays within library
         try:
-            target_dir = _validate_target_path(target_dir, base_path)
+            target_dir = validate_target_path(target_dir, base_path)
         except ValueError as e:
             await log_warning("review", f"Path traversal blocked: {debug_key}", str(e))
             return RedirectResponse(url="/review", status_code=303)
@@ -518,7 +414,7 @@ async def classify_all(request: Request):
                 continue
 
             # ── Lokal: Verschieben ────────────────────────────
-            filepath = _resolve_filepath(job)
+            filepath = resolve_filepath(job)
             if not os.path.exists(filepath):
                 continue
 
@@ -528,13 +424,13 @@ async def classify_all(request: Request):
             base_path = await config_manager.get("library.base_path", "/library")
             path_template = lib_cat.path_template if lib_cat else "unknown/review/"
 
-            date = _parse_date(exif.get("date")) or datetime.now()
+            date = parse_date(exif.get("date")) or datetime.now()
             relative_dir = path_template.replace("{YYYY}", date.strftime("%Y")).replace("{MM}", date.strftime("%m"))
             target_dir = os.path.join(base_path, relative_dir)
 
             # Security: ensure target stays within library
             try:
-                target_dir = _validate_target_path(target_dir, base_path)
+                target_dir = validate_target_path(target_dir, base_path)
             except ValueError as e:
                 await log_warning("review", f"Path traversal blocked: {job.debug_key}", str(e))
                 continue

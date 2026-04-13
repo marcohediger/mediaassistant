@@ -7,6 +7,8 @@ Do NOT reimplement these with raw os/shutil calls elsewhere.
 import hashlib
 import logging
 import os
+import re
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -125,3 +127,106 @@ async def get_duplicate_dir() -> str:
     dup_dir = os.path.join(base_path, dup_rel)
     await asyncio.to_thread(os.makedirs, dup_dir, exist_ok=True)
     return dup_dir
+
+
+# ---------------------------------------------------------------------------
+# Path resolution
+# ---------------------------------------------------------------------------
+
+def resolve_filepath(job) -> str:
+    """Find the actual file path, checking target, original, and temp paths.
+
+    Prefers target_path, then original_path (only if the file exists there),
+    then falls back to the IA-04 converted temp file.
+    """
+    if job.target_path and os.path.exists(job.target_path):
+        return job.target_path
+    if job.original_path and os.path.exists(job.original_path):
+        return job.original_path
+    # Fallback: IA-04 converted temp file
+    convert_result = (job.step_result or {}).get("IA-04", {})
+    temp_path = convert_result.get("temp_path")
+    if temp_path and os.path.exists(temp_path):
+        return temp_path
+    return job.target_path or job.original_path
+
+
+# ---------------------------------------------------------------------------
+# Path sanitisation & validation
+# ---------------------------------------------------------------------------
+
+def sanitize_path_component(value: str) -> str:
+    """Remove dangerous characters from path components to prevent path traversal."""
+    if not value:
+        return "unknown"
+    # Remove .. / \ and null bytes — prevents directory escape
+    value = value.replace("..", "").replace("/", "_").replace("\\", "_")
+    value = re.sub(r'[\x00-\x1f]', '', value)
+    return value.strip() or "unknown"
+
+
+def validate_target_path(target_dir: str, base_path: str) -> str:
+    """Ensure target directory is within base_path (defense in depth).
+
+    Returns the validated real path or raises ValueError.
+    """
+    target_real = os.path.realpath(target_dir)
+    base_real = os.path.realpath(base_path)
+    if not target_real.startswith(base_real + os.sep) and target_real != base_real:
+        raise ValueError(
+            f"Security: target path escapes library boundary "
+            f"(target={target_dir}, base={base_path})"
+        )
+    return target_real
+
+
+# ---------------------------------------------------------------------------
+# Date parsing
+# ---------------------------------------------------------------------------
+
+def parse_date(date_str: str) -> datetime | None:
+    """Parse EXIF/video date string into datetime.
+
+    Handles timezone suffixes (Z, +00:00, etc.) and sub-second precision
+    by stripping them before matching.
+    """
+    if not date_str:
+        return None
+    # Strip timezone suffix (Z, +00:00, +02:00 etc.) for naive datetime
+    cleaned = re.sub(r"[+-]\d{2}:\d{2}$", "", date_str)
+    cleaned = cleaned.rstrip("Z")
+    # Strip sub-second precision (.000000)
+    cleaned = re.sub(r"\.\d+$", "", cleaned)
+    for fmt in (
+        "%Y:%m:%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y/%m/%d %H:%M:%S",
+    ):
+        try:
+            return datetime.strptime(cleaned, fmt)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Module-activation check
+# ---------------------------------------------------------------------------
+
+async def is_folder_tags_active(job) -> bool:
+    """Check if folder tags should be applied — re-reads module AND inbox setting at runtime."""
+    from config import config_manager
+    if not await config_manager.is_module_enabled("ordner_tags"):
+        return False
+    if not job.source_inbox_path:
+        return False
+    from models import InboxDirectory
+    from sqlalchemy import select
+    from database import async_session
+    async with async_session() as session:
+        result = await session.execute(
+            select(InboxDirectory.folder_tags).where(InboxDirectory.path == job.source_inbox_path)
+        )
+        inbox_folder_tags = result.scalar()
+    return bool(inbox_folder_tags)
