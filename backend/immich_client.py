@@ -433,6 +433,24 @@ async def download_asset(asset_id: str, target_path: str, *, api_key: str | None
     return file_path
 
 
+async def get_asset_original(asset_id: str, *, api_key: str | None = None) -> tuple[bytes, str] | None:
+    """Download original file bytes + content-type. Returns (bytes, mime) or None."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key or not asset_id:
+        return None
+    headers = {"x-api-key": api_key}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{url}/api/assets/{asset_id}/original",
+            headers=headers,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            content_type = resp.headers.get("content-type", "image/jpeg")
+            return resp.content, content_type
+    return None
+
+
 async def copy_asset_metadata(from_id: str, to_id: str, *, api_key: str | None = None) -> dict:
     """Copy metadata (albums, favorites, faces, stacks, shared links) from one asset to another."""
     url, api_key = await _resolve_api_key(api_key)
