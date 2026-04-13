@@ -1,110 +1,32 @@
 import asyncio
-import hashlib
-import io
 import os
 import subprocess
-import tempfile
 from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from PIL import Image
 from sqlalchemy import select, func
 from sqlalchemy.orm.attributes import flag_modified
 
 from config import config_manager
 from database import async_session
+from file_operations import resolve_filepath
 from models import Job
 from system_logger import log_info
+from thumbnail_utils import (
+    generate_thumbnail, raw_to_jpeg, heic_to_jpeg, video_to_jpeg,
+    THUMB_SIZE, PREVIEW_SIZE, HEIC_EXTENSIONS, RAW_EXTENSIONS, VIDEO_EXTENSIONS,
+)
 
 from template_engine import render
 
 router = APIRouter()
 
-THUMB_SIZE = (400, 400)
-PREVIEW_SIZE = (1600, 1600)
-HEIC_EXTENSIONS = {".heic", ".heif"}
-RAW_EXTENSIONS = {".dng", ".cr2", ".nef", ".arw"}
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mts"}
 
 
-def _raw_to_jpeg(filepath: str) -> bytes | None:
-    """Extract embedded PreviewImage from RAW file via ExifTool."""
-    try:
-        result = subprocess.run(
-            ["exiftool", "-b", "-PreviewImage", filepath],
-            capture_output=True, timeout=15,
-        )
-        if result.stdout and len(result.stdout) > 1000:
-            return result.stdout
-        # Fallback: try JpgFromRaw
-        result = subprocess.run(
-            ["exiftool", "-b", "-JpgFromRaw", filepath],
-            capture_output=True, timeout=15,
-        )
-        if result.stdout and len(result.stdout) > 1000:
-            return result.stdout
-    except Exception:
-        pass
-    return None
-
-
-def _heic_to_jpeg(filepath: str) -> bytes | None:
-    """Convert HEIC to JPEG bytes using heif-convert."""
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=True) as tmp:
-            subprocess.run(
-                ["heif-convert", "-q", "80", filepath, tmp.name],
-                capture_output=True, timeout=15, check=True,
-            )
-            with open(tmp.name, "rb") as f:
-                return f.read()
-    except Exception:
-        return None
-
-
-def _video_to_jpeg(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
-    """Extract a frame from a video file via ffmpeg and return as JPEG bytes."""
-    try:
-        w, h = max_size
-        result = subprocess.run(
-            ["ffmpeg", "-ss", "1", "-i", filepath,
-             "-frames:v", "1", "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease",
-             "-f", "image2", "-c:v", "mjpeg", "-q:v", "5", "pipe:1"],
-            capture_output=True, timeout=15,
-        )
-        if result.stdout and len(result.stdout) > 500:
-            return result.stdout
-    except Exception:
-        pass
-    return None
-
-
-def _generate_thumbnail(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
-    """Generate a JPEG thumbnail from an image or video file."""
-    ext = os.path.splitext(filepath)[1].lower()
-
-    if ext in VIDEO_EXTENSIONS:
-        return _video_to_jpeg(filepath, max_size)
-
-    if ext in HEIC_EXTENSIONS:
-        jpeg_data = _heic_to_jpeg(filepath)
-        if not jpeg_data:
-            return None
-        img = Image.open(io.BytesIO(jpeg_data))
-    else:
-        try:
-            img = Image.open(filepath)
-        except Exception:
-            return None
-
-    img.thumbnail(max_size, Image.LANCZOS)
-    if img.mode in ("RGBA", "P"):
-        img = img.convert("RGB")
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=80)
-    return buf.getvalue()
+# Thumbnail functions (raw_to_jpeg, heic_to_jpeg, video_to_jpeg,
+# generate_thumbnail) consolidated into thumbnail_utils.py
 
 
 def _parse_exiftool_entry(data: dict, filepath: str) -> dict:
@@ -231,21 +153,8 @@ def _union_find_groups(links: list[tuple[str, str]]) -> dict[str, set[str]]:
     return groups
 
 
-def _resolve_filepath(job) -> str:
-    """Find the actual file path, checking target, original, and temp paths.
 
-    Bevorzugt target_path — original_path nur wenn Datei dort noch existiert.
-    """
-    if job.target_path and os.path.exists(job.target_path):
-        return job.target_path
-    if job.original_path and os.path.exists(job.original_path):
-        return job.original_path
-    # Fallback: IA-04 converted temp file
-    convert_result = (job.step_result or {}).get("IA-04", {})
-    temp_path = convert_result.get("temp_path")
-    if temp_path and os.path.exists(temp_path):
-        return temp_path
-    return job.target_path or job.original_path
+# _resolve_filepath consolidated into file_operations.resolve_filepath
 
 
 def _display_path(job) -> str:
@@ -257,7 +166,7 @@ def _display_path(job) -> str:
 
 async def _build_member(job, session, *, prefetched_info: dict | None = None) -> dict:
     """Build a member dict for a single job — all info read directly from the file."""
-    filepath = _resolve_filepath(job)
+    filepath = resolve_filepath(job)
     dup_info = (job.step_result or {}).get("IA-02", {})
     # is_original is determined later in _build_group_detail by
     # comparing job IDs — the oldest job (lowest ID) in the group is
@@ -468,7 +377,7 @@ async def _build_group_detail(member_keys: list[str], jobs_by_key: dict) -> list
         job = jobs_by_key.get(key)
         if not job:
             continue
-        filepath = _resolve_filepath(job)
+        filepath = resolve_filepath(job)
         asset_id = job.immich_asset_id or ""
         target = job.target_path or ""
         if target.startswith("immich:"):
@@ -658,13 +567,13 @@ async def thumbnail(job_id: int, size: str = "thumbnail"):
     if not job:
         return Response(status_code=404)
 
-    filepath = _resolve_filepath(job)
+    filepath = resolve_filepath(job)
 
     if not os.path.exists(filepath):
         return Response(status_code=404)
 
     max_size = PREVIEW_SIZE if size == "preview" else THUMB_SIZE
-    data = await asyncio.to_thread(_generate_thumbnail, filepath, max_size)
+    data = await asyncio.to_thread(generate_thumbnail, filepath, max_size)
     if not data:
         return Response(status_code=404)
 
@@ -719,7 +628,7 @@ async def local_original(job_id: int):
     if not job:
         return Response(status_code=404)
 
-    filepath = _resolve_filepath(job)
+    filepath = resolve_filepath(job)
     if not os.path.exists(filepath):
         return Response(status_code=404)
 
@@ -730,14 +639,14 @@ async def local_original(job_id: int):
 
     # For HEIC, convert to JPEG for browser compatibility
     if ext in HEIC_EXTENSIONS:
-        data = await asyncio.to_thread(_heic_to_jpeg, filepath)
+        data = await asyncio.to_thread(heic_to_jpeg, filepath)
         if data:
             return Response(content=data, media_type="image/jpeg")
         return Response(status_code=404)
 
     # For RAW, extract PreviewImage via ExifTool
     if ext in RAW_EXTENSIONS:
-        data = await asyncio.to_thread(_raw_to_jpeg, filepath)
+        data = await asyncio.to_thread(raw_to_jpeg, filepath)
         if data:
             return Response(content=data, media_type="image/jpeg")
         return Response(status_code=404)
@@ -1129,7 +1038,7 @@ async def merge_metadata(request: Request):
         if not target_job:
             return JSONResponse({"error": "target job not found"}, status_code=404)
 
-        target_path = _resolve_filepath(target_job)
+        target_path = resolve_filepath(target_job)
         if not os.path.exists(target_path):
             return JSONResponse({"error": "target file not found"}, status_code=404)
 
@@ -1141,7 +1050,7 @@ async def merge_metadata(request: Request):
             sj = jobs.get(sk)
             if not sj:
                 continue
-            sp = _resolve_filepath(sj)
+            sp = resolve_filepath(sj)
             if os.path.exists(sp):
                 local_paths.append(sp)
                 source_infos.append((None, sp))  # info filled via batch below

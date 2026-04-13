@@ -32,14 +32,16 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 
 ### Release-Übersicht (Test-Skript-Roll-ups)
 
-| Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | 2026-04-09 | 2026-04-13 |
-|---|---|---|---|---|---|---|
-| **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 | v2.28.66 | v2.28.73 |
-| **Commit** | – | – | – | – | `8ffc4c5` | `16f4b8c` |
-| `test_duplicate_fix.py` | – | – | 26/26 ✅ | 26/26 ✅ | 34/34 ✅ | 34/34 ✅ |
-| `test_retry_file_lifecycle.py` | – | – | – | 46/46 ✅ | 110/110 ✅ | 110/110 ✅ |
-| `test_testplan_final.py` | – | 296/305 | 66/66 ✅ | 59/60 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) |
-| `test_ai_backends.py` | – | – | – | – | – | 13/13 ✅ |
+| Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | 2026-04-09 | 2026-04-13 | 2026-04-13b |
+|---|---|---|---|---|---|---|---|
+| **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 | v2.28.66 | v2.28.73 | v2.28.84 |
+| **Commit** | – | – | – | – | `8ffc4c5` | `16f4b8c` | `db2b8a7+` |
+| `test_duplicate_fix.py` | – | – | 26/26 ✅ | 26/26 ✅ | 34/34 ✅ | 34/34 ✅ | 34/34 ✅ |
+| `test_retry_file_lifecycle.py` | – | – | – | 46/46 ✅ | 110/110 ✅ | 110/110 ✅ | 110/110 ✅ |
+| `test_testplan_final.py` | – | 296/305 | 66/66 ✅ | 59/60 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) |
+| `test_ai_backends.py` | – | – | – | – | – | 13/13 ✅ | 13/13 ✅ |
+| `test_ftag_immich.py` | – | – | – | – | – | – | 20/20 ✅ |
+| `test_keep_flow.py` | – | – | – | – | – | – | 15/15 ✅ |
 
 ### IA01 — IA-01 EXIF auslesen (26 Tests)
 
@@ -617,7 +619,17 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 
 Kurze, **anonymisierte** Bemerkungen — keine personenbezogenen Daten.
 
-### 2026-04-13
+### 2026-04-13b (v2.28.84)
+
+- Vollständiger Testlauf aller 6 Suites nach grossem Refactoring
+  (file_operations.py, thumbnail_utils.py, 8 Redundanzen eliminiert).
+- 255/256 bestanden, 1 BLOCK (HEIC-Testdatei fehlt).
+- `test_ftag_immich.py` erstmals dokumentiert: 20/20 grün (E2E Immich).
+- `test_keep_flow.py` erstmals dokumentiert: 15/15 grün.
+- Bugfixes v2.28.74-83: folder_tags Propagation, force=True bei Keep-Delete,
+  shared delete_asset(), Pfad-Müll-Filter (..), Immich-Album-Fallback.
+
+### 2026-04-13 (v2.28.73)
 
 - Vollständiger Testlauf aller 4 Suites auf v2.28.73 (`16f4b8c`).
 - `test_ai_backends.py` erstmals dokumentiert: 13/13 grün.

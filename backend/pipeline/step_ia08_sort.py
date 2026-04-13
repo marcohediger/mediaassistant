@@ -9,23 +9,14 @@ logger = logging.getLogger("mediaassistant.pipeline.ia08")
 from sqlalchemy import select
 from config import config_manager
 from database import async_session as _async_session
+from file_operations import (
+    is_folder_tags_active as _is_folder_tags_active,
+    parse_date as _parse_date,
+    sanitize_path_component as _sanitize_path_component,
+    validate_target_path as _validate_target_path,
+)
 from safe_file import safe_move
 from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, untag_asset, get_asset_info, get_user_api_key, update_asset_description
-
-
-async def _is_folder_tags_active(job) -> bool:
-    """Check if folder tags should be applied — re-reads module AND inbox setting at runtime."""
-    if not await config_manager.is_module_enabled("ordner_tags"):
-        return False
-    if not job.source_inbox_path:
-        return False
-    from models import InboxDirectory
-    async with _async_session() as session:
-        result = await session.execute(
-            select(InboxDirectory.folder_tags).where(InboxDirectory.path == job.source_inbox_path)
-        )
-        inbox_folder_tags = result.scalar()
-    return bool(inbox_folder_tags)
 
 
 async def _get_folder_album_names(job) -> list[str] | None:
@@ -190,51 +181,9 @@ async def _tag_immich_asset(
     return already + tags_written, tags_failed, tags_removed
 
 
-def _parse_date(date_str: str) -> datetime | None:
-    """Parse EXIF/video date string into datetime."""
-    if not date_str:
-        return None
-    # Strip timezone suffix (Z, +00:00, +02:00 etc.) for naive datetime
-    cleaned = re.sub(r"[+-]\d{2}:\d{2}$", "", date_str)
-    cleaned = cleaned.rstrip("Z")
-    # Strip sub-second precision (.000000)
-    cleaned = re.sub(r"\.\d+$", "", cleaned)
-    for fmt in (
-        "%Y:%m:%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y/%m/%d %H:%M:%S",
-    ):
-        try:
-            return datetime.strptime(cleaned, fmt)
-        except (ValueError, TypeError):
-            continue
-    return None
 
-
-def _sanitize_path_component(value: str) -> str:
-    """Remove dangerous characters from path components to prevent path traversal."""
-    if not value:
-        return "unknown"
-    # Remove .. / \ and null bytes — prevents directory escape
-    value = value.replace("..", "").replace("/", "_").replace("\\", "_")
-    value = re.sub(r'[\x00-\x1f]', '', value)
-    return value.strip() or "unknown"
-
-
-def _validate_target_path(target_dir: str, base_path: str) -> str:
-    """Ensure target directory is within base_path (defense in depth).
-
-    Returns the validated real path or raises ValueError.
-    """
-    target_real = os.path.realpath(target_dir)
-    base_real = os.path.realpath(base_path)
-    if not target_real.startswith(base_real + os.sep) and target_real != base_real:
-        raise ValueError(
-            f"Security: target path escapes library boundary "
-            f"(target={target_dir}, base={base_path})"
-        )
-    return target_real
+# _parse_date, _sanitize_path_component, _validate_target_path
+# consolidated into file_operations — imported above with underscore aliases.
 
 
 def _resolve_path(template: str, exif: dict, date: datetime | None) -> str:
