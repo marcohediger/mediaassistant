@@ -290,6 +290,10 @@ async def prepare_job_for_reprocess(
     moved_or_skipped = True
     if move_file:
         moved_or_skipped = await _move_file_for_reprocess(job)
+        if not moved_or_skipped:
+            # No source file found anywhere — abort without changing the job.
+            # Callers check the return value and can set error status themselves.
+            return False
 
     _reset_step_results(
         job,
