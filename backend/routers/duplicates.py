@@ -308,23 +308,11 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
     if not folder_album and immich_asset_id:
         # Last resort: query Immich API for album membership
         try:
-            from immich_client import get_immich_config
-            import httpx
-            i_url, i_key = await get_immich_config()
-            if job.immich_user_id:
-                from immich_client import get_user_api_key
-                i_key = await get_user_api_key(job.immich_user_id) or i_key
-            if i_url and i_key:
-                async with httpx.AsyncClient(timeout=5) as client:
-                    resp = await client.get(
-                        f"{i_url}/api/albums",
-                        headers={"x-api-key": i_key},
-                        params={"assetId": immich_asset_id},
-                    )
-                    if resp.status_code == 200:
-                        albums = resp.json()
-                        if albums:
-                            folder_album = albums[0].get("albumName", "")
+            from immich_client import get_asset_albums, get_user_api_key
+            _akey = await get_user_api_key(job.immich_user_id) if job.immich_user_id else None
+            album_names = await get_asset_albums(immich_asset_id, api_key=_akey)
+            if album_names:
+                folder_album = album_names[0]
         except Exception:
             pass
 

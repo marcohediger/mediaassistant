@@ -474,6 +474,23 @@ async def delete_asset(asset_id: str, *, force: bool = True, api_key: str | None
     return {"status": "deleted", "asset_id": asset_id}
 
 
+async def get_asset_albums(asset_id: str, *, api_key: str | None = None) -> list[str]:
+    """Return album names that an asset belongs to."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key or not asset_id:
+        return []
+    headers = {"x-api-key": api_key}
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{url}/api/albums",
+            headers=headers,
+            params={"assetId": asset_id},
+        )
+        if resp.status_code == 200:
+            return [a.get("albumName", "") for a in resp.json() if a.get("albumName")]
+    return []
+
+
 async def _search_assets_for_type(
     client: httpx.AsyncClient,
     url: str,
