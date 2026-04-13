@@ -293,10 +293,40 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
     from pipeline.step_ia02_duplicates import _quality_score
     q_score = _quality_score(job)
 
-    # Folder tags (album name) from IA-02 — shown in the duplicate comparison UI
+    # Folder tags (album name) — shown in the duplicate comparison UI.
+    # Priority: 1) IA-02 folder_tags  2) IA-08 immich_albums_added  3) Immich API
     folder_tags = dup_info.get("folder_tags") or []
-    # Combined tag is the last entry (e.g. "Ferien Mallorca")
     folder_album = folder_tags[-1] if folder_tags else ""
+
+    if not folder_album:
+        # Fallback: IA-08 recorded which albums the asset was added to
+        ia08 = (job.step_result or {}).get("IA-08", {})
+        ia08_albums = ia08.get("immich_albums_added") or []
+        if ia08_albums:
+            folder_album = ia08_albums[0]
+
+    if not folder_album and immich_asset_id:
+        # Last resort: query Immich API for album membership
+        try:
+            from immich_client import get_immich_config
+            import httpx
+            i_url, i_key = await get_immich_config()
+            if job.immich_user_id:
+                from immich_client import get_user_api_key
+                i_key = await get_user_api_key(job.immich_user_id) or i_key
+            if i_url and i_key:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    resp = await client.get(
+                        f"{i_url}/api/albums",
+                        headers={"x-api-key": i_key},
+                        params={"assetId": immich_asset_id},
+                    )
+                    if resp.status_code == 200:
+                        albums = resp.json()
+                        if albums:
+                            folder_album = albums[0].get("albumName", "")
+        except Exception:
+            pass
 
     return {
         "job_id": job.id,
