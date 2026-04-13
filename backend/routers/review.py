@@ -384,15 +384,11 @@ async def classify_file(request: Request):
         target_path = os.path.join(target_dir, filename)
 
         # Handle name conflicts
-        if os.path.exists(target_path):
-            name, ext = os.path.splitext(filename)
-            counter = 1
-            while os.path.exists(target_path):
-                target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
-                counter += 1
+        from file_operations import resolve_filename_conflict
+        await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
+        target_path = resolve_filename_conflict(target_dir, filename)
 
         # Move file
-        await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
         await asyncio.to_thread(safe_move, filepath, target_path, job.debug_key)
 
         # Update job
@@ -549,16 +545,9 @@ async def classify_all(request: Request):
                 continue
 
             filename = os.path.basename(filepath)
-            target_path = os.path.join(target_dir, filename)
-
-            if os.path.exists(target_path):
-                name, ext = os.path.splitext(filename)
-                counter = 1
-                while os.path.exists(target_path):
-                    target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
-                    counter += 1
-
+            from file_operations import resolve_filename_conflict
             await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
+            target_path = resolve_filename_conflict(target_dir, filename)
             await asyncio.to_thread(safe_move, filepath, target_path, job.debug_key)
 
             job.target_path = target_path

@@ -507,7 +507,7 @@ async def execute(job, session) -> dict:
     # If file already exists, decide: overwrite (same photo) or rename (different photo)
     overwrite_existing = False
     if os.path.exists(target_path):
-        from safe_file import _sha256
+        from file_operations import sha256, resolve_filename_conflict
         existing_size = os.path.getsize(target_path)
         source_size = os.path.getsize(job.original_path)
 
@@ -518,18 +518,14 @@ async def execute(job, session) -> dict:
         else:
             # Check if it's the same base image (size may differ due to metadata changes)
             # Same name in same folder → probably same photo re-processed → overwrite
-            existing_hash = await asyncio.to_thread(_sha256, target_path)
-            source_hash = await asyncio.to_thread(_sha256, job.original_path)
+            existing_hash = await asyncio.to_thread(sha256, target_path)
+            source_hash = await asyncio.to_thread(sha256, job.original_path)
             if existing_hash == source_hash:
                 overwrite_existing = True
                 logger.info("File exists with same hash, overwriting: %s", filename)
             else:
                 # Different content → append counter
-                name, ext = os.path.splitext(filename)
-                counter = 1
-                while os.path.exists(target_path):
-                    target_path = os.path.join(target_dir, f"{name}+{counter}{ext}")
-                    counter += 1
+                target_path = resolve_filename_conflict(target_dir, filename, "+")
                 logger.info("File exists with different content, saving as: %s", os.path.basename(target_path))
 
     # All EXIF keywords are written by IA-07 (type, tags, source, geo, folder tags).
