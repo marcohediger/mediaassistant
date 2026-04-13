@@ -72,11 +72,9 @@ async def execute(job, session) -> dict:
             return {"converted": True, "temp_path": temp_path}
     except Exception as e:
         # Cleanup temp files on error
+        from file_operations import safe_remove
         for f in _glob_temp_files(job.debug_key):
-            try:
-                os.remove(f)
-            except OSError:
-                pass
+            safe_remove(f)
         import logging
         logging.getLogger("mediaassistant.pipeline.ia04").warning(
             "%s HEIC/convert fallback fehlgeschlagen: %s", job.debug_key, e

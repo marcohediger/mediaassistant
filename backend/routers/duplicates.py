@@ -879,10 +879,8 @@ async def keep_file(request: Request):
             # Delete local file if exists
             filepath = job.target_path or job.original_path
             if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
-                await asyncio.to_thread(os.remove, filepath)
-                log_path = filepath + ".log"
-                if os.path.exists(log_path):
-                    await asyncio.to_thread(os.remove, log_path)
+                from file_operations import safe_remove_with_log
+                await asyncio.to_thread(safe_remove_with_log, filepath)
 
             # Delete from Immich using the shared helper (force=True by
             # default, so the asset is permanently gone — not just trashed).
@@ -1093,10 +1091,8 @@ async def delete_duplicate(request: Request):
         if job:
             filepath = job.target_path or job.original_path
             if os.path.exists(filepath):
-                await asyncio.to_thread(os.remove, filepath)
-                log_path = filepath + ".log"
-                if os.path.exists(log_path):
-                    await asyncio.to_thread(os.remove, log_path)
+                from file_operations import safe_remove_with_log
+                await asyncio.to_thread(safe_remove_with_log, filepath)
 
             job.status = "done"
             job.error_message = "Duplicate deleted (manually)"
@@ -1450,12 +1446,9 @@ async def batch_clean_quality(request: Request):
 
                 filepath = job.target_path or job.original_path
                 if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
-                    try:
-                        await asyncio.to_thread(os.remove, filepath)
-                        log_path = filepath + ".log"
-                        if os.path.exists(log_path):
-                            await asyncio.to_thread(os.remove, log_path)
-                    except OSError:
+                    from file_operations import safe_remove_with_log
+                    removed_paths = await asyncio.to_thread(safe_remove_with_log, filepath)
+                    if filepath not in removed_paths:
                         errors += 1
                         continue
 
@@ -1586,10 +1579,8 @@ async def batch_clean():
 
             filepath = dup.target_path or dup.original_path
             if os.path.exists(filepath):
-                await asyncio.to_thread(os.remove, filepath)
-                log_path = filepath + ".log"
-                if os.path.exists(log_path):
-                    await asyncio.to_thread(os.remove, log_path)
+                from file_operations import safe_remove_with_log
+                await asyncio.to_thread(safe_remove_with_log, filepath)
 
             dup.status = "done"
             dup.error_message = "Duplicate deleted (Batch-Clean, SHA256 exact)"

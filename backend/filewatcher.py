@@ -27,12 +27,7 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".mpg", ".mp
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
 
-def _sha256(filepath: str) -> str:
-    h = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
+from file_operations import sha256 as _sha256  # shared implementation
 
 
 # In-memory counter — initialized from DB on first use, then only incremented in memory.

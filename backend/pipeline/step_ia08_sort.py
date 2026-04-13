@@ -288,7 +288,8 @@ def _force_remove_dir(path: str):
         if entry.is_dir() and entry.name.lower() in _IGNORABLE_DIRS:
             shutil.rmtree(entry.path, ignore_errors=True)
         elif entry.is_file() and entry.name.lower() in _IGNORABLE_FILES:
-            os.remove(entry.path)
+            from file_operations import safe_remove
+            safe_remove(entry.path)
     os.rmdir(path)
 
 
@@ -762,9 +763,8 @@ async def execute(job, session) -> dict:
                 )
 
         # Remove source file after successful upload
-        try:
-            await asyncio.to_thread(os.remove, job.original_path)
-        except FileNotFoundError:
+        from file_operations import safe_remove
+        if not await asyncio.to_thread(safe_remove, job.original_path):
             logger.info("Source file already removed: %s", job.original_path)
 
         # Clean up empty parent directories in inbox
@@ -802,7 +802,8 @@ async def execute(job, session) -> dict:
     await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
     if overwrite_existing:
         # Remove old file first, then move the updated one in
-        await asyncio.to_thread(os.remove, target_path)
+        from file_operations import safe_remove
+        await asyncio.to_thread(safe_remove, target_path)
         logger.info("Removed old file for overwrite: %s", target_path)
     await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
 
