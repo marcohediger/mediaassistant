@@ -32,16 +32,18 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 
 ### Release-Übersicht (Test-Skript-Roll-ups)
 
-| Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | 2026-04-09 | 2026-04-13 | 2026-04-13b |
+| Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | 2026-04-09 | 2026-04-13 | v2.29.1 |
 |---|---|---|---|---|---|---|---|
-| **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 | v2.28.66 | v2.28.73 | v2.28.84 |
-| **Commit** | – | – | – | – | `8ffc4c5` | `16f4b8c` | `db2b8a7+` |
+| **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 | v2.28.66 | v2.28.73 | v2.29.1 |
+| **Commit** | – | – | – | – | `8ffc4c5` | `16f4b8c` | `6358dfe` |
 | `test_duplicate_fix.py` | – | – | 26/26 ✅ | 26/26 ✅ | 34/34 ✅ | 34/34 ✅ | 34/34 ✅ |
 | `test_retry_file_lifecycle.py` | – | – | – | 46/46 ✅ | 110/110 ✅ | 110/110 ✅ | 110/110 ✅ |
 | `test_testplan_final.py` | – | 296/305 | 66/66 ✅ | 59/60 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) |
 | `test_ai_backends.py` | – | – | – | – | – | 13/13 ✅ | 13/13 ✅ |
 | `test_ftag_immich.py` | – | – | – | – | – | – | 20/20 ✅ |
 | `test_keep_flow.py` | – | – | – | – | – | – | 15/15 ✅ |
+| `test_v29_stress.py` | – | – | – | – | – | – | 41/41 ✅ |
+| `test_no_file_loss.py` | – | – | – | – | – | – | 19/20 ⚠️ |
 
 ### IA01 — IA-01 EXIF auslesen (26 Tests)
 
@@ -618,6 +620,15 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 ## Notizen pro Lauf
 
 Kurze, **anonymisierte** Bemerkungen — keine personenbezogenen Daten.
+
+### 2026-04-13c (v2.29.1)
+
+- Vollständiger Testlauf aller 8 Suites.
+- Neue Suites: test_v29_stress.py (41/41), test_no_file_loss.py (19/20).
+- NFL P3a (10 parallel in <30s) fehlgeschlagen (34s) — Performance, kein
+  Datei-Verlust. **Kein einziger Datei-Verlust in allen Tests.**
+- Bugfix v2.29.1: prepare_job_for_reprocess setzte Status auf queued
+  ohne Datei → ewige Retry-Schleife.
 
 ### 2026-04-13b (v2.28.84)
 

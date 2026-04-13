@@ -10,6 +10,11 @@
 > docker exec mediaassistant-dev python /app/test_duplicate_fix.py
 > docker exec mediaassistant-dev python /app/test_retry_file_lifecycle.py
 > docker exec mediaassistant-dev python /app/test_testplan_final.py
+> docker exec mediaassistant-dev python /app/test_ai_backends.py
+> docker exec mediaassistant-dev python /app/test_keep_flow.py
+> docker exec mediaassistant-dev python /app/test_ftag_immich.py
+> docker exec mediaassistant-dev python /app/test_v29_stress.py
+> docker exec mediaassistant-dev python /app/test_no_file_loss.py
 > ```
 >
 > Test-Daten: Panasonic DMC-GF2 JPGs, DJI FC7203 JPGs, iPhone 12 Pro
@@ -500,6 +505,81 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 - **FTAG-31:** E2E `_build_member`: folder_tags Key existiert in Member-Dict
 - **FTAG-32:** E2E `_build_member`: folder_album Key existiert in Member-Dict
 - **FTAG-33:** E2E `_build_member`: folder_album ist String (auch wenn leer)
+
+## 12c. v2.29 Stress & Edge-Cases (STRESS)
+
+> Stress-Tests und Edge-Cases die reguläre Tests nicht abdecken.
+> Test-Skript: `backend/test_v29_stress.py`.
+
+- **STRESS-01:** resolve_filename_conflict: nicht-existierend → original
+- **STRESS-02:** resolve_filename_conflict: existierend → _1
+- **STRESS-03:** resolve_filename_conflict: _1 belegt → _2
+- **STRESS-04:** resolve_filename_conflict: separator '+' → +1
+- **STRESS-05:** resolve_filename_conflict: ohne Extension
+- **STRESS-06:** safe_remove: None → False
+- **STRESS-07:** safe_remove: leer → False
+- **STRESS-08:** safe_remove: nicht-existent → False
+- **STRESS-09:** safe_remove: existierend → True
+- **STRESS-10:** safe_remove: nochmal → False (weg)
+- **STRESS-11:** sha256: gleiche Datei → gleicher Hash
+- **STRESS-12:** sha256: andere Datei → anderer Hash
+- **STRESS-13:** Thumbnail-Generierung JPEG nach Refactoring
+- **STRESS-14:** resolve_filepath: original_path existiert
+- **STRESS-15:** resolve_filepath: target_path bevorzugt
+- **STRESS-16:** resolve_filepath: nicht-existent → original_path
+- **STRESS-17:** Web-Endpoint /version erreichbar
+- **STRESS-18:** Web-Endpoint /api/health erreichbar
+- **STRESS-19:** Web-Endpoint /login erreichbar
+- **STRESS-20:** Folder-Tags: Umlaute (Höhlen, Übersee)
+- **STRESS-21:** Folder-Tags: Leerzeichen im Ordnernamen
+- **STRESS-22:** Folder-Tags: Emoji
+- **STRESS-23:** 5 Dateien parallel: alle verarbeitet
+- **STRESS-24:** 5 Dateien parallel: kein Error
+- **STRESS-25:** Keep ohne Datei: prepare → False
+- **STRESS-26:** Keep ohne Datei: Status nicht queued
+- **STRESS-27:** Immich check_connection
+- **STRESS-28:** Immich get_asset_albums ungültige ID → leer
+- **STRESS-29:** Immich asset_exists ungültige ID → False
+- **STRESS-30:** sanitize_path_component: path traversal
+- **STRESS-31:** sanitize_path_component: slashes
+- **STRESS-32:** sanitize_path_component: leer → unknown
+- **STRESS-33:** sanitize_path_component: normal
+- **STRESS-34:** validate_target_path: path escape → ValueError
+- **STRESS-35:** parse_date: EXIF-Format
+- **STRESS-36:** parse_date: ISO-Format
+- **STRESS-37:** parse_date: mit Timezone
+- **STRESS-38:** parse_date: mit Z
+- **STRESS-39:** parse_date: mit Subsekunden
+- **STRESS-40:** parse_date: leer → None
+- **STRESS-41:** parse_date: Müll → None
+
+## 12d. Datei-Verlust-Prävention (NFL)
+
+> **Kritisch:** Keine Datei darf durch eine User-Interaktion verloren gehen.
+> Jeder Test verifiziert nach der Aktion dass die Datei entweder lokal
+> oder in Immich existiert.
+> Test-Skript: `backend/test_no_file_loss.py`.
+
+- **NFL-D1a:** Keep this → Kept-Datei reachable nach prepare (disk)
+- **NFL-D1b:** Keep this → Kept-Datei reachable nach Pipeline (Immich)
+- **NFL-D1c:** Keep this → Original-Datei unberührt
+- **NFL-D3a:** Not-a-duplicate → prepare ok
+- **NFL-D3b:** Not-a-duplicate → Datei reachable nach prepare (disk)
+- **NFL-D3c:** Not-a-duplicate → Datei reachable nach Pipeline (Immich)
+- **NFL-A1a:** Retry error job → reset ok
+- **NFL-A1b:** Retry error job → Datei reachable nach Reset
+- **NFL-A2a:** Retry ohne Datei → Status nicht queued
+- **NFL-A2b:** Retry ohne Datei → Error-Message vorhanden
+- **NFL-P1a:** Pipeline mit beliebiger Datei → Datei reachable
+- **NFL-P1b:** Pipeline → Status done/review/duplicate (nicht error)
+- **NFL-P3a:** 10 Dateien parallel → alle verarbeitet
+- **NFL-P3b:** 10 Dateien parallel → KEINE Datei verloren
+- **NFL-P4a:** Datei verschwindet → Status = error
+- **NFL-P4b:** Datei verschwindet → Error-Message vorhanden
+- **NFL-I1a:** Immich-Upload → Asset existiert / Datei reachable
+- **NFL-I2a:** Retry mit Datei nur in Immich → Asset existiert vor Retry
+- **NFL-I2b:** Retry mit Datei nur in Immich → Datei reachable nach Retry
+- **NFL-I2c:** Retry mit Datei nur in Immich → Immich-Asset noch da
 
 ## 13. Race-Condition-Tests
 
