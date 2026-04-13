@@ -940,6 +940,11 @@ async def keep_file(request: Request):
                 # Original that was already fully processed — nothing to do
                 pass
             elif kept_job.status == "duplicate" and kept_filepath and os.path.exists(kept_filepath):
+                # Save folder_tags BEFORE prepare_job_for_reprocess wipes
+                # all steps except IA-01.
+                pre_ia02 = (kept_job.step_result or {}).get("IA-02") or {}
+                saved_folder_tags = pre_ia02.get("folder_tags") or kept_folder_tags or []
+
                 # File move (incl. .xmp sidecar) + step_result reset (keep
                 # only IA-01 EXIF) + status flip is delegated to the shared
                 # reprocess helper.
@@ -957,11 +962,9 @@ async def keep_file(request: Request):
                 # decision (especially when other jobs with matching pHash
                 # still exist in the DB).
                 sr = kept_job.step_result or {}
-                # Read old folder_tags BEFORE overwriting IA-02
-                old_ia02 = sr.get("IA-02") or {}
                 sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review"}
-                if old_ia02.get("folder_tags"):
-                    sr["IA-02"]["folder_tags"] = old_ia02["folder_tags"]
+                if saved_folder_tags:
+                    sr["IA-02"]["folder_tags"] = saved_folder_tags
                 kept_job.step_result = sr
                 flag_modified(kept_job, "step_result")
                 await session.commit()
