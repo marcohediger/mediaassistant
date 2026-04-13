@@ -1,20 +1,26 @@
-# Shared Functions — MediaAssistant Backend
+# Funktionskatalog — MediaAssistant Backend
 
-> Alle wiederverwendbaren Funktionen an einer Stelle dokumentiert.
-> **Regel:** Wenn eine Funktion hier steht, MUSS sie benutzt werden.
-> Keine Neuimplementierung mit raw os/shutil/httpx Calls.
+> **Komplette Auflistung aller Funktionen.** Vor jeder neuen Funktion
+> MUSS dieses Dokument geprüft werden:
+> 1. Gibt es die Funktion schon? → **Benutzen, nicht neu schreiben.**
+> 2. Gehört sie in ein shared Modul? → **Dort erstellen, hier eintragen.**
+> 3. Ist sie mit `⚠️ REDUNDANT` markiert? → **Muss konsolidiert werden.**
 
 ---
 
-## file_operations.py — Datei-Operationen
+## file_operations.py — Shared Datei-Operationen
+
+> **Pflicht:** Jede Datei-Operation die in mehr als einem Modul vorkommt
+> gehört hier rein. Kein raw `os.remove`, `os.rename`, `hashlib` in
+> Pipeline oder Routers.
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `sha256` | `sha256(path: str) -> str` | SHA-256 Hash einer Datei (64 KiB Chunks). Einzige Implementierung — nicht mit `hashlib` neu schreiben. |
-| `resolve_filename_conflict` | `resolve_filename_conflict(directory: str, filename: str, separator: str = "_") -> str` | Findet eindeutigen Dateinamen. Hängt `_1`, `_2`, ... an (oder `+1` etc. je nach Separator). Gibt Pfad zurück der nicht existiert. |
-| `safe_remove` | `safe_remove(path: str, *, missing_ok: bool = True) -> bool` | Löscht eine Datei ohne Exception. Gibt `True` zurück wenn gelöscht, `False` wenn nicht vorhanden oder Fehler. |
-| `safe_remove_with_log` | `safe_remove_with_log(path: str) -> list[str]` | Löscht Datei + zugehörige `.log`-Sidecar. Überspringt `None`, leer, `immich:`-Pfade. Gibt Liste der gelöschten Pfade zurück. |
-| `get_duplicate_dir` | `async get_duplicate_dir() -> str` | Liest `library.base_path` + `library.path_duplicate` aus Config, erstellt Verzeichnis falls nötig. Gibt Pfad zurück. |
+| `sha256` | `(path: str) -> str` | SHA-256 Hash (64 KiB Chunks). **Einzige Implementierung.** |
+| `resolve_filename_conflict` | `(directory, filename, separator="_") -> str` | Eindeutiger Pfad: hängt `_1`, `+1` etc. an bis frei. |
+| `safe_remove` | `(path, *, missing_ok=True) -> bool` | Datei löschen ohne Exception. `True` wenn gelöscht. |
+| `safe_remove_with_log` | `(path) -> list[str]` | Datei + `.log`-Sidecar löschen. Skippt `immich:`-Pfade. |
+| `get_duplicate_dir` | `async () -> str` | Duplikat-Verzeichnis aus Config, erstellt falls nötig. |
 
 ---
 
@@ -22,49 +28,52 @@
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `safe_move` | `safe_move(src: str, dst: str, context: str = "") -> str` | 3-Schritt Move: Copy mit Hash-Berechnung → Hash-Verify → Delete Original. Wirft `RuntimeError` bei fehlgeschlagener Verifikation. Nutzt intern `file_operations.sha256`. |
+| `safe_move` | `(src, dst, context="") -> str` | Copy+Hash-Verify+Delete. Wirft `RuntimeError` bei Fehler. |
 
 ---
 
 ## immich_client.py — Immich API
 
+> **Pflicht:** Kein raw `httpx`-Call an Immich-Endpoints in Routers/Pipeline.
+> Alles über diese Helper.
+
 ### Konfiguration
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `get_immich_config` | `async get_immich_config() -> tuple[str, str]` | Gibt `(base_url, api_key)` aus der globalen Config zurück. |
-| `get_user_api_key` | `async get_user_api_key(user_id: int) -> str \| None` | Entschlüsselt den API-Key eines ImmichUser anhand seiner DB-ID. |
-| `check_connection` | `async check_connection(*, api_key=None) -> tuple[bool, str]` | Testet die Immich-Verbindung. Gibt `(ok, detail_message)` zurück. |
+| `get_immich_config` | `async () -> tuple[str, str]` | `(base_url, api_key)` aus Config. |
+| `get_user_api_key` | `async (user_id: int) -> str \| None` | Entschlüsselter API-Key eines ImmichUser. |
+| `check_connection` | `async (*, api_key=None) -> tuple[bool, str]` | Verbindungstest. |
 
-### Asset-Upload & -Download
-
-| Funktion | Signatur | Beschreibung |
-|---|---|---|
-| `upload_asset` | `async upload_asset(file_path, album_names=None, *, sidecar_path=None, api_key=None) -> dict` | Lädt Datei nach Immich hoch. Optional mit XMP-Sidecar und Album-Zuordnung (Alben werden automatisch erstellt). Gibt Immich-Response zurück (enthält `id`, `status`). |
-| `download_asset` | `async download_asset(asset_id, target_path, *, api_key=None) -> str` | Lädt Original-Datei von Immich auf Disk (Streaming, 1 MB Chunks). Gibt lokalen Dateipfad zurück. |
-| `get_asset_original` | `async get_asset_original(asset_id, *, api_key=None) -> tuple[bytes, str] \| None` | Lädt Original-Datei als Bytes + MIME-Type. Für HTTP-Proxying (z.B. Duplikat-Vorschau). Gibt `None` zurück wenn nicht gefunden. |
-| `get_asset_thumbnail` | `async get_asset_thumbnail(asset_id, size="thumbnail", *, api_key=None) -> bytes \| None` | Thumbnail-Bytes (`size`: `thumbnail` oder `preview`). |
-
-### Asset-Informationen
+### Upload & Download
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `get_asset_info` | `async get_asset_info(asset_id, *, api_key=None) -> dict \| None` | Vollständige Asset-Details (EXIF, Tags, Pfad). |
-| `asset_exists` | `async asset_exists(asset_id, *, api_key=None) -> bool` | Prüft ob ein Asset in Immich existiert (HTTP 200). |
-| `get_asset_albums` | `async get_asset_albums(asset_id, *, api_key=None) -> list[str]` | Liste der Album-Namen in denen das Asset enthalten ist. Nutzt `GET /api/albums?assetId=`. |
-| `get_recent_assets` | `async get_recent_assets(since=None, *, api_key=None) -> list[dict]` | Assets die nach `since` (ISO-Timestamp) hochgeladen wurden. Für den Immich-Poller. |
+| `upload_asset` | `async (file_path, album_names=None, *, sidecar_path=None, api_key=None) -> dict` | Upload + Album-Zuordnung + Sidecar. |
+| `download_asset` | `async (asset_id, target_path, *, api_key=None) -> str` | Original auf Disk (Streaming, 1 MB Chunks). |
+| `get_asset_original` | `async (asset_id, *, api_key=None) -> tuple[bytes, str] \| None` | Original als Bytes + MIME (für HTTP-Proxy). |
+| `get_asset_thumbnail` | `async (asset_id, size="thumbnail", *, api_key=None) -> bytes \| None` | Thumbnail-Bytes (`thumbnail` oder `preview`). |
 
-### Asset-Modifikation
+### Informationen
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `tag_asset` | `async tag_asset(asset_id, tag_name, *, api_key=None) -> dict` | Tag hinzufügen (wird erstellt falls nicht vorhanden). |
-| `untag_asset` | `async untag_asset(asset_id, tag_name, *, api_key=None) -> dict` | Tag entfernen. |
-| `update_asset_description` | `async update_asset_description(asset_id, description, *, api_key=None) -> dict` | Description-Feld setzen via `PUT /api/assets/{id}`. |
-| `archive_asset` | `async archive_asset(asset_id, *, api_key=None) -> dict` | Asset archivieren. Unterstützt neue (visibility) und legacy (isArchived) API. |
-| `lock_asset` | `async lock_asset(asset_id, *, api_key=None) -> dict` | Asset in den gesperrten Ordner verschieben (visibility: locked). |
-| `copy_asset_metadata` | `async copy_asset_metadata(from_id, to_id, *, api_key=None) -> dict` | Kopiert Alben, Favoriten, Gesichter, Stacks von einem Asset auf ein anderes. Für den Upload+Copy+Delete Workflow. |
-| `delete_asset` | `async delete_asset(asset_id, *, force=True, api_key=None) -> dict` | Asset löschen. **`force=True`** = permanent (kein Papierkorb). |
+| `get_asset_info` | `async (asset_id, *, api_key=None) -> dict \| None` | Vollständige Asset-Details (EXIF, Tags). |
+| `asset_exists` | `async (asset_id, *, api_key=None) -> bool` | Existenz-Check (HTTP 200). |
+| `get_asset_albums` | `async (asset_id, *, api_key=None) -> list[str]` | Album-Namen des Assets. |
+| `get_recent_assets` | `async (since=None, *, api_key=None) -> list[dict]` | Assets nach Zeitstempel (Poller). |
+
+### Modifikation
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `tag_asset` | `async (asset_id, tag_name, *, api_key=None) -> dict` | Tag hinzufügen (erstellt falls nötig). |
+| `untag_asset` | `async (asset_id, tag_name, *, api_key=None) -> dict` | Tag entfernen. |
+| `update_asset_description` | `async (asset_id, description, *, api_key=None) -> dict` | Description setzen. |
+| `archive_asset` | `async (asset_id, *, api_key=None) -> dict` | Archivieren (neue + legacy API). |
+| `lock_asset` | `async (asset_id, *, api_key=None) -> dict` | In gesperrten Ordner verschieben. |
+| `copy_asset_metadata` | `async (from_id, to_id, *, api_key=None) -> dict` | Alben/Faces/Stacks kopieren. |
+| `delete_asset` | `async (asset_id, *, force=True, api_key=None) -> dict` | Löschen (**permanent** per Default). |
 
 ---
 
@@ -72,22 +81,22 @@
 
 | Methode | Signatur | Beschreibung |
 |---|---|---|
-| `get` | `async get(key: str, default=None)` | Config-Wert lesen (aus Cache oder DB). |
-| `set` | `async set(key: str, value, encrypted=False)` | Config-Wert schreiben (DB + Cache). |
-| `is_setup_complete` | `async is_setup_complete() -> bool` | Prüft ob Ersteinrichtung abgeschlossen. |
-| `is_module_enabled` | `async is_module_enabled(name: str) -> bool` | Prüft ob ein Modul aktiviert ist. |
-| `set_module_enabled` | `async set_module_enabled(name: str, enabled: bool)` | Modul aktivieren/deaktivieren. |
-| `seed_from_env` | `async seed_from_env()` | Initiale Config-Werte aus Umgebungsvariablen setzen. |
+| `get` | `async (key, default=None)` | Config-Wert lesen (Cache → DB, auto-Decrypt). |
+| `set` | `async (key, value, encrypted=False)` | Config-Wert schreiben. |
+| `is_setup_complete` | `async () -> bool` | Ersteinrichtung abgeschlossen? |
+| `is_module_enabled` | `async (name) -> bool` | Modul aktiviert? |
+| `set_module_enabled` | `async (name, enabled)` | Modul schalten. |
+| `seed_from_env` | `async ()` | ENV-Variablen in DB schreiben. |
 
 ---
 
-## system_logger.py — System-Logging
+## system_logger.py — Persistentes Logging
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `log_info` | `async log_info(source: str, message: str, detail=None)` | Info-Level Log in `system_logs` Tabelle. |
-| `log_warning` | `async log_warning(source: str, message: str, detail=None)` | Warning-Level Log. |
-| `log_error` | `async log_error(source: str, message: str, detail=None)` | Error-Level Log. |
+| `log_info` | `async (source, message, detail=None)` | INFO in `system_logs` Tabelle. |
+| `log_warning` | `async (source, message, detail=None)` | WARNING. |
+| `log_error` | `async (source, message, detail=None)` | ERROR. |
 
 ---
 
@@ -95,47 +104,275 @@
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `async_session` | `async_sessionmaker(...)` | Session-Factory für SQLAlchemy async Sessions. |
-| `init_db` | `async init_db()` | DB-Schema erstellen + Migrationen ausführen. |
-| `seed_inbox_from_env` | `async seed_inbox_from_env()` | Inbox-Verzeichnisse aus Umgebungsvariablen anlegen. |
+| `async_session` | Sessionmaker | SQLAlchemy async Session-Factory. |
+| `init_db` | `async ()` | Schema + Migrationen + Defaults. |
+| `seed_inbox_from_env` | `async ()` | Default-Inbox aus ENV. |
 
 ---
 
-## pipeline/reprocess.py — Reprocess-Helper
+## models.py — Datenbank-Modelle
+
+| Klasse | Beschreibung |
+|---|---|
+| `Job` | Pipeline-Job (Status, Steps, EXIF, Pfade, Immich-Asset). |
+| `Config` | Key-Value Config (optional verschlüsselt). |
+| `Module` | Modul-Flags (an/aus). |
+| `SystemLog` | Persistente Log-Einträge. |
+| `SortingRule` | Benutzerdefinierte Sortierregeln. |
+| `LibraryCategory` | Ziel-Kategorien (Foto/Video/Screenshot). |
+| `ImmichUser` | Per-User Immich API-Keys (verschlüsselt). |
+| `InboxDirectory` | Inbox-Verzeichnis-Konfiguration. |
+
+---
+
+## auth.py — Authentifizierung
+
+| Funktion / Klasse | Beschreibung |
+|---|---|
+| `get_session_secret() -> str` | Session-Secret generieren/laden. |
+| `AuthMiddleware` | HTTP-Middleware (disabled/password/OIDC). |
+
+---
+
+## ai_backends.py — KI-Backend Loadbalancer
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `prepare_job_for_reprocess` | `async prepare_job_for_reprocess(session, job, *, keep_steps=None, inject_steps=None, move_file=True, commit=True)` | Setzt einen Job für erneute Pipeline-Verarbeitung zurück. Verschiebt Datei nach `/reprocess/`, behält angegebene Steps (z.B. `{"IA-01"}`), injiziert neue Steps (z.B. `{"IA-02": skip_result}`). |
+| `acquire_ai_backend` | `async () -> contextmanager` | Gibt idle Backend (Semaphore-gesteuert). |
+| `get_total_slots` | `async () -> int` | Verfügbare Slots über alle Backends. |
 
 ---
 
-## Pipeline Steps (IA-01 bis IA-11)
-
-Jeder Step hat eine `async execute(job, session) -> dict` Funktion.
-
-| Step | Datei | Beschreibung |
-|---|---|---|
-| IA-01 | `step_ia01_exif.py` | EXIF-Daten auslesen (ExifTool + ffprobe für Video) |
-| IA-02 | `step_ia02_duplicates.py` | Duplikat-Erkennung (SHA256 + pHash). Zusätzlich: `execute_video_phash()` für nachgelagerte Video-pHash-Berechnung. |
-| IA-03 | `step_ia03_geocoding.py` | Geocoding (GPS → Land/Stadt/Stadtteil via Nominatim) |
-| IA-04 | `step_ia04_convert.py` | Format-Konvertierung (HEIC/RAW → JPEG für KI-Analyse) |
-| IA-05 | `step_ia05_ai.py` | KI-Bildanalyse (Kategorisierung, Tags, Description) |
-| IA-06 | `step_ia06_ocr.py` | OCR-Texterkennung (für Screenshots) |
-| IA-07 | `step_ia07_exif_write.py` | Keywords + Description in EXIF/XMP schreiben |
-| IA-08 | `step_ia08_sort.py` | Sortierung: Immich-Upload oder lokale Verzeichnisstruktur |
-| IA-09 | `step_ia09_notify.py` | Benachrichtigung (E-Mail/SMTP) |
-| IA-10 | `step_ia10_cleanup.py` | Temp-Dateien aufräumen |
-| IA-11 | `step_ia11_log.py` | Job-Abschluss loggen |
-
----
-
-## filewatcher.py — Dateiüberwachung & Immich-Poller
+## template_engine.py — Jinja2 Rendering
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `_scan_inbox` | `async _scan_inbox()` | Scannt alle konfigurierten Inbox-Verzeichnisse nach neuen Dateien. |
-| `_poll_immich` | `async _poll_immich()` | Fragt Immich nach kürzlich hochgeladenen Assets und erstellt Jobs. |
-| `_create_job_safe` | `async _create_job_safe(...)` | Erstellt einen neuen Job mit Duplikat-Check auf Dateiname+Grösse. |
-| `_is_file_stable` | `_is_file_stable(filepath, expected_size) -> bool` | Prüft ob eine Datei stabil ist (nicht mehr geschrieben wird). |
-| `_is_within_schedule` | `async _is_within_schedule() -> bool` | Prüft ob der aktuelle Zeitpunkt innerhalb des konfigurierten Zeitplans liegt. |
-| `trigger_manual_scan` | `trigger_manual_scan()` | Löst einen manuellen Inbox-Scan aus (von UI oder API). |
+| `render` | `async (request, template, context=None) -> Response` | Template rendern mit i18n + Theme. |
+| `get_ui_settings` | `async () -> dict` | Sprache + Theme aus Config. |
+
+---
+
+## i18n/__init__.py — Internationalisierung
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `load_lang` | `(lang) -> dict` | Sprachdatei laden (cached). |
+| `get_text` | `(lang, section, key, default="") -> str` | Einzelnen String übersetzen. |
+| `get_section` | `(lang, section) -> dict` | Ganze Sektion. |
+| `clear_cache` | `()` | Cache leeren (Dev-Reload). |
+
+---
+
+## filewatcher.py — Dateiüberwachung & Poller
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `start_filewatcher` | `async (shutdown_event)` | Haupt-Loop (Background-Task). |
+| `trigger_manual_scan` | `()` | Manuellen Scan auslösen. |
+| `_scan_inbox` | `async ()` | Inbox scannen, Jobs erstellen. |
+| `_poll_immich` | `async ()` | Immich nach neuen Assets abfragen. |
+| `_create_job_safe` | `async (**kwargs) -> Job \| None` | Job erstellen mit Duplikat-Check. |
+| `_scan_directory` | `(path, min_age) -> list[str]` | Verzeichnis nach Mediendateien scannen. |
+| `_is_file_stable` | `(filepath, expected_size) -> bool` | Datei fertig geschrieben? |
+| `_is_within_schedule` | `async () -> bool` | Innerhalb Zeitplan? |
+| `_next_debug_key` | `async () -> str` | Nächster Debug-Key (In-Memory Counter). |
+| `_pipeline_worker` | `async (shutdown_event)` | Background-Worker: Jobs aus Queue verarbeiten. |
+| `_scan_csv_retry` | `async ()` | CSV-Retry-Ordner scannen. |
+| `_run_job` | `async (job_id, filename, debug_key)` | Einzelnen Pipeline-Job starten. |
+
+---
+
+## health_watcher.py — Auto-Pause/Resume
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `start_health_watcher` | `async (shutdown_event)` | Background: prüft Services, resumet bei Recovery. |
+
+---
+
+## cleanup_broken_sidecars.py — Utility
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `is_broken_sidecar` | `(path) -> tuple[bool, str]` | Prüft ob XMP-Sidecar defekt ist. |
+| `walk_and_report` | `(root, do_delete)` | Verzeichnis scannen + defekte löschen. |
+| `main` | `() -> int` | CLI Entry-Point. |
+
+---
+
+## Pipeline
+
+### pipeline/__init__.py — Pipeline-Engine
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `run_pipeline` | `async (job_id: int)` | Komplette Pipeline für einen Job. |
+| `reset_job_for_retry` | `async (job_id) -> bool` | Job auf `queued` zurücksetzen. |
+| `retry_job` | `async (job_id)` | Reset + sofort ausführen. |
+| `_move_to_error` | `async (job, session)` | Job in Error-Verzeichnis verschieben. |
+
+### pipeline/reprocess.py — Reprocess-Helper
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `prepare_job_for_reprocess` | `async (session, job, *, keep_steps=None, inject_steps=None, move_file=True, commit=True) -> bool` | Job für Re-Pipeline vorbereiten (Move + Step-Reset). |
+| `_move_file_for_reprocess` | `async (job) -> bool` | Datei nach `/reprocess/` verschieben. |
+| `_reset_step_results` | `(job, *, keep_steps, ...)` | Step-Results selektiv zurücksetzen. |
+| `_resolve_reprocess_path` | `(filename, debug_key) -> str` | Eindeutiger Pfad in REPROCESS_DIR. |
+| `_is_immich_target` | `(target_path) -> bool` | Prüft `immich:` Prefix. |
+
+### Pipeline Steps (IA-01 bis IA-11)
+
+Jeder Step hat: `async execute(job, session) -> dict`
+
+| Step | Datei | Beschreibung | Zusätzliche Funktionen |
+|---|---|---|---|
+| IA-01 | `step_ia01_exif.py` | EXIF lesen (ExifTool + ffprobe) | `_run_ffprobe`, `_parse_iso6709`, `_format_duration`, `_find_google_json`, `_read_google_json` |
+| IA-02 | `step_ia02_duplicates.py` | Duplikat-Erkennung (SHA256 + pHash) | `execute_video_phash`, `_quality_score`, `_compute_phash`, `_compute_video_phash`, `_phash_from_preview`, `_file_exists`, `_swap_duplicate`, `_extract_folder_tags`, `_handle_duplicate` |
+| IA-03 | `step_ia03_geocoding.py` | Geocoding (GPS → Ort) | `_reverse_nominatim`, `_reverse_photon`, `_reverse_google`, `_http_get_with_retry`, `_throttle`, `_cache_key` |
+| IA-04 | `step_ia04_convert.py` | Format-Konvertierung (→ temp JPEG) | `_extract_video_frames`, `_ffmpeg_extract_frame`, `_glob_temp_files` |
+| IA-05 | `step_ia05_ai.py` | KI-Analyse (Tags, Description) | `_resize_for_ai` |
+| IA-06 | `step_ia06_ocr.py` | OCR-Texterkennung | — |
+| IA-07 | `step_ia07_exif_write.py` | Keywords/Description schreiben | `_write_direct`, `_write_sidecar`, `_is_folder_tags_active` ⚠️ |
+| IA-08 | `step_ia08_sort.py` | Sortierung / Immich-Upload | `_get_folder_album_names`, `_tag_immich_asset`, `_parse_date` ⚠️, `_sanitize_path_component` ⚠️, `_validate_target_path` ⚠️, `_resolve_path`, `_is_dir_empty`, `_force_remove_dir`, `_cleanup_empty_dirs`, `_eval_exif_expression`, `_eval_single_condition`, `_match_sorting_rules`, `_is_folder_tags_active` ⚠️ |
+| IA-09 | `step_ia09_notify.py` | E-Mail-Benachrichtigung | — |
+| IA-10 | `step_ia10_cleanup.py` | Temp-Dateien aufräumen | — |
+| IA-11 | `step_ia11_log.py` | Job-Abschluss loggen | — |
+
+---
+
+## Routers
+
+### routers/api.py — REST API
+
+| Funktion | Beschreibung |
+|---|---|
+| `health` | Health-Check Endpoint. |
+| `retry_job_endpoint` | Einzelnen Job retrien. |
+| `retry_all_errors_endpoint` | Alle Error-Jobs zurücksetzen. |
+| `retry_all_warnings_endpoint` | Alle Warning-Jobs zurücksetzen. |
+| `cleanup_orphans_endpoint` | Verwaiste Jobs markieren. |
+| `trigger_scan` | Manuellen Scan auslösen. |
+| `pause_pipeline_endpoint` | Pipeline pausieren. |
+| `resume_pipeline_endpoint` | Pipeline fortsetzen. |
+| `pipeline_status_endpoint` | Pipeline-Status abfragen. |
+| `delete_job_endpoint` | Job + Dateien löschen. |
+
+### routers/dashboard.py — Dashboard
+
+| Funktion | Beschreibung |
+|---|---|
+| `dashboard` | Dashboard HTML-Seite. |
+| `dashboard_json` | Live-Update JSON. |
+| `_get_module_status` | Health-Status aller Module. |
+| `_get_throughput` | Durchsatz-Statistiken. |
+| `_check_ai_backend` / `_check_ai_backend_2` | KI-Backend Connectivity. |
+| `_check_geocoding` | Geocoding Connectivity. |
+| `_check_smtp` | SMTP Connectivity. |
+| `_check_filewatcher` | Inbox-Verzeichnisse prüfen. |
+| `_check_immich` | Immich Connectivity. |
+
+### routers/duplicates.py — Duplikat-UI
+
+| Funktion | Beschreibung |
+|---|---|
+| `duplicates_page` | Duplikat-Seite (HTML). |
+| `api_duplicate_groups` | Paginierte Gruppen-API. |
+| `keep_file` | "Behalten" — Metadata-Merge + Re-Pipeline. |
+| `not_duplicate` | "Kein Duplikat" — Re-Pipeline mit skip. |
+| `delete_duplicate` | Einzelnes Duplikat löschen. |
+| `merge_metadata` | Metadaten zusammenführen. |
+| `batch_clean_quality` | Qualitäts-basiertes Batch-Clean. |
+| `batch_clean` | SHA256-exakte Duplikate auto-löschen. |
+| `re_evaluate_quality` | Qualitäts-Neuberechnung. |
+| `thumbnail` / `immich_thumbnail` | Thumbnails servieren. |
+| `immich_original` / `local_original` | Originalbilder servieren. |
+| `_build_member` | Member-Dict für Duplikat-Gruppe bauen. |
+| `_build_group_index` / `_build_group_detail` | Gruppen-Index + Detail. |
+| `_build_duplicate_groups` | Transitive Gruppen-Zusammenführung. |
+| `_generate_thumbnail` ⚠️ | Thumbnail generieren. |
+| `_heic_to_jpeg` ⚠️ | HEIC → JPEG Konvertierung. |
+| `_video_to_jpeg` ⚠️ | Video-Frame → JPEG. |
+| `_resolve_filepath` ⚠️ | Dateipfad auflösen. |
+| `_get_image_info` / `_get_image_info_batch` | EXIF via ExifTool. |
+| `_img_info_from_immich` | EXIF via Immich-API. |
+| `_union_find_groups` | Union-Find für transitive Gruppen. |
+| `_raw_to_jpeg` | RAW PreviewImage extrahieren. |
+| `_sanitize_path_component` ⚠️ | Pfad-Traversal verhindern. |
+| `_validate_target_path` ⚠️ | Pfad innerhalb base_path prüfen. |
+| `_parse_exiftool_entry` | ExifTool JSON parsen. |
+
+### routers/review.py — Review-UI
+
+| Funktion | Beschreibung |
+|---|---|
+| `review_page` | Review-Seite (HTML). |
+| `review_thumbnail` | Thumbnails servieren. |
+| `classify_file` | Datei klassifizieren + verschieben. |
+| `classify_all` | Alle als "sourceless" klassifizieren. |
+| `delete_file` | Review-Datei löschen. |
+| `_build_review_items` | Review-Items laden. |
+| `_generate_thumbnail` ⚠️ | Thumbnail generieren. |
+| `_heic_to_jpeg` ⚠️ | HEIC → JPEG. |
+| `_video_to_jpeg` ⚠️ | Video-Frame → JPEG. |
+| `_resolve_filepath` ⚠️ | Dateipfad auflösen. |
+| `_parse_date` ⚠️ | Datum parsen. |
+| `_sanitize_path_component` ⚠️ | Pfad-Traversal verhindern. |
+| `_validate_target_path` ⚠️ | Pfad innerhalb base_path. |
+
+### routers/settings.py — Einstellungen
+
+| Funktion | Beschreibung |
+|---|---|
+| `settings_page` | Einstellungs-Seite. |
+| `save_settings` | Allgemeine Settings speichern. |
+| `add_inbox` / `update_inbox` / `delete_inbox` | Inbox-CRUD. |
+| `add_sorting_rule` / `update_sorting_rule` / `delete_sorting_rule` / `move_sorting_rule` | Sortierregeln-CRUD. |
+| `add_category` / `delete_category` | Kategorien-CRUD. |
+| `add_immich_user` / `update_immich_user` / `delete_immich_user` / `test_immich_user` | Immich-User CRUD. |
+
+### routers/logs.py — Logs
+
+| Funktion | Beschreibung |
+|---|---|
+| `logs_page` | Job- und System-Logs Seite. |
+| `log_detail` / `log_detail_json` | Job-Detail (HTML + JSON). |
+| `dryrun_report` | Dry-Run Zusammenfassung. |
+
+### routers/setup.py — Ersteinrichtung
+
+| Funktion | Beschreibung |
+|---|---|
+| `setup_index` | Setup-Wizard Start. |
+| `setup_step` | Einzelner Setup-Schritt. |
+| `setup_step1_save` / `setup_step1_test` | KI-Backend Config. |
+| `setup_step2_save` | SMTP Config. |
+| `setup_step3_save` | Library/Inbox Pfade. |
+| `setup_complete` | Setup abschliessen. |
+
+### routers/auth_oidc.py — OIDC Login
+
+| Funktion | Beschreibung |
+|---|---|
+| `login` | Login-Seite. |
+| `sso_redirect` | Weiterleitung zum OIDC-Provider. |
+| `callback` | OIDC Callback verarbeiten. |
+| `logout` | Session beenden. |
+
+---
+
+## ⚠️ Bekannte Redundanzen (noch zu konsolidieren)
+
+Diese Funktionen existieren **identisch in mehreren Dateien** und sollten
+in ein shared Modul extrahiert werden:
+
+| Funktion | Dateien | Vorgeschlagenes Ziel |
+|---|---|---|
+| `_generate_thumbnail` | `duplicates.py`, `review.py` | `thumbnail_utils.py` |
+| `_heic_to_jpeg` | `duplicates.py`, `review.py` | `thumbnail_utils.py` |
+| `_video_to_jpeg` | `duplicates.py`, `review.py` | `thumbnail_utils.py` |
+| `_resolve_filepath` | `duplicates.py`, `review.py` | `file_operations.py` |
+| `_sanitize_path_component` | `duplicates.py`, `review.py` | `file_operations.py` |
+| `_validate_target_path` | `duplicates.py`, `review.py` | `file_operations.py` |
+| `_parse_date` | `step_ia08_sort.py`, `review.py` | `file_operations.py` |
+| `_is_folder_tags_active` | `step_ia07_exif_write.py`, `step_ia08_sort.py` | `file_operations.py` |
