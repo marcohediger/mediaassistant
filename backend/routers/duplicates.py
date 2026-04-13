@@ -901,28 +901,18 @@ async def keep_file(request: Request):
                 if os.path.exists(log_path):
                     await asyncio.to_thread(os.remove, log_path)
 
-            # Delete from Immich — use force=True so the asset is
-            # permanently gone (not just trashed). Without force, a
-            # subsequent re-upload of the kept file would get "duplicate"
-            # from Immich (matching the trashed asset) and fail silently.
+            # Delete from Immich using the shared helper (force=True by
+            # default, so the asset is permanently gone — not just trashed).
+            # Without force, a re-upload of the kept file gets "duplicate"
+            # from Immich (matching the trashed asset) and fails silently.
             asset_id = job.immich_asset_id or ""
             target = job.target_path or ""
             if target.startswith("immich:"):
                 asset_id = asset_id or target[7:]
             if asset_id:
                 try:
-                    from immich_client import get_immich_config
-                    import httpx
-                    i_url, i_key = await get_immich_config()
-                    if i_url and i_key:
-                        import json as _json
-                        async with httpx.AsyncClient(timeout=10) as client:
-                            await client.request(
-                                "DELETE",
-                                f"{i_url}/api/assets",
-                                headers={"x-api-key": i_key, "Content-Type": "application/json"},
-                                content=_json.dumps({"ids": [asset_id], "force": True}),
-                            )
+                    from immich_client import delete_asset
+                    await delete_asset(asset_id)
                 except Exception:
                     pass
 
