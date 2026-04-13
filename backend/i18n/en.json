@@ -159,6 +159,7 @@
     "merge_nothing": "No missing metadata found",
     "merge_error": "Error merging metadata",
     "has_more_metadata": "More metadata",
+    "folder_album_title": "Folder tag (album from inbox folder structure)",
     "load_more": "Load more groups",
     "loading": "Loading...",
     "merge_metadata_all": "Merge all metadata",

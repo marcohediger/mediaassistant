@@ -74,7 +74,7 @@ async def execute(job, session) -> dict:
     folder_tags_active = await _is_folder_tags_active(job)
     if folder_tags_active and job.source_inbox_path:
         rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
-        if rel and rel != ".":
+        if rel and rel != "." and not rel.startswith(".."):
             folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
             # Split all folder names into individual words as tags
             for part in folder_parts:

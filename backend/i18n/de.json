@@ -159,6 +159,7 @@
     "merge_nothing": "Keine fehlenden Metadaten gefunden",
     "merge_error": "Fehler beim Übernehmen der Metadaten",
     "has_more_metadata": "Mehr Metadaten",
+    "folder_album_title": "Ordner-Tag (Album aus Inbox-Ordnerstruktur)",
     "load_more": "Weitere Gruppen laden",
     "loading": "Lade...",
     "merge_metadata_all": "Alle Metadaten zusammenführen",

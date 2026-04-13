@@ -83,6 +83,9 @@
                     {% if member.is_quality_best %}
                         <span class="match-badge match-quality-best" title="Beste Qualitaet — wird beim Batch-Clean bevorzugt">⭐ Beste Qualitaet</span>
                     {% endif %}
+                    {% if member.folder_album %}
+                        <span class="match-badge match-folder-album" title="{{ t.duplicates.folder_album_title }}">📁 {{ member.folder_album }}</span>
+                    {% endif %}
                 </div>
 
                 <div class="dup-props">

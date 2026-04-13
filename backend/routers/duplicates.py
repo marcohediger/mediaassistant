@@ -293,6 +293,11 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
     from pipeline.step_ia02_duplicates import _quality_score
     q_score = _quality_score(job)
 
+    # Folder tags (album name) from IA-02 — shown in the duplicate comparison UI
+    folder_tags = dup_info.get("folder_tags") or []
+    # Combined tag is the last entry (e.g. "Ferien Mallorca")
+    folder_album = folder_tags[-1] if folder_tags else ""
+
     return {
         "job_id": job.id,
         "debug_key": job.debug_key,
@@ -305,6 +310,8 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
         "immich_link": immich_link,
         "immich_asset_id": immich_asset_id,
         "quality_score": q_score,
+        "folder_tags": folder_tags,
+        "folder_album": folder_album,
         **img_info,
     }
 
@@ -784,11 +791,14 @@ async def keep_file(request: Request):
                 library_path = job.target_path
 
         # Merge metadata from all other members into the kept one
-        # before deleting them (GPS, date, keywords, description).
+        # before deleting them (GPS, date, keywords, description,
+        # folder_tags from IA-02).
         if kept_job:
             kept_sr = kept_job.step_result or {}
             kept_ia01 = kept_sr.get("IA-01") or {}
+            kept_ia02 = kept_sr.get("IA-02") or {}
             kept_ia07 = kept_sr.get("IA-07") or {}
+            kept_folder_tags = list(kept_ia02.get("folder_tags") or [])
             merge_notes = []
 
             for donor in group_jobs:
@@ -796,6 +806,7 @@ async def keep_file(request: Request):
                     continue
                 d_sr = donor.step_result or {}
                 d_ia01 = d_sr.get("IA-01") or {}
+                d_ia02 = d_sr.get("IA-02") or {}
                 d_ia03 = d_sr.get("IA-03") or {}
                 d_ia07 = d_sr.get("IA-07") or {}
 
@@ -820,13 +831,28 @@ async def keep_file(request: Request):
                     kept_ia07["tags_count"] = len(kept_kw)
                     merge_notes.append(f"keywords(+{len(new_kw)})")
 
+                # Merge donor folder_tags from IA-02 (duplicates never ran
+                # IA-07, so their folder tags only exist in IA-02)
+                donor_ft = d_ia02.get("folder_tags") or []
+                new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
+                if new_ft:
+                    kept_folder_tags.extend(new_ft)
+                    merge_notes.append(f"folder_tags(+{len(new_ft)})")
+
                 kept_desc = kept_ia07.get("description_written") or ""
                 donor_desc = d_ia07.get("description_written") or ""
                 if not kept_desc and donor_desc:
                     kept_ia07["description_written"] = donor_desc
                     merge_notes.append("description")
 
-            if merge_notes:
+            # Persist merged folder_tags back into IA-02
+            if kept_folder_tags:
+                if not isinstance(kept_ia02, dict):
+                    kept_ia02 = {}
+                kept_ia02["folder_tags"] = kept_folder_tags
+                kept_sr["IA-02"] = kept_ia02
+
+            if merge_notes or kept_folder_tags:
                 kept_sr["IA-01"] = kept_ia01
                 kept_sr["IA-07"] = kept_ia07
                 kept_job.step_result = kept_sr
@@ -901,9 +927,9 @@ async def keep_file(request: Request):
                 # decision (especially when other jobs with matching pHash
                 # still exist in the DB).
                 sr = kept_job.step_result or {}
+                # Read old folder_tags BEFORE overwriting IA-02
+                old_ia02 = sr.get("IA-02") or {}
                 sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review"}
-                # Preserve folder_tags if they were saved earlier
-                old_ia02 = (job.step_result or {}).get("IA-02") or {}
                 if old_ia02.get("folder_tags"):
                     sr["IA-02"]["folder_tags"] = old_ia02["folder_tags"]
                 kept_job.step_result = sr
@@ -952,6 +978,11 @@ async def not_duplicate(request: Request):
             "status": "skipped",
             "reason": "manually marked as not a duplicate",
         }
+
+        # Preserve folder_tags before IA-02 is overwritten
+        old_ia02 = (job.step_result or {}).get("IA-02") or {}
+        if old_ia02.get("folder_tags"):
+            skip_result["folder_tags"] = old_ia02["folder_tags"]
 
         filepath = job.target_path or job.original_path
         if not filepath or not os.path.exists(filepath) or (filepath and filepath.startswith("immich:")):
@@ -1338,11 +1369,13 @@ async def batch_clean_quality(request: Request):
             kept += 1
 
             # Merge metadata from all others into the best before deleting.
-            # Collects GPS, date, keywords, description from worse members
-            # and fills gaps in the best member's step_result.
+            # Collects GPS, date, keywords, description, folder_tags from
+            # worse members and fills gaps in the best member's step_result.
             best_sr = best.step_result or {}
             best_ia01 = best_sr.get("IA-01") or {}
+            best_ia02 = best_sr.get("IA-02") or {}
             best_ia07 = best_sr.get("IA-07") or {}
+            best_folder_tags = list((best_ia02 if isinstance(best_ia02, dict) else {}).get("folder_tags") or [])
             merged_fields = []
 
             for donor in member_jobs:
@@ -1350,6 +1383,7 @@ async def batch_clean_quality(request: Request):
                     continue
                 donor_sr = donor.step_result or {}
                 donor_ia01 = donor_sr.get("IA-01") or {}
+                donor_ia02 = donor_sr.get("IA-02") or {}
                 donor_ia03 = donor_sr.get("IA-03") or {}
                 donor_ia07 = donor_sr.get("IA-07") or {}
 
@@ -1378,6 +1412,14 @@ async def batch_clean_quality(request: Request):
                     best_ia07["tags_count"] = len(best_kw)
                     merged_fields.append(f"keywords(+{len(new_kw)})")
 
+                # Merge donor folder_tags from IA-02 (duplicates never ran
+                # IA-07, so their folder tags only exist in IA-02)
+                donor_ft = (donor_ia02 if isinstance(donor_ia02, dict) else {}).get("folder_tags") or []
+                new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
+                if new_ft:
+                    best_folder_tags.extend(new_ft)
+                    merged_fields.append(f"folder_tags(+{len(new_ft)})")
+
                 # Description: if best has none but donor does
                 best_desc = best_ia07.get("description_written") or ""
                 donor_desc = donor_ia07.get("description_written") or ""
@@ -1385,7 +1427,14 @@ async def batch_clean_quality(request: Request):
                     best_ia07["description_written"] = donor_desc
                     merged_fields.append("description")
 
-            if merged_fields:
+            # Persist merged folder_tags back into IA-02
+            if best_folder_tags:
+                if not isinstance(best_ia02, dict):
+                    best_ia02 = {}
+                best_ia02["folder_tags"] = best_folder_tags
+                best_sr["IA-02"] = best_ia02
+
+            if merged_fields or best_folder_tags:
                 best_sr["IA-01"] = best_ia01
                 best_sr["IA-07"] = best_ia07
                 best.step_result = best_sr

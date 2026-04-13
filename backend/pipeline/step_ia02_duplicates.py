@@ -211,13 +211,16 @@ async def execute(job, session) -> dict:
                         "demoted_debug_key": existing.debug_key,
                         "reason": "current file has better quality, swapped roles",
                     }
-                await _handle_duplicate(job, session, existing, "exact", 0)
-                return {
+                folder_tags = await _handle_duplicate(job, session, existing, "exact", 0)
+                result = {
                     "status": "duplicate",
                     "match_type": "exact",
                     "original_debug_key": existing.debug_key,
                     "original_path": existing.target_path or existing.original_path,
                 }
+                if folder_tags:
+                    result["folder_tags"] = folder_tags
+                return result
             # File missing — likely because it's currently being retried
             # (path in transition from /library/error to /app/data/reprocess)
             # or the user manually deleted it. Operational noise, not a real
@@ -254,13 +257,16 @@ async def execute(job, session) -> dict:
                 # JPG sucht RAW-Partner und umgekehrt
                 if (is_jpg and cand_ext in RAW_EXTENSIONS) or (is_raw and cand_ext in jpg_exts):
                     if await _file_exists(candidate):
-                        await _handle_duplicate(job, session, candidate, "raw_jpg_pair", 0)
-                        return {
+                        folder_tags = await _handle_duplicate(job, session, candidate, "raw_jpg_pair", 0)
+                        result = {
                             "status": "duplicate",
                             "match_type": "raw_jpg_pair",
                             "original_debug_key": candidate.debug_key,
                             "original_path": candidate.target_path or candidate.original_path,
                         }
+                        if folder_tags:
+                            result["folder_tags"] = folder_tags
+                        return result
 
     # --- Stage 2: Perceptual hash (pHash) similarity ---
     phash_str = await asyncio.to_thread(_compute_phash, image_path)
@@ -323,7 +329,7 @@ async def execute(job, session) -> dict:
                                 "reason": "current file has better quality, swapped roles",
                             }
                             break
-                        await _handle_duplicate(job, session, candidate, "similar", distance)
+                        folder_tags = await _handle_duplicate(job, session, candidate, "similar", distance)
                         found_duplicate = {
                             "status": "duplicate",
                             "match_type": "similar",
@@ -331,6 +337,8 @@ async def execute(job, session) -> dict:
                             "original_debug_key": candidate.debug_key,
                             "original_path": candidate.target_path or candidate.original_path,
                         }
+                        if folder_tags:
+                            found_duplicate["folder_tags"] = folder_tags
                         break
                     elif candidate:
                         _orphan_logger.debug(
@@ -412,14 +420,17 @@ async def execute_video_phash(job, session) -> dict | None:
 
                 candidate = await session.get(Job, row.id)
                 if candidate and await _file_exists(candidate):
-                    await _handle_duplicate(job, session, candidate, "similar", distance)
-                    return {
+                    folder_tags = await _handle_duplicate(job, session, candidate, "similar", distance)
+                    result = {
                         "status": "duplicate",
                         "match_type": "similar",
                         "phash_distance": distance,
                         "original_debug_key": candidate.debug_key,
                         "original_path": candidate.target_path or candidate.original_path,
                     }
+                    if folder_tags:
+                        result["folder_tags"] = folder_tags
+                    return result
 
         offset += BATCH_SIZE
 
@@ -494,6 +505,8 @@ async def _swap_duplicate(job, session, existing, match_type: str, distance: int
     # Update the existing job's status and step_result
     existing.status = "duplicate"
     existing.error_message = None
+    # Preserve folder tags before the file moves (path breaks after move)
+    folder_tags = _extract_folder_tags(existing)
     sr = existing.step_result or {}
     sr["IA-02"] = {
         "status": "duplicate",
@@ -506,6 +519,8 @@ async def _swap_duplicate(job, session, existing, match_type: str, distance: int
     }
     if match_type == "similar" and distance > 0:
         sr["IA-02"]["phash_distance"] = distance
+    if folder_tags:
+        sr["IA-02"]["folder_tags"] = folder_tags
     existing.step_result = sr
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(existing, "step_result")
@@ -534,7 +549,7 @@ def _extract_folder_tags(job) -> list[str]:
         rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
     except ValueError:
         return []
-    if not rel or rel == ".":
+    if not rel or rel == "." or rel.startswith(".."):
         return []
     folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
     if not folder_parts:
@@ -551,8 +566,12 @@ def _extract_folder_tags(job) -> list[str]:
     return tags
 
 
-async def _handle_duplicate(job, session, original, match_type: str, distance: int):
-    """Move duplicate file to duplicates/ directory and write .log file."""
+async def _handle_duplicate(job, session, original, match_type: str, distance: int) -> list[str]:
+    """Move duplicate file to duplicates/ directory and write .log file.
+
+    Returns the extracted folder_tags list (may be empty) so the caller
+    can include them in the step_result dict returned to the pipeline.
+    """
     original_path = original.target_path or original.original_path
     if match_type == "exact":
         desc = f"Exact duplicate of: {original_path} ({original.debug_key})"
@@ -571,7 +590,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
         # warnings, so the message is no longer truthful.
         job.error_message = None
         await log_info("IA-02", f"{job.debug_key} [dry-run] {desc}")
-        return
+        return folder_tags
 
     base_path = await config_manager.get("library.base_path", "/library")
     dup_rel = await config_manager.get("library.path_duplicate", "error/duplicates/")
@@ -611,20 +630,6 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     # would otherwise outlive its referent.
     job.error_message = None
 
-    # Store folder tags in step_result so they survive the file move
-    # and can be picked up by IA-07 when this job is later kept via
-    # the duplicate review UI and re-processed.
-    if folder_tags:
-        sr = job.step_result or {}
-        ia02 = sr.get("IA-02", {})
-        if not isinstance(ia02, dict):
-            ia02 = {}
-        ia02["folder_tags"] = folder_tags
-        sr["IA-02"] = ia02
-        job.step_result = sr
-        from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(job, "step_result")
-
     await log_info("IA-02", f"{job.debug_key} {desc}"
                    + (f" [folder_tags: {', '.join(folder_tags)}]" if folder_tags else ""))
 
@@ -636,6 +641,8 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
             await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
     except Exception as e:
         await log_warning("IA-02", f"{job.debug_key} Cleanup nach Duplikat-Move fehlgeschlagen: {e}")
+
+    return folder_tags
 
 
 
