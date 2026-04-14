@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.29.4 — 2026-04-14
+
+### Bugfix
+
+- **Fix: Folder-Tags von Originals bei Keep-Duplikat nicht gemergt.**
+  Wenn das Duplikat behalten und das Original gelöscht wird, hatte
+  das Original keine folder_tags in IA-02 (nur Duplikate speichern
+  diese). Jetzt werden folder_tags aus dem Inbox-Pfad des Donors
+  extrahiert, falls IA-02 leer ist. Auch in Batch-Clean.
+- **Fix: Nur ein Album bei gemergten folder_tags von mehreren Donors.**
+  `_get_folder_album_names` gab nur das letzte Element zurück.
+  Gibt jetzt ALLE kombinierten Album-Namen (mit Leerzeichen) zurück.
+
 ## v2.29.3 — 2026-04-14
 
 ### Bugfix
