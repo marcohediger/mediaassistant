@@ -282,6 +282,13 @@ Eigene Seite im Webinterface zum Reviewen und Löschen von Duplikaten:
 - Re-Evaluate Quality: informativ, zaehlt wieviele Gruppen betroffen
 - pHash Medientyp-Filter: Bilder nur mit Bildern, Videos nur mit Videos
 - "Dieses behalten" → IA-02 wird als skipped injiziert (kein Re-Duplicate), Metadata-Merge, Folder-Tags erhalten
+- Vollstaendiger Daten-Merge bei Duplikat-Aufloesung (v2.29.5):
+  - **Alben:** Donor-Alben aus Immich API / IA-08 / folder_tags werden auf Ziel uebertragen
+  - **Tags/Keywords:** Album-Namen fliessen auch in Keywords (File + Immich-Tags)
+  - **Description:** Uebernommen wenn Ziel keine hat
+  - **IA-02 Felder:** `own_album` (eigenes Album vor Merge), `donor_albums` (geerbte Alben)
+  - **Already-done Pfad:** Tags, Alben, Description direkt via Immich API (kein Pipeline-Re-run)
+  - **Fallback-Kette fuer Donor-Alben:** IA-02 folder_tags → Inbox-Pfad → IA-08 albums_added → Immich API
 - Promoted Duplicates: Analyse-Steps (IA-03..06) vom Original kopiert, nur IA-07/IA-08 laeuft (schnell, keine KI)
 - Anzahl offener Duplikat-Gruppen im Dashboard anzeigen
 - Dateinamen-Kollision: automatischer Index (_1, _2, ...) bei gleichem Namen im Zielordner
@@ -634,6 +641,7 @@ Flach:               photos/{YYYY}/
 - [x] FIX: Zirkulaere Duplikat-Erkennung bei Retry (v2.28.43)
 - [x] FEAT: Qualitaetsbasierte Duplikat-Erkennung (Format > Dateigroesse > Pixel > Meta > Original-Bias)
 - [x] FEAT: Folder-Tags bei Duplikaten erhalten (in step_result['IA-02']['folder_tags'])
+- [x] FEAT: Vollstaendiger Daten-Merge bei Duplikat-Aufloesung (v2.29.5) — Alben, Tags, Keywords, Description
 - [x] FEAT: Batch-Clean Quality (qualitaetsbasiert, seitenweise, Metadata-Merge, Analyse-Steps kopieren)
 - [x] FEAT: Duplikat-UI: Quality-Badge, Pagination, Dropdown, Medientyp-Filter, 3 Buttons
 - [x] FEAT: CSV-Retry Input (/app/data/csv-retry/ → Bulk-Retry via Filewatcher)
