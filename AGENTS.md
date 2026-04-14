@@ -426,6 +426,31 @@ Vergleichbarer Tuple-Score für Duplikat-Paare:
 - `prepare_job_for_reprocess` verschiebt Datei korrekt
 - IA-02 wird als `skipped` injiziert (folder_tags erhalten)
 
+### Vollständiger Daten-Merge (v2.29.5)
+
+Beim Auflösen einer Duplikatgruppe (Keep this / Batch-Clean) werden
+**alle Informationen aller aufgelösten Assets** auf das Ziel übertragen.
+
+**IA-02 step_result Felder:**
+- `folder_tags` — gemergte Folder-Tags aller Members (für Keywords)
+- `own_album` — Album-Name des behaltenen Jobs (vor Merge gesichert)
+- `donor_albums` — Alben der gelöschten Donors (aus Immich abgefragt)
+
+**Donor-Album Fallback-Kette:**
+1. `get_asset_albums()` — Donor hat Immich-Asset
+2. `IA-08.immich_albums_added` — Donor lief durch Pipeline
+3. `folder_tags[-1]` — Donor war Duplikat (nie hochgeladen)
+
+**Zwei Pfade:**
+- **Reprocess (kept was duplicate):** Pipeline läuft IA-03..08.
+  `_get_folder_album_names()` liest `own_album` + `donor_albums` aus IA-02.
+- **Already-done (kept was original):** Kein Pipeline-Re-run. Tags,
+  Alben, Description werden direkt via Immich API angewendet
+  (`tag_asset`, `add_asset_to_albums`, `update_asset_description`).
+
+**Wichtig:** Album-Namen fliessen auch in `keywords_written` (IA-07),
+damit sie als Immich-Tags UND File-Keywords geschrieben werden.
+
 ### CSV-Retry Input (`/app/data/csv-retry/`)
 - CSV mit `filename`-Spalte → Filewatcher erkennt → passende Jobs auf `queued`
 - Verarbeitete CSVs werden nach `csv-retry/done/` verschoben

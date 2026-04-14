@@ -506,6 +506,26 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 - **FTAG-32:** E2E `_build_member`: folder_album Key existiert in Member-Dict
 - **FTAG-33:** E2E `_build_member`: folder_album ist String (auch wenn leer)
 
+### v2.29.5 Daten-Merge bei Duplikat-Auflösung (FTAG-34+)
+
+- **FTAG-34:** Keep this (already done): Donor-Alben via `get_asset_albums()` abgefragt vor Löschung
+- **FTAG-35:** Keep this (already done): Donor-Alben via `add_asset_to_albums()` auf Kept-Asset zugewiesen
+- **FTAG-36:** Keep this (already done): neue Tags via `tag_asset()` auf Kept-Asset geschrieben
+- **FTAG-37:** Keep this (already done): Description via `update_asset_description()` übernommen (wenn Kept leer)
+- **FTAG-38:** Keep this (reprocess): `own_album` in IA-02 gespeichert (vor Merge)
+- **FTAG-39:** Keep this (reprocess): `donor_albums` in IA-02 gespeichert
+- **FTAG-40:** Keep this (reprocess): `_get_folder_album_names` gibt own_album + donor_albums zurück
+- **FTAG-41:** Keep this (reprocess): own_album überlebt `prepare_job_for_reprocess`
+- **FTAG-42:** Donor ohne Immich-Asset: Album aus `folder_tags[-1]` abgeleitet
+- **FTAG-43:** Donor ohne Immich + ohne folder_tags: Album aus IA-08 `immich_albums_added`
+- **FTAG-44:** Donor ohne Immich + ohne folder_tags + ohne IA-08: Album aus Inbox-Pfad extrahiert
+- **FTAG-45:** Album-Namen fliessen in `keywords_written` (IA-07)
+- **FTAG-46:** Album-Wörter fliessen einzeln in `kept_folder_tags` (z.B. "Eis" + "Kalt" aus "Eis Kalt")
+- **FTAG-47:** Batch-Clean Quality: gleiche Merge-Logik wie Keep this
+- **FTAG-48:** Batch-Clean Quality (already done): Tags + Alben + Description direkt via API
+- **FTAG-49:** Mehrere Donors: Alben aller Donors gesammelt (dedupliziert)
+- **FTAG-50:** Mehrere Donors: Keywords aller Donors gemerged (Union)
+
 ## 12c. v2.29 Stress & Edge-Cases (STRESS)
 
 > Stress-Tests und Edge-Cases die reguläre Tests nicht abdecken.

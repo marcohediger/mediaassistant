@@ -539,6 +539,23 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `FTAG-31` | – | – | – | – | ✅ | E2E _build_member: folder_tags Key existiert |
 | `FTAG-32` | – | – | – | – | ✅ | E2E _build_member: folder_album Key existiert |
 | `FTAG-33` | – | – | – | – | ✅ | E2E _build_member: folder_album ist String |
+| `FTAG-34` | – | – | – | – | – | Keep (done): Donor-Alben aus Immich abgefragt |
+| `FTAG-35` | – | – | – | – | – | Keep (done): Donor-Alben auf Kept-Asset zugewiesen |
+| `FTAG-36` | – | – | – | – | – | Keep (done): neue Tags auf Kept-Asset geschrieben |
+| `FTAG-37` | – | – | – | – | – | Keep (done): Description übernommen |
+| `FTAG-38` | – | – | – | – | – | Keep (reprocess): own_album in IA-02 |
+| `FTAG-39` | – | – | – | – | – | Keep (reprocess): donor_albums in IA-02 |
+| `FTAG-40` | – | – | – | – | – | Keep (reprocess): _get_folder_album_names own+donor |
+| `FTAG-41` | – | – | – | – | – | Keep (reprocess): own_album überlebt reprocess |
+| `FTAG-42` | – | – | – | – | – | Donor ohne Immich: Album aus folder_tags[-1] |
+| `FTAG-43` | – | – | – | – | – | Donor ohne folder_tags: Album aus IA-08 |
+| `FTAG-44` | – | – | – | – | – | Donor ohne alles: Album aus Inbox-Pfad |
+| `FTAG-45` | – | – | – | – | – | Album-Namen in keywords_written |
+| `FTAG-46` | – | – | – | – | – | Album-Wörter einzeln in folder_tags |
+| `FTAG-47` | – | – | – | – | – | Batch-Clean: gleiche Merge-Logik |
+| `FTAG-48` | – | – | – | – | – | Batch-Clean (done): API-Anwendung |
+| `FTAG-49` | – | – | – | – | – | Mehrere Donors: Alben gesammelt |
+| `FTAG-50` | – | – | – | – | – | Mehrere Donors: Keywords Union |
 
 ### MATRIX — Sektion 14 Test-Matrix (Coverage-Karte) (72 Tests)
 

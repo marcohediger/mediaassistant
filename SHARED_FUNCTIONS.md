@@ -83,6 +83,7 @@
 | `get_asset_info` | `async (asset_id, *, api_key=None) -> dict \| None` | Vollständige Asset-Details (EXIF, Tags). |
 | `asset_exists` | `async (asset_id, *, api_key=None) -> bool` | Existenz-Check (HTTP 200). |
 | `get_asset_albums` | `async (asset_id, *, api_key=None) -> list[str]` | Album-Namen des Assets. |
+| `add_asset_to_albums` | `async (asset_id, album_names, *, api_key=None) -> list[str]` | Asset zu Alben hinzufügen (erstellt falls nötig). Returns Liste der erfolgreich zugewiesenen. |
 | `get_recent_assets` | `async (since=None, *, api_key=None) -> list[dict]` | Assets nach Zeitstempel (Poller). |
 
 ### Modifikation
