@@ -756,11 +756,32 @@ async def keep_file(request: Request):
 
                 # Merge donor folder_tags from IA-02.  Originals that were
                 # never flagged as duplicate don't have folder_tags in
-                # IA-02 — extract from their inbox path instead.
+                # IA-02 — extract from their inbox path.  If even that
+                # fails (e.g. Immich-only asset without inbox path),
+                # fall back to IA-08 albums or the Immich API.
                 donor_ft = d_ia02.get("folder_tags") or []
                 if not donor_ft:
                     from pipeline.step_ia02_duplicates import _extract_folder_tags
                     donor_ft = _extract_folder_tags(donor)
+                if not donor_ft:
+                    # Try IA-08 albums_added
+                    d_ia08 = d_sr.get("IA-08") or {}
+                    albums = d_ia08.get("immich_albums_added") or []
+                    if not albums:
+                        # Last resort: query Immich API for current albums
+                        donor_asset = donor.immich_asset_id or ""
+                        if not donor_asset and (donor.target_path or "").startswith("immich:"):
+                            donor_asset = (donor.target_path or "")[7:]
+                        if donor_asset:
+                            from immich_client import get_asset_albums
+                            albums = await get_asset_albums(donor_asset)
+                    # Convert album names to folder_tags format
+                    for album in albums:
+                        if album and album not in donor_ft:
+                            donor_ft.append(album)
+                            for word in album.split():
+                                if word and word not in donor_ft:
+                                    donor_ft.append(word)
                 new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
                 if new_ft:
                     kept_folder_tags.extend(new_ft)
@@ -1352,11 +1373,29 @@ async def batch_clean_quality(request: Request):
 
                 # Merge donor folder_tags from IA-02.  Originals that were
                 # never flagged as duplicate don't have folder_tags in
-                # IA-02 — extract from their inbox path instead.
+                # IA-02 — extract from their inbox path.  If even that
+                # fails (e.g. Immich-only asset), fall back to IA-08
+                # albums or the Immich API.
                 donor_ft = (donor_ia02 if isinstance(donor_ia02, dict) else {}).get("folder_tags") or []
                 if not donor_ft:
                     from pipeline.step_ia02_duplicates import _extract_folder_tags
                     donor_ft = _extract_folder_tags(donor)
+                if not donor_ft:
+                    d_ia08 = donor_sr.get("IA-08") or {}
+                    albums = d_ia08.get("immich_albums_added") or []
+                    if not albums:
+                        donor_asset = donor.immich_asset_id or ""
+                        if not donor_asset and (donor.target_path or "").startswith("immich:"):
+                            donor_asset = (donor.target_path or "")[7:]
+                        if donor_asset:
+                            from immich_client import get_asset_albums
+                            albums = await get_asset_albums(donor_asset)
+                    for album in albums:
+                        if album and album not in donor_ft:
+                            donor_ft.append(album)
+                            for word in album.split():
+                                if word and word not in donor_ft:
+                                    donor_ft.append(word)
                 new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
                 if new_ft:
                     best_folder_tags.extend(new_ft)
