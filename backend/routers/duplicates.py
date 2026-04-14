@@ -786,12 +786,27 @@ async def keep_file(request: Request):
                 for a in donor_albums_found:
                     if a and a not in donor_immich_albums:
                         donor_immich_albums.append(a)
+                    # Album names must also flow into keywords/tags
+                    if a and a not in kept_folder_tags:
+                        kept_folder_tags.append(a)
+                    for word in (a or "").split():
+                        if word and word not in kept_folder_tags:
+                            kept_folder_tags.append(word)
 
                 kept_desc = kept_ia07.get("description_written") or ""
                 donor_desc = d_ia07.get("description_written") or ""
                 if not kept_desc and donor_desc:
                     kept_ia07["description_written"] = donor_desc
                     merge_notes.append("description")
+
+            # Ensure all folder_tags (incl. album-derived) are in keywords
+            kept_kw = kept_ia07.get("keywords_written") or []
+            for ft in kept_folder_tags:
+                if ft and ft not in kept_kw:
+                    kept_kw.append(ft)
+            if kept_kw:
+                kept_ia07["keywords_written"] = kept_kw
+                kept_ia07["tags_count"] = len(kept_kw)
 
             # Persist merged folder_tags + own_album + donor_albums into IA-02
             if not isinstance(kept_ia02, dict):
@@ -1417,6 +1432,11 @@ async def batch_clean_quality(request: Request):
                 for a in donor_albums_found:
                     if a and a not in batch_donor_immich_albums:
                         batch_donor_immich_albums.append(a)
+                    if a and a not in best_folder_tags:
+                        best_folder_tags.append(a)
+                    for word in (a or "").split():
+                        if word and word not in best_folder_tags:
+                            best_folder_tags.append(word)
 
                 # Description: if best has none but donor does
                 best_desc = best_ia07.get("description_written") or ""
@@ -1424,6 +1444,15 @@ async def batch_clean_quality(request: Request):
                 if not best_desc and donor_desc:
                     best_ia07["description_written"] = donor_desc
                     merged_fields.append("description")
+
+            # Ensure all folder_tags (incl. album-derived) are in keywords
+            best_kw = best_ia07.get("keywords_written") or []
+            for ft in best_folder_tags:
+                if ft and ft not in best_kw:
+                    best_kw.append(ft)
+            if best_kw:
+                best_ia07["keywords_written"] = best_kw
+                best_ia07["tags_count"] = len(best_kw)
 
             # Persist merged folder_tags + donor_albums into IA-02
             if not isinstance(best_ia02, dict):
