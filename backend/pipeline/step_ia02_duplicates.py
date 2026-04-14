@@ -173,6 +173,17 @@ async def _file_exists(job_entry) -> bool:
     return path and os.path.exists(path)
 
 
+def _is_user_kept(job_entry) -> bool:
+    """Check if a job was explicitly kept by the user via duplicate review.
+
+    Such jobs must not be demoted by quality_swap — the user decision
+    takes priority over automatic quality comparison.
+    """
+    sr = job_entry.step_result or {}
+    ia02 = sr.get("IA-02") or {}
+    return bool(ia02.get("user_kept"))
+
+
 async def execute(job, session) -> dict:
     """IA-02: Duplikat-Erkennung — SHA256 (exakt) + pHash (ähnlich)."""
     if not await config_manager.is_module_enabled("duplikat_erkennung"):
@@ -203,7 +214,8 @@ async def execute(job, session) -> dict:
                 # Quality-aware: if the current file is better quality
                 # than the existing one, swap roles — demote the existing
                 # to duplicate and let the current continue as original.
-                if _quality_score(job) > _quality_score(existing):
+                # Never swap a user-kept job (explicit review decision).
+                if _quality_score(job) > _quality_score(existing) and not _is_user_kept(existing):
                     await _swap_duplicate(job, session, existing, "exact", 0)
                     return {
                         "status": "ok",
@@ -318,8 +330,9 @@ async def execute(job, session) -> dict:
                     # Load full Job object only for the match
                     candidate = await session.get(Job, row.id)
                     if candidate and await _file_exists(candidate):
-                        # Quality-aware: prefer the better file as original
-                        if _quality_score(job) > _quality_score(candidate):
+                        # Quality-aware: prefer the better file as original.
+                        # Never swap a user-kept job (explicit review decision).
+                        if _quality_score(job) > _quality_score(candidate) and not _is_user_kept(candidate):
                             await _swap_duplicate(job, session, candidate, "similar", distance)
                             found_duplicate = {
                                 "status": "ok",

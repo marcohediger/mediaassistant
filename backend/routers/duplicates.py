@@ -864,6 +864,14 @@ async def keep_file(request: Request):
 
         # Re-run pipeline for the kept file (AI analysis, tag writing, sorting)
         if kept_job:
+            # Mark as user-kept so IA-02 never quality_swaps this job
+            sr = kept_job.step_result or {}
+            if not isinstance(sr.get("IA-02"), dict):
+                sr["IA-02"] = sr.get("IA-02") or {}
+            sr["IA-02"]["user_kept"] = True
+            kept_job.step_result = sr
+            flag_modified(kept_job, "step_result")
+
             kept_filepath = kept_job.target_path or kept_job.original_path
             is_already_done = kept_job.status == "done"
 
@@ -928,7 +936,7 @@ async def keep_file(request: Request):
                 # decision (especially when other jobs with matching pHash
                 # still exist in the DB).
                 sr = kept_job.step_result or {}
-                sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review"}
+                sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review", "user_kept": True}
                 if saved_folder_tags:
                     sr["IA-02"]["folder_tags"] = saved_folder_tags
                 if saved_own_album:
@@ -980,6 +988,7 @@ async def not_duplicate(request: Request):
         skip_result = {
             "status": "skipped",
             "reason": "manually marked as not a duplicate",
+            "user_kept": True,
         }
 
         # Preserve folder_tags before IA-02 is overwritten
