@@ -522,10 +522,12 @@ async def add_asset_to_albums(asset_id: str, album_names: list[str], *, api_key:
 
 
 async def get_asset_albums(asset_id: str, *, api_key: str | None = None) -> list[str]:
-    """Return album names that an asset belongs to."""
+    """Return album names that an asset belongs to (excludes Immich system albums)."""
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key or not asset_id:
         return []
+    # Immich system/auto-generated albums that should not be transferred
+    _IGNORED_ALBUMS = {"Zuletzt"}
     headers = {"x-api-key": api_key}
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
@@ -534,7 +536,8 @@ async def get_asset_albums(asset_id: str, *, api_key: str | None = None) -> list
             params={"assetId": asset_id},
         )
         if resp.status_code == 200:
-            return [a.get("albumName", "") for a in resp.json() if a.get("albumName")]
+            return [a.get("albumName", "") for a in resp.json()
+                    if a.get("albumName") and a["albumName"] not in _IGNORED_ALBUMS]
     return []
 
 
