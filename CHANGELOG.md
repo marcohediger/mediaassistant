@@ -1,10 +1,16 @@
 # Changelog
 
-## v2.29.6 — 2026-04-14
+## v2.29.7 — 2026-04-14
 
-### Bugfix
+### Bugfixes
 
-- **Fix: Immich System-Album "Zuletzt" wird bei Donor-Merge ignoriert.**
+- **Fix: Duplikat-Loop bei Immich-Poller gestoppt (user_kept Flag).**
+  Wenn ein Job via "Keep this" oder "Kein Duplikat" behalten wird,
+  setzt `keep_file` jetzt `user_kept=True` in IA-02. Die quality_swap-
+  Logik prüft dieses Flag — User-Entscheidung hat Vorrang.
+- **Fix: Folder-Tags nur aus Pfad extrahieren wenn Feature aktiv war.**
+  `_extract_folder_tags(donor)` prüft jetzt `donor.folder_tags` Boolean.
+- **Fix: Immich System-Album "Zuletzt" bei Donor-Merge ignoriert.**
   `get_asset_albums()` filtert System-Alben automatisch heraus.
 
 ## v2.29.5 — 2026-04-14
