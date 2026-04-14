@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.29.6 — 2026-04-14
+
+### Bugfix
+
+- **Fix: Immich System-Album "Zuletzt" wird bei Donor-Merge ignoriert.**
+  `get_asset_albums()` filtert System-Alben automatisch heraus.
+
 ## v2.29.5 — 2026-04-14
 
 ### Feature: Vollständiger Daten-Merge bei Duplikat-Auflösung
