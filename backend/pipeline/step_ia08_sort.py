@@ -32,7 +32,9 @@ async def _get_folder_album_names(job) -> list[str] | None:
     if not await _is_folder_tags_active(job):
         return None
 
-    # Try path-based extraction first (only if file is still under inbox)
+    albums = []
+
+    # 1) Own album: from inbox path or IA-02 own_album
     if job.source_inbox_path:
         try:
             rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
@@ -41,24 +43,26 @@ async def _get_folder_album_names(job) -> list[str] | None:
         if rel and rel != "." and not rel.startswith(".."):
             parts = [p for p in rel.split(os.sep) if p and p != "."]
             if parts:
-                return [" ".join(parts)]
+                albums.append(" ".join(parts))
 
-    # Fallback: IA-02 preserved folder_tags (last entry is the combined
-    # album name from the job's own inbox folder).
+    if not albums:
+        # Path failed (file moved) — use saved own_album from IA-02
+        ia02 = (job.step_result or {}).get("IA-02") or {}
+        own = ia02.get("own_album") or ""
+        if not own:
+            # Legacy fallback: last entry before donor merge
+            ia02_ft = ia02.get("folder_tags") or []
+            own = ia02_ft[-1] if ia02_ft else ""
+        if own:
+            albums.append(own)
+
+    # 2) Donor albums: inherited from deleted donors (always add)
     ia02 = (job.step_result or {}).get("IA-02") or {}
-    ia02_ft = ia02.get("folder_tags") or []
-    # donor_albums: album names inherited from deleted donors (queried
-    # from Immich before deletion).  Must also be added.
-    donor_albums = ia02.get("donor_albums") or []
-    albums = []
-    if ia02_ft:
-        albums.append(ia02_ft[-1])
-    if donor_albums:
-        albums.extend(a for a in donor_albums if a not in albums)
-    if albums:
-        return albums
+    for a in (ia02.get("donor_albums") or []):
+        if a and a not in albums:
+            albums.append(a)
 
-    return None
+    return albums if albums else None
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
