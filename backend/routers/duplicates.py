@@ -721,6 +721,7 @@ async def keep_file(request: Request):
             kept_ia02 = kept_sr.get("IA-02") or {}
             kept_ia07 = kept_sr.get("IA-07") or {}
             kept_folder_tags = list(kept_ia02.get("folder_tags") or [])
+            new_donor_folder_tags: list[str] = []
             merge_notes = []
 
             for donor in group_jobs:
@@ -759,6 +760,7 @@ async def keep_file(request: Request):
                 new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
                 if new_ft:
                     kept_folder_tags.extend(new_ft)
+                    new_donor_folder_tags.extend(new_ft)
                     merge_notes.append(f"folder_tags(+{len(new_ft)})")
 
                 kept_desc = kept_ia07.get("description_written") or ""
@@ -820,8 +822,31 @@ async def keep_file(request: Request):
             is_already_done = kept_job.status == "done"
 
             if is_already_done:
-                # Original that was already fully processed — nothing to do
-                pass
+                # Original that was already fully processed — add merged
+                # folder_tags as Immich albums (the pipeline won't re-run
+                # for this job, so we must apply new albums directly).
+                asset_id = kept_job.immich_asset_id or ""
+                if not asset_id and (kept_job.target_path or "").startswith("immich:"):
+                    asset_id = (kept_job.target_path or "")[7:]
+                if new_donor_folder_tags and asset_id:
+                    # Only check global module — the folder_tags came from
+                    # the donor's inbox, not the kept job's inbox.
+                    if await config_manager.is_module_enabled("ordner_tags"):
+                        from immich_client import add_asset_to_albums, tag_asset
+                        # 1) Add ALL folder_tags as Immich tags
+                        for ft in new_donor_folder_tags:
+                            try:
+                                await tag_asset(asset_id, ft)
+                            except Exception:
+                                pass
+                        merge_notes.append(f"tags({', '.join(new_donor_folder_tags)})")
+                        # 2) Add asset to combined-name albums (space = combined)
+                        album_names = [t for t in new_donor_folder_tags if " " in t]
+                        if not album_names:
+                            album_names = list(new_donor_folder_tags)
+                        added = await add_asset_to_albums(asset_id, album_names)
+                        if added:
+                            merge_notes.append(f"albums({', '.join(added)})")
             elif kept_job.status == "duplicate" and kept_filepath and os.path.exists(kept_filepath):
                 # Save folder_tags BEFORE prepare_job_for_reprocess wipes
                 # all steps except IA-01.
@@ -1284,6 +1309,7 @@ async def batch_clean_quality(request: Request):
             best_ia02 = best_sr.get("IA-02") or {}
             best_ia07 = best_sr.get("IA-07") or {}
             best_folder_tags = list((best_ia02 if isinstance(best_ia02, dict) else {}).get("folder_tags") or [])
+            batch_new_donor_folder_tags: list[str] = []
             merged_fields = []
 
             for donor in member_jobs:
@@ -1326,6 +1352,7 @@ async def batch_clean_quality(request: Request):
                 new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
                 if new_ft:
                     best_folder_tags.extend(new_ft)
+                    batch_new_donor_folder_tags.extend(new_ft)
                     merged_fields.append(f"folder_tags(+{len(new_ft)})")
 
                 # Description: if best has none but donor does
@@ -1458,8 +1485,29 @@ async def batch_clean_quality(request: Request):
                     best.error_message = "Promoted (best quality, full re-processing)"
                     if merged_fields:
                         best.error_message += f" + merged: {', '.join(merged_fields)}"
-            elif merged_fields:
-                best.error_message = (best.error_message or "") + f" + merged: {', '.join(merged_fields)}"
+            else:
+                # best was already "done" — add donor folder_tags as
+                # Immich albums directly (no pipeline re-run).
+                asset_id = best.immich_asset_id or ""
+                if not asset_id and (best.target_path or "").startswith("immich:"):
+                    asset_id = (best.target_path or "")[7:]
+                if batch_new_donor_folder_tags and asset_id:
+                    if await config_manager.is_module_enabled("ordner_tags"):
+                        from immich_client import add_asset_to_albums, tag_asset
+                        for ft in batch_new_donor_folder_tags:
+                            try:
+                                await tag_asset(asset_id, ft)
+                            except Exception:
+                                pass
+                        merged_fields.append(f"tags({', '.join(batch_new_donor_folder_tags)})")
+                        album_names = [t for t in batch_new_donor_folder_tags if " " in t]
+                        if not album_names:
+                            album_names = list(batch_new_donor_folder_tags)
+                        added = await add_asset_to_albums(asset_id, album_names)
+                        if added:
+                            merged_fields.append(f"albums({', '.join(added)})")
+                if merged_fields:
+                    best.error_message = (best.error_message or "") + f" + merged: {', '.join(merged_fields)}"
 
         await session.commit()
 

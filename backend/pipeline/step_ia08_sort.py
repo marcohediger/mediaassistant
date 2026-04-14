@@ -43,14 +43,15 @@ async def _get_folder_album_names(job) -> list[str] | None:
             if parts:
                 return [" ".join(parts)]
 
-    # Fallback: IA-02 preserved folder_tags (last entry is the combined tag)
+    # Fallback: IA-02 preserved folder_tags (may contain merged tags from
+    # multiple donors, e.g. ["Schnee", "Birr", "Schnee Birr", "Brugg",
+    # "Schnee Brugg"]).  Combined album names contain spaces; individual
+    # words don't.  Return ALL combined names as albums.
     ia02_ft = ((job.step_result or {}).get("IA-02") or {}).get("folder_tags") or []
     if ia02_ft:
-        # The last entry is the combined tag (e.g. "Ferien Mallorca")
-        combined = ia02_ft[-1]
-        # If it contains spaces, it's the combined tag — use it as album name.
-        # If there's only one folder level, the single word IS the combined tag.
-        return [combined]
+        albums = [t for t in ia02_ft if " " in t]
+        # Single-word folders (e.g. ["Mallorca"]) have no spaces — use all
+        return albums if albums else list(ia02_ft)
 
     return None
 
