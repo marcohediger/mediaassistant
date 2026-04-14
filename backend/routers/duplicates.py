@@ -841,17 +841,41 @@ async def keep_file(request: Request):
             is_already_done = kept_job.status == "done"
 
             if is_already_done:
-                # Original that was already fully processed — add merged
-                # folder_tags as Immich albums (the pipeline won't re-run
-                # for this job, so we must apply new albums directly).
+                # Already fully processed — pipeline won't re-run, so
+                # apply all merged data directly to the Immich asset.
                 asset_id = kept_job.immich_asset_id or ""
                 if not asset_id and (kept_job.target_path or "").startswith("immich:"):
                     asset_id = (kept_job.target_path or "")[7:]
-                if donor_immich_albums and asset_id:
-                    from immich_client import add_asset_to_albums
-                    added = await add_asset_to_albums(asset_id, donor_immich_albums)
-                    if added:
-                        merge_notes.append(f"albums({', '.join(added)})")
+                if asset_id:
+                    from immich_client import add_asset_to_albums, tag_asset, update_asset_description
+
+                    # 1) Tags: apply new keywords + folder_tags to Immich
+                    existing_tags = set((kept_sr.get("IA-08") or {}).get("immich_tags_written") or [])
+                    all_tags = set(kept_ia07.get("keywords_written") or [])
+                    new_tags = [t for t in all_tags if t not in existing_tags]
+                    for tag in new_tags:
+                        try:
+                            await tag_asset(asset_id, tag)
+                        except Exception:
+                            pass
+                    if new_tags:
+                        merge_notes.append(f"tags(+{len(new_tags)})")
+
+                    # 2) Albums: add to donor's Immich albums
+                    if donor_immich_albums:
+                        added = await add_asset_to_albums(asset_id, donor_immich_albums)
+                        if added:
+                            merge_notes.append(f"albums({', '.join(added)})")
+
+                    # 3) Description: apply if kept had none
+                    merged_desc = kept_ia07.get("description_written") or ""
+                    existing_desc = (kept_sr.get("IA-08") or {}).get("description_written") or ""
+                    if not existing_desc and merged_desc:
+                        try:
+                            await update_asset_description(asset_id, merged_desc)
+                            merge_notes.append("description")
+                        except Exception:
+                            pass
             elif kept_job.status == "duplicate" and kept_filepath and os.path.exists(kept_filepath):
                 # Save folder_tags BEFORE prepare_job_for_reprocess wipes
                 # all steps except IA-01.
@@ -1516,16 +1540,41 @@ async def batch_clean_quality(request: Request):
                     if merged_fields:
                         best.error_message += f" + merged: {', '.join(merged_fields)}"
             else:
-                # best was already "done" — add donor Immich albums
-                # directly (no pipeline re-run).
+                # best was already "done" — apply all merged data
+                # directly to Immich (no pipeline re-run).
                 asset_id = best.immich_asset_id or ""
                 if not asset_id and (best.target_path or "").startswith("immich:"):
                     asset_id = (best.target_path or "")[7:]
-                if batch_donor_immich_albums and asset_id:
-                    from immich_client import add_asset_to_albums
-                    added = await add_asset_to_albums(asset_id, batch_donor_immich_albums)
-                    if added:
-                        merged_fields.append(f"albums({', '.join(added)})")
+                if asset_id:
+                    from immich_client import add_asset_to_albums, tag_asset, update_asset_description
+
+                    # Tags: apply new keywords + folder_tags
+                    existing_tags = set((best_sr.get("IA-08") or {}).get("immich_tags_written") or [])
+                    all_tags = set(best_ia07.get("keywords_written") or [])
+                    new_tags = [t for t in all_tags if t not in existing_tags]
+                    for tag in new_tags:
+                        try:
+                            await tag_asset(asset_id, tag)
+                        except Exception:
+                            pass
+                    if new_tags:
+                        merged_fields.append(f"tags(+{len(new_tags)})")
+
+                    # Albums
+                    if batch_donor_immich_albums:
+                        added = await add_asset_to_albums(asset_id, batch_donor_immich_albums)
+                        if added:
+                            merged_fields.append(f"albums({', '.join(added)})")
+
+                    # Description
+                    merged_desc = best_ia07.get("description_written") or ""
+                    existing_desc = (best_sr.get("IA-08") or {}).get("description_written") or ""
+                    if not existing_desc and merged_desc:
+                        try:
+                            await update_asset_description(asset_id, merged_desc)
+                            merged_fields.append("description")
+                        except Exception:
+                            pass
                 if merged_fields:
                     best.error_message = (best.error_message or "") + f" + merged: {', '.join(merged_fields)}"
 
