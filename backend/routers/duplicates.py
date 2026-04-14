@@ -721,6 +721,8 @@ async def keep_file(request: Request):
             kept_ia02 = kept_sr.get("IA-02") or {}
             kept_ia07 = kept_sr.get("IA-07") or {}
             kept_folder_tags = list(kept_ia02.get("folder_tags") or [])
+            # Save own album before donor tags corrupt the list
+            own_album = kept_folder_tags[-1] if kept_folder_tags else ""
             donor_immich_albums: list[str] = []
             merge_notes = []
 
@@ -781,11 +783,13 @@ async def keep_file(request: Request):
                     kept_ia07["description_written"] = donor_desc
                     merge_notes.append("description")
 
-            # Persist merged folder_tags + donor_albums into IA-02
+            # Persist merged folder_tags + own_album + donor_albums into IA-02
             if not isinstance(kept_ia02, dict):
                 kept_ia02 = {}
             if kept_folder_tags:
                 kept_ia02["folder_tags"] = kept_folder_tags
+            if own_album:
+                kept_ia02["own_album"] = own_album
             if donor_immich_albums:
                 kept_ia02["donor_albums"] = donor_immich_albums
                 merge_notes.append(f"donor_albums({', '.join(donor_immich_albums)})")
@@ -853,6 +857,7 @@ async def keep_file(request: Request):
                 # all steps except IA-01.
                 pre_ia02 = (kept_job.step_result or {}).get("IA-02") or {}
                 saved_folder_tags = pre_ia02.get("folder_tags") or kept_folder_tags or []
+                saved_own_album = pre_ia02.get("own_album") or own_album or ""
                 saved_donor_albums = pre_ia02.get("donor_albums") or donor_immich_albums or []
 
                 # File move (incl. .xmp sidecar) + step_result reset (keep
@@ -875,6 +880,8 @@ async def keep_file(request: Request):
                 sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review"}
                 if saved_folder_tags:
                     sr["IA-02"]["folder_tags"] = saved_folder_tags
+                if saved_own_album:
+                    sr["IA-02"]["own_album"] = saved_own_album
                 if saved_donor_albums:
                     sr["IA-02"]["donor_albums"] = saved_donor_albums
                 kept_job.step_result = sr
