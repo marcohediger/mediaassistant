@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.29.3 — 2026-04-14
+
+### Bugfix
+
+- **Fix: Folder-Tag/Album bei "Keep this" nicht auf Immich angewendet.**
+  Wenn das Original bereits "done" war, wurden die gemergten folder_tags
+  vom Duplikat zwar in `step_result` gespeichert, aber nie tatsächlich
+  als Immich-Album zugewiesen (Pipeline lief nicht nochmal).
+  Jetzt werden neue Album-Tags direkt via API angewendet.
+  Gleiches Fix auch für Batch-Clean-Quality.
+- **Neue Funktion `add_asset_to_albums`** in `immich_client.py` —
+  fügt ein bestehendes Asset einem oder mehreren Alben hinzu.
+
 ## v2.29.0 — 2026-04-13
 
 ### Feature: Folder-Tags → Immich Album + Tags

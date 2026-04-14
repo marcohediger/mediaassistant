@@ -492,6 +492,35 @@ async def delete_asset(asset_id: str, *, force: bool = True, api_key: str | None
     return {"status": "deleted", "asset_id": asset_id}
 
 
+async def add_asset_to_albums(asset_id: str, album_names: list[str], *, api_key: str | None = None) -> list[str]:
+    """Add an existing asset to one or more albums (created if they don't exist). Returns list of album names added."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key or not asset_id or not album_names:
+        return []
+    headers = {"x-api-key": api_key}
+    albums_added = []
+    async with httpx.AsyncClient(timeout=60) as client:
+        for album_name in album_names:
+            try:
+                album_id = await _get_or_create_album(client, url, headers, album_name)
+                if album_id:
+                    resp = await client.put(
+                        f"{url}/api/albums/{album_id}/assets",
+                        headers={**headers, "Content-Type": "application/json"},
+                        json={"ids": [asset_id]},
+                    )
+                    if resp.status_code in (200, 201):
+                        logger.info("Added asset %s to album '%s'", asset_id, album_name)
+                        albums_added.append(album_name)
+                    else:
+                        logger.warning("Failed to add asset %s to album '%s': HTTP %s", asset_id, album_name, resp.status_code)
+                else:
+                    logger.warning("Could not create/find album '%s' for asset %s", album_name, asset_id)
+            except Exception as exc:
+                logger.warning("Album operation failed for '%s': %s", album_name, exc)
+    return albums_added
+
+
 async def get_asset_albums(asset_id: str, *, api_key: str | None = None) -> list[str]:
     """Return album names that an asset belongs to."""
     url, api_key = await _resolve_api_key(api_key)
