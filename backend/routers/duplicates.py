@@ -721,7 +721,7 @@ async def keep_file(request: Request):
             kept_ia02 = kept_sr.get("IA-02") or {}
             kept_ia07 = kept_sr.get("IA-07") or {}
             kept_folder_tags = list(kept_ia02.get("folder_tags") or [])
-            new_donor_folder_tags: list[str] = []
+            donor_immich_albums: list[str] = []
             merge_notes = []
 
             for donor in group_jobs:
@@ -754,39 +754,26 @@ async def keep_file(request: Request):
                     kept_ia07["tags_count"] = len(kept_kw)
                     merge_notes.append(f"keywords(+{len(new_kw)})")
 
-                # Merge donor folder_tags from IA-02.  Originals that were
-                # never flagged as duplicate don't have folder_tags in
-                # IA-02 — extract from their inbox path.  If even that
-                # fails (e.g. Immich-only asset without inbox path),
-                # fall back to IA-08 albums or the Immich API.
+                # Merge donor folder_tags (for keywords/tags only)
                 donor_ft = d_ia02.get("folder_tags") or []
                 if not donor_ft:
                     from pipeline.step_ia02_duplicates import _extract_folder_tags
                     donor_ft = _extract_folder_tags(donor)
-                if not donor_ft:
-                    # Try IA-08 albums_added
-                    d_ia08 = d_sr.get("IA-08") or {}
-                    albums = d_ia08.get("immich_albums_added") or []
-                    if not albums:
-                        # Last resort: query Immich API for current albums
-                        donor_asset = donor.immich_asset_id or ""
-                        if not donor_asset and (donor.target_path or "").startswith("immich:"):
-                            donor_asset = (donor.target_path or "")[7:]
-                        if donor_asset:
-                            from immich_client import get_asset_albums
-                            albums = await get_asset_albums(donor_asset)
-                    # Convert album names to folder_tags format
-                    for album in albums:
-                        if album and album not in donor_ft:
-                            donor_ft.append(album)
-                            for word in album.split():
-                                if word and word not in donor_ft:
-                                    donor_ft.append(word)
                 new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
                 if new_ft:
                     kept_folder_tags.extend(new_ft)
-                    new_donor_folder_tags.extend(new_ft)
                     merge_notes.append(f"folder_tags(+{len(new_ft)})")
+
+                # Collect donor's Immich albums (before deletion)
+                donor_asset = donor.immich_asset_id or ""
+                if not donor_asset and (donor.target_path or "").startswith("immich:"):
+                    donor_asset = (donor.target_path or "")[7:]
+                if donor_asset:
+                    from immich_client import get_asset_albums
+                    albums = await get_asset_albums(donor_asset)
+                    for a in albums:
+                        if a and a not in donor_immich_albums:
+                            donor_immich_albums.append(a)
 
                 kept_desc = kept_ia07.get("description_written") or ""
                 donor_desc = d_ia07.get("description_written") or ""
@@ -794,14 +781,17 @@ async def keep_file(request: Request):
                     kept_ia07["description_written"] = donor_desc
                     merge_notes.append("description")
 
-            # Persist merged folder_tags back into IA-02
+            # Persist merged folder_tags + donor_albums into IA-02
+            if not isinstance(kept_ia02, dict):
+                kept_ia02 = {}
             if kept_folder_tags:
-                if not isinstance(kept_ia02, dict):
-                    kept_ia02 = {}
                 kept_ia02["folder_tags"] = kept_folder_tags
-                kept_sr["IA-02"] = kept_ia02
+            if donor_immich_albums:
+                kept_ia02["donor_albums"] = donor_immich_albums
+                merge_notes.append(f"donor_albums({', '.join(donor_immich_albums)})")
+            kept_sr["IA-02"] = kept_ia02
 
-            if merge_notes or kept_folder_tags:
+            if merge_notes or kept_folder_tags or donor_immich_albums:
                 kept_sr["IA-01"] = kept_ia01
                 kept_sr["IA-07"] = kept_ia07
                 kept_job.step_result = kept_sr
@@ -853,30 +843,17 @@ async def keep_file(request: Request):
                 asset_id = kept_job.immich_asset_id or ""
                 if not asset_id and (kept_job.target_path or "").startswith("immich:"):
                     asset_id = (kept_job.target_path or "")[7:]
-                if new_donor_folder_tags and asset_id:
-                    # Only check global module — the folder_tags came from
-                    # the donor's inbox, not the kept job's inbox.
-                    if await config_manager.is_module_enabled("ordner_tags"):
-                        from immich_client import add_asset_to_albums, tag_asset
-                        # 1) Add ALL folder_tags as Immich tags
-                        for ft in new_donor_folder_tags:
-                            try:
-                                await tag_asset(asset_id, ft)
-                            except Exception:
-                                pass
-                        merge_notes.append(f"tags({', '.join(new_donor_folder_tags)})")
-                        # 2) Add asset to combined-name albums (space = combined)
-                        album_names = [t for t in new_donor_folder_tags if " " in t]
-                        if not album_names:
-                            album_names = list(new_donor_folder_tags)
-                        added = await add_asset_to_albums(asset_id, album_names)
-                        if added:
-                            merge_notes.append(f"albums({', '.join(added)})")
+                if donor_immich_albums and asset_id:
+                    from immich_client import add_asset_to_albums
+                    added = await add_asset_to_albums(asset_id, donor_immich_albums)
+                    if added:
+                        merge_notes.append(f"albums({', '.join(added)})")
             elif kept_job.status == "duplicate" and kept_filepath and os.path.exists(kept_filepath):
                 # Save folder_tags BEFORE prepare_job_for_reprocess wipes
                 # all steps except IA-01.
                 pre_ia02 = (kept_job.step_result or {}).get("IA-02") or {}
                 saved_folder_tags = pre_ia02.get("folder_tags") or kept_folder_tags or []
+                saved_donor_albums = pre_ia02.get("donor_albums") or donor_immich_albums or []
 
                 # File move (incl. .xmp sidecar) + step_result reset (keep
                 # only IA-01 EXIF) + status flip is delegated to the shared
@@ -898,6 +875,8 @@ async def keep_file(request: Request):
                 sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review"}
                 if saved_folder_tags:
                     sr["IA-02"]["folder_tags"] = saved_folder_tags
+                if saved_donor_albums:
+                    sr["IA-02"]["donor_albums"] = saved_donor_albums
                 kept_job.step_result = sr
                 flag_modified(kept_job, "step_result")
                 await session.commit()
@@ -1334,7 +1313,7 @@ async def batch_clean_quality(request: Request):
             best_ia02 = best_sr.get("IA-02") or {}
             best_ia07 = best_sr.get("IA-07") or {}
             best_folder_tags = list((best_ia02 if isinstance(best_ia02, dict) else {}).get("folder_tags") or [])
-            batch_new_donor_folder_tags: list[str] = []
+            batch_donor_immich_albums: list[str] = []
             merged_fields = []
 
             for donor in member_jobs:
@@ -1371,36 +1350,26 @@ async def batch_clean_quality(request: Request):
                     best_ia07["tags_count"] = len(best_kw)
                     merged_fields.append(f"keywords(+{len(new_kw)})")
 
-                # Merge donor folder_tags from IA-02.  Originals that were
-                # never flagged as duplicate don't have folder_tags in
-                # IA-02 — extract from their inbox path.  If even that
-                # fails (e.g. Immich-only asset), fall back to IA-08
-                # albums or the Immich API.
+                # Merge donor folder_tags (for keywords only)
                 donor_ft = (donor_ia02 if isinstance(donor_ia02, dict) else {}).get("folder_tags") or []
                 if not donor_ft:
                     from pipeline.step_ia02_duplicates import _extract_folder_tags
                     donor_ft = _extract_folder_tags(donor)
-                if not donor_ft:
-                    d_ia08 = donor_sr.get("IA-08") or {}
-                    albums = d_ia08.get("immich_albums_added") or []
-                    if not albums:
-                        donor_asset = donor.immich_asset_id or ""
-                        if not donor_asset and (donor.target_path or "").startswith("immich:"):
-                            donor_asset = (donor.target_path or "")[7:]
-                        if donor_asset:
-                            from immich_client import get_asset_albums
-                            albums = await get_asset_albums(donor_asset)
-                    for album in albums:
-                        if album and album not in donor_ft:
-                            donor_ft.append(album)
-                            for word in album.split():
-                                if word and word not in donor_ft:
-                                    donor_ft.append(word)
                 new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
                 if new_ft:
                     best_folder_tags.extend(new_ft)
-                    batch_new_donor_folder_tags.extend(new_ft)
                     merged_fields.append(f"folder_tags(+{len(new_ft)})")
+
+                # Collect donor's Immich albums (before deletion)
+                donor_asset = donor.immich_asset_id or ""
+                if not donor_asset and (donor.target_path or "").startswith("immich:"):
+                    donor_asset = (donor.target_path or "")[7:]
+                if donor_asset:
+                    from immich_client import get_asset_albums
+                    albums = await get_asset_albums(donor_asset)
+                    for a in albums:
+                        if a and a not in batch_donor_immich_albums:
+                            batch_donor_immich_albums.append(a)
 
                 # Description: if best has none but donor does
                 best_desc = best_ia07.get("description_written") or ""
@@ -1409,12 +1378,15 @@ async def batch_clean_quality(request: Request):
                     best_ia07["description_written"] = donor_desc
                     merged_fields.append("description")
 
-            # Persist merged folder_tags back into IA-02
+            # Persist merged folder_tags + donor_albums into IA-02
+            if not isinstance(best_ia02, dict):
+                best_ia02 = {}
             if best_folder_tags:
-                if not isinstance(best_ia02, dict):
-                    best_ia02 = {}
                 best_ia02["folder_tags"] = best_folder_tags
-                best_sr["IA-02"] = best_ia02
+            if batch_donor_immich_albums:
+                best_ia02["donor_albums"] = batch_donor_immich_albums
+                merged_fields.append(f"donor_albums({', '.join(batch_donor_immich_albums)})")
+            best_sr["IA-02"] = best_ia02
 
             if merged_fields or best_folder_tags:
                 best_sr["IA-01"] = best_ia01
@@ -1484,6 +1456,8 @@ async def batch_clean_quality(request: Request):
                     new_ia02 = {"status": "skipped", "reason": "kept via batch-clean"}
                     if old_ia02.get("folder_tags"):
                         new_ia02["folder_tags"] = old_ia02["folder_tags"]
+                    if old_ia02.get("donor_albums") or batch_donor_immich_albums:
+                        new_ia02["donor_albums"] = old_ia02.get("donor_albums") or batch_donor_immich_albums
                     best_sr["IA-02"] = new_ia02
                     best.step_result = best_sr
                     flag_modified(best, "step_result")
@@ -1520,12 +1494,14 @@ async def batch_clean_quality(request: Request):
                             move_file=True,
                             commit=False,
                         )
-                        # Skip IA-02 — preserve folder_tags
+                        # Skip IA-02 — preserve folder_tags + donor_albums
                         sr = best.step_result or {}
                         old_ia02 = sr.get("IA-02") or {}
                         sr["IA-02"] = {"status": "skipped", "reason": "kept via batch-clean"}
                         if old_ia02.get("folder_tags"):
                             sr["IA-02"]["folder_tags"] = old_ia02["folder_tags"]
+                        if old_ia02.get("donor_albums") or batch_donor_immich_albums:
+                            sr["IA-02"]["donor_albums"] = old_ia02.get("donor_albums") or batch_donor_immich_albums
                         best.step_result = sr
                         flag_modified(best, "step_result")
                     best.status = "queued"
@@ -1533,26 +1509,16 @@ async def batch_clean_quality(request: Request):
                     if merged_fields:
                         best.error_message += f" + merged: {', '.join(merged_fields)}"
             else:
-                # best was already "done" — add donor folder_tags as
-                # Immich albums directly (no pipeline re-run).
+                # best was already "done" — add donor Immich albums
+                # directly (no pipeline re-run).
                 asset_id = best.immich_asset_id or ""
                 if not asset_id and (best.target_path or "").startswith("immich:"):
                     asset_id = (best.target_path or "")[7:]
-                if batch_new_donor_folder_tags and asset_id:
-                    if await config_manager.is_module_enabled("ordner_tags"):
-                        from immich_client import add_asset_to_albums, tag_asset
-                        for ft in batch_new_donor_folder_tags:
-                            try:
-                                await tag_asset(asset_id, ft)
-                            except Exception:
-                                pass
-                        merged_fields.append(f"tags({', '.join(batch_new_donor_folder_tags)})")
-                        album_names = [t for t in batch_new_donor_folder_tags if " " in t]
-                        if not album_names:
-                            album_names = list(batch_new_donor_folder_tags)
-                        added = await add_asset_to_albums(asset_id, album_names)
-                        if added:
-                            merged_fields.append(f"albums({', '.join(added)})")
+                if batch_donor_immich_albums and asset_id:
+                    from immich_client import add_asset_to_albums
+                    added = await add_asset_to_albums(asset_id, batch_donor_immich_albums)
+                    if added:
+                        merged_fields.append(f"albums({', '.join(added)})")
                 if merged_fields:
                     best.error_message = (best.error_message or "") + f" + merged: {', '.join(merged_fields)}"
 
