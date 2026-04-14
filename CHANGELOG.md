@@ -1,17 +1,29 @@
 # Changelog
 
-## v2.29.4 — 2026-04-14
+## v2.29.5 — 2026-04-14
 
-### Bugfix
+### Feature: Vollständiger Daten-Merge bei Duplikat-Auflösung
 
-- **Fix: Folder-Tags von Originals bei Keep-Duplikat nicht gemergt.**
-  Wenn das Duplikat behalten und das Original gelöscht wird, hatte
-  das Original keine folder_tags in IA-02 (nur Duplikate speichern
-  diese). Jetzt werden folder_tags aus dem Inbox-Pfad des Donors
-  extrahiert, falls IA-02 leer ist. Auch in Batch-Clean.
-- **Fix: Nur ein Album bei gemergten folder_tags von mehreren Donors.**
-  `_get_folder_album_names` gab nur das letzte Element zurück.
-  Gibt jetzt ALLE kombinierten Album-Namen (mit Leerzeichen) zurück.
+Beim Auflösen einer Duplikatgruppe (Keep this / Batch-Clean) werden
+jetzt **alle Informationen aller aufgelösten Assets** auf das Ziel
+übertragen — egal ob Original oder Duplikat behalten wird:
+
+- **Alben:** Donor-Alben aus Immich API, IA-08 oder folder_tags.
+  Eigenes Album (`own_album`) + Donor-Alben (`donor_albums`) werden
+  beide in IA-02 gespeichert und von IA-08 zugewiesen.
+- **Tags/Keywords:** Album-Namen fliessen auch in Keywords, damit
+  sie als Immich-Tags und File-Keywords geschrieben werden.
+- **Description:** Übernommen wenn Ziel-File keine hat.
+- **GPS/Datum:** Wie bisher gemergt.
+- **Already-done Pfad:** Tags, Alben und Description werden direkt
+  via Immich API angewendet (kein Pipeline-Re-run nötig).
+
+### Technische Details
+
+- `add_asset_to_albums()` in `immich_client.py` (neu)
+- `donor_albums` + `own_album` in IA-02 step_result
+- `_get_folder_album_names()` kombiniert eigenes + Donor-Alben
+- Donor-Folder-Tags: Fallback-Kette IA-02 → Pfad → IA-08 → Immich API
 
 ## v2.29.3 — 2026-04-14
 
