@@ -766,16 +766,26 @@ async def keep_file(request: Request):
                     kept_folder_tags.extend(new_ft)
                     merge_notes.append(f"folder_tags(+{len(new_ft)})")
 
-                # Collect donor's Immich albums (before deletion)
+                # Collect donor's albums from all sources
+                donor_albums_found: list[str] = []
+                # Source 1: Immich API (donor has an uploaded asset)
                 donor_asset = donor.immich_asset_id or ""
                 if not donor_asset and (donor.target_path or "").startswith("immich:"):
                     donor_asset = (donor.target_path or "")[7:]
                 if donor_asset:
                     from immich_client import get_asset_albums
-                    albums = await get_asset_albums(donor_asset)
-                    for a in albums:
-                        if a and a not in donor_immich_albums:
-                            donor_immich_albums.append(a)
+                    donor_albums_found = await get_asset_albums(donor_asset)
+                # Source 2: IA-08 result (donor went through pipeline)
+                if not donor_albums_found:
+                    d_ia08 = d_sr.get("IA-08") or {}
+                    donor_albums_found = d_ia08.get("immich_albums_added") or []
+                # Source 3: folder_tags (donor was duplicate, never uploaded)
+                if not donor_albums_found and donor_ft:
+                    # Last entry is the combined album name
+                    donor_albums_found = [donor_ft[-1]]
+                for a in donor_albums_found:
+                    if a and a not in donor_immich_albums:
+                        donor_immich_albums.append(a)
 
                 kept_desc = kept_ia07.get("description_written") or ""
                 donor_desc = d_ia07.get("description_written") or ""
@@ -1391,16 +1401,22 @@ async def batch_clean_quality(request: Request):
                     best_folder_tags.extend(new_ft)
                     merged_fields.append(f"folder_tags(+{len(new_ft)})")
 
-                # Collect donor's Immich albums (before deletion)
+                # Collect donor's albums from all sources
+                donor_albums_found: list[str] = []
                 donor_asset = donor.immich_asset_id or ""
                 if not donor_asset and (donor.target_path or "").startswith("immich:"):
                     donor_asset = (donor.target_path or "")[7:]
                 if donor_asset:
                     from immich_client import get_asset_albums
-                    albums = await get_asset_albums(donor_asset)
-                    for a in albums:
-                        if a and a not in batch_donor_immich_albums:
-                            batch_donor_immich_albums.append(a)
+                    donor_albums_found = await get_asset_albums(donor_asset)
+                if not donor_albums_found:
+                    d_ia08 = donor_sr.get("IA-08") or {}
+                    donor_albums_found = d_ia08.get("immich_albums_added") or []
+                if not donor_albums_found and donor_ft:
+                    donor_albums_found = [donor_ft[-1]]
+                for a in donor_albums_found:
+                    if a and a not in batch_donor_immich_albums:
+                        batch_donor_immich_albums.append(a)
 
                 # Description: if best has none but donor does
                 best_desc = best_ia07.get("description_written") or ""
