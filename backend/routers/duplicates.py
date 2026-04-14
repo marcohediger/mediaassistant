@@ -756,9 +756,11 @@ async def keep_file(request: Request):
                     kept_ia07["tags_count"] = len(kept_kw)
                     merge_notes.append(f"keywords(+{len(new_kw)})")
 
-                # Merge donor folder_tags (for keywords/tags only)
+                # Merge donor folder_tags (for keywords/tags only).
+                # Only extract from path if folder_tags was enabled for
+                # that job at import time (job.folder_tags boolean).
                 donor_ft = d_ia02.get("folder_tags") or []
-                if not donor_ft:
+                if not donor_ft and donor.folder_tags:
                     from pipeline.step_ia02_duplicates import _extract_folder_tags
                     donor_ft = _extract_folder_tags(donor)
                 new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
@@ -1406,9 +1408,11 @@ async def batch_clean_quality(request: Request):
                     best_ia07["tags_count"] = len(best_kw)
                     merged_fields.append(f"keywords(+{len(new_kw)})")
 
-                # Merge donor folder_tags (for keywords only)
+                # Merge donor folder_tags (for keywords only).
+                # Only extract from path if folder_tags was enabled for
+                # that job at import time (job.folder_tags boolean).
                 donor_ft = (donor_ia02 if isinstance(donor_ia02, dict) else {}).get("folder_tags") or []
-                if not donor_ft:
+                if not donor_ft and donor.folder_tags:
                     from pipeline.step_ia02_duplicates import _extract_folder_tags
                     donor_ft = _extract_folder_tags(donor)
                 new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
