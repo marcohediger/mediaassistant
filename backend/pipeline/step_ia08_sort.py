@@ -43,15 +43,20 @@ async def _get_folder_album_names(job) -> list[str] | None:
             if parts:
                 return [" ".join(parts)]
 
-    # Fallback: IA-02 preserved folder_tags (may contain merged tags from
-    # multiple donors, e.g. ["Schnee", "Birr", "Schnee Birr", "Brugg",
-    # "Schnee Brugg"]).  Combined album names contain spaces; individual
-    # words don't.  Return ALL combined names as albums.
-    ia02_ft = ((job.step_result or {}).get("IA-02") or {}).get("folder_tags") or []
+    # Fallback: IA-02 preserved folder_tags (last entry is the combined
+    # album name from the job's own inbox folder).
+    ia02 = (job.step_result or {}).get("IA-02") or {}
+    ia02_ft = ia02.get("folder_tags") or []
+    # donor_albums: album names inherited from deleted donors (queried
+    # from Immich before deletion).  Must also be added.
+    donor_albums = ia02.get("donor_albums") or []
+    albums = []
     if ia02_ft:
-        albums = [t for t in ia02_ft if " " in t]
-        # Single-word folders (e.g. ["Mallorca"]) have no spaces — use all
-        return albums if albums else list(ia02_ft)
+        albums.append(ia02_ft[-1])
+    if donor_albums:
+        albums.extend(a for a in donor_albums if a not in albums)
+    if albums:
+        return albums
 
     return None
 
