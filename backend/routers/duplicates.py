@@ -13,7 +13,11 @@ from config import config_manager
 from database import async_session
 from file_operations import resolve_filepath
 from models import Job
+import logging
+
 from system_logger import log_info
+
+logger = logging.getLogger("mediaassistant.routers.duplicates")
 from thumbnail_utils import (
     generate_thumbnail, raw_to_jpeg, heic_to_jpeg, video_to_jpeg,
     THUMB_SIZE, PREVIEW_SIZE, HEIC_EXTENSIONS, RAW_EXTENSIONS, VIDEO_EXTENSIONS,
@@ -810,6 +814,11 @@ async def _resolve_duplicate_group(
         kept_immich_id = (best.target_path or "")[7:]
 
     # ── 3. Delete donors ────────────────────────────────────────
+    await log_info("duplicates",
+                   f"{source}: Start Duplikat-Auflösung",
+                   f"kept={best.debug_key} asset={kept_immich_id or 'local'} "
+                   f"donors={[d.debug_key for d in donors]}")
+
     deleted = 0
     errors = 0
     for donor in donors:
@@ -825,12 +834,24 @@ async def _resolve_duplicate_group(
         # Immich asset — guard: never delete the same asset as the kept job
         # (race-condition duplicates from poller re-downloading a MA-uploaded asset)
         donor_asset = donor_immich_map.get(donor.id, "")
-        if donor_asset and donor_asset != kept_immich_id:
+        if donor_asset and donor_asset == kept_immich_id:
+            await log_info("duplicates",
+                           f"{donor.debug_key} Immich-Asset übersprungen (gleich wie kept)",
+                           f"asset={donor_asset}")
+        elif donor_asset:
+            await log_info("duplicates",
+                           f"{donor.debug_key} Immich-Asset wird gelöscht",
+                           f"asset={donor_asset}, kept={best.debug_key}")
             try:
                 from immich_client import delete_asset
                 await delete_asset(donor_asset)
-            except Exception:
-                pass
+                await log_info("duplicates",
+                               f"{donor.debug_key} Immich-Asset gelöscht OK",
+                               f"asset={donor_asset}")
+            except Exception as exc:
+                await log_info("duplicates",
+                               f"{donor.debug_key} Immich-Asset Löschung fehlgeschlagen",
+                               f"asset={donor_asset}, error={exc}")
 
         # Clear donor job
         if donor.status == "duplicate":
@@ -933,6 +954,12 @@ async def _resolve_duplicate_group(
         # Safety net (unexpected status)
         best.status = "done"
         best.error_message = None
+
+    await log_info("duplicates",
+                   f"{source}: kept={best.debug_key} asset={best.immich_asset_id or 'local'} "
+                   f"deleted={deleted} errors={errors}",
+                   f"donors={[d.debug_key for d in donors]}" +
+                   (f" merged={merge_notes}" if merge_notes else ""))
 
     return merge_notes, deleted, errors
 
@@ -1347,7 +1374,12 @@ async def re_evaluate_quality():
 
 @router.post("/api/duplicates/batch-clean-quality")
 async def batch_clean_quality(request: Request):
-    """Quality-aware batch clean: keep best quality per group, delete the rest."""
+    """Quality-aware batch clean: keep best quality per group, delete the rest.
+
+    Processes in batches of BATCH_SIZE groups with a commit after each
+    batch to avoid session bloat, Immich API timeouts, and HTTP request
+    timeouts when cleaning thousands of groups at once.
+    """
     from pipeline.step_ia02_duplicates import _quality_score
 
     try:
@@ -1356,6 +1388,7 @@ async def batch_clean_quality(request: Request):
     except (ValueError, Exception):
         page = 1
     per_page = 10
+    BATCH_SIZE = 50
 
     kept = 0
     deleted = 0
@@ -1369,34 +1402,43 @@ async def batch_clean_quality(request: Request):
         start = (page - 1) * per_page
         page_groups = group_index[start:start + per_page]
 
-    async with async_session() as session:
-        for g in page_groups:
-            if not g.get("safe_for_batch", g.get("all_exact")):
-                continue
+    # Process in batches with intermediate commits
+    for batch_start in range(0, len(page_groups), BATCH_SIZE):
+        batch = page_groups[batch_start:batch_start + BATCH_SIZE]
 
-            member_jobs = []
-            for key in g["member_keys"]:
-                job = jobs_by_key.get(key)
-                if job:
-                    result = await session.execute(select(Job).where(Job.id == job.id))
-                    fresh = result.scalar()
-                    if fresh:
-                        member_jobs.append(fresh)
+        async with async_session() as session:
+            for g in batch:
+                if not g.get("safe_for_batch", g.get("all_exact")):
+                    continue
 
-            if len(member_jobs) < 2:
-                continue
+                member_jobs = []
+                for key in g["member_keys"]:
+                    job = jobs_by_key.get(key)
+                    if job:
+                        result = await session.execute(select(Job).where(Job.id == job.id))
+                        fresh = result.scalar()
+                        if fresh:
+                            member_jobs.append(fresh)
 
-            best = max(member_jobs, key=lambda j: _quality_score(j))
+                if len(member_jobs) < 2:
+                    continue
 
-            _, d, e = await _resolve_duplicate_group(
-                session, best, member_jobs,
-                source="batch-clean",
-            )
-            kept += 1
-            deleted += d
-            errors += e
+                best = max(member_jobs, key=lambda j: _quality_score(j))
 
-        await session.commit()
+                try:
+                    _, d, e = await _resolve_duplicate_group(
+                        session, best, member_jobs,
+                        source="batch-clean",
+                    )
+                    kept += 1
+                    deleted += d
+                    errors += e
+                except Exception as exc:
+                    logger.error("Batch-clean error for group %s: %s",
+                                 g.get("original_key"), exc)
+                    errors += 1
+
+            await session.commit()
 
     page_label = "all" if page == 0 else f"page {page}"
     summary = (f"Batch-Clean Quality ({page_label}): "
