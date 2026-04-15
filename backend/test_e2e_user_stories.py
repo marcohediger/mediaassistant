@@ -405,7 +405,7 @@ async def test_us5_duplicate_keep():
             r2 = await session.execute(select(Job).where(Job.id == job2_id))
             j1, j2 = r1.scalar(), r2.scalar()
 
-            _, deleted, _ = await _resolve_duplicate_group(
+            _, deleted, _, _flush = await _resolve_duplicate_group(
                 session, j1, [j1, j2],
                 source="e2e-us5", user_kept=True,
             )
@@ -481,7 +481,7 @@ async def test_us6_shared_asset_keep():
         r2 = await session.execute(select(Job).where(Job.id == poller_id))
         j1, j2 = r1.scalar(), r2.scalar()
 
-        await _resolve_duplicate_group(
+        _, _, _, _flush = await _resolve_duplicate_group(
             session, j1, [j1, j2],
             source="e2e-us6", user_kept=True,
         )
@@ -539,7 +539,7 @@ async def test_us7_batch_clean():
             members = [j1, j2]
             best = max(members, key=lambda j: _quality_score(j))
 
-            _, deleted, errors = await _resolve_duplicate_group(
+            _, deleted, errors, _flush = await _resolve_duplicate_group(
                 session, best, members,
                 source="e2e-us7-batch",
             )

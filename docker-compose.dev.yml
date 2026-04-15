@@ -18,4 +18,4 @@ services:
       - LIBRARY_PATH=/library
       - LOG_LEVEL=DEBUG
       - TZ=Europe/Zurich
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-include '*.py' --reload-exclude 'data/*' --reload-exclude '__pycache__/*'

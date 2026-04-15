@@ -144,12 +144,14 @@ function pollBatchProgress() {
 }
 
 // Auto-detect running batch-clean on page load (survives reload)
+// Only show progress if still running — done state is handled by
+// the polling loop which triggers a single reload.
 fetch('/api/duplicates/batch-clean-status')
     .then(r => r.json())
     .then(data => {
-        if (data.running || data.done) {
+        if (data.running && !data.done) {
             showProgress(data);
-            if (!data.done) pollBatchProgress();
+            pollBatchProgress();
         }
     })
     .catch(() => {});
