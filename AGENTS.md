@@ -307,6 +307,37 @@ Zahlen** — keine personenbezogenen Daten, keine echten Datei-Inhalte.
   temporär deaktivieren (`Module.enabled=False`) und am Ende
   restaurieren.
 
+## Logging-Pflicht: Vor UND Nach jeder destruktiven Aktion
+
+> Jede Operation die Daten verändert oder löscht MUSS **vor** und
+> **nach** der Aktion geloggt werden. Wenn der Server zwischen den
+> beiden Logs abstürzt, muss aus dem Log ersichtlich sein was
+> passiert ist.
+
+**Pattern:**
+```python
+await log_info("module", f"{key} Aktion wird ausgeführt", f"details...")
+try:
+    await destructive_action()
+    await log_info("module", f"{key} Aktion OK", f"result...")
+except Exception as exc:
+    await log_info("module", f"{key} Aktion fehlgeschlagen", f"error={exc}")
+```
+
+**Gilt für:**
+- Immich-Asset löschen (`delete_asset`)
+- Immich-Asset hochladen/ersetzen (`upload_asset`, Upload→Copy→Delete)
+- Dateien verschieben/löschen (`safe_move`, `safe_remove`)
+- Job-Status-Änderungen bei Duplikat-Auflösung (Keep, Batch-Clean)
+- Pipeline quality_swap (Demote + Asset-Transfer)
+
+**Gilt NICHT für:** Reine Lese-Operationen, DB-Queries, Config-Reads.
+
+Kein `except: pass` bei destruktiven Aktionen. Fehler müssen geloggt
+werden — auch wenn die Aktion optional ist.
+
+---
+
 ## Pipeline-Stolperfallen
 
 ### `original_path` vs. `target_path`

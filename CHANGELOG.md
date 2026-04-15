@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.29.10 — 2026-04-15
+
+### Stabilität & Logging
+
+- **Batch-Clean in 50er-Batches mit Zwischen-Commits.**
+  Verhindert Session-Bloat, Immich-API-Timeouts und HTTP-Timeouts
+  bei 2500+ Gruppen. Fehler pro Gruppe gefangen — ein Fehler bricht
+  nicht die restlichen Gruppen ab.
+
+- **Vollständiges Logging bei Duplikat-Auflösung.**
+  Jede destruktive Aktion (Immich-Asset löschen, Datei löschen,
+  Same-Asset-Guard) wird VOR und NACH der Aktion geloggt.
+  Bei Server-Absturz ist ersichtlich was passiert ist.
+
+- **AGENTS.md: Logging-Pflicht verankert.**
+  Neue Sektion "Logging-Pflicht: Vor UND Nach jeder destruktiven
+  Aktion" — gilt für alle zukünftigen Änderungen.
+
 ## v2.29.9 — 2026-04-15
 
 ### Kritischer Bugfix
