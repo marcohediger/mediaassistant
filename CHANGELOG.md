@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.30.0 — 2026-04-15
+
+### Breaking Change
+
+- **quality_swap komplett entfernt.** IA-02 erkennt Duplikate und
+  verschiebt sie in den Duplikat-Ordner. Kein automatischer
+  Rollentausch mehr. Der User entscheidet im Duplikat-Review
+  (Keep / Batch-Clean) welche Datei behalten wird. Die Qualitäts-
+  Bewertung bleibt im UI (Badge) und im Batch-Clean (automatische
+  Auswahl der besten Datei).
+
+  Entfernt: `_swap_duplicate()`, `_is_user_kept()`, alle quality_swap
+  Aufrufe in IA-02. Entfernt 128 Zeilen fehleranfälligen Code der
+  die Ursache war für: Orphan-Assets in Immich, Datenverlust bei
+  Keep, Inbox-Dateien die nicht gelöscht wurden, Doppel-Scans im
+  Filewatcher.
+
+### Bugfixes (v2.29.8–v2.29.12)
+
+- Fix: Datenverlust bei Duplikat-Auflösung (Shared-Asset-Guard)
+- Fix: Poller lädt eigene MA-Uploads nicht mehr herunter (deviceId-Filter)
+- Fix: Batch-Clean "database is locked" (Logs nach Commit)
+- Fix: Batch-Clean Progressbar mit Background-Task + Auto-Detect
+- Fix: Unified `_resolve_duplicate_group()` (keine duplizierte Logik)
+- Fix: Vollständiges Logging bei Duplikat-Auflösung
+
+### Tests
+
+- E2E User-Story Release-Gate: 47/47 PASS
+- `test_immich_dedup.py`: Shared-Asset, Asset-ID Transfer, Analysis-Kopie
+
 ## v2.29.12 — 2026-04-15
 
 ### Bugfix
