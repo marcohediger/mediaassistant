@@ -173,16 +173,6 @@ async def _file_exists(job_entry) -> bool:
     return path and os.path.exists(path)
 
 
-def _is_user_kept(job_entry) -> bool:
-    """Check if a job was explicitly kept by the user via duplicate review.
-
-    Such jobs must not be demoted by quality_swap — the user decision
-    takes priority over automatic quality comparison.
-    """
-    sr = job_entry.step_result or {}
-    ia02 = sr.get("IA-02") or {}
-    return bool(ia02.get("user_kept"))
-
 
 async def execute(job, session) -> dict:
     """IA-02: Duplikat-Erkennung — SHA256 (exakt) + pHash (ähnlich)."""
@@ -211,18 +201,6 @@ async def execute(job, session) -> dict:
         candidates = result.scalars().all()
         for existing in candidates:
             if await _file_exists(existing):
-                # Quality-aware: if the current file is better quality
-                # than the existing one, swap roles — demote the existing
-                # to duplicate and let the current continue as original.
-                # Never swap a user-kept job (explicit review decision).
-                if _quality_score(job) > _quality_score(existing) and not _is_user_kept(existing):
-                    await _swap_duplicate(job, session, existing, "exact", 0)
-                    return {
-                        "status": "ok",
-                        "quality_swap": True,
-                        "demoted_debug_key": existing.debug_key,
-                        "reason": "current file has better quality, swapped roles",
-                    }
                 folder_tags = await _handle_duplicate(job, session, existing, "exact", 0)
                 result = {
                     "status": "duplicate",
@@ -330,18 +308,6 @@ async def execute(job, session) -> dict:
                     # Load full Job object only for the match
                     candidate = await session.get(Job, row.id)
                     if candidate and await _file_exists(candidate):
-                        # Quality-aware: prefer the better file as original.
-                        # Never swap a user-kept job (explicit review decision).
-                        if _quality_score(job) > _quality_score(candidate) and not _is_user_kept(candidate):
-                            await _swap_duplicate(job, session, candidate, "similar", distance)
-                            found_duplicate = {
-                                "status": "ok",
-                                "quality_swap": True,
-                                "demoted_debug_key": candidate.debug_key,
-                                "phash_distance": distance,
-                                "reason": "current file has better quality, swapped roles",
-                            }
-                            break
                         folder_tags = await _handle_duplicate(job, session, candidate, "similar", distance)
                         found_duplicate = {
                             "status": "duplicate",
@@ -449,100 +415,6 @@ async def execute_video_phash(job, session) -> dict | None:
 
     return None
 
-
-async def _swap_duplicate(job, session, existing, match_type: str, distance: int):
-    """The current job has better quality than the existing one.
-
-    Demote the existing job to duplicate (move its file to duplicates/),
-    and let the current job continue through the pipeline as the new
-    original. The existing job's step_result['IA-02'] is updated to
-    reference the current job as the new original.
-    """
-    existing_path = existing.target_path or existing.original_path
-
-    if match_type == "exact":
-        desc_existing = f"Demoted: better quality duplicate arrived ({job.debug_key})"
-    else:
-        desc_existing = (f"Demoted: better quality similar file arrived "
-                         f"({job.debug_key}, pHash distance: {distance})")
-
-    cur_score = _quality_score(job)
-    ext_score = _quality_score(existing)
-
-    # Dry-run: only log, don't move
-    if job.dry_run:
-        await log_info(
-            "IA-02",
-            f"{job.debug_key} quality swap: keeping current "
-            f"(score={cur_score}) over {existing.debug_key} "
-            f"(score={ext_score})",
-        )
-        return
-
-    # Move the existing job's file to duplicates/
-    from file_operations import get_duplicate_dir, resolve_filename_conflict
-    dup_dir = await get_duplicate_dir()
-
-    # Only move if the existing file is a local path (not immich:)
-    if existing_path and not existing_path.startswith("immich:") and os.path.exists(existing_path):
-        filename = os.path.basename(existing_path)
-        dup_path = resolve_filename_conflict(dup_dir, filename)
-        await asyncio.to_thread(safe_move, existing_path, dup_path, existing.debug_key)
-        existing.target_path = dup_path
-    elif existing_path and existing_path.startswith("immich:"):
-        # Transfer the Immich asset to the winner so IA-08 does
-        # Upload→Copy→Delete (replace) instead of a bare new upload.
-        # This ensures only ONE asset exists in Immich — no orphans.
-        old_asset_id = existing.immich_asset_id or existing_path[7:]
-        if old_asset_id:
-            job.immich_asset_id = old_asset_id
-            job.use_immich = True
-            if existing.immich_user_id and not job.immich_user_id:
-                job.immich_user_id = existing.immich_user_id
-        dup_path = existing_path
-
-    # Write log for the demoted file
-    if existing.target_path and not existing.target_path.startswith("immich:"):
-        log_lines = [
-            f"Debug-Key: {existing.debug_key}",
-            f"File: {existing.filename}",
-            f"Demoted by: {job.debug_key} (better quality)",
-            f"Quality scores: demoted={ext_score} winner={cur_score}",
-            f"Match type: {match_type}",
-            f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        ]
-        log_path = existing.target_path + ".log"
-        await asyncio.to_thread(_write_log, log_path, "\n".join(log_lines))
-
-    # Update the existing job's status and step_result
-    existing.status = "duplicate"
-    existing.error_message = None
-    # Preserve folder tags before the file moves (path breaks after move)
-    folder_tags = _extract_folder_tags(existing)
-    sr = existing.step_result or {}
-    sr["IA-02"] = {
-        "status": "duplicate",
-        "match_type": match_type,
-        "original_debug_key": job.debug_key,
-        "original_path": job.original_path,
-        "quality_swap": True,
-        "quality_score_self": list(ext_score),
-        "quality_score_winner": list(cur_score),
-    }
-    if match_type == "similar" and distance > 0:
-        sr["IA-02"]["phash_distance"] = distance
-    if folder_tags:
-        sr["IA-02"]["folder_tags"] = folder_tags
-    existing.step_result = sr
-    from sqlalchemy.orm.attributes import flag_modified
-    flag_modified(existing, "step_result")
-    await session.commit()
-
-    await log_info(
-        "IA-02",
-        f"{existing.debug_key} {desc_existing}",
-        f"Scores: demoted={ext_score} winner={cur_score}",
-    )
 
 
 def _extract_folder_tags(job) -> list[str]:
