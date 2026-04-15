@@ -1,5 +1,7 @@
 # MediaAssistant
 
+![MediaAssistant Logo](logos/mediaassistant_logo.svg)
+
 Drop your photos and videos into a folder. MediaAssistant takes care of the rest: metadata extraction, AI-powered tagging, duplicate detection, geocoding, and automatic sorting into your library or Immich.
 
 ![Dashboard](docs/screenshots/Screenshot%202026-04-15%20133554.png)
@@ -112,8 +114,6 @@ MediaAssistant works bidirectionally with Immich:
 
 ## Duplicate Review
 
-![Duplicate Review](docs/screenshots/Screenshot%202026-04-15%20150132.png)
-
 Duplicates are detected automatically and placed in a review queue:
 
 - Side-by-side comparison with thumbnails, EXIF data, keywords, and quality scores
@@ -175,8 +175,6 @@ Target paths with placeholders, configurable per category:
 - **Theme:** Dark and Light mode
 
 ## Authentication (SSO)
-
-![SSO Login](docs/screenshots/Screenshot%202026-04-15%20135538.png)
 
 OIDC/OAuth2 authentication via Authentik, Keycloak, Authelia, or any OIDC-compliant provider.
 
