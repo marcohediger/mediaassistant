@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.30.2 — 2026-04-15
+
+### Tests
+
+- **E2E Duplikat-Tests erweitert (US-11 bis US-14):**
+  US-11 pHash-Duplikat, US-12 Keep mit Folder-Tags Merge,
+  US-13 Batch-Clean Alle, US-14 Batch-Clean Page.
+  Total: 61 E2E-Tests. Alle Test-Suites: 284/285 PASS.
+- **Test-Runner crasht nicht mehr bei einzelnem Test-Fehler.**
+
 ## v2.30.1 — 2026-04-15
 
 ### Bereinigung

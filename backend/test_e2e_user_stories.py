@@ -715,6 +715,245 @@ async def test_us10_folder_tags_album():
 
 
 # ══════════════════════════════════════════════════════════════
+# US-11: pHash-Duplikat (gleiches Bild, verschiedene Kompression)
+# ══════════════════════════════════════════════════════════════
+async def test_us11_phash_duplicate():
+    print("\n-- US-11: pHash-Duplikat --")
+
+    from PIL import Image, ImageDraw
+
+    # Gleiches Bild, zwei Kompressionen → verschiedener SHA256, gleicher pHash
+    img = Image.new("RGB", (800, 600), (80, 120, 160))
+    draw = ImageDraw.Draw(img)
+    for i in range(8):
+        for j in range(6):
+            c = ((i * 30 + TS) % 256, (j * 50 + TS // 2) % 256, (i + j + TS // 3) % 256)
+            draw.rectangle([i * 100, j * 100, (i + 1) * 100, (j + 1) * 100], fill=c)
+    draw.text((100, 200), f"US11-{TS}", fill=(255, 255, 255))
+
+    path_a = f"/inbox/__e2e_us11a_{TS}.jpg"
+    path_b = f"/inbox/__e2e_us11b_{TS}.jpg"
+    img.save(path_a, "JPEG", quality=85)
+    img.save(path_b, "JPEG", quality=92)
+    CLEANUP_FILES.extend([path_a, path_b])
+
+    job1_id = await create_and_run_job(f"__e2e_us11a_{TS}.jpg", path_a, use_immich=True)
+    job2_id = await create_and_run_job(f"__e2e_us11b_{TS}.jpg", path_b, use_immich=True)
+
+    job1 = await get_job(job1_id)
+    job2 = await get_job(job2_id)
+
+    if job1.immich_asset_id:
+        CLEANUP_ASSETS.append(job1.immich_asset_id)
+    if job2.immich_asset_id and job2.immich_asset_id != job1.immich_asset_id:
+        CLEANUP_ASSETS.append(job2.immich_asset_id)
+
+    check("US11-01 Erster Job done", job1.status == "done")
+    check("US11-02 Zweiter Job duplicate (pHash)", job2.status == "duplicate",
+          f"status={job2.status}")
+
+    sr2 = (job2.step_result or {}).get("IA-02", {})
+    check("US11-03 Match-Type similar", sr2.get("match_type") == "similar",
+          f"match={sr2.get('match_type')}")
+    check("US11-04 Kein quality_swap", sr2.get("quality_swap") is None,
+          f"swap={sr2.get('quality_swap')}")
+    check("US11-05 Nur 1 Asset in Immich",
+          job2.immich_asset_id is None,
+          f"job2 asset={job2.immich_asset_id}")
+
+    if job1.immich_asset_id:
+        exists = await asset_exists(job1.immich_asset_id)
+        check("US11-06 Original-Asset existiert in Immich", exists)
+
+
+# ══════════════════════════════════════════════════════════════
+# US-12: Duplikat Keep mit Folder-Tags + Keywords Merge
+# ══════════════════════════════════════════════════════════════
+async def test_us12_keep_with_tag_merge():
+    print("\n-- US-12: Keep mit Folder-Tags Merge --")
+
+    from config import config_manager
+    await config_manager.set_module_enabled("ordner_tags", True)
+
+    # Zwei Ordner mit verschiedenen Folder-Tags
+    folder_a = f"/inbox/Ferien_US12_{TS}"
+    folder_b = f"/inbox/Backup_US12_{TS}"
+    os.makedirs(folder_a, exist_ok=True)
+    os.makedirs(folder_b, exist_ok=True)
+    CLEANUP_FILES.extend([folder_a, folder_b])
+
+    path_a = f"{folder_a}/__e2e_us12_{TS}.jpg"
+    path_b = f"{folder_b}/__e2e_us12_{TS}.jpg"
+
+    # Gleiches Bild, exakte Kopie (SHA256 Match)
+    make_unique_jpg(path_a)
+    shutil.copy2(path_a, path_b)
+    CLEANUP_FILES.extend([path_a, path_b])
+
+    job1_id = await create_and_run_job(
+        f"__e2e_us12_{TS}.jpg", path_a, use_immich=True,
+        source_inbox_path="/inbox", folder_tags=True)
+    job2_id = await create_and_run_job(
+        f"__e2e_us12_{TS}.jpg", path_b, use_immich=True,
+        source_inbox_path="/inbox", folder_tags=True)
+
+    job1 = await get_job(job1_id)
+    job2 = await get_job(job2_id)
+
+    if job1.immich_asset_id:
+        CLEANUP_ASSETS.append(job1.immich_asset_id)
+
+    check("US12-01 Job1 done", job1.status == "done")
+    check("US12-02 Job2 duplicate", job2.status == "duplicate")
+
+    if job2.status == "duplicate":
+        from database import async_session
+        from models import Job
+        from sqlalchemy import select
+        from routers.duplicates import _resolve_duplicate_group
+
+        async with async_session() as session:
+            r1 = await session.execute(select(Job).where(Job.id == job1_id))
+            r2 = await session.execute(select(Job).where(Job.id == job2_id))
+            j1, j2 = r1.scalar(), r2.scalar()
+
+            merge_notes, _, _, flush = await _resolve_duplicate_group(
+                session, j1, [j1, j2],
+                source="e2e-us12", user_kept=True,
+            )
+            await session.commit()
+        await flush()
+
+        check("US12-03 Folder-Tags gemergt",
+              any("folder_tags" in n for n in merge_notes),
+              f"merged={merge_notes}")
+
+        if job1.immich_asset_id:
+            tags = await get_immich_tags(job1.immich_asset_id)
+            folder_a_name = f"Ferien_US12_{TS}"
+            folder_b_name = f"Backup_US12_{TS}"
+            check("US12-04 FolderA-Tag in Immich",
+                  any(folder_a_name in t for t in tags), f"tags={tags}")
+            check("US12-05 FolderB-Tag in Immich (gemergt)",
+                  any(folder_b_name in t for t in tags), f"tags={tags}")
+
+    # Cleanup
+    for d in [folder_a, folder_b]:
+        if os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+
+
+# ══════════════════════════════════════════════════════════════
+# US-13: Batch-Clean Alle (mehrere Gruppen)
+# ══════════════════════════════════════════════════════════════
+async def test_us13_batch_clean_all():
+    print("\n-- US-13: Batch-Clean Alle (mehrere Gruppen) --")
+
+    from pipeline.step_ia02_duplicates import _quality_score
+    from routers.duplicates import _resolve_duplicate_group, _build_group_index
+
+    # 3 Duplikat-Paare erstellen
+    pairs = []
+    for i in range(3):
+        path_a = f"/inbox/__e2e_us13_{i}a_{TS}.jpg"
+        path_b = f"/inbox/__e2e_us13_{i}b_{TS}.jpg"
+        make_unique_jpg(path_a)
+        shutil.copy2(path_a, path_b)
+        CLEANUP_FILES.extend([path_a, path_b])
+
+        j1_id = await create_and_run_job(f"__e2e_us13_{i}a_{TS}.jpg", path_a, use_immich=True)
+        j2_id = await create_and_run_job(f"__e2e_us13_{i}b_{TS}.jpg", path_b, use_immich=True)
+        j1 = await get_job(j1_id)
+        j2 = await get_job(j2_id)
+        if j1.immich_asset_id:
+            CLEANUP_ASSETS.append(j1.immich_asset_id)
+        if j2.immich_asset_id and j2.immich_asset_id != (j1.immich_asset_id or ""):
+            CLEANUP_ASSETS.append(j2.immich_asset_id)
+        pairs.append((j1_id, j2_id, j1.status, j2.status))
+
+    dup_count = sum(1 for _, _, s1, s2 in pairs if s2 == "duplicate")
+    check(f"US13-01 {dup_count}/3 Paare als Duplikat erkannt", dup_count == 3,
+          f"statuses={[(s1,s2) for _,_,s1,s2 in pairs]}")
+
+    # Batch-Clean via _resolve_duplicate_group (wie der Endpoint)
+    from database import async_session
+    from models import Job
+    from sqlalchemy import select
+
+    total_kept = 0
+    total_deleted = 0
+    for j1_id, j2_id, _, _ in pairs:
+        async with async_session() as session:
+            r1 = await session.execute(select(Job).where(Job.id == j1_id))
+            r2 = await session.execute(select(Job).where(Job.id == j2_id))
+            j1, j2 = r1.scalar(), r2.scalar()
+            if j1 and j2 and (j1.status == "duplicate" or j2.status == "duplicate"):
+                members = [j1, j2]
+                best = max(members, key=lambda j: _quality_score(j))
+                _, d, _, flush = await _resolve_duplicate_group(
+                    session, best, members, source="e2e-us13-batch")
+                await session.commit()
+                await flush()
+                total_kept += 1
+                total_deleted += d
+
+    check("US13-02 3 Gruppen aufgeloest", total_kept == 3, f"kept={total_kept}")
+    check("US13-03 3 Donors geloescht", total_deleted == 3, f"deleted={total_deleted}")
+
+    # Assets pruefen
+    surviving = 0
+    for j1_id, _, _, _ in pairs:
+        j = await get_job(j1_id)
+        if j.immich_asset_id and await asset_exists(j.immich_asset_id):
+            surviving += 1
+    check("US13-04 3 Assets in Immich", surviving == 3, f"surviving={surviving}")
+
+
+# ══════════════════════════════════════════════════════════════
+# US-14: Batch-Clean diese Seite
+# ══════════════════════════════════════════════════════════════
+async def test_us14_batch_clean_page():
+    print("\n-- US-14: Batch-Clean diese Seite --")
+
+    from routers.duplicates import _build_group_index, _run_batch_clean, _batch_progress
+
+    # 2 Duplikat-Paare erstellen
+    for i in range(2):
+        path_a = f"/inbox/__e2e_us14_{i}a_{TS}.jpg"
+        path_b = f"/inbox/__e2e_us14_{i}b_{TS}.jpg"
+        make_unique_jpg(path_a)
+        shutil.copy2(path_a, path_b)
+        CLEANUP_FILES.extend([path_a, path_b])
+
+        j1_id = await create_and_run_job(f"__e2e_us14_{i}a_{TS}.jpg", path_a, use_immich=True)
+        j2_id = await create_and_run_job(f"__e2e_us14_{i}b_{TS}.jpg", path_b, use_immich=True)
+        j1 = await get_job(j1_id)
+        if j1.immich_asset_id:
+            CLEANUP_ASSETS.append(j1.immich_asset_id)
+
+    # Count duplicates before
+    from database import async_session
+    from models import Job
+    from sqlalchemy import select, func
+    async with async_session() as s:
+        r = await s.execute(select(func.count()).where(Job.status == "duplicate"))
+        before = r.scalar()
+
+    # Run batch-clean for page 1 (max 10 groups)
+    await _run_batch_clean(1)
+
+    async with async_session() as s:
+        r = await s.execute(select(func.count()).where(Job.status == "duplicate"))
+        after = r.scalar()
+
+    cleaned = before - after
+    check("US14-01 Batch-Clean Page hat Duplikate aufgeloest",
+          cleaned > 0, f"before={before} after={after} cleaned={cleaned}")
+    check("US14-02 Progress done",
+          _batch_progress["done"] is True, f"progress={_batch_progress}")
+
+
+# ══════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════
 async def main():
@@ -735,17 +974,29 @@ async def main():
     was_enabled = await config_manager.is_module_enabled("filewatcher")
     await config_manager.set_module_enabled("filewatcher", False)
 
+    tests = [
+        test_us1_inbox_to_immich,
+        test_us2_inbox_to_local,
+        test_us3_poller_handy_upload,
+        test_us4_poller_skips_own,
+        test_us5_duplicate_keep,
+        test_us6_shared_asset_keep,
+        test_us7_batch_clean,
+        test_us8_not_duplicate,
+        test_us9_retry_after_error,
+        test_us10_folder_tags_album,
+        test_us11_phash_duplicate,
+        test_us12_keep_with_tag_merge,
+        test_us13_batch_clean_all,
+        test_us14_batch_clean_page,
+    ]
     try:
-        await test_us1_inbox_to_immich()
-        await test_us2_inbox_to_local()
-        await test_us3_poller_handy_upload()
-        await test_us4_poller_skips_own()
-        await test_us5_duplicate_keep()
-        await test_us6_shared_asset_keep()
-        await test_us7_batch_clean()
-        await test_us8_not_duplicate()
-        await test_us9_retry_after_error()
-        await test_us10_folder_tags_album()
+        for test_fn in tests:
+            try:
+                await test_fn()
+            except Exception as exc:
+                FAIL.append(f"{test_fn.__name__} CRASHED: {exc}")
+                print(f"  FAIL  {test_fn.__name__} CRASHED: {exc}")
     finally:
         await config_manager.set_module_enabled("filewatcher", was_enabled)
         await cleanup()
