@@ -219,6 +219,45 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_testplan_final.py` | 68 Asserts: API/UI Smoke-Tests | `docker exec mediaassistant-dev python /app/test_testplan_final.py` |
 | `backend/test_ai_backends.py` | AI-Backend-Loadbalancer | `docker exec mediaassistant-dev python /app/test_ai_backends.py` |
 
+### Pflicht-E2E-Test: Release-Gate
+
+> **Kein Release ohne grünen E2E-Test.** Unit-Tests allein reichen
+> NICHT — die gravierendsten Bugs (v2.29.7 Datenverlust, Poller-
+> Phantom-Duplikate) entstanden im Zusammenspiel von Features, nie
+> in einzelnen Funktionen.
+
+Das Test-Skript `test_e2e_user_stories.py` deckt alle User-Stories
+end-to-end ab. Jede Story schickt eine **echte Datei** durch den
+**ganzen Flow** gegen das Dev-System (echtes Immich, echte Pipeline,
+echte DB) und verifiziert das Endergebnis:
+
+| User-Story | Flow |
+|---|---|
+| **US-1: Inbox → Immich** | Datei in Inbox → Pipeline → Upload zu Immich → Asset existiert + Tags korrekt |
+| **US-2: Inbox → Lokale Ablage** | Datei in Inbox → Pipeline → Datei in Library → EXIF-Tags geschrieben |
+| **US-3: Immich-Poller** | Asset in Immich (vom Handy) → Poller erkennt → Pipeline → Tags in Immich |
+| **US-4: Poller ignoriert eigene** | MA lädt Datei hoch → Poller überspringt (deviceId-Filter) → kein Duplikat |
+| **US-5: Duplikat Keep** | Datei 2× einlesen → Duplikat erkannt → "Behalten" → 1 Asset in Immich, kein Verlust |
+| **US-6: Duplikat Keep (Shared-Asset)** | Inbox + Poller = gleiche asset_id → "Behalten" → Asset bleibt in Immich |
+| **US-7: Batch-Clean** | 2 Duplikate → Batch-Clean → Best bleibt, Donor weg, Asset in Immich OK |
+| **US-8: Kein Duplikat** | "Kein Duplikat" → volle Pipeline → Upload zu Immich → Asset + Tags korrekt |
+| **US-9: Retry nach Fehler** | Pipeline-Fehler → Retry → Datei landet korrekt in Immich |
+| **US-10: Folder-Tags → Album** | Datei in Subfolder → Album in Immich erstellt → Asset zugeordnet |
+
+**Pflicht vor jedem Release:**
+```bash
+docker exec mediaassistant-dev python /app/test_e2e_user_stories.py
+```
+Alle Stories müssen PASS sein. Ein FAIL blockiert den Release.
+
+**Pflicht bei neuen Features/Bugfixes:**
+- Wenn ein neues Feature eine User-Story betrifft → bestehenden
+  E2E-Test erweitern oder neue Story hinzufügen.
+- Wenn ein Bug im Live-System gefunden wird → **zuerst** prüfen
+  ob eine E2E-Story diesen Fall abdeckt. Wenn nicht: Story ergänzen
+  und sicherstellen dass sie den Bug **rot** zeigt, bevor der Fix
+  geschrieben wird.
+
 ### Vor einem Bug-Fix: Reproducer auf dev bauen
 
 Wenn ein Live-Bug gemeldet wird, ist die Pflicht-Reihenfolge:
@@ -226,11 +265,14 @@ Wenn ein Live-Bug gemeldet wird, ist die Pflicht-Reihenfolge:
 1. Live-DB-Kopie nach `dataLiveSystem/mediaassistant.db` ziehen, mit
    sqlite analysieren (`python3 -c "import sqlite3; …"`). Verstehe
    den exakten Job-Verlauf.
-2. Reproducer auf dev schreiben, der den Bug rot macht. Ohne Reproducer
+2. **Prüfen ob eine E2E-User-Story den Fall abdeckt.** Wenn nicht:
+   Story ergänzen die den Bug rot macht.
+3. Reproducer auf dev schreiben, der den Bug rot macht. Ohne Reproducer
    kein Fix. Ohne rotem Reproducer kein Fix.
-3. Code fixen, bis der Reproducer grün ist.
-4. Bestehende Tests ALLE laufen lassen — keine Regressionen erlaubt.
-5. Erst dann Version bumpen + commit + push.
+4. Code fixen, bis der Reproducer grün ist.
+5. **E2E-Test + alle bestehenden Tests laufen lassen** — keine
+   Regressionen erlaubt.
+6. Erst dann Version bumpen + commit + push.
 
 Siehe auch [`TESTPLAN.md` Sektion 14](TESTPLAN.md#14-test-matrix--vollständige-coverage-karte)
 für die vollständig kartografierte Test-Matrix aller Pipeline-
@@ -247,6 +289,12 @@ Zahlen** — keine personenbezogenen Daten, keine echten Datei-Inhalte.
 - **Kein pytest.** Tests sind eigenständige `async def main()`-Skripte
   mit eigenem `report(name, ok, detail)`-Helper. Stil siehe
   `test_duplicate_fix.py` oder `test_retry_file_lifecycle.py`.
+- **E2E first, Unit second.** Jeder neue Code-Pfad braucht zuerst
+  eine E2E-User-Story die den vollen Flow testet. Unit-Tests sind
+  Ergänzung, nicht Ersatz.
+- **Test-Design vom Live-System her.** Bevor ein Test geschrieben
+  wird: Live-DB abfragen, welche Daten-Konstellationen es wirklich
+  gibt. Daraus Test-Szenarien ableiten — nicht aus dem Code.
 - **Echte Datei-Operationen, echte HTTP-Calls, echte DB.** Mocks nur
   wenn ein Service real nicht erreichbar ist (z.B. SMTP).
 - **Cleanup im finally-Block.** Tests müssen idempotent sein und nach
