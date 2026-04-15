@@ -156,17 +156,10 @@
     "delete_local": "Lokale Kopie löschen",
     "not_duplicate": "Kein Duplikat",
     "not_duplicate_confirm": "{name} ist kein Duplikat? Die Datei wird erneut verarbeitet.",
-    "merge_metadata": "Metadaten übernehmen",
-    "merge_confirm": "Fehlende Metadaten von {source} auf {target} übertragen?",
-    "merge_success": "Metadaten übernommen",
-    "merge_nothing": "Keine fehlenden Metadaten gefunden",
-    "merge_error": "Fehler beim Übernehmen der Metadaten",
     "has_more_metadata": "Mehr Metadaten",
     "folder_album_title": "Ordner-Tag (Album aus Inbox-Ordnerstruktur)",
     "load_more": "Weitere Gruppen laden",
-    "loading": "Lade...",
-    "merge_metadata_all": "Alle Metadaten zusammenführen",
-    "merge_all_confirm": "Fehlende Metadaten von {n} Dateien auf {target} übertragen?"
+    "loading": "Lade..."
   },
   "settings": {
     "title": "Einstellungen",

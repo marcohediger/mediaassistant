@@ -178,20 +178,7 @@
                 {% endfor %}
                 {% endif %}
 
-                {% if merge_ns.any_can_merge %}
-                    {# Single "merge all" button when multiple sources, individual buttons otherwise #}
-                    {% if merge_ns.source_keys | length == 1 %}
-                    <button type="button" class="btn btn-small btn-merge"
-                            onclick="mergeMetadata('{{ merge_ns.source_keys[0] }}', '{{ member.debug_key }}', '{{ merge_ns.source_names[0] }}', '{{ member.filename }}')">
-                        {{ t.duplicates.merge_metadata }} ← {{ merge_ns.source_names[0] }}
-                    </button>
-                    {% else %}
-                    <button type="button" class="btn btn-small btn-merge"
-                            onclick="mergeMetadataAll('{{ merge_ns.source_keys | join(',') }}', '{{ member.debug_key }}', '{{ member.filename }}')">
-                        {{ t.duplicates.merge_metadata_all }} ({{ merge_ns.source_keys | length }})
-                    </button>
-                    {% endif %}
-                {% endif %}
+                {# merge-metadata buttons removed in v2.30 — merge happens automatically via keep/batch-clean #}
 
                 {% if not member.is_original %}
                 <form method="post" action="/api/duplicates/not-duplicate" class="inline-form"

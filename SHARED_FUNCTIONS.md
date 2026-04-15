@@ -304,7 +304,6 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | `batch_clean_quality` | Batch-Clean — Wrapper: Qualität vergleichen, `_resolve_duplicate_group()` pro Gruppe. |
 | `not_duplicate` | "Kein Duplikat" — Re-Pipeline mit skip. |
 | `delete_duplicate` | Einzelnes Duplikat löschen. |
-| `merge_metadata` | Metadaten zusammenführen. |
 | `re_evaluate_quality` | Qualitäts-Neuberechnung. |
 | `duplicates_page` | Duplikat-Seite (HTML). |
 | `api_duplicate_groups` | Paginierte Gruppen-API. |
