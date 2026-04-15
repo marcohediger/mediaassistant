@@ -138,7 +138,7 @@ async def test_d6_shared_asset_keep():
         await session.refresh(poller_job)
 
         # 3) Keep inbox_job (the "done" one), delete poller_job
-        merge_notes, deleted, errors = await _resolve_duplicate_group(
+        merge_notes, deleted, errors, _flush = await _resolve_duplicate_group(
             session, inbox_job, [inbox_job, poller_job],
             source="test-d6",
             user_kept=True,
@@ -241,7 +241,7 @@ async def test_d7_shared_asset_batch_clean():
         members = [done_job, dup_job]
         best = max(members, key=lambda j: _quality_score(j))
 
-        _, deleted, _ = await _resolve_duplicate_group(
+        _, deleted, _, _flush = await _resolve_duplicate_group(
             session, best, members,
             source="test-d7-batch",
         )
@@ -315,7 +315,7 @@ async def test_d9_asset_id_transfer():
         await session.refresh(donor)
         await session.refresh(best)
 
-        await _resolve_duplicate_group(
+        _, _, _, _flush = await _resolve_duplicate_group(
             session, best, [best, donor],
             source="test-d9",
         )
@@ -396,7 +396,7 @@ async def test_d11_analysis_copy():
         await session.refresh(donor)
         await session.refresh(best)
 
-        await _resolve_duplicate_group(
+        _, _, _, _flush = await _resolve_duplicate_group(
             session, best, [best, donor],
             source="test-d11",
         )

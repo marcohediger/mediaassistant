@@ -814,10 +814,11 @@ async def _resolve_duplicate_group(
         kept_immich_id = (best.target_path or "")[7:]
 
     # ── 3. Delete donors ────────────────────────────────────────
-    await log_info("duplicates",
-                   f"{source}: Start Duplikat-Auflösung",
-                   f"kept={best.debug_key} asset={kept_immich_id or 'local'} "
-                   f"donors={[d.debug_key for d in donors]}")
+    # NOTE: no log_info() calls inside this section — they open a
+    # separate DB session which causes "database is locked" when the
+    # caller's session has an open write lock. All log messages are
+    # collected and written after the caller commits.
+    _pending_logs: list[tuple[str, str]] = []
 
     deleted = 0
     errors = 0
@@ -832,26 +833,25 @@ async def _resolve_duplicate_group(
                 continue  # Don't clear job if file couldn't be deleted
 
         # Immich asset — guard: never delete the same asset as the kept job
-        # (race-condition duplicates from poller re-downloading a MA-uploaded asset)
         donor_asset = donor_immich_map.get(donor.id, "")
         if donor_asset and donor_asset == kept_immich_id:
-            await log_info("duplicates",
-                           f"{donor.debug_key} Immich-Asset übersprungen (gleich wie kept)",
-                           f"asset={donor_asset}")
+            _pending_logs.append(
+                (f"{donor.debug_key} Immich-Asset übersprungen (gleich wie kept)",
+                 f"asset={donor_asset}"))
         elif donor_asset:
-            await log_info("duplicates",
-                           f"{donor.debug_key} Immich-Asset wird gelöscht",
-                           f"asset={donor_asset}, kept={best.debug_key}")
+            _pending_logs.append(
+                (f"{donor.debug_key} Immich-Asset wird gelöscht",
+                 f"asset={donor_asset}, kept={best.debug_key}"))
             try:
                 from immich_client import delete_asset
                 await delete_asset(donor_asset)
-                await log_info("duplicates",
-                               f"{donor.debug_key} Immich-Asset gelöscht OK",
-                               f"asset={donor_asset}")
+                _pending_logs.append(
+                    (f"{donor.debug_key} Immich-Asset gelöscht OK",
+                     f"asset={donor_asset}"))
             except Exception as exc:
-                await log_info("duplicates",
-                               f"{donor.debug_key} Immich-Asset Löschung fehlgeschlagen",
-                               f"asset={donor_asset}, error={exc}")
+                _pending_logs.append(
+                    (f"{donor.debug_key} Immich-Asset Löschung fehlgeschlagen",
+                     f"asset={donor_asset}, error={exc}"))
 
         # Clear donor job
         if donor.status == "duplicate":
@@ -955,13 +955,23 @@ async def _resolve_duplicate_group(
         best.status = "done"
         best.error_message = None
 
-    await log_info("duplicates",
-                   f"{source}: kept={best.debug_key} asset={best.immich_asset_id or 'local'} "
-                   f"deleted={deleted} errors={errors}",
-                   f"donors={[d.debug_key for d in donors]}" +
-                   (f" merged={merge_notes}" if merge_notes else ""))
+    # Store pending logs on the function return — caller writes them
+    # AFTER session.commit() to avoid "database is locked".
+    async def flush_logs():
+        try:
+            await log_info("duplicates",
+                           f"{source}: Start Duplikat-Auflösung",
+                           f"kept={best.debug_key} asset={best.immich_asset_id or 'local'} "
+                           f"donors={[d.debug_key for d in donors]}")
+            for msg, detail in _pending_logs:
+                await log_info("duplicates", msg, detail)
+            await log_info("duplicates",
+                           f"{source}: kept={best.debug_key} deleted={deleted} errors={errors}",
+                           f"merged={merge_notes}" if merge_notes else "")
+        except Exception:
+            pass
 
-    return merge_notes, deleted, errors
+    return merge_notes, deleted, errors, flush_logs
 
 
 @router.post("/api/duplicates/keep")
@@ -1007,13 +1017,14 @@ async def keep_file(request: Request):
         if not kept_job:
             return RedirectResponse(url="/duplicates", status_code=303)
 
-        await _resolve_duplicate_group(
+        _, _, _, flush_logs = await _resolve_duplicate_group(
             session, kept_job, group_jobs,
             source="duplicate review",
             user_kept=True,
         )
         await session.commit()
 
+    await flush_logs()
     await log_info("duplicates", f"Review: Group {group_key}, kept: {keep_key}")
     return RedirectResponse(url="/duplicates", status_code=303)
 
@@ -1432,6 +1443,7 @@ async def _run_batch_clean(page: int):
         idx = 0
         for batch_start in range(0, len(safe_groups), BATCH_SIZE):
             batch = safe_groups[batch_start:batch_start + BATCH_SIZE]
+            batch_log_fns = []
 
             async with async_session() as session:
                 for g in batch:
@@ -1453,13 +1465,14 @@ async def _run_batch_clean(page: int):
                     best = max(member_jobs, key=lambda j: _quality_score(j))
 
                     try:
-                        _, d, e = await _resolve_duplicate_group(
+                        _, d, e, flush_fn = await _resolve_duplicate_group(
                             session, best, member_jobs,
                             source="batch-clean",
                         )
                         _batch_progress["kept"] += 1
                         _batch_progress["deleted"] += d
                         _batch_progress["errors"] += e
+                        batch_log_fns.append(flush_fn)
                     except Exception as exc:
                         logger.error("Batch-clean error for group %s: %s",
                                      g.get("original_key"), exc)
@@ -1469,6 +1482,10 @@ async def _run_batch_clean(page: int):
                     _batch_progress["current"] = idx
 
                 await session.commit()
+
+            # Write logs AFTER commit (avoids "database is locked")
+            for fn in batch_log_fns:
+                await fn()
 
         page_label = "all" if page == 0 else f"page {page}"
         summary = (f"Batch-Clean Quality ({page_label}): "

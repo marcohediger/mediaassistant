@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.29.12 — 2026-04-15
+
+### Bugfix
+
+- **Fix: Batch-Clean crashte mit "database is locked".**
+  `log_info()` öffnete eine separate DB-Session während die
+  Batch-Session einen Write-Lock hatte. Fix: Logs werden gesammelt
+  und erst NACH session.commit() geschrieben.
+
+- **Fix: Batch-Clean Progressbar überlebt Page-Reload.**
+  Auto-Detect bei Seitenlade prüft ob ein Batch-Clean läuft.
+
+- **uvicorn --reload im Dev-Container eingeschränkt** auf `.py`-Dateien
+  (excludes `data/`, `__pycache__/`).
+
 ## v2.29.11 — 2026-04-15
 
 ### Feature: Batch-Clean Fortschrittsanzeige
