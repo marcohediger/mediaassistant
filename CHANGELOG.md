@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.29.11 — 2026-04-15
+
+### Feature: Batch-Clean Fortschrittsanzeige
+
+- **Progressbar im UI:** Batch-Clean läuft als Background-Task mit
+  Live-Fortschritt ("42/2598 Gruppen verarbeitet, 40 behalten,
+  2 gelöscht, 0 Fehler"). Kein Browser-Timeout mehr.
+- **Poll-Endpoint:** `/api/duplicates/batch-clean-status` liefert
+  aktuellen Fortschritt (JSON).
+- **Auto-Reload:** Seite wird nach Abschluss automatisch neu geladen.
+
 ## v2.29.10 — 2026-04-15
 
 ### Stabilität & Logging

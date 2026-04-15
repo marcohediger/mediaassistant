@@ -1372,77 +1372,113 @@ async def re_evaluate_quality():
     return RedirectResponse(url="/duplicates", status_code=303)
 
 
+# Batch-clean progress tracking (in-memory, single instance)
+_batch_progress: dict = {"running": False, "kept": 0, "deleted": 0, "errors": 0,
+                         "total": 0, "current": 0, "done": False, "page": 0}
+
+
+@router.get("/api/duplicates/batch-clean-status")
+async def batch_clean_status():
+    """Poll endpoint for batch-clean progress."""
+    return JSONResponse(_batch_progress)
+
+
 @router.post("/api/duplicates/batch-clean-quality")
 async def batch_clean_quality(request: Request):
-    """Quality-aware batch clean: keep best quality per group, delete the rest.
+    """Quality-aware batch clean — runs as background task with progress tracking."""
+    global _batch_progress
 
-    Processes in batches of BATCH_SIZE groups with a commit after each
-    batch to avoid session bloat, Immich API timeouts, and HTTP request
-    timeouts when cleaning thousands of groups at once.
-    """
-    from pipeline.step_ia02_duplicates import _quality_score
+    if _batch_progress["running"]:
+        return JSONResponse({"error": "Batch-Clean läuft bereits"}, status_code=409)
 
     try:
         form = await request.form()
         page = int(form.get("page", 1))
     except (ValueError, Exception):
         page = 1
+
+    _batch_progress = {"running": True, "kept": 0, "deleted": 0, "errors": 0,
+                       "total": 0, "current": 0, "done": False, "page": page}
+
+    import asyncio
+    asyncio.create_task(_run_batch_clean(page))
+
+    return JSONResponse({"status": "started", "page": page})
+
+
+async def _run_batch_clean(page: int):
+    """Background task: process batch-clean with progress updates."""
+    global _batch_progress
+    from pipeline.step_ia02_duplicates import _quality_score
+
     per_page = 10
     BATCH_SIZE = 50
 
-    kept = 0
-    deleted = 0
-    errors = 0
+    try:
+        group_index, jobs_by_key = await _build_group_index()
 
-    group_index, jobs_by_key = await _build_group_index()
+        if page == 0:
+            page_groups = group_index
+        else:
+            start = (page - 1) * per_page
+            page_groups = group_index[start:start + per_page]
 
-    if page == 0:
-        page_groups = group_index
-    else:
-        start = (page - 1) * per_page
-        page_groups = group_index[start:start + per_page]
+        # Count safe groups for progress
+        safe_groups = [g for g in page_groups
+                       if g.get("safe_for_batch", g.get("all_exact"))]
+        _batch_progress["total"] = len(safe_groups)
 
-    # Process in batches with intermediate commits
-    for batch_start in range(0, len(page_groups), BATCH_SIZE):
-        batch = page_groups[batch_start:batch_start + BATCH_SIZE]
+        idx = 0
+        for batch_start in range(0, len(safe_groups), BATCH_SIZE):
+            batch = safe_groups[batch_start:batch_start + BATCH_SIZE]
 
-        async with async_session() as session:
-            for g in batch:
-                if not g.get("safe_for_batch", g.get("all_exact")):
-                    continue
+            async with async_session() as session:
+                for g in batch:
+                    member_jobs = []
+                    for key in g["member_keys"]:
+                        job = jobs_by_key.get(key)
+                        if job:
+                            result = await session.execute(
+                                select(Job).where(Job.id == job.id))
+                            fresh = result.scalar()
+                            if fresh:
+                                member_jobs.append(fresh)
 
-                member_jobs = []
-                for key in g["member_keys"]:
-                    job = jobs_by_key.get(key)
-                    if job:
-                        result = await session.execute(select(Job).where(Job.id == job.id))
-                        fresh = result.scalar()
-                        if fresh:
-                            member_jobs.append(fresh)
+                    if len(member_jobs) < 2:
+                        idx += 1
+                        _batch_progress["current"] = idx
+                        continue
 
-                if len(member_jobs) < 2:
-                    continue
+                    best = max(member_jobs, key=lambda j: _quality_score(j))
 
-                best = max(member_jobs, key=lambda j: _quality_score(j))
+                    try:
+                        _, d, e = await _resolve_duplicate_group(
+                            session, best, member_jobs,
+                            source="batch-clean",
+                        )
+                        _batch_progress["kept"] += 1
+                        _batch_progress["deleted"] += d
+                        _batch_progress["errors"] += e
+                    except Exception as exc:
+                        logger.error("Batch-clean error for group %s: %s",
+                                     g.get("original_key"), exc)
+                        _batch_progress["errors"] += 1
 
-                try:
-                    _, d, e = await _resolve_duplicate_group(
-                        session, best, member_jobs,
-                        source="batch-clean",
-                    )
-                    kept += 1
-                    deleted += d
-                    errors += e
-                except Exception as exc:
-                    logger.error("Batch-clean error for group %s: %s",
-                                 g.get("original_key"), exc)
-                    errors += 1
+                    idx += 1
+                    _batch_progress["current"] = idx
 
-            await session.commit()
+                await session.commit()
 
-    page_label = "all" if page == 0 else f"page {page}"
-    summary = (f"Batch-Clean Quality ({page_label}): "
-               f"{kept} groups, {deleted} deleted, {errors} errors")
-    await log_info("duplicates", summary)
-    redirect_url = "/duplicates" if page == 0 else f"/duplicates?page={page}"
-    return RedirectResponse(url=redirect_url, status_code=303)
+        page_label = "all" if page == 0 else f"page {page}"
+        summary = (f"Batch-Clean Quality ({page_label}): "
+                   f"{_batch_progress['kept']} groups, "
+                   f"{_batch_progress['deleted']} deleted, "
+                   f"{_batch_progress['errors']} errors")
+        await log_info("duplicates", summary)
+
+    except Exception as exc:
+        logger.error("Batch-clean crashed: %s", exc)
+        await log_info("duplicates", f"Batch-Clean abgestürzt: {exc}")
+    finally:
+        _batch_progress["done"] = True
+        _batch_progress["running"] = False
