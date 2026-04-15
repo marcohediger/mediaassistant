@@ -22,6 +22,7 @@
 | `test_retry_file_lifecycle.py` | `docker exec mediaassistant-dev python /app/test_retry_file_lifecycle.py` | Retry/Reprocess File-Lifecycle gegen echtes Dev-Immich (sidecar+direct, immich+file-storage, error+warning, missing-file, error-retry) |
 | `test_testplan_final.py` | `docker exec mediaassistant-dev python /app/test_testplan_final.py` | TESTPLAN.md Sektionen 1-12 (Formate, Web-UI, Filewatcher, Security, Performance, Edge Cases, Stress) |
 | `test_ai_backends.py` | `docker exec mediaassistant-dev python /app/test_ai_backends.py` | AI-Backend-Loadbalancer (Slot-Verteilung, Fallback) |
+| `test_immich_dedup.py` | `docker exec mediaassistant-dev python /app/test_immich_dedup.py` | Immich Duplikat-Safety: Shared-Asset Keep/Batch-Clean (D6/D7), Asset-ID Transfer (D9), Analysis-Kopie (D11), Poller deviceId-Filter (IM-11/12) |
 
 ## Lauf-Historie
 
@@ -44,6 +45,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `test_keep_flow.py` | – | – | – | – | – | – | 15/15 ✅ |
 | `test_v29_stress.py` | – | – | – | – | – | – | 41/41 ✅ |
 | `test_no_file_loss.py` | – | – | – | – | – | – | 19/20 ⚠️ |
+| `test_immich_dedup.py` | – | – | – | – | – | – | 18/18 ✅ |
 
 ### IA01 — IA-01 EXIF auslesen (26 Tests)
 

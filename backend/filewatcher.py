@@ -326,7 +326,11 @@ async def _poll_immich():
             await log_error("immich_poll", f"Failed for user {user_label}", str(e))
             continue
 
-        new_assets = [a for a in assets if a["id"] not in already_by_id]
+        new_assets = [
+            a for a in assets
+            if a["id"] not in already_by_id
+            and a.get("deviceId") != "MediaAssistant"
+        ]
         if not new_assets:
             continue
 

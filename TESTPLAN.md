@@ -15,6 +15,7 @@
 > docker exec mediaassistant-dev python /app/test_ftag_immich.py
 > docker exec mediaassistant-dev python /app/test_v29_stress.py
 > docker exec mediaassistant-dev python /app/test_no_file_loss.py
+> docker exec mediaassistant-dev python /app/test_immich_dedup.py
 > ```
 >
 > Test-Daten: Panasonic DMC-GF2 JPGs, DJI FC7203 JPGs, iPhone 12 Pro
@@ -256,6 +257,12 @@
 - **WEB-40b:** "Dieses behalten" injiziert IA-02=skipped (kein Re-Duplicate)
 - **WEB-41b:** pHash vergleicht nur innerhalb Medientyp (Bilder vs Bilder, Videos vs Videos)
 - **WEB-42b:** Quality-Score: Format > Dateigrösse(log) > Pixel > Metadaten > Original-Bias
+- **WEB-43:** "Dieses behalten" bei Shared-Asset-Gruppe (2 Jobs, gleiche immich_asset_id) → Asset bleibt in Immich erhalten, kein Datenverlust
+- **WEB-44:** Batch-Clean bei Shared-Asset-Gruppe → Asset bleibt in Immich erhalten, kein Datenverlust
+- **WEB-45:** "Dieses behalten" bei Gruppe mit unterschiedlichen immich_asset_ids → nur Donor-Asset wird gelöscht, Kept-Asset bleibt
+- **WEB-46:** "Dieses behalten" auf Immich-Duplicate (status=duplicate, hat immich_asset_id) → Asset-ID wird an kept Job transferiert
+- **WEB-47:** Batch-Clean: Donor-Hashes (file_hash, phash) werden gelöscht → kein falscher Match bei zukünftigen Imports
+- **WEB-48:** _resolve_duplicate_group: Analysis-Kopie (IA-03..06) vom Original → kein unnötiger AI-Re-Run
 
 ### Review (Manuelle Klassifikation)
 - **WEB-33:** Alle Jobs mit Status "review" angezeigt
@@ -315,6 +322,11 @@
 - **IM-08:** JPG nach Immich hochgeladen (mit GPS/Tags)
 - **IM-09:** Immich: Alle Tags korrekt zugewiesen (auch bereits existierende Tags, HTTP 400 Handling)
 - **IM-10:** Cross-Mode Duplikat: Dateiablage → Immich erkannt
+- **IM-11:** Poller: Assets mit `deviceId == "MediaAssistant"` werden übersprungen (kein Self-Download)
+- **IM-12:** Poller: Assets mit anderem `deviceId` (z.B. Handy-Upload) werden verarbeitet
+- **IM-13:** Poller + Inbox Race-Condition: Datei wird aus Inbox hochgeladen, Poller läuft gleichzeitig → kein Phantom-Duplikat
+- **IM-14:** Shared-Asset Duplikat: Inbox-Job und Poller-Job referenzieren dieselbe immich_asset_id → Keep/Batch-Clean löscht Asset NICHT aus Immich
+- **IM-15:** Nach Keep auf Shared-Asset: Asset existiert noch in Immich (API-Verify)
 
 ## 6. Dateiformate
 
@@ -912,6 +924,12 @@ Eingangs-Status: `status='error'` ODER `status='done' + error_message='Warnungen
 | D3 | "Kein Duplikat": IA-02 wird auf skipped injiziert, IA-01 behalten | Immich | duplicate | ⚠️ **Lücke** |
 | D4 | "Kein Duplikat", File-Storage | File-Storage | duplicate | ⚠️ **Lücke** |
 | D5 | "Kein Duplikat" wenn Datei im library/duplicates/ verschwunden ist | – | duplicate | ⚠️ **Lücke** (sollte jetzt sauber abbrechen analog zu R15) |
+| D6 | **Shared-Asset Keep:** 2 Jobs mit gleicher immich_asset_id → Keep löscht Asset NICHT | Immich | done+duplicate | **KRITISCH** — v2.29.7 Datenverlust-Bug |
+| D7 | **Shared-Asset Batch-Clean:** wie D6 aber via Batch-Clean → Asset bleibt | Immich | done+duplicate | **KRITISCH** |
+| D8 | **Verschiedene Assets Keep:** 2 Jobs mit verschiedener immich_asset_id → Donor-Asset gelöscht, Kept-Asset bleibt | Immich | done+duplicate | ⚠️ **Lücke** |
+| D9 | **Asset-ID Transfer:** Kept=duplicate (ohne asset_id), Donor=done (mit asset_id) → best bekommt asset_id | Immich | duplicate | ⚠️ **Lücke** |
+| D10 | **Hash-Clearing:** Nach Keep/Batch-Clean sind file_hash+phash der Donors NULL | – | duplicate | ⚠️ **Lücke** |
+| D11 | **Analysis-Kopie:** Kept=duplicate, Donor hat IA-05 → IA-03..06 werden kopiert, kein AI-Re-Run | Immich | duplicate | ⚠️ **Lücke** |
 
 ### Test-Matrix: `move_file=False` (Entry 8)
 

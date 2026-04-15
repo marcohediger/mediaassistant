@@ -1,5 +1,44 @@
 # Changelog
 
+## v2.29.8 — 2026-04-15
+
+### Kritische Bugfixes
+
+- **Fix: Datenverlust bei Duplikat-Auflösung mit Immich (Shared-Asset).**
+  Wenn zwei Jobs dieselbe `immich_asset_id` referenzierten (Inbox-Job +
+  Poller-Job), löschte `keep_file` das Immich-Asset des Donors — obwohl
+  der behaltene Job dasselbe Asset referenzierte. Ergebnis: Datei aus
+  Immich verschwunden. Betraf 4890 Asset-Gruppen im Live-System.
+  Fix: Same-Asset-Guard prüft vor Löschung ob Donor und Kept dieselbe
+  `immich_asset_id` haben.
+
+- **Fix: Immich-Poller lädt eigene Uploads erneut herunter.**
+  Der Poller erkannte Assets, die MediaAssistant selbst hochgeladen hatte,
+  als "neue" Dateien (Race-Condition zwischen Pipeline-Commit und Poller-
+  Snapshot). Fix: Assets mit `deviceId == "MediaAssistant"` werden vom
+  Poller übersprungen.
+
+### Refactoring
+
+- **Unified `_resolve_duplicate_group()`**: Die duplizierte Logik aus
+  `keep_file` (~300 Zeilen) und `batch_clean_quality` (~340 Zeilen)
+  wurde in eine einzige shared Funktion konsolidiert. Behebt dabei
+  5 weitere Inkonsistenzen:
+  - `batch_clean_quality` löschte `file_hash`/`phash` der Donors nicht (→ falsche Matches)
+  - `batch_clean_quality` speicherte `own_album` nicht
+  - `keep_file` transferierte keine `immich_asset_id` bei Promote
+  - `keep_file` kopierte keine Analysis-Steps (IA-03..06) → unnötige AI-Kosten
+  - `keep_file` löschte Immich-Assets ohne Same-Asset-Guard
+
+- **Toter Code entfernt:** `batch_clean` Endpunkt (nicht mehr im UI verlinkt).
+
+### Tests
+
+- Neues Test-Skript `test_immich_dedup.py` (18 Tests):
+  D6/D7 Shared-Asset Keep/Batch-Clean, D9 Asset-ID Transfer,
+  D11 Analysis-Kopie, IM-11/12 Poller deviceId-Filter.
+  Alle gegen echte Dev-Immich-Instanz verifiziert.
+
 ## v2.29.7 — 2026-04-14
 
 ### Bugfixes
