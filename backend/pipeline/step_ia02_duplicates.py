@@ -490,8 +490,15 @@ async def _swap_duplicate(job, session, existing, match_type: str, distance: int
         await asyncio.to_thread(safe_move, existing_path, dup_path, existing.debug_key)
         existing.target_path = dup_path
     elif existing_path and existing_path.startswith("immich:"):
-        # Immich asset: keep the reference, just mark as duplicate.
-        # The file stays in Immich (user can clean up via Immich UI).
+        # Transfer the Immich asset to the winner so IA-08 does
+        # Upload→Copy→Delete (replace) instead of a bare new upload.
+        # This ensures only ONE asset exists in Immich — no orphans.
+        old_asset_id = existing.immich_asset_id or existing_path[7:]
+        if old_asset_id:
+            job.immich_asset_id = old_asset_id
+            job.use_immich = True
+            if existing.immich_user_id and not job.immich_user_id:
+                job.immich_user_id = existing.immich_user_id
         dup_path = existing_path
 
     # Write log for the demoted file
