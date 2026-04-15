@@ -1409,6 +1409,7 @@ async def batch_clean_quality(request: Request):
 async def _run_batch_clean(page: int):
     """Background task: process batch-clean with progress updates."""
     global _batch_progress
+    logger.info("Batch-clean background task started for page=%s", page)
     from pipeline.step_ia02_duplicates import _quality_score
 
     per_page = 10
@@ -1477,8 +1478,13 @@ async def _run_batch_clean(page: int):
         await log_info("duplicates", summary)
 
     except Exception as exc:
-        logger.error("Batch-clean crashed: %s", exc)
-        await log_info("duplicates", f"Batch-Clean abgestürzt: {exc}")
+        import traceback
+        logger.error("Batch-clean crashed: %s\n%s", exc, traceback.format_exc())
+        try:
+            await log_info("duplicates", f"Batch-Clean abgestürzt: {exc}")
+        except Exception:
+            pass
     finally:
         _batch_progress["done"] = True
         _batch_progress["running"] = False
+        logger.info("Batch-clean background task finished: %s", _batch_progress)
