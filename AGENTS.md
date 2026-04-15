@@ -214,7 +214,7 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 
 | File | Was | Aufruf |
 |---|---|---|
-| `backend/test_duplicate_fix.py` | 34 Tests: Duplikat-Fix #38 + Race-Conditions + Quality-Swap + zirkuläre Duplikate | `docker exec mediaassistant-dev python /app/test_duplicate_fix.py` |
+| `backend/test_duplicate_fix.py` | 28 Tests: Duplikat-Fix #38 + Race-Conditions + zirkuläre Duplikate | `docker exec mediaassistant-dev python /app/test_duplicate_fix.py` |
 | `backend/test_retry_file_lifecycle.py` | 110 Asserts: kompletter Retry-File-Lifecycle gegen echtes Immich (sidecar+direct, immich+file-storage, error+warning, missing-file, stale-warning, stuck-state) | `docker exec mediaassistant-dev python /app/test_retry_file_lifecycle.py` |
 | `backend/test_testplan_final.py` | 68 Asserts: API/UI Smoke-Tests | `docker exec mediaassistant-dev python /app/test_testplan_final.py` |
 | `backend/test_ai_backends.py` | AI-Backend-Loadbalancer | `docker exec mediaassistant-dev python /app/test_ai_backends.py` |

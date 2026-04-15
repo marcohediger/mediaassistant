@@ -13,7 +13,7 @@ New files in inbox directories are automatically detected and processed through 
 | Step | Name | Description |
 |------|------|-------------|
 | IA-01 | Read EXIF | Extract metadata via ExifTool; videos additionally via ffprobe (date, GPS with ISO 6709 parser, duration + formatted, resolution, megapixels, codec, framerate, bitrate, rotation) |
-| IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar) for images and videos, incl. Immich-uploaded files. Video pHash is computed as average from IA-04 frames (post-IA-04 check). Quality-aware: better quality file becomes original (format > file size > pixels > metadata). Media-type filter: images only match images, videos only match videos |
+| IA-02 | Duplicate Detection | SHA256 (exact) + pHash (similar) for images and videos, incl. Immich-uploaded files. Video pHash is computed as average from IA-04 frames (post-IA-04 check). Duplicates are moved to the duplicates folder for manual review or batch-clean. Media-type filter: images only match images, videos only match videos |
 | IA-03 | Geocoding | GPS coordinates → place names (country, state, city, suburb) |
 | IA-04 | Temp. Conversion for AI | HEIC/DNG/RAW/GIF → temp JPEG for AI analysis; video thumbnail extraction via ffmpeg (configurable number of frames evenly distributed across video duration) |
 | IA-05 | AI Analysis | Classify image (type from DB categories, source, tags, description) with all collected metadata + static rule pre-classification |
@@ -183,7 +183,7 @@ All system log messages are always written in English, regardless of the UI lang
 - Actions: "Keep this" on all group members — triggers full pipeline re-run (AI analysis, tag writing, sorting/Immich upload) so the kept file gets all metadata before being filed. Merges metadata from deleted files first. IA-02 is skipped on re-processing to prevent re-flagging as duplicate
 - **Three batch actions**:
   - **Re-Evaluate Quality**: informational — counts how many groups have a better-quality duplicate
-  - **Batch-Clean (this page)**: quality-aware clean for exact + pHash-100% groups on current page only
+  - **Batch-Clean (this page)**: clean exact + pHash-100% groups on current page, keeps best quality per group
   - **Batch-Clean All**: same for all groups. For promoted duplicates: analysis data (IA-03..06) is copied from original, only IA-07/08 run (fast, no AI needed)
 - Orphaned entries: if a referenced original file no longer exists on disk (or was deleted from Immich), the match is skipped and the new file is treated as a fresh original
 
