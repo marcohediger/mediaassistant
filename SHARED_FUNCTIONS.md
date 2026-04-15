@@ -251,7 +251,7 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | Step | Datei | Beschreibung | Zusätzliche Funktionen |
 |---|---|---|---|
 | IA-01 | `step_ia01_exif.py` | EXIF lesen (ExifTool + ffprobe) | `_run_ffprobe`, `_parse_iso6709`, `_format_duration`, `_find_google_json`, `_read_google_json` |
-| IA-02 | `step_ia02_duplicates.py` | Duplikat-Erkennung (SHA256 + pHash) | `execute_video_phash`, `_quality_score`, `_compute_phash`, `_compute_video_phash`, `_phash_from_preview`, `_file_exists`, `_swap_duplicate`, `_extract_folder_tags`, `_handle_duplicate` |
+| IA-02 | `step_ia02_duplicates.py` | Duplikat-Erkennung (SHA256 + pHash) | `execute_video_phash`, `_quality_score`, `_compute_phash`, `_compute_video_phash`, `_phash_from_preview`, `_file_exists`, `_extract_folder_tags`, `_handle_duplicate` |
 | IA-03 | `step_ia03_geocoding.py` | Geocoding (GPS → Ort) | `_reverse_nominatim`, `_reverse_photon`, `_reverse_google`, `_http_get_with_retry`, `_throttle`, `_cache_key` |
 | IA-04 | `step_ia04_convert.py` | Format-Konvertierung (→ temp JPEG) | `_extract_video_frames`, `_ffmpeg_extract_frame`, `_glob_temp_files` |
 | IA-05 | `step_ia05_ai.py` | KI-Analyse (Tags, Description) | `_resize_for_ai` |

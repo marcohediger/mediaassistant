@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.30.1 — 2026-04-15
+
+### Bereinigung
+
+- **Toter quality_swap Code aus Tests und Doku entfernt.**
+  `test_quality_swap_duplicate` (test_duplicate_fix.py),
+  `test_user_kept_flag_keep/not_duplicate`, `test_is_user_kept`,
+  `test_quality_swap_protection` (test_v29_merge.py) entfernt.
+  SHARED_FUNCTIONS.md, TESTPLAN.md, AGENTS.md aktualisiert.
+
 ## v2.30.0 — 2026-04-15
 
 ### Breaking Change

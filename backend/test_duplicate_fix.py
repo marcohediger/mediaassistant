@@ -656,114 +656,6 @@ async def test_retry_not_circular_duplicate():
             pass
 
 
-# ─────────────────────────────────────────────
-# Test 10: Quality-aware duplicate: better file becomes original
-# (v2.28.44 — #46)
-# ─────────────────────────────────────────────
-async def test_quality_swap_duplicate():
-    """When a new file has better quality (higher resolution) than an
-    existing one with the same SHA256 hash, the new file should become
-    the original and the existing one should be demoted to duplicate."""
-    print("\n🧪 Test 10: Quality-aware duplicate swap (#46)")
-
-    from pipeline.step_ia02_duplicates import execute as ia02_execute, _quality_score
-
-    ts = f"{datetime.now().timestamp():.0f}"
-    content = f"quality-swap-test-{ts}".encode()
-    file_hash = hashlib.sha256(content).hexdigest()
-
-    # Stage files
-    low_file = f"/app/data/__quality_low_{ts}.jpg"
-    high_file = f"/app/data/__quality_high_{ts}.jpg"
-    for p in (low_file, high_file):
-        with open(p, "wb") as f:
-            f.write(content)
-
-    async with async_session() as session:
-        # Job A: existing, low quality (small resolution)
-        job_a = Job(
-            filename=f"quality_low_{ts}.jpg",
-            original_path=low_file,
-            target_path=low_file,
-            debug_key=f"QUAL-A-{ts}",
-            status="done",
-            file_hash=file_hash,
-            step_result={
-                "IA-01": {
-                    "width": 640, "height": 480, "file_size": 50000,
-                    "has_exif": False, "file_type": "JPEG",
-                },
-            },
-            use_immich=False, dry_run=False, folder_tags=False,
-        )
-        session.add(job_a)
-
-        # Job B: new arrival, high quality (large resolution)
-        job_b = Job(
-            filename=f"quality_high_{ts}.jpg",
-            original_path=high_file,
-            debug_key=f"QUAL-B-{ts}",
-            status="processing",
-            file_hash=file_hash,
-            step_result={
-                "IA-01": {
-                    "width": 4032, "height": 3024, "file_size": 5000000,
-                    "has_exif": True, "file_type": "JPEG",
-                },
-            },
-            use_immich=False, dry_run=False, folder_tags=False,
-        )
-        session.add(job_b)
-        await session.commit()
-
-        score_a = _quality_score(job_a)
-        score_b = _quality_score(job_b)
-        report("quality_score: high-res > low-res", score_b > score_a,
-               f"low={score_a} high={score_b}")
-
-        # Run IA-02 on job B (the high-quality newcomer)
-        result = await ia02_execute(job_b, session)
-
-        report("IA-02 returns status=ok (not duplicate) for better file",
-               result.get("status") == "ok",
-               f"got status={result.get('status')}, result={result}")
-        report("IA-02 result has quality_swap=True",
-               result.get("quality_swap") is True,
-               f"got quality_swap={result.get('quality_swap')}")
-
-        # Reload job_a to check if it was demoted
-        await session.refresh(job_a)
-        report("existing low-quality job demoted to 'duplicate'",
-               job_a.status == "duplicate",
-               f"got status={job_a.status}")
-
-        ia02_a = (job_a.step_result or {}).get("IA-02", {})
-        report("demoted job references the winner",
-               ia02_a.get("original_debug_key") == f"QUAL-B-{ts}",
-               f"got original_debug_key={ia02_a.get('original_debug_key')}")
-
-        report("job_b status still 'processing' (continues pipeline)",
-               job_b.status == "processing",
-               f"got status={job_b.status}")
-
-        # Cleanup
-        await session.delete(job_a)
-        await session.delete(job_b)
-        await session.commit()
-
-    for p in (low_file, high_file):
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-    # Clean up any moved files in duplicates dir
-    import glob
-    for f in glob.glob(f"/library/error/duplicates/*quality_low_{ts}*"):
-        try:
-            os.remove(f)
-        except OSError:
-            pass
-
 
 # ─────────────────────────────────────────────
 async def main():
@@ -772,7 +664,6 @@ async def main():
     print("  Test Suite: Fix #38 — Duplikat-Pipeline-Bug")
     print("                + v2.28.2 — Race-Condition (atomic claim)")
     print("                + v2.28.43 — Zirkulaere Duplikat-Erkennung")
-    print("                + v2.28.44 — Quality-aware Duplikat-Swap")
     print("=" * 60)
 
     try:
@@ -810,7 +701,6 @@ async def main():
         (7, test_retry_job_blocks_parallel_run_pipeline),
         (8, test_parallel_retry_job_calls),
         (9, test_retry_not_circular_duplicate),
-        (10, test_quality_swap_duplicate),
     ):
         try:
             await fn()

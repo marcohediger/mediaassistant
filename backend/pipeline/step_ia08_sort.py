@@ -26,8 +26,7 @@ async def _get_folder_album_names(job) -> list[str] | None:
     inactive or no folder structure is available.  When the file has been
     moved away from the inbox (e.g. duplicate → /reprocess/), the path-
     based extraction fails.  In that case, fall back to the combined tag
-    stored in step_result['IA-02']['folder_tags'] by _handle_duplicate /
-    _swap_duplicate.
+    stored in step_result['IA-02']['folder_tags'] by _handle_duplicate.
     """
     if not await _is_folder_tags_active(job):
         return None
