@@ -1,6 +1,4 @@
-# MediaAssistant
-
-![MediaAssistant Logo](logos/mediaassistant_logo.svg)
+![MediaAssistant](logos/mediaassistant_logo_dark.svg)
 
 Drop your photos and videos into a folder. MediaAssistant takes care of the rest: metadata extraction, AI-powered tagging, duplicate detection, geocoding, and automatic sorting into your library or Immich.
 
