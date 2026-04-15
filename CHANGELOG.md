@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.30.4 — 2026-04-15
+
+### UI-Fix: Duplikat-Review Sortierung + Badges
+
+- **Datei im Target (Immich/Library) steht jetzt links.**
+  Sortierung: done/review zuerst, dann nach Job-ID.
+- **ORIGINAL Badge = Datei die im Target ist** (nicht mehr ältester Job).
+- **"Not a duplicate" Button nur bei Duplikaten** (nicht bei der
+  Datei die schon verarbeitet ist).
+
 ## v2.30.3 — 2026-04-15
 
 ### Entfernt
