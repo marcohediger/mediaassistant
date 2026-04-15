@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.29.9 — 2026-04-15
+
+### Kritischer Bugfix
+
+- **Fix: quality_swap erzeugt Orphan-Assets in Immich.**
+  Wenn ein besseres Duplikat gefunden wurde (pHash-Match, verschiedener
+  SHA256), wurde das alte Immich-Asset stehengelassen und ein zweites
+  hochgeladen. Resultat: zwei Assets für dasselbe Foto in Immich.
+  Beim anschliessenden "Behalten" im Duplikat-Review wurden dann
+  beide Assets gelöscht → Datenverlust.
+  Fix: `_swap_duplicate` übergibt die `immich_asset_id` an den
+  Gewinner-Job. IA-08 macht dann Upload→Copy→Delete (Replace) statt
+  eines neuen Uploads. Nur noch ein Asset pro Foto in Immich.
+
 ## v2.29.8 — 2026-04-15
 
 ### Kritische Bugfixes
