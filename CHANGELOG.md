@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.30.3 — 2026-04-15
+
+### Entfernt
+
+- **merge-metadata Endpunkt + Button entfernt.** Metadata-Merge
+  passiert automatisch bei Keep/Batch-Clean. Separater Button war
+  redundant. Entfernt: Endpunkt, JS-Funktionen, i18n-Strings,
+  Template-Buttons (-244 Zeilen).
+- **quality_swap Referenzen aus Doku bereinigt.**
+
 ## v2.30.2 — 2026-04-15
 
 ### Tests
