@@ -705,17 +705,11 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 
 **Beweis:** Vor v2.28.43 hat IA-02 `duplicate`-Status-Jobs als Match akzeptiert → A wurde als Duplikat seines eigenen Duplikats B markiert (Live: MA-2026-28103).
 
-#### RACE-10: Quality-Swap bei Duplikaten (v2.28.44)
-**Setup:** Job A (done, 640×480, 50KB), Job B (processing, 4032×3024, 5MB), gleicher file_hash.
+#### RACE-10: ENTFERNT (quality_swap entfernt in v2.30.0)
 
-| Assertion | Erwartet |
-| --- | --- |
-| `_quality_score(B) > _quality_score(A)` | True |
-| IA-02 returned `status=duplicate` | B wird Duplikat (kein quality_swap mehr seit v2.30.0) |
-| A demoted to `status=duplicate` | `duplicate` |
-| B bleibt `status=processing` (Pipeline läuft weiter) | `processing` |
-
-**Beweis:** Vor v2.28.44 wurde immer der ZUERST verarbeitete Job als Original behalten, unabhängig von der Qualität.
+IA-02 macht keinen quality_swap mehr. Duplikate werden immer in den
+Duplikat-Ordner verschoben. Die Qualitäts-Auswahl passiert im UI
+(Badge) und beim Batch-Clean (automatische Auswahl der besten Datei).
 
 ## 14. Test-Matrix — Vollständige Coverage-Karte
 

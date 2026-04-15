@@ -522,7 +522,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | `FTAG-12` | – | – | – | – | ✅ | folder_tags Merge dedupliziert (z.B. "Mallorca") |
 | `FTAG-13` | – | – | – | – | ✅ | folder_tags Merge fügt neue Tags hinzu |
 | `FTAG-14` | – | – | – | – | ✅ | folder_tags Merge zurück in IA-02 persistiert |
-| `FTAG-15` | – | – | – | – | ✅ | `_swap_duplicate` speichert folder_tags in IA-02 step_result |
+| `FTAG-15` | – | – | – | – | ✅ | ENTFERNT (quality_swap entfernt in v2.30.0) |
 | `FTAG-16` | – | – | – | – | ✅ | Template: folder_album Badge + `.match-folder-album` |
 | `FTAG-17` | – | – | – | – | ✅ | CSS: `.match-folder-album` Klasse vorhanden |
 | `FTAG-18` | – | – | – | – | ✅ | `de.json`: `folder_album_title` Übersetzung |
