@@ -328,8 +328,10 @@ async def _build_group_index() -> tuple[list[dict], dict[str, "Job"]]:
 
         groups = []
         for root_key, member_keys in merged.items():
-            # Sort by job ID (oldest first = original first in the UI)
+            # Sort: files already in target (done/review) first, then by job ID.
+            # This ensures the file that's in Immich/Library shows on the left.
             sorted_keys = sorted(member_keys, key=lambda k: (
+                0 if k in jobs_by_key and jobs_by_key[k].status != "duplicate" else 1,
                 jobs_by_key[k].id if k in jobs_by_key else float("inf"),
             ))
             valid_keys = [k for k in sorted_keys if k in jobs_by_key]
@@ -426,13 +428,15 @@ async def _build_group_detail(member_keys: list[str], jobs_by_key: dict) -> list
                 prefetched = immich_info[key]
             members.append(await _build_member(job, session, prefetched_info=prefetched))
 
-    # Mark the oldest member (lowest job_id) as the true original —
-    # this is the file that was in the library first, regardless of
-    # any status swaps from re-evaluate operations.
+    # Mark the member that is already in the target (not duplicate) as original.
+    # Fallback: oldest job if all are duplicates.
     if members:
-        oldest_idx = min(range(len(members)), key=lambda i: members[i].get("job_id", float("inf")))
+        orig_idx = next(
+            (i for i, m in enumerate(members) if m.get("match_type") == "original"),
+            min(range(len(members)), key=lambda i: members[i].get("job_id", float("inf"))),
+        )
         for i, m in enumerate(members):
-            m["is_original"] = (i == oldest_idx)
+            m["is_original"] = (i == orig_idx)
 
     # Mark the member with the best quality score with ⭐
     if members:
