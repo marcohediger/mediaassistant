@@ -56,6 +56,16 @@ Flexible rules based on filename, regex, EXIF expressions, or file extension. Fi
 
 Configurable library structure with placeholders ({YYYY}, {COUNTRY}, {CAMERA}, ...). Per-category paths.
 
+### Duplicate Review — Side-by-Side Comparison
+![Duplicate Review](docs/screenshots/Screenshot%202026-04-15%20150132.png)
+
+Compare duplicates with thumbnails, metadata, and quality scores at a glance. Keep the best file, batch-clean entire groups, or mark false positives — with live progress tracking.
+
+### Authentication — SSO Login
+![SSO Login](docs/screenshots/Screenshot%202026-04-15%20135538.png)
+
+Secure access via OIDC/OAuth2. Works with Authentik, Keycloak, Authelia, or any compatible provider — one click to sign in.
+
 ## Quick Start
 
 ```bash
@@ -101,6 +111,8 @@ MediaAssistant works bidirectionally with Immich:
 **Archiving** — Categories like screenshots or sourceless images are automatically archived in Immich (hidden from timeline). NSFW content is moved to the locked folder.
 
 ## Duplicate Review
+
+![Duplicate Review](docs/screenshots/Screenshot%202026-04-15%20150132.png)
 
 Duplicates are detected automatically and placed in a review queue:
 
@@ -163,6 +175,8 @@ Target paths with placeholders, configurable per category:
 - **Theme:** Dark and Light mode
 
 ## Authentication (SSO)
+
+![SSO Login](docs/screenshots/Screenshot%202026-04-15%20135538.png)
 
 OIDC/OAuth2 authentication via Authentik, Keycloak, Authelia, or any OIDC-compliant provider.
 
