@@ -656,6 +656,287 @@ async def local_original(job_id: int):
     return Response(content=data, media_type=content_type)
 
 
+async def _resolve_duplicate_group(
+    session,
+    best: Job,
+    member_jobs: list[Job],
+    *,
+    source: str = "review",
+    user_kept: bool = False,
+) -> tuple[list[str], int, int]:
+    """Resolve a duplicate group: keep *best*, merge metadata, clean up donors.
+
+    Shared core for keep_file (manual pick) and batch_clean_quality (auto pick).
+
+    1. Merges GPS, date, keywords, folder_tags, description, albums from donors.
+    2. Deletes donor local files + Immich assets (guards same-asset deletion).
+    3. Clears donor job fields (status, hashes, paths).
+    4. Handles best: if "done" → apply merged data to Immich directly;
+       if "duplicate" → copy analysis from original, prepare for reprocess.
+
+    Returns (merge_notes, deleted_count, error_count).
+    Caller must commit the session after this returns.
+    """
+    from pipeline.step_ia02_duplicates import _extract_folder_tags
+
+    donors = [j for j in member_jobs if j.id != best.id]
+
+    # ── Pre-collect donor data needed after cleanup ─────────────
+    donor_immich_map: dict[int, str] = {}
+    for d in donors:
+        did = d.immich_asset_id or ""
+        if not did and (d.target_path or "").startswith("immich:"):
+            did = (d.target_path or "")[7:]
+        if did:
+            donor_immich_map[d.id] = did
+
+    # Best donor with analysis data (for copying IA-03..06, saves AI costs)
+    analysis_donor = next(
+        (d for d in donors if d.status != "duplicate"
+         and (d.step_result or {}).get("IA-05")),
+        None,
+    )
+
+    # ── 1. Metadata merge (donors → best) ──────────────────────
+    best_sr = best.step_result or {}
+    best_ia01 = best_sr.get("IA-01") or {}
+    best_ia02 = best_sr.get("IA-02") or {}
+    if not isinstance(best_ia02, dict):
+        best_ia02 = {}
+    best_ia07 = best_sr.get("IA-07") or {}
+    best_folder_tags = list(best_ia02.get("folder_tags") or [])
+    own_album = best_folder_tags[-1] if best_folder_tags else ""
+    donor_immich_albums: list[str] = []
+    merge_notes: list[str] = []
+
+    for donor in donors:
+        d_sr = donor.step_result or {}
+        d_ia01 = d_sr.get("IA-01") or {}
+        d_ia02 = d_sr.get("IA-02") or {}
+        d_ia03 = d_sr.get("IA-03") or {}
+        d_ia07 = d_sr.get("IA-07") or {}
+
+        # GPS
+        if not best_ia01.get("gps") and d_ia01.get("gps"):
+            best_ia01["gps"] = True
+            best_ia01["gps_lat"] = d_ia01.get("gps_lat")
+            best_ia01["gps_lon"] = d_ia01.get("gps_lon")
+            if d_ia03 and d_ia03.get("status") != "skipped":
+                best_sr["IA-03"] = d_ia03
+            merge_notes.append("GPS")
+
+        # Date
+        if not best_ia01.get("date") and d_ia01.get("date"):
+            best_ia01["date"] = d_ia01["date"]
+            merge_notes.append("date")
+
+        # Keywords
+        best_kw = best_ia07.get("keywords_written") or []
+        donor_kw = d_ia07.get("keywords_written") or []
+        new_kw = [k for k in donor_kw if k and k not in best_kw]
+        if new_kw:
+            best_kw.extend(new_kw)
+            best_ia07["keywords_written"] = best_kw
+            best_ia07["tags_count"] = len(best_kw)
+            merge_notes.append(f"keywords(+{len(new_kw)})")
+
+        # Folder tags
+        donor_ft = (d_ia02 if isinstance(d_ia02, dict) else {}).get("folder_tags") or []
+        if not donor_ft and donor.folder_tags:
+            donor_ft = _extract_folder_tags(donor)
+        new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
+        if new_ft:
+            best_folder_tags.extend(new_ft)
+            merge_notes.append(f"folder_tags(+{len(new_ft)})")
+
+        # Donor albums (Immich API → IA-08 result → folder_tags fallback)
+        donor_albums_found: list[str] = []
+        donor_asset = donor_immich_map.get(donor.id, "")
+        if donor_asset:
+            try:
+                from immich_client import get_asset_albums
+                donor_albums_found = await get_asset_albums(donor_asset)
+            except Exception:
+                pass
+        if not donor_albums_found:
+            d_ia08 = d_sr.get("IA-08") or {}
+            donor_albums_found = d_ia08.get("immich_albums_added") or []
+        if not donor_albums_found and donor_ft:
+            donor_albums_found = [donor_ft[-1]]
+        for a in donor_albums_found:
+            if a and a not in donor_immich_albums:
+                donor_immich_albums.append(a)
+            if a and a not in best_folder_tags:
+                best_folder_tags.append(a)
+            for word in (a or "").split():
+                if word and word not in best_folder_tags:
+                    best_folder_tags.append(word)
+
+        # Description
+        best_desc = best_ia07.get("description_written") or ""
+        donor_desc = d_ia07.get("description_written") or ""
+        if not best_desc and donor_desc:
+            best_ia07["description_written"] = donor_desc
+            merge_notes.append("description")
+
+    # Ensure all folder_tags are in keywords
+    best_kw = best_ia07.get("keywords_written") or []
+    for ft in best_folder_tags:
+        if ft and ft not in best_kw:
+            best_kw.append(ft)
+    if best_kw:
+        best_ia07["keywords_written"] = best_kw
+        best_ia07["tags_count"] = len(best_kw)
+
+    # Persist merged data into step_result
+    if best_folder_tags:
+        best_ia02["folder_tags"] = best_folder_tags
+    if own_album:
+        best_ia02["own_album"] = own_album
+    if donor_immich_albums:
+        best_ia02["donor_albums"] = donor_immich_albums
+        merge_notes.append(f"donor_albums({', '.join(donor_immich_albums)})")
+    best_sr["IA-02"] = best_ia02
+
+    if merge_notes or best_folder_tags or donor_immich_albums:
+        best_sr["IA-01"] = best_ia01
+        best_sr["IA-07"] = best_ia07
+        best.step_result = best_sr
+        flag_modified(best, "step_result")
+
+    # ── 2. Resolve kept Immich asset ID (same-asset guard) ──────
+    kept_immich_id = best.immich_asset_id or ""
+    if not kept_immich_id and (best.target_path or "").startswith("immich:"):
+        kept_immich_id = (best.target_path or "")[7:]
+
+    # ── 3. Delete donors ────────────────────────────────────────
+    deleted = 0
+    errors = 0
+    for donor in donors:
+        # Local file
+        filepath = donor.target_path or donor.original_path
+        if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
+            from file_operations import safe_remove_with_log
+            removed = await asyncio.to_thread(safe_remove_with_log, filepath)
+            if filepath not in removed:
+                errors += 1
+                continue  # Don't clear job if file couldn't be deleted
+
+        # Immich asset — guard: never delete the same asset as the kept job
+        # (race-condition duplicates from poller re-downloading a MA-uploaded asset)
+        donor_asset = donor_immich_map.get(donor.id, "")
+        if donor_asset and donor_asset != kept_immich_id:
+            try:
+                from immich_client import delete_asset
+                await delete_asset(donor_asset)
+            except Exception:
+                pass
+
+        # Clear donor job
+        if donor.status == "duplicate":
+            donor.status = "done"
+        donor.error_message = f"Duplicate deleted ({source}). Kept: {best.debug_key}"
+        donor.target_path = None
+        donor.file_hash = None
+        donor.phash = None
+        deleted += 1
+
+    # ── 4. Handle kept job ──────────────────────────────────────
+    if user_kept:
+        sr = best.step_result or {}
+        if not isinstance(sr.get("IA-02"), dict):
+            sr["IA-02"] = sr.get("IA-02") or {}
+        sr["IA-02"]["user_kept"] = True
+        best.step_result = sr
+        flag_modified(best, "step_result")
+
+    if best.status == "done":
+        # Already processed — apply merged data directly to Immich
+        if kept_immich_id:
+            from immich_client import add_asset_to_albums, tag_asset, update_asset_description
+
+            existing_tags = set((best_sr.get("IA-08") or {}).get("immich_tags_written") or [])
+            all_tags = set(best_ia07.get("keywords_written") or [])
+            new_tags = [t for t in all_tags if t not in existing_tags]
+            for tag in new_tags:
+                try:
+                    await tag_asset(kept_immich_id, tag)
+                except Exception:
+                    pass
+            if new_tags:
+                merge_notes.append(f"tags(+{len(new_tags)})")
+
+            if donor_immich_albums:
+                added = await add_asset_to_albums(kept_immich_id, donor_immich_albums)
+                if added:
+                    merge_notes.append(f"albums({', '.join(added)})")
+
+            merged_desc = best_ia07.get("description_written") or ""
+            existing_desc = (best_sr.get("IA-08") or {}).get("description_written") or ""
+            if not existing_desc and merged_desc:
+                try:
+                    await update_asset_description(kept_immich_id, merged_desc)
+                    merge_notes.append("description→immich")
+                except Exception:
+                    pass
+
+        best.error_message = None
+
+    elif best.status == "duplicate":
+        # Transfer Immich asset ID from donor if best doesn't have one
+        if not best.immich_asset_id and donor_immich_map:
+            best.immich_asset_id = next(iter(donor_immich_map.values()))
+
+        # Copy analysis steps from original (saves AI re-run costs)
+        keep_steps = {"IA-01"}
+        if analysis_donor:
+            orig_sr = analysis_donor.step_result or {}
+            for step in ("IA-03", "IA-04", "IA-05", "IA-06"):
+                if orig_sr.get(step):
+                    best_sr[step] = orig_sr[step]
+            keep_steps = {"IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}
+
+        # Inject IA-02 skip (before prepare_job_for_reprocess so keep_steps preserves it)
+        ia02_data = best_sr.get("IA-02") or {}
+        new_ia02: dict = {"status": "skipped", "reason": f"kept via {source}"}
+        if user_kept:
+            new_ia02["user_kept"] = True
+        if ia02_data.get("folder_tags") or best_folder_tags:
+            new_ia02["folder_tags"] = ia02_data.get("folder_tags") or best_folder_tags
+        if ia02_data.get("own_album") or own_album:
+            new_ia02["own_album"] = ia02_data.get("own_album") or own_album
+        if ia02_data.get("donor_albums") or donor_immich_albums:
+            new_ia02["donor_albums"] = ia02_data.get("donor_albums") or donor_immich_albums
+        best_sr["IA-02"] = new_ia02
+        best.step_result = best_sr
+        flag_modified(best, "step_result")
+
+        # Move file from duplicates/ to reprocess/ and reset pipeline state
+        kept_filepath = best.target_path or best.original_path
+        if kept_filepath and not kept_filepath.startswith("immich:") and os.path.exists(kept_filepath):
+            from pipeline.reprocess import prepare_job_for_reprocess
+            await prepare_job_for_reprocess(
+                session, best,
+                keep_steps=keep_steps,
+                move_file=True,
+                commit=False,
+            )
+
+        best.status = "queued"
+        best.error_message = f"Promoted ({source})"
+        if analysis_donor:
+            best.error_message += f". Analysis copied from {analysis_donor.debug_key}"
+        if merge_notes:
+            best.error_message += f" + merged: {', '.join(merge_notes)}"
+
+    else:
+        # Safety net (unexpected status)
+        best.status = "done"
+        best.error_message = None
+
+    return merge_notes, deleted, errors
+
+
 @router.post("/api/duplicates/keep")
 async def keep_file(request: Request):
     """Keep one file from a group, delete all others (including original if needed)."""
@@ -682,280 +963,28 @@ async def keep_file(request: Request):
 
         merged = _union_find_groups(links)
 
-        # Find which group contains group_key
         group_keys = set()
         for members in merged.values():
             if group_key in members:
                 group_keys = members
                 break
-
         if not group_keys:
             group_keys = {group_key}
 
-        # Fetch all jobs in the group
         result = await session.execute(
             select(Job).where(Job.debug_key.in_(group_keys))
         )
         group_jobs = result.scalars().all()
 
-        # Find the kept job and a target path in the library
-        kept_job = None
-        library_path = None
-        group_is_immich = False
-        for job in group_jobs:
-            if job.debug_key == keep_key:
-                kept_job = job
-            # Check if any job in the group uses Immich
-            if job.use_immich or (job.target_path or "").startswith("immich:") or job.immich_asset_id:
-                group_is_immich = True
-            # Find a target_path from an original (non-duplicate) in the library
-            if job.status != "duplicate" and job.target_path and not job.target_path.startswith("immich:"):
-                library_path = job.target_path
+        kept_job = next((j for j in group_jobs if j.debug_key == keep_key), None)
+        if not kept_job:
+            return RedirectResponse(url="/duplicates", status_code=303)
 
-        # Merge metadata from all other members into the kept one
-        # before deleting them (GPS, date, keywords, description,
-        # folder_tags from IA-02).
-        if kept_job:
-            kept_sr = kept_job.step_result or {}
-            kept_ia01 = kept_sr.get("IA-01") or {}
-            kept_ia02 = kept_sr.get("IA-02") or {}
-            kept_ia07 = kept_sr.get("IA-07") or {}
-            kept_folder_tags = list(kept_ia02.get("folder_tags") or [])
-            # Save own album before donor tags corrupt the list
-            own_album = kept_folder_tags[-1] if kept_folder_tags else ""
-            donor_immich_albums: list[str] = []
-            merge_notes = []
-
-            for donor in group_jobs:
-                if donor.debug_key == keep_key:
-                    continue
-                d_sr = donor.step_result or {}
-                d_ia01 = d_sr.get("IA-01") or {}
-                d_ia02 = d_sr.get("IA-02") or {}
-                d_ia03 = d_sr.get("IA-03") or {}
-                d_ia07 = d_sr.get("IA-07") or {}
-
-                if not kept_ia01.get("gps") and d_ia01.get("gps"):
-                    kept_ia01["gps"] = True
-                    kept_ia01["gps_lat"] = d_ia01.get("gps_lat")
-                    kept_ia01["gps_lon"] = d_ia01.get("gps_lon")
-                    if d_ia03 and d_ia03.get("status") != "skipped":
-                        kept_sr["IA-03"] = d_ia03
-                    merge_notes.append("GPS")
-
-                if not kept_ia01.get("date") and d_ia01.get("date"):
-                    kept_ia01["date"] = d_ia01["date"]
-                    merge_notes.append("date")
-
-                kept_kw = kept_ia07.get("keywords_written") or []
-                donor_kw = d_ia07.get("keywords_written") or []
-                new_kw = [k for k in donor_kw if k and k not in kept_kw]
-                if new_kw:
-                    kept_kw.extend(new_kw)
-                    kept_ia07["keywords_written"] = kept_kw
-                    kept_ia07["tags_count"] = len(kept_kw)
-                    merge_notes.append(f"keywords(+{len(new_kw)})")
-
-                # Merge donor folder_tags (for keywords/tags only).
-                # Only extract from path if folder_tags was enabled for
-                # that job at import time (job.folder_tags boolean).
-                donor_ft = d_ia02.get("folder_tags") or []
-                if not donor_ft and donor.folder_tags:
-                    from pipeline.step_ia02_duplicates import _extract_folder_tags
-                    donor_ft = _extract_folder_tags(donor)
-                new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
-                if new_ft:
-                    kept_folder_tags.extend(new_ft)
-                    merge_notes.append(f"folder_tags(+{len(new_ft)})")
-
-                # Collect donor's albums from all sources
-                donor_albums_found: list[str] = []
-                # Source 1: Immich API (donor has an uploaded asset)
-                donor_asset = donor.immich_asset_id or ""
-                if not donor_asset and (donor.target_path or "").startswith("immich:"):
-                    donor_asset = (donor.target_path or "")[7:]
-                if donor_asset:
-                    from immich_client import get_asset_albums
-                    donor_albums_found = await get_asset_albums(donor_asset)
-                # Source 2: IA-08 result (donor went through pipeline)
-                if not donor_albums_found:
-                    d_ia08 = d_sr.get("IA-08") or {}
-                    donor_albums_found = d_ia08.get("immich_albums_added") or []
-                # Source 3: folder_tags (donor was duplicate, never uploaded)
-                if not donor_albums_found and donor_ft:
-                    # Last entry is the combined album name
-                    donor_albums_found = [donor_ft[-1]]
-                for a in donor_albums_found:
-                    if a and a not in donor_immich_albums:
-                        donor_immich_albums.append(a)
-                    # Album names must also flow into keywords/tags
-                    if a and a not in kept_folder_tags:
-                        kept_folder_tags.append(a)
-                    for word in (a or "").split():
-                        if word and word not in kept_folder_tags:
-                            kept_folder_tags.append(word)
-
-                kept_desc = kept_ia07.get("description_written") or ""
-                donor_desc = d_ia07.get("description_written") or ""
-                if not kept_desc and donor_desc:
-                    kept_ia07["description_written"] = donor_desc
-                    merge_notes.append("description")
-
-            # Ensure all folder_tags (incl. album-derived) are in keywords
-            kept_kw = kept_ia07.get("keywords_written") or []
-            for ft in kept_folder_tags:
-                if ft and ft not in kept_kw:
-                    kept_kw.append(ft)
-            if kept_kw:
-                kept_ia07["keywords_written"] = kept_kw
-                kept_ia07["tags_count"] = len(kept_kw)
-
-            # Persist merged folder_tags + own_album + donor_albums into IA-02
-            if not isinstance(kept_ia02, dict):
-                kept_ia02 = {}
-            if kept_folder_tags:
-                kept_ia02["folder_tags"] = kept_folder_tags
-            if own_album:
-                kept_ia02["own_album"] = own_album
-            if donor_immich_albums:
-                kept_ia02["donor_albums"] = donor_immich_albums
-                merge_notes.append(f"donor_albums({', '.join(donor_immich_albums)})")
-            kept_sr["IA-02"] = kept_ia02
-
-            if merge_notes or kept_folder_tags or donor_immich_albums:
-                kept_sr["IA-01"] = kept_ia01
-                kept_sr["IA-07"] = kept_ia07
-                kept_job.step_result = kept_sr
-                flag_modified(kept_job, "step_result")
-
-        # Delete all except the kept one
-        for job in group_jobs:
-            if job.debug_key == keep_key:
-                continue
-
-            # Delete local file if exists
-            filepath = job.target_path or job.original_path
-            if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
-                from file_operations import safe_remove_with_log
-                await asyncio.to_thread(safe_remove_with_log, filepath)
-
-            # Delete from Immich using the shared helper (force=True by
-            # default, so the asset is permanently gone — not just trashed).
-            # Without force, a re-upload of the kept file gets "duplicate"
-            # from Immich (matching the trashed asset) and fails silently.
-            asset_id = job.immich_asset_id or ""
-            target = job.target_path or ""
-            if target.startswith("immich:"):
-                asset_id = asset_id or target[7:]
-            if asset_id:
-                try:
-                    from immich_client import delete_asset
-                    await delete_asset(asset_id)
-                except Exception:
-                    pass
-
-            if job.status == "duplicate":
-                job.status = "done"
-            job.error_message = None
-            job.target_path = None
-            # Clear hash so IA-02 won't match against this deleted job
-            job.file_hash = None
-            job.phash = None
-
-        # Re-run pipeline for the kept file (AI analysis, tag writing, sorting)
-        if kept_job:
-            # Mark as user-kept so IA-02 never quality_swaps this job
-            sr = kept_job.step_result or {}
-            if not isinstance(sr.get("IA-02"), dict):
-                sr["IA-02"] = sr.get("IA-02") or {}
-            sr["IA-02"]["user_kept"] = True
-            kept_job.step_result = sr
-            flag_modified(kept_job, "step_result")
-
-            kept_filepath = kept_job.target_path or kept_job.original_path
-            is_already_done = kept_job.status == "done"
-
-            if is_already_done:
-                # Already fully processed — pipeline won't re-run, so
-                # apply all merged data directly to the Immich asset.
-                asset_id = kept_job.immich_asset_id or ""
-                if not asset_id and (kept_job.target_path or "").startswith("immich:"):
-                    asset_id = (kept_job.target_path or "")[7:]
-                if asset_id:
-                    from immich_client import add_asset_to_albums, tag_asset, update_asset_description
-
-                    # 1) Tags: apply new keywords + folder_tags to Immich
-                    existing_tags = set((kept_sr.get("IA-08") or {}).get("immich_tags_written") or [])
-                    all_tags = set(kept_ia07.get("keywords_written") or [])
-                    new_tags = [t for t in all_tags if t not in existing_tags]
-                    for tag in new_tags:
-                        try:
-                            await tag_asset(asset_id, tag)
-                        except Exception:
-                            pass
-                    if new_tags:
-                        merge_notes.append(f"tags(+{len(new_tags)})")
-
-                    # 2) Albums: add to donor's Immich albums
-                    if donor_immich_albums:
-                        added = await add_asset_to_albums(asset_id, donor_immich_albums)
-                        if added:
-                            merge_notes.append(f"albums({', '.join(added)})")
-
-                    # 3) Description: apply if kept had none
-                    merged_desc = kept_ia07.get("description_written") or ""
-                    existing_desc = (kept_sr.get("IA-08") or {}).get("description_written") or ""
-                    if not existing_desc and merged_desc:
-                        try:
-                            await update_asset_description(asset_id, merged_desc)
-                            merge_notes.append("description")
-                        except Exception:
-                            pass
-            elif kept_job.status == "duplicate" and kept_filepath and os.path.exists(kept_filepath):
-                # Save folder_tags BEFORE prepare_job_for_reprocess wipes
-                # all steps except IA-01.
-                pre_ia02 = (kept_job.step_result or {}).get("IA-02") or {}
-                saved_folder_tags = pre_ia02.get("folder_tags") or kept_folder_tags or []
-                saved_own_album = pre_ia02.get("own_album") or own_album or ""
-                saved_donor_albums = pre_ia02.get("donor_albums") or donor_immich_albums or []
-
-                # File move (incl. .xmp sidecar) + step_result reset (keep
-                # only IA-01 EXIF) + status flip is delegated to the shared
-                # reprocess helper.
-                from pipeline.reprocess import prepare_job_for_reprocess
-                await prepare_job_for_reprocess(
-                    session,
-                    kept_job,
-                    keep_steps={"IA-01"},
-                    move_file=True,
-                )
-
-                # Inject IA-02 as skipped so the pipeline does NOT re-run
-                # duplicate detection. The user explicitly chose to keep
-                # this file — re-flagging it as duplicate would undo their
-                # decision (especially when other jobs with matching pHash
-                # still exist in the DB).
-                sr = kept_job.step_result or {}
-                sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review", "user_kept": True}
-                if saved_folder_tags:
-                    sr["IA-02"]["folder_tags"] = saved_folder_tags
-                if saved_own_album:
-                    sr["IA-02"]["own_album"] = saved_own_album
-                if saved_donor_albums:
-                    sr["IA-02"]["donor_albums"] = saved_donor_albums
-                kept_job.step_result = sr
-                flag_modified(kept_job, "step_result")
-                await session.commit()
-
-                # Re-run pipeline in background
-                from pipeline import run_pipeline
-                asyncio.create_task(run_pipeline(kept_job.id))
-                await log_info("duplicates", f"Review: Group {group_key}, kept: {keep_key} → re-processing")
-                return RedirectResponse(url="/duplicates", status_code=303)
-            else:
-                kept_job.status = "done"
-                kept_job.error_message = None
-
+        await _resolve_duplicate_group(
+            session, kept_job, group_jobs,
+            source="duplicate review",
+            user_kept=True,
+        )
         await session.commit()
 
     await log_info("duplicates", f"Review: Group {group_key}, kept: {keep_key}")
@@ -1318,18 +1347,9 @@ async def re_evaluate_quality():
 
 @router.post("/api/duplicates/batch-clean-quality")
 async def batch_clean_quality(request: Request):
-    """Quality-aware batch clean for the current page only.
-
-    Reads the 'page' form field to determine which groups to clean.
-    Only exact-match groups on that page are processed. The best
-    quality member per group is kept, the rest is deleted.
-
-    After cleaning, redirects back to the same page (or page 1 if
-    the current page is now empty).
-    """
+    """Quality-aware batch clean: keep best quality per group, delete the rest."""
     from pipeline.step_ia02_duplicates import _quality_score
 
-    # Read page from form data (page=0 means "all pages")
     try:
         form = await request.form()
         page = int(form.get("page", 1))
@@ -1343,7 +1363,6 @@ async def batch_clean_quality(request: Request):
 
     group_index, jobs_by_key = await _build_group_index()
 
-    # page=0 → all groups; page>0 → only that page
     if page == 0:
         page_groups = group_index
     else:
@@ -1353,9 +1372,8 @@ async def batch_clean_quality(request: Request):
     async with async_session() as session:
         for g in page_groups:
             if not g.get("safe_for_batch", g.get("all_exact")):
-                continue  # only exact or pHash-100% for auto-clean
+                continue
 
-            # Load all members and compute quality scores
             member_jobs = []
             for key in g["member_keys"]:
                 job = jobs_by_key.get(key)
@@ -1368,273 +1386,15 @@ async def batch_clean_quality(request: Request):
             if len(member_jobs) < 2:
                 continue
 
-            # Find the best quality member
             best = max(member_jobs, key=lambda j: _quality_score(j))
+
+            _, d, e = await _resolve_duplicate_group(
+                session, best, member_jobs,
+                source="batch-clean",
+            )
             kept += 1
-
-            # Merge metadata from all others into the best before deleting.
-            # Collects GPS, date, keywords, description, folder_tags from
-            # worse members and fills gaps in the best member's step_result.
-            best_sr = best.step_result or {}
-            best_ia01 = best_sr.get("IA-01") or {}
-            best_ia02 = best_sr.get("IA-02") or {}
-            best_ia07 = best_sr.get("IA-07") or {}
-            best_folder_tags = list((best_ia02 if isinstance(best_ia02, dict) else {}).get("folder_tags") or [])
-            batch_donor_immich_albums: list[str] = []
-            merged_fields = []
-
-            for donor in member_jobs:
-                if donor.id == best.id:
-                    continue
-                donor_sr = donor.step_result or {}
-                donor_ia01 = donor_sr.get("IA-01") or {}
-                donor_ia02 = donor_sr.get("IA-02") or {}
-                donor_ia03 = donor_sr.get("IA-03") or {}
-                donor_ia07 = donor_sr.get("IA-07") or {}
-
-                # GPS: if best has none but donor does
-                if not best_ia01.get("gps") and donor_ia01.get("gps"):
-                    best_ia01["gps"] = True
-                    best_ia01["gps_lat"] = donor_ia01.get("gps_lat")
-                    best_ia01["gps_lon"] = donor_ia01.get("gps_lon")
-                    # Also copy geocoding result
-                    if donor_ia03 and donor_ia03.get("status") != "skipped":
-                        best_sr["IA-03"] = donor_ia03
-                    merged_fields.append("GPS")
-
-                # Date: if best has none but donor does
-                if not best_ia01.get("date") and donor_ia01.get("date"):
-                    best_ia01["date"] = donor_ia01["date"]
-                    merged_fields.append("date")
-
-                # Keywords: merge unique keywords from donor
-                best_kw = best_ia07.get("keywords_written") or []
-                donor_kw = donor_ia07.get("keywords_written") or []
-                new_kw = [k for k in donor_kw if k and k not in best_kw]
-                if new_kw:
-                    best_kw.extend(new_kw)
-                    best_ia07["keywords_written"] = best_kw
-                    best_ia07["tags_count"] = len(best_kw)
-                    merged_fields.append(f"keywords(+{len(new_kw)})")
-
-                # Merge donor folder_tags (for keywords only).
-                # Only extract from path if folder_tags was enabled for
-                # that job at import time (job.folder_tags boolean).
-                donor_ft = (donor_ia02 if isinstance(donor_ia02, dict) else {}).get("folder_tags") or []
-                if not donor_ft and donor.folder_tags:
-                    from pipeline.step_ia02_duplicates import _extract_folder_tags
-                    donor_ft = _extract_folder_tags(donor)
-                new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
-                if new_ft:
-                    best_folder_tags.extend(new_ft)
-                    merged_fields.append(f"folder_tags(+{len(new_ft)})")
-
-                # Collect donor's albums from all sources
-                donor_albums_found: list[str] = []
-                donor_asset = donor.immich_asset_id or ""
-                if not donor_asset and (donor.target_path or "").startswith("immich:"):
-                    donor_asset = (donor.target_path or "")[7:]
-                if donor_asset:
-                    from immich_client import get_asset_albums
-                    donor_albums_found = await get_asset_albums(donor_asset)
-                if not donor_albums_found:
-                    d_ia08 = donor_sr.get("IA-08") or {}
-                    donor_albums_found = d_ia08.get("immich_albums_added") or []
-                if not donor_albums_found and donor_ft:
-                    donor_albums_found = [donor_ft[-1]]
-                for a in donor_albums_found:
-                    if a and a not in batch_donor_immich_albums:
-                        batch_donor_immich_albums.append(a)
-                    if a and a not in best_folder_tags:
-                        best_folder_tags.append(a)
-                    for word in (a or "").split():
-                        if word and word not in best_folder_tags:
-                            best_folder_tags.append(word)
-
-                # Description: if best has none but donor does
-                best_desc = best_ia07.get("description_written") or ""
-                donor_desc = donor_ia07.get("description_written") or ""
-                if not best_desc and donor_desc:
-                    best_ia07["description_written"] = donor_desc
-                    merged_fields.append("description")
-
-            # Ensure all folder_tags (incl. album-derived) are in keywords
-            best_kw = best_ia07.get("keywords_written") or []
-            for ft in best_folder_tags:
-                if ft and ft not in best_kw:
-                    best_kw.append(ft)
-            if best_kw:
-                best_ia07["keywords_written"] = best_kw
-                best_ia07["tags_count"] = len(best_kw)
-
-            # Persist merged folder_tags + donor_albums into IA-02
-            if not isinstance(best_ia02, dict):
-                best_ia02 = {}
-            if best_folder_tags:
-                best_ia02["folder_tags"] = best_folder_tags
-            if batch_donor_immich_albums:
-                best_ia02["donor_albums"] = batch_donor_immich_albums
-                merged_fields.append(f"donor_albums({', '.join(batch_donor_immich_albums)})")
-            best_sr["IA-02"] = best_ia02
-
-            if merged_fields or best_folder_tags:
-                best_sr["IA-01"] = best_ia01
-                best_sr["IA-07"] = best_ia07
-                best.step_result = best_sr
-                flag_modified(best, "step_result")
-
-            # Delete all others
-            for job in member_jobs:
-                if job.id == best.id:
-                    continue
-
-                filepath = job.target_path or job.original_path
-                if filepath and not filepath.startswith("immich:") and os.path.exists(filepath):
-                    from file_operations import safe_remove_with_log
-                    removed_paths = await asyncio.to_thread(safe_remove_with_log, filepath)
-                    if filepath not in removed_paths:
-                        errors += 1
-                        continue
-
-                job.status = "done"
-                job.error_message = (
-                    f"Duplicate deleted (Batch-Clean Quality). "
-                    f"Kept: {best.debug_key} (better quality)"
-                )
-                deleted += 1
-
-            # If the best was a duplicate, it never ran IA-03..IA-08.
-            # Copy the analysis results (IA-03 geocoding, IA-05 AI tags,
-            # IA-06 OCR) from the original so we don't need to re-run
-            # the slow AI step. Then queue for re-processing — only
-            # IA-07 (tag write) and IA-08 (sort/upload) need to run.
-            if best.status == "duplicate":
-                # Transfer Immich asset ID from deleted members to the
-                # promoted job. When the worse member was already uploaded
-                # to Immich, the promoted job needs its asset_id so IA-08
-                # does the Upload→Copy→Delete replace workflow instead of
-                # a bare new upload.  Without this, the promoted file
-                # stayed in /library/error/duplicates/ and Immich kept
-                # the lower-quality version.  (Fix for v2.28.69)
-                for donor_job in member_jobs:
-                    if donor_job.id == best.id:
-                        continue
-                    donor_immich_id = donor_job.immich_asset_id
-                    if not donor_immich_id:
-                        donor_target = donor_job.target_path or ""
-                        if donor_target.startswith("immich:"):
-                            donor_immich_id = donor_target[len("immich:"):]
-                    if donor_immich_id and not best.immich_asset_id:
-                        best.immich_asset_id = donor_immich_id
-                        break
-
-                # Find the original (the done member with the most complete step_result)
-                original = next(
-                    (j for j in member_jobs if j.id != best.id and j.status != "duplicate"
-                     and (j.step_result or {}).get("IA-05")),
-                    None,
-                )
-                if original:
-                    orig_sr = original.step_result or {}
-                    # Copy analysis steps from original
-                    for step in ("IA-03", "IA-04", "IA-05", "IA-06"):
-                        if orig_sr.get(step):
-                            best_sr[step] = orig_sr[step]
-                    # Skip IA-02 — preserve folder_tags
-                    old_ia02 = best_sr.get("IA-02") or {}
-                    new_ia02 = {"status": "skipped", "reason": "kept via batch-clean"}
-                    if old_ia02.get("folder_tags"):
-                        new_ia02["folder_tags"] = old_ia02["folder_tags"]
-                    if old_ia02.get("donor_albums") or batch_donor_immich_albums:
-                        new_ia02["donor_albums"] = old_ia02.get("donor_albums") or batch_donor_immich_albums
-                    best_sr["IA-02"] = new_ia02
-                    best.step_result = best_sr
-                    flag_modified(best, "step_result")
-
-                    # Move file from /library/error/duplicates/ to reprocess/
-                    # so the pipeline can sort it into the library or upload
-                    # to Immich via IA-08.
-                    from pipeline.reprocess import prepare_job_for_reprocess
-                    kept_filepath = best.target_path or best.original_path
-                    if kept_filepath and not kept_filepath.startswith("immich:") and os.path.exists(kept_filepath):
-                        await prepare_job_for_reprocess(
-                            session,
-                            best,
-                            keep_steps={"IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06"},
-                            move_file=True,
-                            commit=False,
-                        )
-
-                    best.status = "queued"
-                    best.error_message = (
-                        f"Promoted (best quality). Analysis copied from {original.debug_key}."
-                        + (f" Merged: {', '.join(merged_fields)}" if merged_fields else "")
-                    )
-                else:
-                    # No original with analysis data found — queue for full
-                    # re-processing (AI will run)
-                    from pipeline.reprocess import prepare_job_for_reprocess
-                    kept_filepath = best.target_path or best.original_path
-                    if kept_filepath and not kept_filepath.startswith("immich:") and os.path.exists(kept_filepath):
-                        await prepare_job_for_reprocess(
-                            session,
-                            best,
-                            keep_steps={"IA-01"},
-                            move_file=True,
-                            commit=False,
-                        )
-                        # Skip IA-02 — preserve folder_tags + donor_albums
-                        sr = best.step_result or {}
-                        old_ia02 = sr.get("IA-02") or {}
-                        sr["IA-02"] = {"status": "skipped", "reason": "kept via batch-clean"}
-                        if old_ia02.get("folder_tags"):
-                            sr["IA-02"]["folder_tags"] = old_ia02["folder_tags"]
-                        if old_ia02.get("donor_albums") or batch_donor_immich_albums:
-                            sr["IA-02"]["donor_albums"] = old_ia02.get("donor_albums") or batch_donor_immich_albums
-                        best.step_result = sr
-                        flag_modified(best, "step_result")
-                    best.status = "queued"
-                    best.error_message = "Promoted (best quality, full re-processing)"
-                    if merged_fields:
-                        best.error_message += f" + merged: {', '.join(merged_fields)}"
-            else:
-                # best was already "done" — apply all merged data
-                # directly to Immich (no pipeline re-run).
-                asset_id = best.immich_asset_id or ""
-                if not asset_id and (best.target_path or "").startswith("immich:"):
-                    asset_id = (best.target_path or "")[7:]
-                if asset_id:
-                    from immich_client import add_asset_to_albums, tag_asset, update_asset_description
-
-                    # Tags: apply new keywords + folder_tags
-                    existing_tags = set((best_sr.get("IA-08") or {}).get("immich_tags_written") or [])
-                    all_tags = set(best_ia07.get("keywords_written") or [])
-                    new_tags = [t for t in all_tags if t not in existing_tags]
-                    for tag in new_tags:
-                        try:
-                            await tag_asset(asset_id, tag)
-                        except Exception:
-                            pass
-                    if new_tags:
-                        merged_fields.append(f"tags(+{len(new_tags)})")
-
-                    # Albums
-                    if batch_donor_immich_albums:
-                        added = await add_asset_to_albums(asset_id, batch_donor_immich_albums)
-                        if added:
-                            merged_fields.append(f"albums({', '.join(added)})")
-
-                    # Description
-                    merged_desc = best_ia07.get("description_written") or ""
-                    existing_desc = (best_sr.get("IA-08") or {}).get("description_written") or ""
-                    if not existing_desc and merged_desc:
-                        try:
-                            await update_asset_description(asset_id, merged_desc)
-                            merged_fields.append("description")
-                        except Exception:
-                            pass
-                if merged_fields:
-                    best.error_message = (best.error_message or "") + f" + merged: {', '.join(merged_fields)}"
+            deleted += d
+            errors += e
 
         await session.commit()
 
@@ -1644,33 +1404,3 @@ async def batch_clean_quality(request: Request):
     await log_info("duplicates", summary)
     redirect_url = "/duplicates" if page == 0 else f"/duplicates?page={page}"
     return RedirectResponse(url=redirect_url, status_code=303)
-
-
-@router.post("/api/duplicates/batch-clean")
-async def batch_clean():
-    """Auto-delete all exact SHA256 duplicates (keep original)."""
-    deleted = 0
-    async with async_session() as session:
-        result = await session.execute(
-            select(Job).where(Job.status == "duplicate")
-        )
-        dups = result.scalars().all()
-
-        for dup in dups:
-            dup_info = (dup.step_result or {}).get("IA-02", {})
-            if dup_info.get("match_type") != "exact":
-                continue
-
-            filepath = dup.target_path or dup.original_path
-            if os.path.exists(filepath):
-                from file_operations import safe_remove_with_log
-                await asyncio.to_thread(safe_remove_with_log, filepath)
-
-            dup.status = "done"
-            dup.error_message = "Duplicate deleted (Batch-Clean, SHA256 exact)"
-            deleted += 1
-
-        await session.commit()
-
-    await log_info("duplicates", f"Batch-Clean: {deleted} exact duplicates deleted")
-    return RedirectResponse(url="/duplicates", status_code=303)

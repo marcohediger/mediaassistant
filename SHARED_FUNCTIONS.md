@@ -299,15 +299,15 @@ Jeder Step hat: `async execute(job, session) -> dict`
 
 | Funktion | Beschreibung |
 |---|---|
-| `duplicates_page` | Duplikat-Seite (HTML). |
-| `api_duplicate_groups` | Paginierte Gruppen-API. |
-| `keep_file` | "Behalten" — Metadata-Merge + Re-Pipeline. |
+| **`_resolve_duplicate_group`** | **Shared Kern-Logik:** Metadata-Merge (GPS, Date, Keywords, Folder-Tags, Description, Albums), Donor-Cleanup (Dateien + Immich mit Same-Asset-Guard), Hash-Clearing, Asset-ID Transfer, Analysis-Kopie, Immich-Sync. Benutzt von `keep_file` und `batch_clean_quality`. |
+| `keep_file` | "Behalten" — Wrapper: Gruppe finden, `_resolve_duplicate_group(user_kept=True)`. |
+| `batch_clean_quality` | Batch-Clean — Wrapper: Qualität vergleichen, `_resolve_duplicate_group()` pro Gruppe. |
 | `not_duplicate` | "Kein Duplikat" — Re-Pipeline mit skip. |
 | `delete_duplicate` | Einzelnes Duplikat löschen. |
 | `merge_metadata` | Metadaten zusammenführen. |
-| `batch_clean_quality` | Qualitäts-basiertes Batch-Clean. |
-| `batch_clean` | SHA256-exakte Duplikate auto-löschen. |
 | `re_evaluate_quality` | Qualitäts-Neuberechnung. |
+| `duplicates_page` | Duplikat-Seite (HTML). |
+| `api_duplicate_groups` | Paginierte Gruppen-API. |
 | `thumbnail` / `immich_thumbnail` | Thumbnails servieren. |
 | `immich_original` / `local_original` | Originalbilder servieren. |
 | `_build_member` | Member-Dict für Duplikat-Gruppe bauen. |
