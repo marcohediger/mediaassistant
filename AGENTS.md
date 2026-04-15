@@ -329,7 +329,7 @@ except Exception as exc:
 - Immich-Asset hochladen/ersetzen (`upload_asset`, Upload→Copy→Delete)
 - Dateien verschieben/löschen (`safe_move`, `safe_remove`)
 - Job-Status-Änderungen bei Duplikat-Auflösung (Keep, Batch-Clean)
-- Pipeline quality_swap (Demote + Asset-Transfer)
+- Pipeline Duplikat-Erkennung (IA-02 Verschiebung in Duplikat-Ordner)
 
 **Gilt NICHT für:** Reine Lese-Operationen, DB-Queries, Config-Reads.
 

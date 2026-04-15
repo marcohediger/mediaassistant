@@ -498,7 +498,7 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 - **FTAG-12:** folder_tags Merge — doppelte Einträge (z.B. "Mallorca") werden nicht verdoppelt
 - **FTAG-13:** folder_tags Merge — neue Tags aus zweitem Donor hinzugefügt
 - **FTAG-14:** folder_tags Merge — Ergebnis zurück in IA-02 persistiert
-- **FTAG-15:** `_swap_duplicate` speichert folder_tags im IA-02 step_result des demotierten Jobs
+- **FTAG-15:** ENTFERNT (quality_swap entfernt in v2.30.0)
 - **FTAG-16:** Template `_dup_group.html` zeigt folder_album Badge mit CSS-Klasse `.match-folder-album`
 - **FTAG-17:** CSS enthält `.match-folder-album` Styling
 - **FTAG-18:** `de.json` enthält `folder_album_title` Übersetzung
@@ -711,7 +711,7 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 | Assertion | Erwartet |
 | --- | --- |
 | `_quality_score(B) > _quality_score(A)` | True |
-| IA-02 returned `status=ok, quality_swap=True` | B wird Original |
+| IA-02 returned `status=duplicate` | B wird Duplikat (kein quality_swap mehr seit v2.30.0) |
 | A demoted to `status=duplicate` | `duplicate` |
 | B bleibt `status=processing` (Pipeline läuft weiter) | `processing` |
 
