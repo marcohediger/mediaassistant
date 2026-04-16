@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.31.1 — 2026-04-16
+
+### Fix: Keep-Flow safe_replace auch bei pre-existing asset_id
+
+Folge-Fix zu v2.31.0. Der `_force_reupload`-Sentinel wurde im Keep-
+Flow nur gesetzt, wenn `best.immich_asset_id` frisch vom donor geerbt
+wurde. Wenn `best.status="duplicate"` aber bereits eine eigene
+`immich_asset_id` hatte (z.B. weil der Job vorher mal `done` war und
+später durch ein neueres Bild auf `duplicate` zurück-flippte, oder
+durch Poller-Registrierung), griff der Sentinel nicht und IA-08 hat
+in sidecar mode + retry_count=0 nur API-Tags geschrieben — der
+lokale Datei-Inhalt der "kept" Variante landete nie in Immich.
+Gleiche Wurzel wie der v2.31.0-Bug, anderer Trigger.
+
+`routers/duplicates.py`: `force_reupload_after_inherit = bool(
+best.immich_asset_id)` setzt den Sentinel jetzt unabhängig davon, ob
+die ID frisch oder pre-existing ist. safe_replace_asset's
+short-circuit (`if old_id == new_id: return`) verhindert
+unnötigen Mehraufwand wenn Immich den Upload als Duplikat erkennt
+(byte-identischer Inhalt).
+
+### Tests
+
+- `test_no_file_loss.py` neuer Case **K2**: best=duplicate mit
+  pre-existing immich_asset_id auf altem Inhalt + lokale Datei
+  hat NEUEN Inhalt → Pipeline läuft → asset_id hat sich geändert
+  (safe_replace lief), neues Asset matched lokale Datei-Bytes
+  (size-check), altes Asset weg.
+
 ## v2.31.0 — 2026-04-16
 
 ### safe_move-Garantie für Immich (Datenverlust-Fix)

@@ -587,6 +587,105 @@ async def main():
                 except Exception:
                     pass
 
+        # ==================================================================
+        # K2: Best=duplicate mit PRE-EXISTING immich_asset_id (nicht
+        # vom donor geerbt) — Bug-Pfad mit anderem Trigger als K1.
+        # Vor v2.31.1 wurde der Sentinel hier nicht gesetzt → IA-08 hat
+        # nur API-getagged statt safe_replace zu machen.
+        # ==================================================================
+        print("\n── K2: Keep This mit pre-existing best.immich_asset_id ──")
+        # Asset A = best's eigener alter Inhalt (in Immich)
+        # Lokale Datei = NEUER Inhalt (was beim Keep behalten wird)
+        old_content_path = f"/tmp/__nfl_k2_old_{ts}.jpg"
+        new_content_path = f"/library/error/duplicates/__nfl_k2_new_{ts}.jpg"
+        os.makedirs(os.path.dirname(new_content_path), exist_ok=True)
+        make_unique_jpg(old_content_path, w=600, h=500)
+        make_unique_jpg(new_content_path, w=620, h=520)  # anderer Inhalt
+        old_size = os.path.getsize(old_content_path)
+        new_size = os.path.getsize(new_content_path)
+
+        # Upload den OLD-Inhalt als best's pre-existing Asset
+        old_upload = await safe_upload_asset(old_content_path)
+        best_pre_asset_id = old_upload["id"]
+        # Donor (irgendein anderes Asset im Immich, harmloses Setup)
+        donor_upload = await safe_upload_asset(_mk_file("k2donor", b"donor" * 100))
+        donor_pre_asset_id = donor_upload["id"]
+
+        async with async_session() as session:
+            best_k2 = Job(
+                filename=os.path.basename(new_content_path),
+                original_path=new_content_path,
+                source_inbox_path="/inbox", status="duplicate",
+                target_path=new_content_path,
+                immich_asset_id=best_pre_asset_id,  # ← PRE-EXISTING
+                debug_key=f"NFL-K2-BEST-{ts}",
+                file_hash=f"k2best_{ts}", phash=f"k2ph_{ts}",
+                use_immich=True,
+                step_result={"IA-01": {"file_type": "JPEG"},
+                             "IA-02": {"status": "duplicate",
+                                       "original_debug_key": f"NFL-K2-DON-{ts}",
+                                       "folder_tags": []}},
+            )
+            donor_k2 = Job(
+                filename=f"__nfl_k2_donor_{ts}.jpg",
+                original_path=f"/tmp/__nfl_k2_donor_{ts}.jpg",
+                source_inbox_path="/inbox", status="done",
+                target_path=f"immich:{donor_pre_asset_id}",
+                immich_asset_id=donor_pre_asset_id,
+                debug_key=f"NFL-K2-DON-{ts}",
+                file_hash=f"k2don_{ts}", phash=f"k2ph_{ts}",
+                use_immich=True,
+                step_result={"IA-01": {"file_type": "JPEG"},
+                             "IA-02": {"status": "ok"}},
+            )
+            session.add_all([best_k2, donor_k2])
+            await session.commit()
+            best_k2_id = best_k2.id
+
+            _, _, _, flush2 = await _resolve_duplicate_group(
+                session, best_k2, [best_k2, donor_k2],
+                source="keep", user_kept=True,
+            )
+            await session.commit()
+            await flush2()
+
+        await run_pipeline(best_k2_id)
+
+        async with async_session() as session:
+            best_k2 = (await session.execute(select(Job).where(Job.id == best_k2_id))).scalar()
+            check("K2a Job hat Immich-Asset-ID nach Pipeline",
+                  bool(best_k2.immich_asset_id),
+                  f"asset_id={best_k2.immich_asset_id} status={best_k2.status}")
+            check("K2b Asset-ID hat sich GEÄNDERT (= safe_replace lief)",
+                  best_k2.immich_asset_id != best_pre_asset_id,
+                  f"new={best_k2.immich_asset_id} pre={best_pre_asset_id}")
+            if best_k2.immich_asset_id and best_k2.immich_asset_id != best_pre_asset_id:
+                # Verify: neues Asset hat den NEUEN Inhalt (size matched)
+                from immich_client import get_asset_info
+                info = await get_asset_info(best_k2.immich_asset_id)
+                actual_size = (info or {}).get("exifInfo", {}).get("fileSizeInByte") if info else None
+                check("K2c Neues Asset hat neue Datei-Bytes (size match)",
+                      actual_size == new_size,
+                      f"immich_size={actual_size} local_new={new_size} local_old={old_size}")
+                # Old asset must be gone
+                check("K2d Altes pre-existing Asset weg",
+                      not await asset_exists(best_pre_asset_id),
+                      f"old={best_pre_asset_id}")
+                # Cleanup
+                try:
+                    await delete_asset(best_k2.immich_asset_id)
+                except Exception:
+                    pass
+        # Donor cleanup if leftover
+        if await asset_exists(donor_pre_asset_id):
+            try:
+                await delete_asset(donor_pre_asset_id)
+            except Exception:
+                pass
+        for p in (old_content_path,):
+            if os.path.exists(p):
+                os.remove(p)
+
     # ==================================================================
     # Zusammenfassung
     # ==================================================================
