@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -124,6 +126,196 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
     if albums_added:
         result["albums_added"] = albums_added
     return result
+
+
+def _sha1_b64(path: str) -> str:
+    """Return base64-encoded SHA-1 of a file (matches Immich's `checksum` field)."""
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return base64.b64encode(h.digest()).decode("ascii")
+
+
+async def safe_upload_asset(
+    file_path: str,
+    album_names: list[str] | None = None,
+    *,
+    sidecar_path: str | None = None,
+    api_key: str | None = None,
+    max_attempts: int = 3,
+) -> dict:
+    """Upload to Immich + verify the asset is reachable with matching size+checksum.
+
+    The Immich-side equivalent of `safe_move`: never trust an upload as
+    "complete" before the destination is verified. Wraps `upload_asset()`
+    with a verification + retry loop that guarantees:
+
+      - Returns only when GET /api/assets/{id} confirms the asset exists
+        with `fileSizeInByte == os.path.getsize(file_path)` and (if
+        Immich exposes it) `checksum == base64(SHA-1(file))`.
+      - On failure of any single attempt, the partially-uploaded orphan
+        asset is deleted from Immich before retrying — no duplicate
+        leakage on transient errors.
+      - After `max_attempts` failed verifications, raises `RuntimeError`.
+        The caller (IA-08) propagates it; the pipeline marks the job
+        `error` and `_move_to_error()` preserves the local file in
+        `/library/error/`. The source file is NEVER deleted by the
+        caller without a verified-success return from this function.
+
+    Albums passed via `album_names` are still attached on success — the
+    `albums_added` list from `upload_asset()` is preserved on the
+    returned dict.
+    """
+    BACKOFF_S = (5, 15, 30)
+    last_error: Exception | None = None
+    expected_size = os.path.getsize(file_path)
+    expected_sha1 = await asyncio.to_thread(_sha1_b64, file_path)
+
+    for attempt in range(max_attempts):
+        orphan_id: str | None = None
+        try:
+            result = await upload_asset(
+                file_path,
+                album_names=album_names,
+                sidecar_path=sidecar_path,
+                api_key=api_key,
+            )
+            asset_id = result.get("id")
+            if not asset_id:
+                raise RuntimeError(f"upload returned no asset id: {result!r}")
+            orphan_id = asset_id
+
+            info = await get_asset_info(asset_id, api_key=api_key)
+            if not info:
+                raise RuntimeError(
+                    f"asset {asset_id} not reachable via GET after upload"
+                )
+
+            actual_size = (info.get("exifInfo") or {}).get("fileSizeInByte")
+            if actual_size and actual_size != expected_size:
+                raise RuntimeError(
+                    f"size mismatch: Immich={actual_size} local={expected_size}"
+                )
+
+            actual_sha1 = info.get("checksum")
+            if actual_sha1 and actual_sha1 != expected_sha1:
+                raise RuntimeError(
+                    f"checksum mismatch: Immich={actual_sha1[:16]}… "
+                    f"local={expected_sha1[:16]}…"
+                )
+
+            logger.info(
+                "safe_upload OK: %s (attempt %d/%d, size=%d)",
+                asset_id, attempt + 1, max_attempts, expected_size,
+            )
+            return result
+
+        except Exception as exc:
+            last_error = exc
+            if orphan_id:
+                try:
+                    await delete_asset(orphan_id, api_key=api_key)
+                    logger.info(
+                        "Cleaned up orphan asset %s after failed verify",
+                        orphan_id,
+                    )
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        "Could not clean up orphan asset %s: %s — leaking",
+                        orphan_id, cleanup_exc,
+                    )
+
+            await log_warning(
+                "immich_safe_upload",
+                f"Versuch {attempt + 1}/{max_attempts} fehlgeschlagen für "
+                f"{os.path.basename(file_path)}",
+                f"{type(exc).__name__}: {exc}",
+            )
+
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(BACKOFF_S[min(attempt, len(BACKOFF_S) - 1)])
+
+    raise RuntimeError(
+        f"safe_upload_asset failed after {max_attempts} attempts: {last_error}"
+    )
+
+
+async def safe_replace_asset(
+    old_asset_id: str,
+    file_path: str,
+    *,
+    sidecar_path: str | None = None,
+    album_names: list[str] | None = None,
+    api_key: str | None = None,
+    max_attempts: int = 3,
+) -> dict:
+    """Replace an Immich asset with a freshly uploaded copy, safe_move-style.
+
+    Steps:
+
+      1. `safe_upload_asset(file_path)` — upload + verify with retries.
+         On terminal failure raises `RuntimeError`; caller's pipeline
+         marks job error and the OLD asset stays untouched as the
+         surviving copy of the file.
+      2. `copy_asset_metadata(old → new)` — best-effort. A 404 on
+         `old` is tolerated (= old already gone, no metadata to migrate).
+         Other errors are logged but don't trigger a rollback.
+      3. `delete_asset(old)` — best-effort. 404 is OK.
+
+    **Critical invariant**: NEVER delete the verified new asset on
+    failure of step 2 or 3. After step 1 returns, the new asset IS
+    the only verified copy of the file content — rolling it back
+    would be data loss. This is the bug the v2.30.x replace path had
+    in `step_ia08_sort.py` (rollback after `copy_asset_metadata`
+    raised "Not found"), which caused MediaAssistant-Live "Bild
+    verloren bei Keep This"-Vorfälle.
+    """
+    new = await safe_upload_asset(
+        file_path,
+        album_names=album_names,
+        sidecar_path=sidecar_path,
+        api_key=api_key,
+        max_attempts=max_attempts,
+    )
+    new_id = new["id"]
+
+    # Same-asset short-circuit (e.g. Immich returned existing asset as duplicate)
+    if not old_asset_id or old_asset_id == new_id:
+        return new
+
+    # Best-effort metadata copy
+    try:
+        await copy_asset_metadata(old_asset_id, new_id, api_key=api_key)
+    except RuntimeError as exc:
+        msg = str(exc).lower()
+        if "404" in msg or "not found" in msg:
+            logger.info(
+                "Old asset %s gone — no metadata to copy to %s",
+                old_asset_id, new_id,
+            )
+        else:
+            await log_warning(
+                "immich_safe_replace",
+                f"Metadata-Copy {old_asset_id}→{new_id} fehlgeschlagen "
+                "— neue Kopie bleibt erhalten",
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    # Best-effort delete of old asset
+    try:
+        await delete_asset(old_asset_id, api_key=api_key)
+    except RuntimeError as exc:
+        msg = str(exc).lower()
+        if "404" not in msg and "not found" not in msg:
+            await log_warning(
+                "immich_safe_replace",
+                f"Delete altes Asset {old_asset_id} fehlgeschlagen "
+                "— mögliches Duplikat in Immich",
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    return new
 
 
 async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dict, name: str) -> str | None:

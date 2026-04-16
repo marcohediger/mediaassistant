@@ -1,5 +1,60 @@
 # Changelog
 
+## v2.31.0 — 2026-04-16
+
+### safe_move-Garantie für Immich (Datenverlust-Fix)
+
+- **Neu: `safe_upload_asset` + `safe_replace_asset` in
+  `immich_client.py`.** Beide Wrapper liefern für Immich-Operationen
+  die gleiche Garantie wie `safe_move` lokal: eine bekannt-gute Kopie
+  wird NIE gelöscht bevor eine neue Kopie verifiziert existiert.
+  - `safe_upload_asset`: Upload + GET-Verify (size + base64-SHA1
+    checksum gegen Immich's `checksum`-Feld) + 3 Retries mit Backoff
+    (5/15/30s). Bei Verify-Fail: orphaner Upload wird gelöscht
+    bevor retry — kein Duplikat-Leak in Immich.
+  - `safe_replace_asset`: erst safe_upload, dann best-effort
+    `copy_asset_metadata` (404 toleriert) + best-effort `delete`
+    des alten Assets. **Kein Rollback** des verifizierten neuen
+    Assets bei Fehler in Schritt 2/3 — das war der bisherige
+    Datenverlust-Pfad.
+- **`step_ia08_sort.py`:** beide Upload-Pfade nutzen jetzt die
+  safe_*-Wrapper. Der gefährliche Rollback-Block im Replace-Pfad
+  (löschte das gerade hochgeladene Asset wenn `copy_asset_metadata`
+  mit "Not found" warf) ist entfernt.
+- **`routers/duplicates.py` Keep-Flow:** wenn `best.status="duplicate"`
+  und ohne eigene `immich_asset_id`, wird das donor-Immich-Asset
+  NICHT mehr eager gelöscht. Stattdessen erbt best die donor-id
+  und IA-08 macht `safe_replace_asset` (upload neu → copy meta →
+  delete alt) atomar.
+- **Bei terminalem Fehler** (3x Retry erschöpft) wirft IA-08
+  `RuntimeError` → Pipeline markiert `status='error'` → `_move_to_error`
+  verschiebt die Datei nach `/library/error/`. Die Datei ist
+  garantiert auffindbar, das alte Immich-Asset bleibt als Backup.
+
+### Live-Vorfall der gefixt wurde
+
+**"Bild verloren bei Keep This"** (User-Report 2026-04-16): Original-
+Asset war in Immich, neues Bild kam als Duplikat rein, User klickte
+"Keep This". Resultat war: nichts in Immich, Retry half nicht.
+Wurzel: routers/duplicates.py löschte donor-Asset eager, dann setzte
+`best.immich_asset_id = donor_asset_id` (Zombie-Referenz). IA-08
+ging in den Replace-Branch, `copy_asset_metadata` warf 404, der
+Rollback-Block löschte das gerade hochgeladene neue Asset → Datei
+nur noch in `/app/data/reprocess/`. Mit v2.31.0 bleiben Original-
+Asset, neue Kopie und lokale Datei während des gesamten Flows
+gleichzeitig verifiziert vorhanden, bis die safe_replace-Sequenz
+abgeschlossen ist.
+
+### Tests
+
+- `test_no_file_loss.py` erweitert um U1/U2/R1/R2/K1:
+  - U1: 3x Verify-Fail → RuntimeError + alle Orphans aufgeräumt
+  - U2: Checksum-Mismatch beim 1. Versuch → 2. Versuch erfolgreich
+  - R1: copy_metadata 404 → neue Kopie BLEIBT (kein Rollback)
+  - R2: 3x Upload-Fail → RuntimeError, alter donor unangetastet
+  - K1: Keep-This e2e — donor wird via safe_replace ersetzt, neue
+    Kopie verifiziert in Immich, donor weg
+
 ## v2.30.4 — 2026-04-15
 
 ### UI-Fix: Duplikat-Review Sortierung + Badges

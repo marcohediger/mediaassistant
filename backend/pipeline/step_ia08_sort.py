@@ -16,7 +16,7 @@ from file_operations import (
     validate_target_path as _validate_target_path,
 )
 from safe_file import safe_move
-from immich_client import upload_asset, copy_asset_metadata, delete_asset, archive_asset, lock_asset, tag_asset, untag_asset, get_asset_info, get_user_api_key, update_asset_description
+from immich_client import safe_upload_asset, safe_replace_asset, archive_asset, lock_asset, tag_asset, untag_asset, get_asset_info, get_user_api_key, update_asset_description
 
 
 async def _get_folder_album_names(job) -> list[str] | None:
@@ -540,7 +540,16 @@ async def execute(job, session) -> dict:
         upload_result = {}
 
         is_retry = (job.retry_count or 0) > 0
-        needs_reupload = not sidecar_mode or is_retry
+        # Keep-Flow inheritance signal: when the duplicate-resolver in
+        # routers/duplicates.py transferred a donor's asset_id onto this
+        # job, the local file content differs from what the asset
+        # currently holds — a fresh safe_replace is required (not just
+        # an API-tag of the existing donor asset). The sentinel is
+        # injected by _resolve_duplicate_group via inject_steps and
+        # popped at the end of this function so it never leaks into
+        # the persisted step_result.
+        force_reupload = bool(step_results.get("_force_reupload"))
+        needs_reupload = not sidecar_mode or is_retry or force_reupload
 
         if not needs_reupload:
             # First-time processing, sidecar mode: original file unchanged,
@@ -566,39 +575,28 @@ async def execute(job, session) -> dict:
             # Extract album name from inbox folder structure (re-check module + inbox at runtime)
             reupload_album_names = await _get_folder_album_names(job)
 
-            try:
-                # Step 1: Upload file as new asset (with sidecar if available)
-                upload_result = await upload_asset(
-                    job.original_path,
-                    album_names=reupload_album_names,
-                    sidecar_path=sidecar_path if sidecar_mode else None,
-                    api_key=user_api_key,
-                )
-                new_asset_id = upload_result.get("id")
-
-                if new_asset_id and upload_result.get("status") != "duplicate":
-                    # Step 2: Copy metadata (albums, favorites, faces, stacks) from old to new
-                    await copy_asset_metadata(old_asset_id, new_asset_id, api_key=user_api_key)
-
-                    # Step 3: Delete old asset (force = skip trash)
-                    await delete_asset(old_asset_id, api_key=user_api_key)
-
-                    # Update job to reference new asset
-                    job.immich_asset_id = new_asset_id
-                    immich_replaced = True
-            except RuntimeError as e:
-                # Rollback: delete newly uploaded asset to prevent duplicates/loops
-                if new_asset_id and new_asset_id != old_asset_id:
-                    try:
-                        await delete_asset(new_asset_id, api_key=user_api_key)
-                        logger.info("Rolled back new asset %s after error", new_asset_id)
-                    except Exception:
-                        logger.warning("Failed to rollback new asset %s", new_asset_id)
-                # No write access — skip, continue with tagging
-                if "asset.update" in str(e) or "Not found" in str(e):
-                    pass
-                else:
-                    raise
+            # safe_replace_asset = upload+verify+copy+delete with the
+            # safe_move guarantee:
+            #   - 3 internal retries on upload/verify failure
+            #   - new asset is NEVER rolled back once verified
+            #     (the previous "rollback on Not found" logic destroyed
+            #      the only verified copy when old_asset_id was already
+            #      gone — root cause of "Bild verloren bei Keep This")
+            #   - copy_metadata + delete_old are best-effort: 404 OK
+            #   - on terminal failure raises RuntimeError → pipeline marks
+            #     job error → _move_to_error preserves the file in
+            #     /library/error/. Old asset stays as backup.
+            upload_result = await safe_replace_asset(
+                old_asset_id,
+                job.original_path,
+                sidecar_path=sidecar_path if sidecar_mode else None,
+                album_names=reupload_album_names,
+                api_key=user_api_key,
+            )
+            new_asset_id = upload_result.get("id")
+            if new_asset_id and new_asset_id != old_asset_id:
+                job.immich_asset_id = new_asset_id
+                immich_replaced = True
             job.target_path = f"immich:{job.immich_asset_id}"
 
         # Tag the asset in Immich. Also removes any stale tag that was
@@ -652,8 +650,9 @@ async def execute(job, session) -> dict:
         if tags_failed:
             result["status"] = "warning"
             result["reason"] = f"Immich-Tags fehlgeschlagen: {', '.join(tags_failed)}"
-        # Drop the retry sentinel so it doesn't leak into next run's step_result
+        # Drop sentinels so they don't leak into next run's step_result
         step_results.pop("_retry_previous_immich_tags", None)
+        step_results.pop("_force_reupload", None)
         return result
 
     # Route: Immich upload or target directory
@@ -661,16 +660,19 @@ async def execute(job, session) -> dict:
         # Extract folder tags as single combined album name (re-check module + inbox at runtime)
         album_names = await _get_folder_album_names(job)
 
-        try:
-            immich_result = await upload_asset(job.original_path, album_names=album_names,
-                                              sidecar_path=sidecar_path, api_key=user_api_key)
-        except Exception as exc:
-            raise RuntimeError(f"Immich upload failed for {job.filename}: {exc}") from exc
-
-        if not immich_result or not isinstance(immich_result, dict):
-            raise RuntimeError(f"Immich upload returned invalid response for {job.filename}: {immich_result}")
-
-        asset_id = immich_result.get("id", "")
+        # safe_upload_asset = upload + verify (size + checksum) + retries.
+        # On success: asset_id is guaranteed non-empty AND the asset is
+        # verified-reachable in Immich. Only then is it safe to remove
+        # the source file below.
+        # On failure (3x retries exhausted): RuntimeError → pipeline marks
+        # job error → _move_to_error preserves the file in /library/error/.
+        immich_result = await safe_upload_asset(
+            job.original_path,
+            album_names=album_names,
+            sidecar_path=sidecar_path,
+            api_key=user_api_key,
+        )
+        asset_id = immich_result["id"]
 
         # Tag asset in Immich. Also removes any stale tag that was in
         # the PREVIOUS retry's immich_tags_written set but is no longer
