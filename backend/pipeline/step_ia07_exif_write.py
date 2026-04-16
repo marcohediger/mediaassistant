@@ -74,11 +74,16 @@ async def execute(job, session) -> dict:
     # reprocess (the file moved to /library/error/duplicates/ → relative
     # path is broken). IA-02 pre-computes the folder tags and stores them
     # in step_result['IA-02']['folder_tags'] so they survive the move.
-    ia02_folder_tags = step_results.get("IA-02", {}).get("folder_tags", [])
-    if ia02_folder_tags:
-        for tag in ia02_folder_tags:
-            if tag and tag not in keywords:
-                keywords.append(tag)
+    # Gate by folder_tags_active so the cached IA-02 list is only honoured
+    # when the module is currently active. Otherwise a stale cache (from a
+    # prior run when the module was on) would leak folder-derived keywords
+    # despite the user having since disabled the feature.
+    if folder_tags_active:
+        ia02_folder_tags = step_results.get("IA-02", {}).get("folder_tags", [])
+        if ia02_folder_tags:
+            for tag in ia02_folder_tags:
+                if tag and tag not in keywords:
+                    keywords.append(tag)
 
     # From AI analysis (type + tags + source)
     # Skip the literal "unknown" type — it gets set as a default when IA-05

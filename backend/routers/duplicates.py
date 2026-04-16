@@ -717,6 +717,14 @@ async def _resolve_duplicate_group(
     donor_immich_albums: list[str] = []
     merge_notes: list[str] = []
 
+    # Folder-Tags-Modul-Status für best (current job): wenn aus, NIE
+    # folder_tags vom donor übernehmen — sonst leakt das Feature in
+    # Immich-Tags und EXIF-Keywords obwohl der User es deaktiviert hat.
+    # Schon vorhandene best_folder_tags aus früheren Läufen bleiben (die
+    # wurden zu einem Zeitpunkt geschrieben wo das Modul aktiv war).
+    from file_operations import is_folder_tags_active as _is_ft_active
+    folder_tags_active_for_best = await _is_ft_active(best)
+
     for donor in donors:
         d_sr = donor.step_result or {}
         d_ia01 = d_sr.get("IA-01") or {}
@@ -748,14 +756,19 @@ async def _resolve_duplicate_group(
             best_ia07["tags_count"] = len(best_kw)
             merge_notes.append(f"keywords(+{len(new_kw)})")
 
-        # Folder tags
-        donor_ft = (d_ia02 if isinstance(d_ia02, dict) else {}).get("folder_tags") or []
-        if not donor_ft and donor.folder_tags:
-            donor_ft = _extract_folder_tags(donor)
-        new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
-        if new_ft:
-            best_folder_tags.extend(new_ft)
-            merge_notes.append(f"folder_tags(+{len(new_ft)})")
+        # Folder tags — nur mergen wenn Modul für best aktiv. Sonst würde
+        # ein donor mit folder_tags (z.B. weil der zur Zeit seiner Verar-
+        # beitung das Modul an hatte) seine Tags an best vererben obwohl
+        # das Modul JETZT aus ist.
+        donor_ft: list[str] = []
+        if folder_tags_active_for_best:
+            donor_ft = (d_ia02 if isinstance(d_ia02, dict) else {}).get("folder_tags") or []
+            if not donor_ft and donor.folder_tags:
+                donor_ft = _extract_folder_tags(donor)
+            new_ft = [t for t in donor_ft if t and t not in best_folder_tags]
+            if new_ft:
+                best_folder_tags.extend(new_ft)
+                merge_notes.append(f"folder_tags(+{len(new_ft)})")
 
         # Donor albums (Immich API → IA-08 result → folder_tags fallback)
         donor_albums_found: list[str] = []
@@ -774,11 +787,16 @@ async def _resolve_duplicate_group(
         for a in donor_albums_found:
             if a and a not in donor_immich_albums:
                 donor_immich_albums.append(a)
-            if a and a not in best_folder_tags:
-                best_folder_tags.append(a)
-            for word in (a or "").split():
-                if word and word not in best_folder_tags:
-                    best_folder_tags.append(word)
+            # Album-Namen NUR als Folder-Tags/Keywords aufnehmen wenn Modul
+            # für best aktiv. Album-Asset-Zuordnung in Immich (donor_immich_albums)
+            # bleibt unabhängig — bestehende Alben werden nicht zerstört, nur
+            # nicht zusätzlich als EXIF-Keyword/Immich-Tag dupliziert.
+            if folder_tags_active_for_best:
+                if a and a not in best_folder_tags:
+                    best_folder_tags.append(a)
+                for word in (a or "").split():
+                    if word and word not in best_folder_tags:
+                        best_folder_tags.append(word)
 
         # Description
         best_desc = best_ia07.get("description_written") or ""

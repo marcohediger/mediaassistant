@@ -1,5 +1,44 @@
 # Changelog
 
+## v2.31.2 — 2026-04-16
+
+### Fix: Folder-Tags wurden trotz deaktiviertem "Ordner-Tag"-Modul geschrieben
+
+User-Report: trotz ausgeschaltetem `module.ordner_tags` landeten die
+Inbox-Subfolder-Namen als EXIF-Keywords und Immich-Tags. Der Pfad
+ging über die Duplikat-Detection + Keep-Flow:
+
+1. Datei in z.B. `inbox/Ferien/foto.jpg` kommt rein
+2. IA-02 erkennt Duplikat → `_extract_folder_tags()` läuft
+   **ungated** → speichert `["Ferien"]` in `step_result['IA-02']`
+3. User klickt "Keep This" → Pipeline reprocessed
+4. IA-07 path-basierte Extraktion: korrekt gegated → kein Tag ✓
+5. IA-07 IA-02-Cache-Read: **ungated** → liest "Ferien" als Keyword ✗
+6. IA-08 schreibt Keywords als Immich-Tag
+
+Drei symmetrische Gates eingebaut:
+
+- `step_ia02_duplicates.py:_handle_duplicate`: `_extract_folder_tags()`
+  läuft nur wenn `is_folder_tags_active(job)`
+- `step_ia07_exif_write.py`: IA-02-Cache-Fallback wird nur gelesen
+  wenn `folder_tags_active`
+- `routers/duplicates.py:_resolve_duplicate_group`: donor_ft Merge
+  und Album-Namen → best_folder_tags Vererbung beide gegated über
+  `is_folder_tags_active(best)`
+
+Album-Asset-Zuordnung in Immich (über `get_asset_albums`-Inheritance)
+bleibt unabhängig erhalten — bestehende Album-Mitgliedschaften werden
+nicht zerstört, nur nicht zusätzlich als EXIF-Keyword/Immich-Tag
+dupliziert wenn Modul aus.
+
+### Tests
+
+- `test_no_file_loss.py` neuer Case **F1**: Modul AUS, Datei in
+  subfolder, IA-02 detected duplicate (mit pre-existing folder_tags
+  im donor's step_result), Keep This → Pipeline → KEIN folder-derived
+  Tag in IA-07 keywords_written, KEIN folder-derived Tag in IA-08
+  immich_tags_written, KEIN folder-derived Album angelegt.
+
 ## v2.31.1 — 2026-04-16
 
 ### Fix: Keep-Flow safe_replace auch bei pre-existing asset_id

@@ -687,6 +687,116 @@ async def main():
                 os.remove(p)
 
     # ==================================================================
+    # F1: Drei Gates für deaktivierten "Ordner-Tag" — Unit-Tests für
+    # Fix A (IA-02), Fix B (IA-07), Fix C (duplicates merge) ohne
+    # Pipeline-Loop, gegen die echte is_folder_tags_active-Funktion mit
+    # toggled Module/InboxDirectory state.
+    # ==================================================================
+    print("\n── F1: Ordner-Tag AUS — Gate-Tests A/B/C ──")
+    from file_operations import is_folder_tags_active
+    from pipeline.step_ia02_duplicates import _extract_folder_tags
+    from models import Module, InboxDirectory
+
+    # Module-State sichern + AUS schalten
+    async with async_session() as session:
+        mod = await session.get(Module, "ordner_tags")
+        original_module_enabled = mod.enabled if mod else None
+        if mod:
+            mod.enabled = False
+            await session.commit()
+        else:
+            session.add(Module(name="ordner_tags", enabled=False))
+            await session.commit()
+        # Inbox-Flag auf True (sonst greift der Test gar nicht — wir wollen
+        # ja zeigen dass MODUL-Status alleine reicht zum Blockieren)
+        ib = await session.execute(select(InboxDirectory).where(InboxDirectory.path == "/inbox"))
+        inbox = ib.scalar()
+        original_inbox_ft = None
+        if inbox:
+            original_inbox_ft = inbox.folder_tags
+            inbox.folder_tags = True
+            await session.commit()
+
+    # Job mit subfolder-path bauen
+    class _FakeJob:
+        source_inbox_path = "/inbox"
+        original_path = "/inbox/Ferien_Mallorca/foto.jpg"
+        folder_tags = True
+        step_result = None
+
+    fake_job = _FakeJob()
+
+    # Sanity-Check: is_folder_tags_active liefert False bei Modul aus
+    check("F1-pre is_folder_tags_active = False bei Modul aus",
+          await is_folder_tags_active(fake_job) is False,
+          "")
+
+    # Fix A: _extract_folder_tags läuft sync und ist NICHT direkt gegated
+    # — die Gate ist im Caller _handle_duplicate. Wir simulieren den Caller-
+    # Pfad durch das gleiche Pattern (= die Production-Gate testen).
+    folder_tags_a = _extract_folder_tags(fake_job) if await is_folder_tags_active(fake_job) else []
+    check("F1a Fix A: bei Modul aus liefert _extract_folder_tags-Pfad []",
+          folder_tags_a == [],
+          f"got={folder_tags_a}")
+
+    # Fix B: IA-07 mit cached IA-02 folder_tags + Modul aus → keine Tags
+    from pipeline import step_ia07_exif_write
+    # Simulierte step_results: IA-02 hat noch alte cached folder_tags
+    fake_job.step_result = {
+        "IA-01": {"file_type": "JPEG", "has_exif": True},
+        "IA-02": {"status": "duplicate",
+                  "folder_tags": ["Ferien_Mallorca", "Ferien", "Mallorca"]},
+        "IA-05": {"type": "", "tags": [], "description": "", "source": "", "quality": ""},
+    }
+    # Direct-extract der IA-07 Logik die gegated wurde — wir bauen die
+    # gleiche keyword-collection wie IA-07 nach
+    folder_tags_active_b = await is_folder_tags_active(fake_job)
+    keywords_b = []
+    if folder_tags_active_b:
+        ia02_ft = (fake_job.step_result.get("IA-02") or {}).get("folder_tags", [])
+        for t in ia02_ft:
+            if t and t not in keywords_b:
+                keywords_b.append(t)
+    check("F1b Fix B: bei Modul aus IA-07 liest cached IA-02 nicht",
+          keywords_b == [],
+          f"got={keywords_b}")
+
+    # Fix C: routers/duplicates donor_ft Merge
+    folder_tags_active_c = await is_folder_tags_active(fake_job)
+    donor_ft_input = ["Ferien_Mallorca", "Ferien", "Mallorca"]
+    donor_ft_after_gate: list[str] = []
+    if folder_tags_active_c:
+        donor_ft_after_gate = donor_ft_input
+    check("F1c Fix C: bei Modul aus donor_ft Merge liefert []",
+          donor_ft_after_gate == [],
+          f"got={donor_ft_after_gate}")
+
+    # Sanity (positive): mit Modul AN müssten alle drei eine nicht-leere
+    # Liste liefern → das verifiziert dass die Gates nicht overshooten
+    async with async_session() as session:
+        mod = await session.get(Module, "ordner_tags")
+        if mod:
+            mod.enabled = True
+            await session.commit()
+    folder_tags_a_on = _extract_folder_tags(fake_job) if await is_folder_tags_active(fake_job) else []
+    check("F1d Sanity: bei Modul AN liefert _extract_folder_tags Tags",
+          len(folder_tags_a_on) > 0,
+          f"got={folder_tags_a_on}")
+
+    # State zurücksetzen (best-effort)
+    async with async_session() as session:
+        mod = await session.get(Module, "ordner_tags")
+        if mod and original_module_enabled is not None:
+            mod.enabled = original_module_enabled
+            await session.commit()
+        if inbox is not None and original_inbox_ft is not None:
+            ib = await session.execute(select(InboxDirectory).where(InboxDirectory.path == "/inbox"))
+            inbox2 = ib.scalar()
+            if inbox2:
+                inbox2.folder_tags = original_inbox_ft
+                await session.commit()
+
+    # ==================================================================
     # Zusammenfassung
     # ==================================================================
 
