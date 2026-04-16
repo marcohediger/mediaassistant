@@ -462,8 +462,14 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     else:
         desc = f"Similar to: {original_path} ({original.debug_key}, pHash distance: {distance})"
 
-    # Preserve folder tags before the file moves (path breaks after move)
-    folder_tags = _extract_folder_tags(job)
+    # Preserve folder tags before the file moves (path breaks after move).
+    # Gated by is_folder_tags_active so we don't stash folder tags into
+    # step_result when the module/inbox is OFF — otherwise IA-07 would
+    # read them from the cache (ungated fallback) on a later "Keep This"
+    # reprocess and write them as keywords/Immich-tags despite the user
+    # having explicitly disabled the feature.
+    from file_operations import is_folder_tags_active
+    folder_tags = _extract_folder_tags(job) if await is_folder_tags_active(job) else []
 
     # Dry-run: detect but don't move
     if job.dry_run:
