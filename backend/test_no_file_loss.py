@@ -365,6 +365,229 @@ async def main():
                 print("  ⚠️ Kein Immich-Job für I2 gefunden")
 
     # ==================================================================
+    # U/R: safe_upload_asset / safe_replace_asset (mocked) —
+    # safe_move-Garantie für Immich. Keine echte Immich-Verbindung nötig.
+    # ==================================================================
+    print("\n── U1/U2/R1/R2: safe_upload + safe_replace Garantien ──")
+    from unittest.mock import patch, AsyncMock
+    import immich_client
+
+    # Helper: temp file with deterministic content
+    def _mk_file(name: str, content: bytes) -> str:
+        p = f"/tmp/{name}_{ts}.jpg"
+        with open(p, "wb") as f:
+            f.write(content)
+        return p
+
+    # --- U1: 3 Retries, Verify scheitert immer → RuntimeError, kein Orphan ---
+    src = _mk_file("u1", b"x" * 1024)
+    upload_calls, delete_calls, info_calls = [], [], []
+    fake_id_counter = [0]
+
+    async def fake_upload(file_path, **kw):
+        fake_id_counter[0] += 1
+        aid = f"u1-asset-{fake_id_counter[0]}"
+        upload_calls.append(aid)
+        return {"id": aid, "checksum": "wrong"}
+
+    async def fake_get_info(aid, **kw):
+        info_calls.append(aid)
+        return None  # always: not reachable
+
+    async def fake_delete(aid, **kw):
+        delete_calls.append(aid)
+        return {"status": "deleted"}
+
+    with patch.object(immich_client, "upload_asset", new=fake_upload), \
+         patch.object(immich_client, "get_asset_info", new=fake_get_info), \
+         patch.object(immich_client, "delete_asset", new=fake_delete):
+        try:
+            await immich_client.safe_upload_asset(src, max_attempts=3)
+            check("U1a wirft RuntimeError nach 3 Versuchen", False, "kein RuntimeError")
+        except RuntimeError as e:
+            check("U1a wirft RuntimeError nach 3 Versuchen", True, str(e)[:60])
+        check("U1b 3 Upload-Versuche", len(upload_calls) == 3, f"calls={len(upload_calls)}")
+        check("U1c jeder Orphan aufgeräumt", set(delete_calls) == set(upload_calls),
+              f"deleted={len(delete_calls)}/{len(upload_calls)}")
+    os.remove(src)
+
+    # --- U2: Erster Versuch Checksum-Mismatch, zweiter OK → kein Verlust ---
+    src = _mk_file("u2", b"y" * 2048)
+    expected_sha1_b64 = await asyncio.to_thread(immich_client._sha1_b64, src)
+    expected_size = os.path.getsize(src)
+    attempt_state = {"n": 0}
+
+    async def fake_upload2(file_path, **kw):
+        attempt_state["n"] += 1
+        return {"id": f"u2-asset-{attempt_state['n']}"}
+
+    async def fake_get_info2(aid, **kw):
+        if aid == "u2-asset-1":
+            return {"checksum": "wrong-base64", "exifInfo": {"fileSizeInByte": expected_size}}
+        return {"checksum": expected_sha1_b64, "exifInfo": {"fileSizeInByte": expected_size}}
+
+    deletes2 = []
+    async def fake_delete2(aid, **kw):
+        deletes2.append(aid)
+        return {"status": "deleted"}
+
+    with patch.object(immich_client, "upload_asset", new=fake_upload2), \
+         patch.object(immich_client, "get_asset_info", new=fake_get_info2), \
+         patch.object(immich_client, "delete_asset", new=fake_delete2):
+        result = await immich_client.safe_upload_asset(src, max_attempts=3)
+    check("U2a Result hat verifizierte id", result.get("id") == "u2-asset-2",
+          f"id={result.get('id')}")
+    check("U2b Orphan aus 1. Versuch wurde gelöscht", deletes2 == ["u2-asset-1"],
+          f"deletes={deletes2}")
+    os.remove(src)
+
+    # --- R1: safe_replace, copy_metadata 404 → KEIN Rollback der neuen ---
+    src = _mk_file("r1", b"z" * 512)
+    expected_sha1_b64_r1 = await asyncio.to_thread(immich_client._sha1_b64, src)
+    expected_size_r1 = os.path.getsize(src)
+    deletes_r1 = []
+
+    async def fake_upload_r1(file_path, **kw):
+        return {"id": "r1-new"}
+
+    async def fake_get_info_r1(aid, **kw):
+        return {"checksum": expected_sha1_b64_r1, "exifInfo": {"fileSizeInByte": expected_size_r1}}
+
+    async def fake_copy_r1(from_id, to_id, **kw):
+        raise RuntimeError("Immich copy metadata failed: HTTP 404 — Not found")
+
+    async def fake_delete_r1(aid, **kw):
+        deletes_r1.append(aid)
+        if aid == "r1-old":
+            raise RuntimeError("Immich delete failed: HTTP 404 — Not found")
+        return {"status": "deleted"}
+
+    with patch.object(immich_client, "upload_asset", new=fake_upload_r1), \
+         patch.object(immich_client, "get_asset_info", new=fake_get_info_r1), \
+         patch.object(immich_client, "copy_asset_metadata", new=fake_copy_r1), \
+         patch.object(immich_client, "delete_asset", new=fake_delete_r1):
+        result = await immich_client.safe_replace_asset("r1-old", src)
+    check("R1a Neue Kopie behalten trotz copy 404", result.get("id") == "r1-new",
+          f"id={result.get('id')}")
+    check("R1b Neue Kopie NICHT gelöscht (kein Rollback)",
+          "r1-new" not in deletes_r1, f"deletes={deletes_r1}")
+    check("R1c Old-delete versucht (best-effort)", "r1-old" in deletes_r1,
+          f"deletes={deletes_r1}")
+    os.remove(src)
+
+    # --- R2: safe_replace, Upload 3x fehl → RuntimeError, alter bleibt ---
+    src = _mk_file("r2", b"q" * 256)
+    upload_attempts_r2 = [0]
+    deletes_r2 = []
+
+    async def fake_upload_r2(file_path, **kw):
+        upload_attempts_r2[0] += 1
+        return {"id": f"r2-orphan-{upload_attempts_r2[0]}"}
+
+    async def fake_get_info_r2(aid, **kw):
+        return None  # never verifiable
+
+    async def fake_delete_r2(aid, **kw):
+        deletes_r2.append(aid)
+        return {"status": "deleted"}
+
+    async def fake_copy_r2(from_id, to_id, **kw):
+        raise AssertionError("copy_asset_metadata must NOT be called when upload fails")
+
+    with patch.object(immich_client, "upload_asset", new=fake_upload_r2), \
+         patch.object(immich_client, "get_asset_info", new=fake_get_info_r2), \
+         patch.object(immich_client, "copy_asset_metadata", new=fake_copy_r2), \
+         patch.object(immich_client, "delete_asset", new=fake_delete_r2):
+        try:
+            await immich_client.safe_replace_asset("r2-old", src, max_attempts=3)
+            check("R2a wirft RuntimeError nach 3 Upload-Failures", False, "kein RuntimeError")
+        except RuntimeError as e:
+            check("R2a wirft RuntimeError nach 3 Upload-Failures", True, str(e)[:60])
+    check("R2b Old-Asset NIEMALS gelöscht (Backup intakt)",
+          "r2-old" not in deletes_r2, f"deletes={deletes_r2}")
+    check("R2c Alle Orphans aufgeräumt",
+          set(deletes_r2) == {"r2-orphan-1", "r2-orphan-2", "r2-orphan-3"},
+          f"deletes={deletes_r2}")
+    os.remove(src)
+
+    # ==================================================================
+    # K1/K2: Keep-Flow safe_replace-Garantie (e2e wenn Immich verfügbar)
+    # ==================================================================
+    if has_immich:
+        print("\n── K1: Keep This Donor-Asset wird via safe_replace ersetzt ──")
+        # Original-Job hat Asset in Immich; Duplikat-Job behaltet "Keep This"
+        from immich_client import safe_upload_asset, asset_exists, delete_asset
+        from routers.duplicates import _resolve_duplicate_group
+
+        orig_path_k1 = f"/tmp/__nfl_k1_orig_{ts}.jpg"
+        dup_path_k1 = f"/library/error/duplicates/__nfl_k1_dup_{ts}.jpg"
+        os.makedirs(os.path.dirname(dup_path_k1), exist_ok=True)
+        make_unique_jpg(orig_path_k1, w=500, h=400)
+        make_unique_jpg(dup_path_k1, w=510, h=410)  # ähnliches aber anderes Bild
+
+        # Upload des "originals" zu Immich
+        orig_upload = await safe_upload_asset(orig_path_k1)
+        orig_asset_id = orig_upload["id"]
+
+        async with async_session() as session:
+            orig_job = Job(
+                filename=os.path.basename(orig_path_k1),
+                original_path=orig_path_k1,
+                source_inbox_path="/inbox", status="done",
+                target_path=f"immich:{orig_asset_id}",
+                immich_asset_id=orig_asset_id,
+                debug_key=f"NFL-K1-ORIG-{ts}",
+                file_hash=f"k1orig_{ts}", phash=f"k1ph_{ts}",
+                use_immich=True,
+                step_result={"IA-01": {"file_type": "JPEG"},
+                             "IA-02": {"status": "ok"}},
+            )
+            dup_job = Job(
+                filename=os.path.basename(dup_path_k1),
+                original_path=dup_path_k1,
+                source_inbox_path="/inbox", status="duplicate",
+                target_path=dup_path_k1,
+                debug_key=f"NFL-K1-DUP-{ts}",
+                file_hash=f"k1dup_{ts}", phash=f"k1ph_{ts}",
+                use_immich=True,
+                step_result={"IA-01": {"file_type": "JPEG"},
+                             "IA-02": {"status": "duplicate",
+                                       "original_debug_key": f"NFL-K1-ORIG-{ts}",
+                                       "folder_tags": []}},
+            )
+            session.add_all([orig_job, dup_job])
+            await session.commit()
+            dup_id = dup_job.id
+
+            _, _, _, flush = await _resolve_duplicate_group(
+                session, dup_job, [orig_job, dup_job],
+                source="keep", user_kept=True,
+            )
+            await session.commit()
+            await flush()
+
+        # Pipeline läuft jetzt auf den queued duplikat-job
+        await run_pipeline(dup_id)
+
+        async with async_session() as session:
+            dup_job = (await session.execute(select(Job).where(Job.id == dup_id))).scalar()
+            check("K1a Job hat eine Immich-Asset-ID nach Pipeline",
+                  bool(dup_job.immich_asset_id),
+                  f"asset_id={dup_job.immich_asset_id} status={dup_job.status}")
+            if dup_job.immich_asset_id:
+                exists_new = await asset_exists(dup_job.immich_asset_id)
+                check("K1b Neues Immich-Asset existiert", exists_new,
+                      f"asset={dup_job.immich_asset_id}")
+                check("K1c Altes Donor-Asset ist weg",
+                      not await asset_exists(orig_asset_id),
+                      f"old_asset={orig_asset_id}")
+                # Cleanup
+                try:
+                    await delete_asset(dup_job.immich_asset_id)
+                except Exception:
+                    pass
+
+    # ==================================================================
     # Zusammenfassung
     # ==================================================================
 

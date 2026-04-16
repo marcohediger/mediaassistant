@@ -817,6 +817,22 @@ async def _resolve_duplicate_group(
     if not kept_immich_id and (best.target_path or "").startswith("immich:"):
         kept_immich_id = (best.target_path or "")[7:]
 
+    # When best is a duplicate without its own Immich asset, it will
+    # inherit one donor's asset_id (Schritt 4, line ~912). IA-08's
+    # `safe_replace_asset` will then upload the kept file as a new
+    # asset, copy metadata over, and delete the old (donor) asset
+    # AFTER the new asset is verified — the safe_move-Garantie für
+    # Immich. Therefore we MUST NOT eager-delete that one donor's
+    # Immich asset here, otherwise IA-08 hits a 404 on copy_metadata.
+    # Pre-v2.31.0, this pre-deletion was the root cause of the
+    # "Bild verloren bei Keep This"-Vorfälle: donor asset gelöscht →
+    # IA-08 versucht Replace gegen Geist → upload OK, copy 404 →
+    # alter Rollback-Pfad löscht NEUES Asset → keine Datei in Immich.
+    promoted_donor_asset = ""
+    if (best.status == "duplicate" and not best.immich_asset_id
+            and donor_immich_map):
+        promoted_donor_asset = next(iter(donor_immich_map.values()))
+
     # ── 3. Delete donors ────────────────────────────────────────
     # NOTE: no log_info() calls inside this section — they open a
     # separate DB session which causes "database is locked" when the
@@ -842,6 +858,13 @@ async def _resolve_duplicate_group(
             _pending_logs.append(
                 (f"{donor.debug_key} Immich-Asset übersprungen (gleich wie kept)",
                  f"asset={donor_asset}"))
+        elif donor_asset and donor_asset == promoted_donor_asset:
+            # Will be replaced by IA-08's safe_replace_asset against the
+            # uploaded kept file. Eager delete here would break the
+            # safe_move-Garantie (no copy verified before old destroyed).
+            _pending_logs.append(
+                (f"{donor.debug_key} Immich-Asset übersprungen (wird via IA-08 safe_replace ersetzt)",
+                 f"asset={donor_asset}, kept={best.debug_key}"))
         elif donor_asset:
             _pending_logs.append(
                 (f"{donor.debug_key} Immich-Asset wird gelöscht",
@@ -908,9 +931,15 @@ async def _resolve_duplicate_group(
         best.error_message = None
 
     elif best.status == "duplicate":
-        # Transfer Immich asset ID from donor if best doesn't have one
+        # Transfer Immich asset ID from donor if best doesn't have one.
+        # IA-08 will safe_replace this donor asset with the kept file's
+        # content via the `_force_reupload` sentinel below — without it,
+        # IA-08 in sidecar mode + retry_count=0 would just re-tag the
+        # donor's asset (whose content differs from the kept file).
+        force_reupload_after_inherit = False
         if not best.immich_asset_id and donor_immich_map:
             best.immich_asset_id = next(iter(donor_immich_map.values()))
+            force_reupload_after_inherit = True
 
         # Copy analysis steps from original (saves AI re-run costs)
         keep_steps = {"IA-01"}
@@ -940,9 +969,16 @@ async def _resolve_duplicate_group(
         kept_filepath = best.target_path or best.original_path
         if kept_filepath and not kept_filepath.startswith("immich:") and os.path.exists(kept_filepath):
             from pipeline.reprocess import prepare_job_for_reprocess
+            inject = None
+            if force_reupload_after_inherit:
+                # IA-08 reads this sentinel and forces a safe_replace_asset
+                # against the inherited donor asset_id. Pops itself at end
+                # of IA-08 so it never persists in the final step_result.
+                inject = {"_force_reupload": True}
             await prepare_job_for_reprocess(
                 session, best,
                 keep_steps=keep_steps,
+                inject_steps=inject,
                 move_file=True,
                 commit=False,
             )
