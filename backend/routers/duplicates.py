@@ -932,14 +932,19 @@ async def _resolve_duplicate_group(
 
     elif best.status == "duplicate":
         # Transfer Immich asset ID from donor if best doesn't have one.
-        # IA-08 will safe_replace this donor asset with the kept file's
-        # content via the `_force_reupload` sentinel below — without it,
-        # IA-08 in sidecar mode + retry_count=0 would just re-tag the
-        # donor's asset (whose content differs from the kept file).
-        force_reupload_after_inherit = False
         if not best.immich_asset_id and donor_immich_map:
             best.immich_asset_id = next(iter(donor_immich_map.values()))
-            force_reupload_after_inherit = True
+
+        # Force safe_replace whenever best=duplicate has any asset_id —
+        # whether freshly inherited from donor OR pre-existing (e.g. job
+        # was previously done, then flipped back to duplicate when a
+        # later arrival was preferred). The kept file's bytes may
+        # differ from whatever the asset currently holds; without this
+        # signal IA-08 in sidecar mode + retry_count=0 would just
+        # re-tag the existing asset and the local file content would
+        # never reach Immich. Same root cause as the v2.31.0 fix, just
+        # a different trigger path.
+        force_reupload_after_inherit = bool(best.immich_asset_id)
 
         # Copy analysis steps from original (saves AI re-run costs)
         keep_steps = {"IA-01"}
