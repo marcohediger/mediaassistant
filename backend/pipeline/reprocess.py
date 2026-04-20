@@ -34,6 +34,7 @@ import os
 from sqlalchemy.orm.attributes import flag_modified
 
 from safe_file import safe_move
+from system_logger import log_info
 
 
 REPROCESS_DIR = "/app/data/reprocess"
@@ -113,7 +114,25 @@ async def _move_file_for_reprocess(job) -> bool:
             # have the same Immich filename don't collide.
             dst = _resolve_reprocess_path(os.path.basename(downloaded), job.debug_key)
             if downloaded != dst:
-                await asyncio.to_thread(os.rename, downloaded, dst)
+                await log_info(
+                    "reprocess",
+                    f"{job.debug_key} os.rename Download → reprocess wird ausgeführt",
+                    f"src={downloaded} dst={dst}",
+                )
+                try:
+                    await asyncio.to_thread(os.rename, downloaded, dst)
+                except Exception as exc:
+                    await log_info(
+                        "reprocess",
+                        f"{job.debug_key} os.rename Download → reprocess fehlgeschlagen",
+                        f"error={type(exc).__name__}: {exc}",
+                    )
+                    raise
+                await log_info(
+                    "reprocess",
+                    f"{job.debug_key} os.rename Download → reprocess OK",
+                    f"dst={dst}",
+                )
             job.original_path = dst
             # Keep target_path = "immich:<id>" so IA-08's webhook branch
             # (cached in step_result) still recognises the asset.
@@ -127,7 +146,25 @@ async def _move_file_for_reprocess(job) -> bool:
 
     await asyncio.to_thread(os.makedirs, REPROCESS_DIR, exist_ok=True)
     dst = _resolve_reprocess_path(os.path.basename(src), job.debug_key)
-    await asyncio.to_thread(safe_move, src, dst, job.debug_key)
+    await log_info(
+        "reprocess",
+        f"{job.debug_key} safe_move → reprocess wird ausgeführt",
+        f"src={src} dst={dst}",
+    )
+    try:
+        await asyncio.to_thread(safe_move, src, dst, job.debug_key)
+    except Exception as exc:
+        await log_info(
+            "reprocess",
+            f"{job.debug_key} safe_move → reprocess fehlgeschlagen",
+            f"src={src} dst={dst} error={type(exc).__name__}: {exc}",
+        )
+        raise
+    await log_info(
+        "reprocess",
+        f"{job.debug_key} safe_move → reprocess OK",
+        f"dst={dst}",
+    )
 
     # Companion .xmp sidecar — move it alongside so IA-07 in sidecar mode
     # finds the metadata at the new location instead of orphaning it.
@@ -139,7 +176,25 @@ async def _move_file_for_reprocess(job) -> bool:
         if os.path.exists(sidecar_dst):
             from file_operations import safe_remove
             safe_remove(sidecar_dst)
-        await asyncio.to_thread(safe_move, sidecar_src, sidecar_dst, job.debug_key)
+        await log_info(
+            "reprocess",
+            f"{job.debug_key} safe_move sidecar → reprocess wird ausgeführt",
+            f"src={sidecar_src} dst={sidecar_dst}",
+        )
+        try:
+            await asyncio.to_thread(safe_move, sidecar_src, sidecar_dst, job.debug_key)
+        except Exception as exc:
+            await log_info(
+                "reprocess",
+                f"{job.debug_key} safe_move sidecar → reprocess fehlgeschlagen",
+                f"src={sidecar_src} dst={sidecar_dst} error={type(exc).__name__}: {exc}",
+            )
+            raise
+        await log_info(
+            "reprocess",
+            f"{job.debug_key} safe_move sidecar → reprocess OK",
+            f"dst={sidecar_dst}",
+        )
 
         # The cached IA-07 step result still points at the old sidecar
         # location. Update it so any step that re-runs after the move
