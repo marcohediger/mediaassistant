@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 import httpx
 from config import config_manager
-from system_logger import log_warning
+from system_logger import log_info, log_warning
 
 logger = logging.getLogger("mediaassistant.immich")
 
@@ -348,44 +348,57 @@ async def archive_asset(asset_id: str, *, api_key: str | None = None) -> dict:
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
+    await log_info(
+        "immich_client",
+        f"archive_asset {asset_id} wird ausgeführt",
+    )
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        # Try new API first (v1.133.0+): visibility enum
-        resp = await client.put(
-            f"{url}/api/assets",
-            headers=headers,
-            json={"ids": [asset_id], "visibility": "archive"},
-        )
-
-        if resp.status_code not in (200, 204):
-            # New API not supported → try legacy
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            # Try new API first (v1.133.0+): visibility enum
             resp = await client.put(
                 f"{url}/api/assets",
                 headers=headers,
-                json={"ids": [asset_id], "isArchived": True},
+                json={"ids": [asset_id], "visibility": "archive"},
             )
-        else:
-            # New API returned 200, but verify it actually worked
-            info = await get_asset_info(asset_id, api_key=api_key)
-            actually_archived = False
-            if info:
-                # Check both new (visibility) and legacy (isArchived) fields
-                actually_archived = (
-                    info.get("visibility") == "archive"
-                    or info.get("isArchived") is True
-                )
-            if not actually_archived:
-                logger.warning("Visibility API returned 200 but asset %s not archived, trying legacy API", asset_id)
+
+            if resp.status_code not in (200, 204):
+                # New API not supported → try legacy
                 resp = await client.put(
                     f"{url}/api/assets",
                     headers=headers,
                     json={"ids": [asset_id], "isArchived": True},
                 )
+            else:
+                # New API returned 200, but verify it actually worked
+                info = await get_asset_info(asset_id, api_key=api_key)
+                actually_archived = False
+                if info:
+                    # Check both new (visibility) and legacy (isArchived) fields
+                    actually_archived = (
+                        info.get("visibility") == "archive"
+                        or info.get("isArchived") is True
+                    )
+                if not actually_archived:
+                    logger.warning("Visibility API returned 200 but asset %s not archived, trying legacy API", asset_id)
+                    resp = await client.put(
+                        f"{url}/api/assets",
+                        headers=headers,
+                        json={"ids": [asset_id], "isArchived": True},
+                    )
 
-    if resp.status_code not in (200, 204):
-        raise RuntimeError(f"Immich archive failed: HTTP {resp.status_code} — {resp.text[:200]}")
+        if resp.status_code not in (200, 204):
+            raise RuntimeError(f"Immich archive failed: HTTP {resp.status_code} — {resp.text[:200]}")
+    except Exception as exc:
+        await log_info(
+            "immich_client",
+            f"archive_asset {asset_id} fehlgeschlagen",
+            f"error={type(exc).__name__}: {exc}",
+        )
+        raise
 
+    await log_info("immich_client", f"archive_asset {asset_id} OK")
     logger.info("Archived asset %s in Immich", asset_id)
     return {"status": "archived", "asset_id": asset_id}
 
@@ -419,18 +432,28 @@ async def lock_asset(asset_id: str, *, api_key: str | None = None) -> dict:
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
+    await log_info("immich_client", f"lock_asset {asset_id} wird ausgeführt")
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.put(
-            f"{url}/api/assets",
-            headers=headers,
-            json={"ids": [asset_id], "visibility": "locked"},
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.put(
+                f"{url}/api/assets",
+                headers=headers,
+                json={"ids": [asset_id], "visibility": "locked"},
+            )
+
+        if resp.status_code not in (200, 204):
+            raise RuntimeError(f"Immich lock failed: HTTP {resp.status_code} — {resp.text[:200]}")
+    except Exception as exc:
+        await log_info(
+            "immich_client",
+            f"lock_asset {asset_id} fehlgeschlagen",
+            f"error={type(exc).__name__}: {exc}",
         )
+        raise
 
-    if resp.status_code not in (200, 204):
-        raise RuntimeError(f"Immich lock failed: HTTP {resp.status_code} — {resp.text[:200]}")
-
+    await log_info("immich_client", f"lock_asset {asset_id} OK")
     return {"status": "locked", "asset_id": asset_id}
 
 
@@ -669,18 +692,36 @@ async def delete_asset(asset_id: str, *, force: bool = True, api_key: str | None
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
 
+    await log_info(
+        "immich_client",
+        f"delete_asset {asset_id} wird ausgeführt",
+        f"force={force}",
+    )
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.request(
-            "DELETE",
-            f"{url}/api/assets",
-            headers=headers,
-            content=json.dumps({"ids": [asset_id], "force": force}),
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.request(
+                "DELETE",
+                f"{url}/api/assets",
+                headers=headers,
+                content=json.dumps({"ids": [asset_id], "force": force}),
+            )
+
+        if resp.status_code not in (200, 204):
+            raise RuntimeError(f"Immich delete failed: HTTP {resp.status_code} — {resp.text[:200]}")
+    except Exception as exc:
+        await log_info(
+            "immich_client",
+            f"delete_asset {asset_id} fehlgeschlagen",
+            f"error={type(exc).__name__}: {exc}",
         )
+        raise
 
-    if resp.status_code not in (200, 204):
-        raise RuntimeError(f"Immich delete failed: HTTP {resp.status_code} — {resp.text[:200]}")
-
+    await log_info(
+        "immich_client",
+        f"delete_asset {asset_id} OK",
+        f"force={force}",
+    )
     return {"status": "deleted", "asset_id": asset_id}
 
 
