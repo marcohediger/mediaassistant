@@ -1,5 +1,64 @@
 # Changelog
 
+## v2.31.3 — 2026-04-20
+
+### Robustheits-Fixes aus dem Logik-/Architektur-Review
+
+Vier eng umrissene defensive Fixes, alle isoliert testbar — Pipeline-
+Kernverhalten unverändert. 64/64 E2E-Tests grün.
+
+**N-6: `_run_job` Exception-Fallback** (`backend/filewatcher.py`)
+
+Pipeline-Crashes außerhalb von `run_pipeline`'s eigener Error-Handling-
+Logik ließen den Job bis zur 15-Minuten-Stale-Recovery in `processing`
+hängen — Worker-Slot war blockiert, keine Sichtbarkeit im Dashboard.
+Neu: der äußere `try/except` in `_run_job` setzt bei unerwarteten
+Exceptions `status=error` + `error_message` und loggt via
+`log_error`. Traceback wird erfasst.
+
+**N-7: Symlink-Schutz in `_scan_directory`** (`backend/filewatcher.py`)
+
+Der Inbox-Scan folgte Symlinks standardmäßig — ein versehentlicher
+Symlink-Loop in der Inbox hätte unendliche Rekursion verursacht.
+Neu: `entry.is_symlink()` wird geskippt; `is_file` / `is_dir` /
+`stat` laufen alle mit `follow_symlinks=False`.
+
+**H-3: Immich-Poll Overlap-Buffer** (`backend/filewatcher.py`)
+
+`immich.last_poll` wurde auf den aktuellen Zeitpunkt gesetzt — bei
+Clock-Skew zwischen MediaAssistant und Immich konnten Assets im
+Grenzbereich verloren gehen (genau einmal nie geholt). Neu: Cursor
+wird mit 5-Minuten-Rückwärts-Buffer persistiert; die existierende
+Deduplikation via `already_by_id` und `processed_hashes_by_user`
+macht den Overlap sicher.
+
+**H-8/H-9: `retry_count` Reset** (`backend/pipeline/__init__.py`)
+
+Der Stale-/Resume-Retry-Counter wurde weder bei manuellem Retry
+noch bei erfolgreichem Pipeline-Durchlauf zurückgesetzt. Konsequenz:
+ein Job der einmal stale war, wurde bei der nächsten Glitche
+vorzeitig als "Max retries exceeded" aufgegeben.
+Neu: `reset_job_for_retry` setzt `retry_count = 0` (User-Retry heißt
+"frisch starten"). Nach `done`/`duplicate`/`review`/`skipped` wird
+der Counter ebenfalls auf 0 gesetzt.
+
+### Nicht gefixt, geschlossen als invalid
+
+**N-9 (Orphan-Status "dead")** war ein False-Positive des Reviews —
+`status="orphan"` wird aktiv vom Admin-Endpoint `/api/jobs/cleanup-
+orphans` gesetzt (`routers/api.py:138`). Kein Dead-Code.
+
+### Tests
+
+- `test_e2e_user_stories.py`: 64/64 PASS — keine Regression durch
+  die Fixes.
+
+### Doku
+
+- `KNOWN_RISKS.md` neu: dokumentiert die verbleibenden Review-
+  Findings (K-1..K-8, H-1..H-12, Architektur-Schulden A-1..A-10) als
+  Orientierung für zukünftige Refactorings.
+
 ## v2.31.2 — 2026-04-16
 
 ### Fix: Folder-Tags wurden trotz deaktiviertem "Ordner-Tag"-Modul geschrieben
