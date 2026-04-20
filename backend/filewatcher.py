@@ -8,7 +8,8 @@ import os
 import shutil
 import tempfile
 import time
-from datetime import datetime, timezone
+import traceback
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, func, update as sql_update
 from sqlalchemy.exc import IntegrityError
 from config import config_manager
@@ -97,20 +98,26 @@ _SKIP_DIRS = {"@eadir", ".synology", "#recycle"}
 
 
 def _scan_directory(path: str, min_age: float) -> list[str]:
-    """Scan directory for supported media files that are stable (not being written)."""
+    """Scan directory for supported media files that are stable (not being written).
+
+    Skips symlinks (both files and dirs) to prevent unbounded recursion
+    on symlink loops and to avoid processing files outside the inbox tree.
+    """
     files = []
     now = time.time()
     try:
         for entry in os.scandir(path):
-            if entry.is_file():
+            if entry.is_symlink():
+                continue
+            if entry.is_file(follow_symlinks=False):
                 if ".tmp." in entry.name:
                     continue
                 ext = os.path.splitext(entry.name)[1].lower()
                 if ext in SUPPORTED_EXTENSIONS:
-                    stat = entry.stat()
+                    stat = entry.stat(follow_symlinks=False)
                     if now - stat.st_mtime > min_age:
                         files.append((entry.path, stat.st_size))
-            elif entry.is_dir():
+            elif entry.is_dir(follow_symlinks=False):
                 if entry.name.lower() in _SKIP_DIRS:
                     continue
                 files.extend(_scan_directory(entry.path, min_age))
@@ -260,7 +267,25 @@ async def _run_job(job_id: int, filename: str, debug_key: str):
     try:
         await run_pipeline(job_id)
     except Exception as e:
-        logger.error(f"Pipeline error {debug_key}: {e}")
+        # Crash outside run_pipeline's own error handling. Without this
+        # fallback the job would remain 'processing' until the 15-min
+        # stale-recovery kicks in, blocking a worker slot silently.
+        tb = traceback.format_exc()
+        logger.error(f"Pipeline error {debug_key}: {e}\n{tb}")
+        try:
+            async with async_session() as session:
+                job = await session.get(Job, job_id)
+                if job and job.status == "processing":
+                    job.status = "error"
+                    job.error_message = f"Pipeline-Crash: {type(e).__name__}: {e}"
+                    await session.commit()
+                    await log_error(
+                        "filewatcher",
+                        f"{debug_key} Pipeline-Crash — Status auf error gesetzt",
+                        f"{type(e).__name__}: {e}\n\n{tb}",
+                    )
+        except Exception as inner:
+            logger.error(f"Failed to mark {debug_key} as error after crash: {inner}")
     logger.info(f"Pipeline done: {debug_key} ({filename})")
 
 
@@ -379,7 +404,16 @@ async def _poll_immich():
             await log_info("immich_poll", f"Processing: {filename}", f"User: {user_label}, Asset: {asset_id}, Key: {job.debug_key}")
             await run_pipeline(job.id)
 
-    await config_manager.set("immich.last_poll", now)
+    # Persist poll cursor with a 5-minute overlap buffer. Dedup via
+    # `already_by_id` (asset-id) and `processed_hashes_by_user` (sha256)
+    # makes the overlap safe — each asset is guaranteed to be processed
+    # at most once. The buffer protects against clock skew between
+    # MediaAssistant and Immich, and against assets arriving in the
+    # interval between `now = ...` (line 277) and the HTTP request.
+    overlap_cursor = (
+        datetime.fromisoformat(now) - timedelta(minutes=5)
+    ).isoformat()
+    await config_manager.set("immich.last_poll", overlap_cursor)
 
 
 async def _is_within_schedule() -> bool:

@@ -247,6 +247,13 @@ async def run_pipeline(job_id: int):
                 flag_modified(job, "step_result")
                 await session.commit()
 
+        # A pipeline run that reaches this point succeeded at least from
+        # the crash-recovery perspective — reset the stale/resume retry
+        # counter so a future glitch is not penalised by a history it
+        # already escaped from.
+        if job.status in ("done", "skipped", "duplicate", "review"):
+            job.retry_count = 0
+
         if job.status == "skipped":
             job.completed_at = datetime.now()
             await session.commit()
@@ -273,9 +280,14 @@ async def run_pipeline(job_id: int):
                 # Preserve "review" status set by IA-08 for unknown files
                 if job.status != "review":
                     job.status = "done"
+            # Re-apply in case status changed to 'done' above (was 'processing'
+            # at the earlier check).
+            if job.status in ("done", "review"):
+                job.retry_count = 0
             job.completed_at = datetime.now()
             await session.commit()
         elif duplicate_detected:
+            job.retry_count = 0
             job.completed_at = datetime.now()
             await session.commit()
 
@@ -416,6 +428,11 @@ async def reset_job_for_retry(job_id: int) -> bool:
             move_file=True,
             commit=False,
         )
+        # User-triggered retry means "try fresh". Reset the stale/resume
+        # attempt counter so an earlier 3× stale history does not
+        # immediately abandon this new run. The counter is for automatic
+        # recovery (startup resume, stale watchdog) — not user intent.
+        job.retry_count = 0
         if not moved_or_skipped:
             # No source file could be located on disk — neither at
             # target_path nor at original_path. Requeueing now would
