@@ -9,6 +9,7 @@ logger = logging.getLogger("mediaassistant.pipeline.ia08")
 from sqlalchemy import select
 from config import config_manager
 from database import async_session as _async_session
+from system_logger import log_info
 from file_operations import (
     is_folder_tags_active as _is_folder_tags_active,
     parse_date as _parse_date,
@@ -763,14 +764,68 @@ async def execute(job, session) -> dict:
     if overwrite_existing:
         # Remove old file first, then move the updated one in
         from file_operations import safe_remove
-        await asyncio.to_thread(safe_remove, target_path)
+        await log_info(
+            "IA-08",
+            f"{job.debug_key} safe_remove (overwrite) wird ausgeführt",
+            f"target={target_path}",
+        )
+        try:
+            await asyncio.to_thread(safe_remove, target_path)
+        except Exception as exc:
+            await log_info(
+                "IA-08",
+                f"{job.debug_key} safe_remove (overwrite) fehlgeschlagen",
+                f"target={target_path} error={type(exc).__name__}: {exc}",
+            )
+            raise
+        await log_info(
+            "IA-08",
+            f"{job.debug_key} safe_remove (overwrite) OK",
+            f"target={target_path}",
+        )
         logger.info("Removed old file for overwrite: %s", target_path)
-    await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
+    await log_info(
+        "IA-08",
+        f"{job.debug_key} safe_move → library wird ausgeführt",
+        f"src={job.original_path} dst={target_path}",
+    )
+    try:
+        await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
+    except Exception as exc:
+        await log_info(
+            "IA-08",
+            f"{job.debug_key} safe_move → library fehlgeschlagen",
+            f"src={job.original_path} dst={target_path} error={type(exc).__name__}: {exc}",
+        )
+        raise
+    await log_info(
+        "IA-08",
+        f"{job.debug_key} safe_move → library OK",
+        f"dst={target_path}",
+    )
 
     # Move sidecar file alongside the image (if sidecar mode)
     if sidecar_path and os.path.exists(sidecar_path):
         sidecar_target = target_path + ".xmp"
-        await asyncio.to_thread(safe_move, sidecar_path, sidecar_target, job.debug_key)
+        await log_info(
+            "IA-08",
+            f"{job.debug_key} safe_move sidecar → library wird ausgeführt",
+            f"src={sidecar_path} dst={sidecar_target}",
+        )
+        try:
+            await asyncio.to_thread(safe_move, sidecar_path, sidecar_target, job.debug_key)
+        except Exception as exc:
+            await log_info(
+                "IA-08",
+                f"{job.debug_key} safe_move sidecar → library fehlgeschlagen",
+                f"src={sidecar_path} dst={sidecar_target} error={type(exc).__name__}: {exc}",
+            )
+            raise
+        await log_info(
+            "IA-08",
+            f"{job.debug_key} safe_move sidecar → library OK",
+            f"dst={sidecar_target}",
+        )
 
     # Clean up empty parent directories in inbox (up to inbox root)
     if job.source_inbox_path:

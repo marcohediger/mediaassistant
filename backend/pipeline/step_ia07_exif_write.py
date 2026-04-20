@@ -4,6 +4,7 @@ import subprocess
 
 from config import config_manager
 from file_operations import is_folder_tags_active as _is_folder_tags_active  # shared
+from system_logger import log_info
 
 
 WRITABLE_EXTENSIONS = {
@@ -261,12 +262,27 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
         raise RuntimeError(f"ExifTool Sidecar Fehler: {stderr.strip()}")
 
     # Atomic move: overwrites existing sidecar (from a prior failed run) cleanly
+    await log_info(
+        "IA-07",
+        f"{job.debug_key} Sidecar atomic replace wird ausgeführt",
+        f"dst={sidecar_path}",
+    )
     try:
         os.replace(tmp_sidecar, sidecar_path)
     except OSError as e:
         from file_operations import safe_remove
         safe_remove(tmp_sidecar)
+        await log_info(
+            "IA-07",
+            f"{job.debug_key} Sidecar atomic replace fehlgeschlagen",
+            f"error={type(e).__name__}: {e}",
+        )
         raise RuntimeError(f"Sidecar atomic replace failed: {e}")
+    await log_info(
+        "IA-07",
+        f"{job.debug_key} Sidecar atomic replace OK",
+        f"dst={sidecar_path}",
+    )
 
     return {
         "keywords_written": keywords,
