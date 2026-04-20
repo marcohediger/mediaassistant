@@ -285,7 +285,25 @@ async def classify_file(request: Request):
         target_path = resolve_filename_conflict(target_dir, filename)
 
         # Move file
-        await asyncio.to_thread(safe_move, filepath, target_path, job.debug_key)
+        await log_info(
+            "review",
+            f"{job.debug_key} safe_move (classify) wird ausgeführt",
+            f"src={filepath} dst={target_path}",
+        )
+        try:
+            await asyncio.to_thread(safe_move, filepath, target_path, job.debug_key)
+        except Exception as exc:
+            await log_info(
+                "review",
+                f"{job.debug_key} safe_move (classify) fehlgeschlagen",
+                f"src={filepath} dst={target_path} error={type(exc).__name__}: {exc}",
+            )
+            raise
+        await log_info(
+            "review",
+            f"{job.debug_key} safe_move (classify) OK",
+            f"dst={target_path}",
+        )
 
         # Update job
         job.target_path = target_path
@@ -343,13 +361,49 @@ async def delete_file(request: Request):
         from file_operations import safe_remove
         for path in [job.original_path, job.target_path]:
             if path and not path.startswith("immich:") and os.path.exists(path):
-                await asyncio.to_thread(safe_remove, path)
+                await log_info(
+                    "review",
+                    f"{job.debug_key} safe_remove (delete) wird ausgeführt",
+                    f"path={path}",
+                )
+                try:
+                    await asyncio.to_thread(safe_remove, path)
+                except Exception as exc:
+                    await log_info(
+                        "review",
+                        f"{job.debug_key} safe_remove (delete) fehlgeschlagen",
+                        f"path={path} error={type(exc).__name__}: {exc}",
+                    )
+                    raise
+                await log_info(
+                    "review",
+                    f"{job.debug_key} safe_remove (delete) OK",
+                    f"path={path}",
+                )
 
         # Delete temp converted file
         convert_result = (job.step_result or {}).get("IA-04", {})
         temp_path = convert_result.get("temp_path")
         if temp_path and os.path.exists(temp_path):
-            await asyncio.to_thread(safe_remove, temp_path)
+            await log_info(
+                "review",
+                f"{job.debug_key} safe_remove (temp) wird ausgeführt",
+                f"path={temp_path}",
+            )
+            try:
+                await asyncio.to_thread(safe_remove, temp_path)
+            except Exception as exc:
+                await log_info(
+                    "review",
+                    f"{job.debug_key} safe_remove (temp) fehlgeschlagen",
+                    f"path={temp_path} error={type(exc).__name__}: {exc}",
+                )
+                raise
+            await log_info(
+                "review",
+                f"{job.debug_key} safe_remove (temp) OK",
+                f"path={temp_path}",
+            )
 
         # Mark job as deleted
         job.status = "deleted"
@@ -439,7 +493,25 @@ async def classify_all(request: Request):
             from file_operations import resolve_filename_conflict
             await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
             target_path = resolve_filename_conflict(target_dir, filename)
-            await asyncio.to_thread(safe_move, filepath, target_path, job.debug_key)
+            await log_info(
+                "review",
+                f"{job.debug_key} safe_move (classify_all) wird ausgeführt",
+                f"src={filepath} dst={target_path}",
+            )
+            try:
+                await asyncio.to_thread(safe_move, filepath, target_path, job.debug_key)
+            except Exception as exc:
+                await log_info(
+                    "review",
+                    f"{job.debug_key} safe_move (classify_all) fehlgeschlagen",
+                    f"src={filepath} dst={target_path} error={type(exc).__name__}: {exc}",
+                )
+                raise
+            await log_info(
+                "review",
+                f"{job.debug_key} safe_move (classify_all) OK",
+                f"dst={target_path}",
+            )
 
             job.target_path = target_path
             job.status = "done"
