@@ -1,5 +1,47 @@
 # Changelog
 
+## v2.31.4 — 2026-04-20
+
+### Logging-Pflicht: Vor/Nach-Pattern für destruktive Aktionen
+
+Konsequente Umsetzung des in `AGENTS.md:310` dokumentierten Logging-
+Patterns für alle destruktiven Aktionen. 14 Stellen in 6 Dateien,
+rein additiv, keine Verhaltensänderung. Drei separate Commits
+(P0/P1/P2) für isolierte Revertierbarkeit.
+
+**P0 — Zentrale Immich-API-Funktionen** (`backend/immich_client.py`)
+- `delete_asset`: `log_info` vor/nach + Fehlerfall
+- `archive_asset`: dito (deckt IA-08 + review.py ab)
+- `lock_asset`: dito (deckt NSFW-Lock in IA-08)
+
+Ein Log-Punkt pro Funktion deckt alle Call-Sites ab.
+
+**P1 — Pipeline-Steps**
+- `step_ia02_duplicates._handle_duplicate`: `safe_move` →
+  duplicate-Ordner
+- `step_ia07_exif_write._write_sidecar`: atomic `os.replace` für
+  XMP-Sidecar
+- `step_ia08_sort.execute`: `safe_remove` (overwrite), `safe_move`
+  → library, `safe_move` sidecar → library
+
+**P2 — Router + Reprocess**
+- `pipeline/reprocess.py`: `os.rename` (Download), `safe_move` src
+  → reprocess, `safe_move` sidecar → reprocess
+- `routers/review.py::classify_file`: `safe_move` (manuelle Klassifikation)
+- `routers/review.py::delete_file`: `safe_remove` (original/target + temp)
+- `routers/review.py::classify_all`: `safe_move` (Batch-Klassifikation)
+
+Bei Server-Crash zwischen den beiden Logs ist aus `system_logs`
+ersichtlich welche Aktion gerade lief und ob sie noch als "OK"
+oder "fehlgeschlagen" markiert wurde.
+
+### Tests
+
+- E2E-Suite zeigt environmental Flakyness (US-3 Immich HTTP 500
+  nach mehreren Runs, US-14 Batch-Clean bei kumuliertem Test-State)
+  — prä-existent, unabhängig von diesen Änderungen. Log-Additionen
+  können Immich-seitige 500er nicht verursachen.
+
 ## v2.31.3 — 2026-04-20
 
 ### Robustheits-Fixes aus dem Logik-/Architektur-Review
