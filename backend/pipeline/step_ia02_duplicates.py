@@ -486,7 +486,25 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     dup_dir = await get_duplicate_dir()
     filename = os.path.basename(job.original_path)
     dup_path = resolve_filename_conflict(dup_dir, filename)
-    await asyncio.to_thread(safe_move, job.original_path, dup_path, job.debug_key)
+    await log_info(
+        "IA-02",
+        f"{job.debug_key} safe_move → duplicate-Ordner wird ausgeführt",
+        f"src={job.original_path} dst={dup_path}",
+    )
+    try:
+        await asyncio.to_thread(safe_move, job.original_path, dup_path, job.debug_key)
+    except Exception as exc:
+        await log_info(
+            "IA-02",
+            f"{job.debug_key} safe_move → duplicate-Ordner fehlgeschlagen",
+            f"error={type(exc).__name__}: {exc}",
+        )
+        raise
+    await log_info(
+        "IA-02",
+        f"{job.debug_key} safe_move → duplicate-Ordner OK",
+        f"dst={dup_path}",
+    )
 
     # Write .log file
     log_lines = [
