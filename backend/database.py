@@ -8,7 +8,7 @@ DATABASE_PATH = os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")
 engine = create_async_engine(
     f"sqlite+aiosqlite:///{DATABASE_PATH}",
     echo=False,
-    connect_args={"timeout": 120},
+    connect_args={"timeout": 600},
     # Pool tuning for high-concurrency scenarios (bulk retries, parallel
     # pipeline workers, dashboard polling). Default was 5/10 = max 15
     # connections, which got exhausted in v2.28.7 when retry-all spawned
@@ -28,7 +28,7 @@ def _set_sqlite_pragmas(dbapi_conn, connection_record):
     """Set SQLite pragmas on every new connection for concurrency."""
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=120000")
+    cursor.execute("PRAGMA busy_timeout=600000")
     cursor.close()
 
 DEFAULT_MODULES = [
@@ -91,7 +91,7 @@ async def init_db():
     async with engine.begin() as conn:
         # Enable WAL mode for better concurrent read/write performance
         await conn.execute(sqlalchemy.text("PRAGMA journal_mode=WAL"))
-        await conn.execute(sqlalchemy.text("PRAGMA busy_timeout=120000"))
+        await conn.execute(sqlalchemy.text("PRAGMA busy_timeout=600000"))
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_columns(conn)
 

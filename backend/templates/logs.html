@@ -11,6 +11,10 @@
            onclick="retryAllWarnings(event)">{{ t.logs.retry_all_warnings }}</a>
         <a href="#" class="btn btn-small btn-secondary"
            onclick="cleanupOrphans(event)">{{ t.logs.cleanup_orphans }}</a>
+        <a href="#" class="btn btn-small btn-secondary"
+           onclick="cleanupStaleErrors(event)">{{ t.logs.cleanup_stale_errors }}</a>
+        <a href="#" class="btn btn-small btn-secondary"
+           onclick="cleanupStuckDuplicates(event)">{{ t.logs.cleanup_stuck_duplicates }}</a>
     </div>
 </div>
 
@@ -78,6 +82,86 @@ async function retryAllWarnings(ev) {
         {{ t.logs.retry_all_warnings_confirm | tojson }},
         'Keine Jobs mit Warnungen gefunden — nichts zu tun.'
     );
+}
+
+async function cleanupStaleErrors(ev) {
+    ev.preventDefault();
+    if (!confirm({{ t.logs.cleanup_stale_errors_confirm | tojson }})) return;
+
+    const btn = ev.currentTarget;
+    const origText = btn.textContent;
+    btn.textContent = '⏳ ...';
+    btn.style.pointerEvents = 'none';
+
+    try {
+        const resp = await fetch('/api/jobs/cleanup-stale-errors', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'fetch' },
+            credentials: 'same-origin'
+        });
+        if (!resp.ok) {
+            alert('Cleanup fehlgeschlagen: HTTP ' + resp.status);
+            btn.textContent = origText;
+            btn.style.pointerEvents = '';
+            return;
+        }
+        const data = await resp.json();
+        const count = data.deleted || 0;
+        const skipped = data.skipped || 0;
+        let msg = count === 0
+            ? 'Keine veralteten Fehler-Jobs mit verifiziertem Ziel gefunden — nichts zu tun.'
+            : '✅ ' + count + ' veraltete Fehler-Job' + (count === 1 ? '' : 's') + ' gelöscht.';
+        if (skipped > 0) msg += '\n\n' + skipped + ' Job' + (skipped === 1 ? '' : 's') + ' übersprungen (Ziel nicht erreichbar).';
+        alert(msg + (count > 0 ? '\n\nSeite wird neu geladen.' : ''));
+        window.location.href = '/logs?tab=jobs&status=error';
+    } catch (e) {
+        alert('Cleanup Fehler: ' + e.message);
+        btn.textContent = origText;
+        btn.style.pointerEvents = '';
+    }
+}
+
+async function cleanupStuckDuplicates(ev) {
+    ev.preventDefault();
+    if (!confirm({{ t.logs.cleanup_stuck_duplicates_confirm | tojson }})) return;
+
+    const btn = ev.currentTarget;
+    const origText = btn.textContent;
+    btn.textContent = '⏳ ...';
+    btn.style.pointerEvents = 'none';
+
+    try {
+        const resp = await fetch('/api/jobs/cleanup-stuck-duplicate-winners', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'fetch' },
+            credentials: 'same-origin'
+        });
+        if (!resp.ok) {
+            alert('Cleanup fehlgeschlagen: HTTP ' + resp.status);
+            btn.textContent = origText;
+            btn.style.pointerEvents = '';
+            return;
+        }
+        const data = await resp.json();
+        const total = data.total || 0;
+        const requeued = data.requeued || 0;
+        const done = data.marked_done || 0;
+        if (total === 0) {
+            alert('Keine hängenden Duplikat-Gewinner gefunden — nichts zu tun.');
+            btn.textContent = origText;
+            btn.style.pointerEvents = '';
+            return;
+        }
+        let msg = '✅ ' + total + ' Job' + (total === 1 ? '' : 's') + ' bereinigt.';
+        if (requeued > 0) msg += '\n  ' + requeued + ' neu eingereiht (Datei vorhanden).';
+        if (done > 0) msg += '\n  ' + done + ' als "done" markiert.';
+        alert(msg + '\n\nSeite wird neu geladen.');
+        window.location.href = '/logs?tab=jobs&status=duplicate';
+    } catch (e) {
+        alert('Cleanup Fehler: ' + e.message);
+        btn.textContent = origText;
+        btn.style.pointerEvents = '';
+    }
 }
 
 async function cleanupOrphans(ev) {
