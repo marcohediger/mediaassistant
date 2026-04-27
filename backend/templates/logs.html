@@ -3,19 +3,30 @@
 {% block content %}
 <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.5rem;">
     <h1 style="margin: 0;">{{ t.logs.title }}</h1>
-    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+    <div id="cleanup-buttons" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
         <a href="/logs/dryrun-report" class="btn btn-small btn-secondary">{{ t.dryrun.report_button }}</a>
         <a href="#" class="btn btn-small btn-secondary"
            onclick="retryAllErrors(event)">{{ t.logs.retry_all_errors }}</a>
         <a href="#" class="btn btn-small btn-secondary"
            onclick="retryAllWarnings(event)">{{ t.logs.retry_all_warnings }}</a>
-        <a href="#" class="btn btn-small btn-secondary"
+        <a href="#" class="btn btn-small btn-secondary cleanup-btn" data-task="orphans"
            onclick="cleanupOrphans(event)">{{ t.logs.cleanup_orphans }}</a>
-        <a href="#" class="btn btn-small btn-secondary"
+        <a href="#" class="btn btn-small btn-secondary cleanup-btn" data-task="stale_errors"
            onclick="cleanupStaleErrors(event)">{{ t.logs.cleanup_stale_errors }}</a>
-        <a href="#" class="btn btn-small btn-secondary"
+        <a href="#" class="btn btn-small btn-secondary cleanup-btn" data-task="stuck_duplicates"
            onclick="cleanupStuckDuplicates(event)">{{ t.logs.cleanup_stuck_duplicates }}</a>
     </div>
+</div>
+
+<div id="cleanup-progress" style="display: none; margin: 1rem 0; padding: 0.75rem 1rem; background: var(--card-bg, #f5f5f5); border: 1px solid var(--border-color, #ddd); border-radius: 4px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+        <strong id="cleanup-progress-title">Cleanup läuft …</strong>
+        <span id="cleanup-progress-counter" style="font-family: monospace; font-size: 0.85rem; color: var(--text-muted, #666);"></span>
+    </div>
+    <div style="height: 10px; background: var(--border-color, #ddd); border-radius: 5px; overflow: hidden;">
+        <div id="cleanup-progress-bar" style="height: 100%; width: 0%; background: var(--accent-blue, #0078d4); transition: width 0.3s ease;"></div>
+    </div>
+    <div id="cleanup-progress-phase" style="margin-top: 0.4rem; font-size: 0.85rem; color: var(--text-muted, #666);"></div>
 </div>
 
 <script>
@@ -84,131 +95,168 @@ async function retryAllWarnings(ev) {
     );
 }
 
+// ─── Shared cleanup-progress UI ─────────────────────────────────────
+const TASK_TITLES = {
+    orphans: 'Verwaiste aufräumen',
+    stale_errors: 'Veraltete Fehler löschen',
+    stuck_duplicates: 'Hängende Duplikate bereinigen',
+};
+let _cleanupPollInterval = null;
+
+function _setButtonsDisabled(disabled) {
+    document.querySelectorAll('.cleanup-btn').forEach(btn => {
+        btn.style.pointerEvents = disabled ? 'none' : '';
+        btn.style.opacity = disabled ? '0.5' : '';
+    });
+}
+
+function _showProgress(task) {
+    const box = document.getElementById('cleanup-progress');
+    document.getElementById('cleanup-progress-title').textContent =
+        (TASK_TITLES[task] || task) + ' läuft …';
+    document.getElementById('cleanup-progress-counter').textContent = '0 / ?';
+    document.getElementById('cleanup-progress-bar').style.width = '0%';
+    document.getElementById('cleanup-progress-phase').textContent = 'Wird gestartet …';
+    box.style.display = 'block';
+    _setButtonsDisabled(true);
+}
+
+function _hideProgress() {
+    document.getElementById('cleanup-progress').style.display = 'none';
+    _setButtonsDisabled(false);
+    if (_cleanupPollInterval) {
+        clearInterval(_cleanupPollInterval);
+        _cleanupPollInterval = null;
+    }
+}
+
+function _updateProgress(data) {
+    const cur = data.current || 0;
+    const total = data.total || 0;
+    const pct = total > 0 ? Math.min(100, Math.round((cur / total) * 100)) : 0;
+    document.getElementById('cleanup-progress-counter').textContent =
+        cur + ' / ' + (total || '?') + ' (' + pct + '%)';
+    document.getElementById('cleanup-progress-bar').style.width = pct + '%';
+    document.getElementById('cleanup-progress-phase').textContent =
+        data.phase || '';
+}
+
+function _formatResult(task, result) {
+    if (!result) return 'Cleanup abgeschlossen.';
+    if (task === 'orphans') {
+        return '✅ Orphan-Scan fertig.\n  ' + (result.orphaned || 0) + ' Jobs als verwaist markiert.\n  ' +
+               (result.checked || 0) + ' geprüft, ' + (result.immich_skipped || 0) + ' Immich übersprungen.';
+    }
+    if (task === 'stale_errors') {
+        const d = result.deleted || 0, s = result.skipped || 0;
+        let msg = d === 0
+            ? 'Keine veralteten Fehler-Jobs mit verifiziertem Ziel gefunden.'
+            : '✅ ' + d + ' veraltete Fehler-Job' + (d === 1 ? '' : 's') + ' gelöscht.';
+        if (s > 0) msg += '\n  ' + s + ' übersprungen (Ziel nicht erreichbar).';
+        return msg;
+    }
+    if (task === 'stuck_duplicates') {
+        const t = result.total || 0, r = result.requeued || 0, m = result.marked_done || 0,
+              s = result.skipped || 0, raced = result.raced || 0;
+        if (t === 0 && s === 0 && raced === 0) return 'Keine hängenden Duplikat-Gewinner gefunden.';
+        let msg = '✅ ' + t + ' Job' + (t === 1 ? '' : 's') + ' bereinigt.';
+        if (r > 0) msg += '\n  ' + r + ' neu eingereiht (Datei vorhanden).';
+        if (m > 0) msg += '\n  ' + m + ' als "done" markiert (Datei verifiziert).';
+        if (s > 0) msg += '\n\n⚠️ ' + s + ' übersprungen — kein "done"-Gegenstück.';
+        if (raced > 0) msg += '\nℹ️ ' + raced + ' inzwischen von Pipeline aufgegriffen.';
+        return msg;
+    }
+    return JSON.stringify(result);
+}
+
+const TASK_REDIRECT = {
+    orphans: '/logs?tab=jobs&status=orphan',
+    stale_errors: '/logs?tab=jobs&status=error',
+    stuck_duplicates: '/logs?tab=jobs&status=duplicate',
+};
+
+async function _pollCleanup(task) {
+    try {
+        const resp = await fetch('/api/jobs/cleanup-status', {credentials: 'same-origin'});
+        if (!resp.ok) return;
+        const data = await resp.json();
+        _updateProgress(data);
+        if (data.done) {
+            _hideProgress();
+            if (data.error) {
+                alert('Cleanup fehlgeschlagen: ' + data.error);
+                return;
+            }
+            const msg = _formatResult(task, data.result);
+            const hasWork = data.result && (data.result.total > 0 || data.result.deleted > 0 || data.result.orphaned > 0);
+            alert(msg + (hasWork ? '\n\nSeite wird neu geladen.' : ''));
+            if (hasWork) {
+                window.location.href = TASK_REDIRECT[task] || '/logs';
+            }
+        }
+    } catch (e) {
+        // Network blip — keep polling, don't tear down
+    }
+}
+
+async function _startCleanup(task, endpoint) {
+    try {
+        const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {'Accept': 'application/json', 'X-Requested-With': 'fetch'},
+            credentials: 'same-origin'
+        });
+        if (resp.status === 409) {
+            const data = await resp.json();
+            alert('Ein anderer Cleanup läuft bereits: ' + (TASK_TITLES[data.task] || data.task) + '\nBitte warten bis dieser fertig ist.');
+            return;
+        }
+        if (!resp.ok) {
+            alert('Cleanup fehlgeschlagen: HTTP ' + resp.status);
+            return;
+        }
+        _showProgress(task);
+        _cleanupPollInterval = setInterval(() => _pollCleanup(task), 1000);
+        // Immediate poll for fast feedback
+        _pollCleanup(task);
+    } catch (e) {
+        alert('Cleanup-Start fehlgeschlagen: ' + e.message);
+    }
+}
+
 async function cleanupStaleErrors(ev) {
     ev.preventDefault();
     if (!confirm({{ t.logs.cleanup_stale_errors_confirm | tojson }})) return;
-
-    const btn = ev.currentTarget;
-    const origText = btn.textContent;
-    btn.textContent = '⏳ ...';
-    btn.style.pointerEvents = 'none';
-
-    try {
-        const resp = await fetch('/api/jobs/cleanup-stale-errors', {
-            method: 'POST',
-            headers: { 'Accept': 'application/json', 'X-Requested-With': 'fetch' },
-            credentials: 'same-origin'
-        });
-        if (!resp.ok) {
-            alert('Cleanup fehlgeschlagen: HTTP ' + resp.status);
-            btn.textContent = origText;
-            btn.style.pointerEvents = '';
-            return;
-        }
-        const data = await resp.json();
-        const count = data.deleted || 0;
-        const skipped = data.skipped || 0;
-        let msg = count === 0
-            ? 'Keine veralteten Fehler-Jobs mit verifiziertem Ziel gefunden — nichts zu tun.'
-            : '✅ ' + count + ' veraltete Fehler-Job' + (count === 1 ? '' : 's') + ' gelöscht.';
-        if (skipped > 0) msg += '\n\n' + skipped + ' Job' + (skipped === 1 ? '' : 's') + ' übersprungen (Ziel nicht erreichbar).';
-        alert(msg + (count > 0 ? '\n\nSeite wird neu geladen.' : ''));
-        window.location.href = '/logs?tab=jobs&status=error';
-    } catch (e) {
-        alert('Cleanup Fehler: ' + e.message);
-        btn.textContent = origText;
-        btn.style.pointerEvents = '';
-    }
+    await _startCleanup('stale_errors', '/api/jobs/cleanup-stale-errors');
 }
 
 async function cleanupStuckDuplicates(ev) {
     ev.preventDefault();
     if (!confirm({{ t.logs.cleanup_stuck_duplicates_confirm | tojson }})) return;
-
-    const btn = ev.currentTarget;
-    const origText = btn.textContent;
-    btn.textContent = '⏳ ...';
-    btn.style.pointerEvents = 'none';
-
-    try {
-        const resp = await fetch('/api/jobs/cleanup-stuck-duplicate-winners', {
-            method: 'POST',
-            headers: { 'Accept': 'application/json', 'X-Requested-With': 'fetch' },
-            credentials: 'same-origin'
-        });
-        if (!resp.ok) {
-            alert('Cleanup fehlgeschlagen: HTTP ' + resp.status);
-            btn.textContent = origText;
-            btn.style.pointerEvents = '';
-            return;
-        }
-        const data = await resp.json();
-        const total = data.total || 0;
-        const requeued = data.requeued || 0;
-        const done = data.marked_done || 0;
-        const skipped = data.skipped || 0;
-        const raced = data.raced || 0;
-        if (total === 0 && skipped === 0 && raced === 0) {
-            alert('Keine hängenden Duplikat-Gewinner gefunden — nichts zu tun.');
-            btn.textContent = origText;
-            btn.style.pointerEvents = '';
-            return;
-        }
-        let msg = '✅ ' + total + ' Job' + (total === 1 ? '' : 's') + ' bereinigt.';
-        if (requeued > 0) msg += '\n  ' + requeued + ' neu eingereiht (Datei vorhanden).';
-        if (done > 0) msg += '\n  ' + done + ' als "done" markiert (Datei verifiziert).';
-        if (skipped > 0) msg += '\n\n⚠️ ' + skipped + ' Job' + (skipped === 1 ? '' : 's') + ' übersprungen — kein "done"-Gegenstück in DB gefunden.';
-        if (raced > 0) msg += '\n\nℹ️ ' + raced + ' Job' + (raced === 1 ? '' : 's') + ' wurde inzwischen von der Pipeline aufgegriffen.';
-        alert(msg + (total > 0 ? '\n\nSeite wird neu geladen.' : ''));
-        window.location.href = '/logs?tab=jobs&status=duplicate';
-    } catch (e) {
-        alert('Cleanup Fehler: ' + e.message);
-        btn.textContent = origText;
-        btn.style.pointerEvents = '';
-    }
+    await _startCleanup('stuck_duplicates', '/api/jobs/cleanup-stuck-duplicate-winners');
 }
 
 async function cleanupOrphans(ev) {
     ev.preventDefault();
-    const confirmMsg = {{ t.logs.cleanup_orphans_confirm | tojson }};
-    if (!confirm(confirmMsg)) return;
-
+    if (!confirm({{ t.logs.cleanup_orphans_confirm | tojson }})) return;
     const checkImmich = confirm({{ t.logs.cleanup_orphans_immich | tojson }});
-
-    const btn = ev.currentTarget;
-    const origText = btn.textContent;
-    btn.textContent = '⏳ ...';
-    btn.style.pointerEvents = 'none';
-
-    try {
-        const url = '/api/jobs/cleanup-orphans' + (checkImmich ? '?check_immich=1' : '');
-        const resp = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'fetch'
-            },
-            credentials: 'same-origin'
-        });
-        if (!resp.ok) {
-            alert('Cleanup fehlgeschlagen: HTTP ' + resp.status);
-            btn.textContent = origText;
-            btn.style.pointerEvents = '';
-            return;
-        }
-        const data = await resp.json();
-        alert('🔍 Scan auf verwaiste Einträge gestartet.\n\n' +
-              'Geprüft werden ' + data.scanning + ' Jobs (done/duplicate/review).\n' +
-              (data.check_immich ? 'Inkl. Immich-API-Check.' : 'Nur lokale Pfade.') +
-              '\n\nDer Scan läuft asynchron — Resultat im System-Log.\n\n' +
-              'Du wirst jetzt zur gefilterten Ansicht "Verwaist" weitergeleitet.');
-        window.location.href = '/logs?tab=jobs&status=orphan';
-    } catch (e) {
-        alert('Cleanup Fehler: ' + e.message);
-        btn.textContent = origText;
-        btn.style.pointerEvents = '';
-    }
+    const url = '/api/jobs/cleanup-orphans' + (checkImmich ? '?check_immich=1' : '');
+    await _startCleanup('orphans', url);
 }
+
+// On page load, check if a cleanup is already running and pick up the polling.
+(async function _resumeCleanup() {
+    try {
+        const resp = await fetch('/api/jobs/cleanup-status', {credentials: 'same-origin'});
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.running && data.task) {
+            _showProgress(data.task);
+            _updateProgress(data);
+            _cleanupPollInterval = setInterval(() => _pollCleanup(data.task), 1000);
+        }
+    } catch (e) {}
+})();
 </script>
 
 <div class="tabs">

@@ -70,6 +70,49 @@ async def _bulk_reset_errors_in_background(job_ids: list[int]):
         await asyncio.sleep(0.05)
 
 
+# ─── Shared cleanup-progress tracker ────────────────────────────────
+# Only ONE cleanup task may run at a time. UI polls /api/jobs/cleanup-status
+# while a task is running and renders a progress bar. The other cleanup
+# buttons are disabled in the UI while `running=True`.
+_cleanup_progress: dict = {
+    "running": False,
+    "task": None,        # "orphans" | "stale_errors" | "stuck_duplicates"
+    "current": 0,
+    "total": 0,
+    "phase": "",         # short status phrase ("scanning", "verifying targets", "re-queueing", ...)
+    "result": None,      # final dict (counts) when done
+    "done": False,
+    "error": None,
+    "started_at": None,
+}
+
+
+def _cleanup_reset(task_name: str):
+    global _cleanup_progress
+    from datetime import datetime
+    _cleanup_progress = {
+        "running": True, "task": task_name, "current": 0, "total": 0,
+        "phase": "starting", "result": None, "done": False, "error": None,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def _cleanup_finish(result: dict | None = None, error: str | None = None):
+    _cleanup_progress["running"] = False
+    _cleanup_progress["done"] = True
+    if result is not None:
+        _cleanup_progress["result"] = result
+    if error is not None:
+        _cleanup_progress["error"] = error
+
+
+@router.get("/jobs/cleanup-status")
+async def cleanup_status_endpoint():
+    """Poll endpoint so the UI can render a progress bar for whichever
+    cleanup task is currently active (or the last completed one)."""
+    return JSONResponse(_cleanup_progress)
+
+
 async def _scan_orphans_in_background(check_immich: bool):
     """Scan all settled jobs (done/duplicate/review) and mark those whose
     file no longer exists as 'orphan'. Stores the previous status in
@@ -85,6 +128,17 @@ async def _scan_orphans_in_background(check_immich: bool):
     total_checked = 0
     total_orphaned = 0
     total_immich_skipped = 0
+
+    # Seed the progress total
+    try:
+        async with async_session() as session:
+            r = await session.execute(
+                select(func.count(Job.id)).where(Job.status.in_(SETTLED_STATES))
+            )
+            _cleanup_progress["total"] = r.scalar() or 0
+            _cleanup_progress["phase"] = "scanning"
+    except Exception:
+        pass
 
     while True:
         async with async_session() as session:
@@ -143,6 +197,7 @@ async def _scan_orphans_in_background(check_immich: bool):
             total_orphaned += len(orphan_ids)
 
         offset += BATCH_SIZE
+        _cleanup_progress["current"] = total_checked
         # Tiny pause to avoid blocking the event loop / DB pool
         await asyncio.sleep(0.05)
 
@@ -154,6 +209,12 @@ async def _scan_orphans_in_background(check_immich: bool):
         )
     except Exception:
         pass
+
+    _cleanup_finish(result={
+        "checked": total_checked,
+        "orphaned": total_orphaned,
+        "immich_skipped": total_immich_skipped,
+    })
 
 
 @router.post("/jobs/retry-all-errors")
@@ -299,6 +360,12 @@ async def cleanup_orphans_endpoint(request: Request):
     Query param `check_immich=1` (default 0) also verifies Immich-asset
     existence via API. Without it, immich:* targets are assumed valid.
     """
+    if _cleanup_progress["running"]:
+        return JSONResponse(
+            {"error": "another_cleanup_running", "task": _cleanup_progress["task"]},
+            status_code=409,
+        )
+
     check_immich = request.query_params.get("check_immich") == "1"
 
     # Get count for immediate UI feedback
@@ -309,6 +376,8 @@ async def cleanup_orphans_endpoint(request: Request):
         )
         total_to_scan = result.scalar() or 0
 
+    _cleanup_reset("orphans")
+    _cleanup_progress["total"] = total_to_scan
     asyncio.create_task(_scan_orphans_in_background(check_immich))
 
     try:
@@ -334,194 +403,240 @@ async def cleanup_orphans_endpoint(request: Request):
     return RedirectResponse(url="/logs?tab=jobs&status=orphan", status_code=303)
 
 
-@router.post("/jobs/cleanup-stale-errors")
-async def cleanup_stale_errors_endpoint(request: Request):
-    """Delete error jobs whose file was never processed (target=None, 'Datei nicht
-    auffindbar') but where the same filename exists in another job that completed
-    successfully with a verified target: local paths checked via os.path.exists(),
-    Immich paths checked via asset_exists() API call.
-    """
+async def _run_cleanup_stale_errors():
+    """Background task: verify each candidate's done counterpart still
+    resolves (local file exists, or Immich asset exists), then bulk-delete
+    the verified IDs. Updates _cleanup_progress as it goes."""
     import os
     from sqlalchemy import delete
     from immich_client import asset_exists
 
-    async with async_session() as session:
-        done_alias = Job.__table__.alias("done_job")
-
-        # Scalar subquery: pick the target_path of the best matching done job
-        done_target_subq = (
-            select(done_alias.c.target_path)
-            .where(
-                done_alias.c.filename == Job.filename,
-                done_alias.c.status.in_(("done", "duplicate")),
-                done_alias.c.target_path.isnot(None),
-                done_alias.c.target_path != "",
-            )
-            .order_by(done_alias.c.id.desc())
-            .limit(1)
-            .correlate(Job)
-            .scalar_subquery()
-        )
-
-        candidates = await session.execute(
-            select(Job.id, done_target_subq.label("done_target")).where(
-                Job.status == "error",
-                Job.error_message.like("%Datei nicht auffindbar%"),
-                Job.target_path.is_(None),
-                done_target_subq.isnot(None),
-            )
-        )
-        rows = candidates.fetchall()
-
-    # Verify that the done job's target actually resolves
-    verified_ids = []
-    for job_id, done_target in rows:
-        if done_target.startswith("immich:"):
-            asset_id = done_target.split(":", 1)[1]
-            if await asset_exists(asset_id):
-                verified_ids.append(job_id)
-        elif os.path.exists(done_target):
-            verified_ids.append(job_id)
-
-    count = len(verified_ids)
-    if verified_ids:
-        async with async_session() as session:
-            await session.execute(delete(Job).where(Job.id.in_(verified_ids)))
-            await session.commit()
-
+    deleted = 0
+    skipped = 0
     try:
-        skipped = len(rows) - count
-        detail = f"Kandidaten: {len(rows)}, verifiziert: {count}, übersprungen (Ziel nicht erreichbar): {skipped}"
-        await log_info("api", f"Stale-Error-Cleanup: {count} veraltete Error-Jobs gelöscht", detail)
-    except Exception:
-        pass
+        _cleanup_progress["phase"] = "loading candidates"
 
-    accept = request.headers.get("accept", "")
-    requested_with = request.headers.get("x-requested-with", "")
-    is_fetch = "application/json" in accept or requested_with == "fetch"
+        async with async_session() as session:
+            done_alias = Job.__table__.alias("done_job")
+            done_target_subq = (
+                select(done_alias.c.target_path)
+                .where(
+                    done_alias.c.filename == Job.filename,
+                    done_alias.c.status.in_(("done", "duplicate")),
+                    done_alias.c.target_path.isnot(None),
+                    done_alias.c.target_path != "",
+                )
+                .order_by(done_alias.c.id.desc())
+                .limit(1)
+                .correlate(Job)
+                .scalar_subquery()
+            )
+            candidates = await session.execute(
+                select(Job.id, done_target_subq.label("done_target")).where(
+                    Job.status == "error",
+                    Job.error_message.like("%Datei nicht auffindbar%"),
+                    Job.target_path.is_(None),
+                    done_target_subq.isnot(None),
+                )
+            )
+            rows = candidates.fetchall()
 
-    if is_fetch:
-        return JSONResponse({"status": "ok", "deleted": count, "skipped": len(rows) - count})
+        _cleanup_progress["total"] = len(rows)
+        _cleanup_progress["phase"] = "verifying targets"
 
-    return RedirectResponse(url="/logs?tab=jobs&status=error", status_code=303)
+        verified_ids = []
+        for idx, (job_id, done_target) in enumerate(rows, 1):
+            if done_target.startswith("immich:"):
+                asset_id = done_target.split(":", 1)[1]
+                try:
+                    if await asset_exists(asset_id):
+                        verified_ids.append(job_id)
+                    else:
+                        skipped += 1
+                except Exception:
+                    skipped += 1
+            elif os.path.exists(done_target):
+                verified_ids.append(job_id)
+            else:
+                skipped += 1
+            _cleanup_progress["current"] = idx
+            # Yield occasionally so the event loop stays responsive
+            if idx % 50 == 0:
+                await asyncio.sleep(0)
+
+        deleted = len(verified_ids)
+        if verified_ids:
+            _cleanup_progress["phase"] = "deleting"
+            async with async_session() as session:
+                await session.execute(delete(Job).where(Job.id.in_(verified_ids)))
+                await session.commit()
+
+        try:
+            detail = (f"Kandidaten: {len(rows)}, verifiziert: {deleted}, "
+                      f"übersprungen (Ziel nicht erreichbar): {skipped}")
+            await log_info("api", f"Stale-Error-Cleanup: {deleted} veraltete Error-Jobs gelöscht", detail)
+        except Exception:
+            pass
+
+        _cleanup_finish(result={"deleted": deleted, "skipped": skipped, "candidates": len(rows)})
+    except Exception as exc:
+        import traceback
+        try:
+            await log_info("api", "Stale-Error-Cleanup failed", f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
+        except Exception:
+            pass
+        _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
+
+
+@router.post("/jobs/cleanup-stale-errors")
+async def cleanup_stale_errors_endpoint(request: Request):
+    """Start the stale-error cleanup as a background task.
+
+    Returns 409 if any cleanup is already running (UI disables the buttons).
+    Progress is reported via /api/jobs/cleanup-status.
+    """
+    if _cleanup_progress["running"]:
+        return JSONResponse(
+            {"error": "another_cleanup_running", "task": _cleanup_progress["task"]},
+            status_code=409,
+        )
+
+    _cleanup_reset("stale_errors")
+    asyncio.create_task(_run_cleanup_stale_errors())
+    return JSONResponse({"status": "started", "task": "stale_errors"})
+
+
+async def _run_cleanup_stuck_duplicate_winners():
+    """Background task: classify stuck duplicate-winner jobs into 3 buckets
+    (re-queue / mark-done / skip) and process each. Updates _cleanup_progress."""
+    import os
+    from datetime import datetime
+    from sqlalchemy import func as sql_func, update
+
+    requeued = 0
+    raced = 0
+    try:
+        _cleanup_progress["phase"] = "loading candidates"
+
+        async with async_session() as session:
+            candidates = await session.execute(
+                select(Job).where(
+                    Job.status == "duplicate",
+                    sql_func.json_extract(Job.step_result, '$."IA-02".status') == "skipped",
+                    sql_func.json_extract(Job.step_result, '$."IA-02".reason').like("%kept via%"),
+                )
+            )
+            jobs = candidates.scalars().all()
+
+        _cleanup_progress["total"] = len(jobs)
+        _cleanup_progress["phase"] = "classifying"
+
+        # Filenames that have a verified 'done' counterpart in the DB.
+        filenames_with_done: set[str] = set()
+        if jobs:
+            async with async_session() as session:
+                done_rows = await session.execute(
+                    select(Job.filename).where(
+                        Job.status == "done",
+                        Job.target_path.isnot(None),
+                        Job.target_path != "",
+                        Job.filename.in_([j.filename for j in jobs]),
+                    ).distinct()
+                )
+                filenames_with_done = {r[0] for r in done_rows.fetchall()}
+
+        requeue_ids = []
+        done_ids = []
+        skip_ids = []
+        for job in jobs:
+            tp = job.target_path or ""
+            if tp and not tp.startswith("immich:") and os.path.exists(tp):
+                requeue_ids.append(job.id)
+            elif job.filename in filenames_with_done:
+                done_ids.append(job.id)
+            else:
+                skip_ids.append(job.id)
+
+        # Reset counter so the progress bar reflects the work loop, not the scan loop.
+        _cleanup_progress["current"] = 0
+        _cleanup_progress["phase"] = "re-queueing"
+
+        from pipeline.reprocess import prepare_job_for_reprocess
+        for idx, job_id in enumerate(requeue_ids, 1):
+            async with async_session() as session:
+                fresh = await session.get(Job, job_id)
+                if not fresh or fresh.status != "duplicate":
+                    raced += 1
+                else:
+                    moved = await prepare_job_for_reprocess(
+                        session, fresh,
+                        keep_steps={"IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06", "IA-07"},
+                        move_file=True,
+                        commit=True,
+                    )
+                    if moved:
+                        requeued += 1
+                    else:
+                        if fresh.filename in filenames_with_done:
+                            done_ids.append(job_id)
+                        else:
+                            skip_ids.append(job_id)
+            _cleanup_progress["current"] = idx
+            if idx % 25 == 0:
+                await asyncio.sleep(0)
+
+        _cleanup_progress["phase"] = "marking done"
+        marked_done = len(done_ids)
+        if done_ids:
+            async with async_session() as session:
+                await session.execute(
+                    update(Job)
+                    .where(Job.id.in_(done_ids))
+                    .values(status="done", error_message=None, completed_at=datetime.now())
+                )
+                await session.commit()
+
+        total = requeued + marked_done
+        skipped = len(skip_ids)
+        try:
+            detail = (f"re-queued: {requeued}, marked done: {marked_done}, "
+                      f"skipped (no done counterpart): {skipped}, raced: {raced}")
+            await log_info("api", f"Stuck-Duplicate-Winner-Cleanup: {total} Jobs bereinigt", detail)
+        except Exception:
+            pass
+
+        _cleanup_finish(result={
+            "requeued": requeued, "marked_done": marked_done,
+            "skipped": skipped, "raced": raced, "total": total,
+        })
+    except Exception as exc:
+        import traceback
+        try:
+            await log_info("api", "Stuck-Duplicate-Winner-Cleanup failed",
+                           f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
+        except Exception:
+            pass
+        _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
 
 
 @router.post("/jobs/cleanup-stuck-duplicate-winners")
 async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
-    """Resolve stuck duplicate-winner jobs left behind by batch-clean.
+    """Start stuck duplicate-winner cleanup as a background task.
 
-    These are jobs where batch-clean injected IA-02='skipped' (marking them as
-    winners) but the pipeline never finalized them — so they still show as
-    'duplicate' in the dashboard.
-
-    For each candidate:
-      - If target_path is a local path that exists: re-queue via
-        prepare_job_for_reprocess so the pipeline can finish (run IA-08).
-      - Otherwise: mark directly as 'done' (file already in library or gone).
+    Returns 409 if any cleanup is already running. Progress is reported via
+    /api/jobs/cleanup-status. The classifier reads `target_path` and queries
+    the DB for 'done' counterparts to decide between re-queue / mark-done / skip
+    so we never wrongly flag a job as 'done' without a verified counterpart.
     """
-    import os
-    from datetime import datetime
-    from sqlalchemy import func, update
-
-    async with async_session() as session:
-        candidates = await session.execute(
-            select(Job).where(
-                Job.status == "duplicate",
-                func.json_extract(Job.step_result, '$."IA-02".status') == "skipped",
-                func.json_extract(Job.step_result, '$."IA-02".reason').like("%kept via%"),
-            )
+    if _cleanup_progress["running"]:
+        return JSONResponse(
+            {"error": "another_cleanup_running", "task": _cleanup_progress["task"]},
+            status_code=409,
         )
-        jobs = candidates.scalars().all()
 
-    # Build a set of filenames that have at least one verified 'done' job in the DB,
-    # so we only mark a stuck winner as 'done' when we know the file is safely in
-    # the library (same check as cleanup-stale-errors uses).
-    filenames_with_done: set[str] = set()
-    if jobs:
-        async with async_session() as session:
-            done_rows = await session.execute(
-                select(Job.filename).where(
-                    Job.status.in_(("done",)),
-                    Job.target_path.isnot(None),
-                    Job.target_path != "",
-                    Job.filename.in_([j.filename for j in jobs]),
-                ).distinct()
-            )
-            filenames_with_done = {r[0] for r in done_rows.fetchall()}
-
-    # Classify each job into one of three buckets:
-    #   requeue_ids  — file still at target_path → move to reprocess, run IA-08
-    #   done_ids     — file gone, but a verified 'done' counterpart exists in DB
-    #   skip_ids     — file gone, no 'done' counterpart → leave untouched
-    requeue_ids = []
-    done_ids = []
-    skip_ids = []
-    for job in jobs:
-        tp = job.target_path or ""
-        if tp and not tp.startswith("immich:") and os.path.exists(tp):
-            requeue_ids.append(job.id)
-        elif job.filename in filenames_with_done:
-            done_ids.append(job.id)
-        else:
-            skip_ids.append(job.id)
-
-    # Re-queue: move file to reprocess/, keep IA-01..IA-07 so pipeline only re-runs IA-08.
-    requeued = 0
-    raced = 0
-    from pipeline.reprocess import prepare_job_for_reprocess
-    for job_id in requeue_ids:
-        async with async_session() as session:
-            fresh = await session.get(Job, job_id)
-            if not fresh or fresh.status != "duplicate":
-                # Pipeline (or another caller) claimed this job between
-                # classification and re-queue — count it so the totals
-                # add up rather than silently dropping it.
-                raced += 1
-                continue
-            moved = await prepare_job_for_reprocess(
-                session, fresh,
-                keep_steps={"IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06", "IA-07"},
-                move_file=True,
-                commit=True,
-            )
-            if moved:
-                requeued += 1
-            else:
-                # File vanished between classify and move — treat like 'done' if possible
-                if fresh.filename in filenames_with_done:
-                    done_ids.append(job_id)
-                else:
-                    skip_ids.append(job_id)
-
-    # Mark-done: bulk update only the verified candidates.
-    marked_done = len(done_ids)
-    if done_ids:
-        async with async_session() as session:
-            await session.execute(
-                update(Job)
-                .where(Job.id.in_(done_ids))
-                .values(status="done", error_message=None, completed_at=datetime.now())
-            )
-            await session.commit()
-
-    total = requeued + marked_done
-    skipped = len(skip_ids)
-    try:
-        detail = (f"re-queued: {requeued}, marked done: {marked_done}, "
-                  f"skipped (no done counterpart): {skipped}, raced: {raced}")
-        await log_info("api", f"Stuck-Duplicate-Winner-Cleanup: {total} Jobs bereinigt", detail)
-    except Exception:
-        pass
-
-    accept = request.headers.get("accept", "")
-    requested_with = request.headers.get("x-requested-with", "")
-    is_fetch = "application/json" in accept or requested_with == "fetch"
-
-    if is_fetch:
-        return JSONResponse({"status": "ok", "requeued": requeued, "marked_done": marked_done,
-                             "skipped": skipped, "raced": raced, "total": total})
-
-    return RedirectResponse(url="/logs?tab=jobs&status=duplicate", status_code=303)
+    _cleanup_reset("stuck_duplicates")
+    asyncio.create_task(_run_cleanup_stuck_duplicate_winners())
+    return JSONResponse({"status": "started", "task": "stuck_duplicates"})
 
 
 @router.post("/trigger-scan")
