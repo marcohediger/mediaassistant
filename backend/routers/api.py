@@ -334,6 +334,164 @@ async def cleanup_orphans_endpoint(request: Request):
     return RedirectResponse(url="/logs?tab=jobs&status=orphan", status_code=303)
 
 
+@router.post("/jobs/cleanup-stale-errors")
+async def cleanup_stale_errors_endpoint(request: Request):
+    """Delete error jobs whose file was never processed (target=None, 'Datei nicht
+    auffindbar') but where the same filename exists in another job that completed
+    successfully with a verified target: local paths checked via os.path.exists(),
+    Immich paths checked via asset_exists() API call.
+    """
+    import os
+    from sqlalchemy import delete
+    from immich_client import asset_exists
+
+    async with async_session() as session:
+        done_alias = Job.__table__.alias("done_job")
+
+        # Scalar subquery: pick the target_path of the best matching done job
+        done_target_subq = (
+            select(done_alias.c.target_path)
+            .where(
+                done_alias.c.filename == Job.filename,
+                done_alias.c.status.in_(("done", "duplicate")),
+                done_alias.c.target_path.isnot(None),
+                done_alias.c.target_path != "",
+            )
+            .order_by(done_alias.c.id.desc())
+            .limit(1)
+            .correlate(Job)
+            .scalar_subquery()
+        )
+
+        candidates = await session.execute(
+            select(Job.id, done_target_subq.label("done_target")).where(
+                Job.status == "error",
+                Job.error_message.like("%Datei nicht auffindbar%"),
+                Job.target_path.is_(None),
+                done_target_subq.isnot(None),
+            )
+        )
+        rows = candidates.fetchall()
+
+    # Verify that the done job's target actually resolves
+    verified_ids = []
+    for job_id, done_target in rows:
+        if done_target.startswith("immich:"):
+            asset_id = done_target.split(":", 1)[1]
+            if await asset_exists(asset_id):
+                verified_ids.append(job_id)
+        elif os.path.exists(done_target):
+            verified_ids.append(job_id)
+
+    count = len(verified_ids)
+    if verified_ids:
+        async with async_session() as session:
+            await session.execute(delete(Job).where(Job.id.in_(verified_ids)))
+            await session.commit()
+
+    try:
+        skipped = len(rows) - count
+        detail = f"Kandidaten: {len(rows)}, verifiziert: {count}, übersprungen (Ziel nicht erreichbar): {skipped}"
+        await log_info("api", f"Stale-Error-Cleanup: {count} veraltete Error-Jobs gelöscht", detail)
+    except Exception:
+        pass
+
+    accept = request.headers.get("accept", "")
+    requested_with = request.headers.get("x-requested-with", "")
+    is_fetch = "application/json" in accept or requested_with == "fetch"
+
+    if is_fetch:
+        return JSONResponse({"status": "ok", "deleted": count, "skipped": len(rows) - count})
+
+    return RedirectResponse(url="/logs?tab=jobs&status=error", status_code=303)
+
+
+@router.post("/jobs/cleanup-stuck-duplicate-winners")
+async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
+    """Resolve stuck duplicate-winner jobs left behind by batch-clean.
+
+    These are jobs where batch-clean injected IA-02='skipped' (marking them as
+    winners) but the pipeline never finalized them — so they still show as
+    'duplicate' in the dashboard.
+
+    For each candidate:
+      - If target_path is a local path that exists: re-queue via
+        prepare_job_for_reprocess so the pipeline can finish (run IA-08).
+      - Otherwise: mark directly as 'done' (file already in library or gone).
+    """
+    import os
+    from datetime import datetime
+    from sqlalchemy import func, update
+
+    async with async_session() as session:
+        candidates = await session.execute(
+            select(Job).where(
+                Job.status == "duplicate",
+                func.json_extract(Job.step_result, '$."IA-02".status') == "skipped",
+                func.json_extract(Job.step_result, '$."IA-02".reason').like("%kept via%"),
+            )
+        )
+        jobs = candidates.scalars().all()
+
+    # Classify each job: re-queue those with a reachable file, mark-done the rest.
+    requeue_ids = []
+    done_ids = []
+    for job in jobs:
+        tp = job.target_path or ""
+        if tp and not tp.startswith("immich:") and os.path.exists(tp):
+            requeue_ids.append(job.id)
+        else:
+            done_ids.append(job.id)
+
+    # Re-queue: move file to reprocess/, keep IA-01+IA-02 so pipeline runs IA-08.
+    requeued = 0
+    from pipeline.reprocess import prepare_job_for_reprocess
+    for job_id in requeue_ids:
+        async with async_session() as session:
+            fresh = await session.get(Job, job_id)
+            if not fresh or fresh.status != "duplicate":
+                done_ids.append(job_id)
+                continue
+            moved = await prepare_job_for_reprocess(
+                session, fresh,
+                keep_steps={"IA-01", "IA-02"},
+                move_file=True,
+                commit=True,
+            )
+            if moved:
+                requeued += 1
+            else:
+                # File vanished between classify and move — fall through to done
+                done_ids.append(job_id)
+
+    # Mark-done: bulk update for all remaining jobs.
+    marked_done = len(done_ids)
+    if done_ids:
+        async with async_session() as session:
+            await session.execute(
+                update(Job)
+                .where(Job.id.in_(done_ids))
+                .values(status="done", error_message=None, completed_at=datetime.now())
+            )
+            await session.commit()
+
+    total = requeued + marked_done
+    try:
+        detail = f"re-queued: {requeued}, marked done: {marked_done}"
+        await log_info("api", f"Stuck-Duplicate-Winner-Cleanup: {total} Jobs bereinigt", detail)
+    except Exception:
+        pass
+
+    accept = request.headers.get("accept", "")
+    requested_with = request.headers.get("x-requested-with", "")
+    is_fetch = "application/json" in accept or requested_with == "fetch"
+
+    if is_fetch:
+        return JSONResponse({"status": "ok", "requeued": requeued, "marked_done": marked_done, "total": total})
+
+    return RedirectResponse(url="/logs?tab=jobs&status=duplicate", status_code=303)
+
+
 @router.post("/trigger-scan")
 async def trigger_scan():
     """Manual trigger: run one scan cycle regardless of schedule mode."""

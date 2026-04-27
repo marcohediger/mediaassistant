@@ -965,7 +965,10 @@ async def _resolve_duplicate_group(
         force_reupload_after_inherit = bool(best.immich_asset_id)
 
         # Copy analysis steps from original (saves AI re-run costs)
-        keep_steps = {"IA-01"}
+        # Always keep IA-02 so the injected 'skipped' sentinel below survives
+        # _reset_step_results — without it, the pipeline re-runs IA-02 fresh and
+        # re-detects the winner as a duplicate (seen in v2.31.4 with 1219 stuck jobs).
+        keep_steps = {"IA-01", "IA-02"}
         if analysis_donor:
             orig_sr = analysis_donor.step_result or {}
             for step in ("IA-03", "IA-04", "IA-05", "IA-06"):
