@@ -406,7 +406,13 @@ async def cleanup_orphans_endpoint(request: Request):
 async def _run_cleanup_stale_errors():
     """Background task: verify each candidate's done counterpart still
     resolves (local file exists, or Immich asset exists), then bulk-delete
-    the verified IDs. Updates _cleanup_progress as it goes."""
+    the verified IDs. Updates _cleanup_progress as it goes.
+
+    Uses two separate queries instead of a correlated subquery — at
+    scale (4k+ errors × 150k+ done jobs without a filename index) the
+    correlated subquery degenerated to O(M·N) and made the task hang
+    indefinitely on `loading candidates`.
+    """
     import os
     from sqlalchemy import delete
     from immich_client import asset_exists
@@ -414,34 +420,52 @@ async def _run_cleanup_stale_errors():
     deleted = 0
     skipped = 0
     try:
-        _cleanup_progress["phase"] = "loading candidates"
+        _cleanup_progress["phase"] = "loading error jobs"
 
+        # Step 1 — error candidates ("Datei nicht auffindbar", target=None)
         async with async_session() as session:
-            done_alias = Job.__table__.alias("done_job")
-            done_target_subq = (
-                select(done_alias.c.target_path)
-                .where(
-                    done_alias.c.filename == Job.filename,
-                    done_alias.c.status.in_(("done", "duplicate")),
-                    done_alias.c.target_path.isnot(None),
-                    done_alias.c.target_path != "",
-                )
-                .order_by(done_alias.c.id.desc())
-                .limit(1)
-                .correlate(Job)
-                .scalar_subquery()
-            )
-            candidates = await session.execute(
-                select(Job.id, done_target_subq.label("done_target")).where(
+            r = await session.execute(
+                select(Job.id, Job.filename).where(
                     Job.status == "error",
                     Job.error_message.like("%Datei nicht auffindbar%"),
                     Job.target_path.is_(None),
-                    done_target_subq.isnot(None),
                 )
             )
-            rows = candidates.fetchall()
+            error_rows = r.fetchall()  # [(id, filename), ...]
+
+        _cleanup_progress["total"] = len(error_rows)
+        _cleanup_progress["phase"] = "loading done counterparts"
+
+        # Step 2 — for the filenames involved, fetch the latest done/duplicate
+        # target_path (one bulk query, batched to stay under SQLite's IN-list
+        # cap on very large filename sets).
+        filename_to_target: dict[str, str] = {}
+        unique_filenames = list({fn for _, fn in error_rows if fn})
+        BATCH = 500
+        for i in range(0, len(unique_filenames), BATCH):
+            chunk = unique_filenames[i:i + BATCH]
+            async with async_session() as session:
+                r = await session.execute(
+                    select(Job.filename, Job.target_path, Job.id)
+                    .where(
+                        Job.filename.in_(chunk),
+                        Job.status.in_(("done", "duplicate")),
+                        Job.target_path.isnot(None),
+                        Job.target_path != "",
+                    )
+                    .order_by(Job.id.desc())
+                )
+                # Keep only the latest target_path per filename
+                for fn, tp, _ in r.fetchall():
+                    filename_to_target.setdefault(fn, tp)
+            await asyncio.sleep(0)  # yield each batch
+
+        # Build the candidates list (only error jobs that have a counterpart)
+        rows = [(jid, filename_to_target[fn]) for jid, fn in error_rows
+                if fn in filename_to_target]
 
         _cleanup_progress["total"] = len(rows)
+        _cleanup_progress["current"] = 0
         _cleanup_progress["phase"] = "verifying targets"
 
         verified_ids = []
