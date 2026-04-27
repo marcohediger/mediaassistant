@@ -146,7 +146,8 @@ async function cleanupStuckDuplicates(ev) {
         const total = data.total || 0;
         const requeued = data.requeued || 0;
         const done = data.marked_done || 0;
-        if (total === 0) {
+        const skipped = data.skipped || 0;
+        if (total === 0 && skipped === 0) {
             alert('Keine hängenden Duplikat-Gewinner gefunden — nichts zu tun.');
             btn.textContent = origText;
             btn.style.pointerEvents = '';
@@ -154,8 +155,9 @@ async function cleanupStuckDuplicates(ev) {
         }
         let msg = '✅ ' + total + ' Job' + (total === 1 ? '' : 's') + ' bereinigt.';
         if (requeued > 0) msg += '\n  ' + requeued + ' neu eingereiht (Datei vorhanden).';
-        if (done > 0) msg += '\n  ' + done + ' als "done" markiert.';
-        alert(msg + '\n\nSeite wird neu geladen.');
+        if (done > 0) msg += '\n  ' + done + ' als "done" markiert (Datei verifiziert).';
+        if (skipped > 0) msg += '\n\n⚠️ ' + skipped + ' Job' + (skipped === 1 ? '' : 's') + ' übersprungen — kein "done"-Gegenstück in DB gefunden.';
+        alert(msg + (total > 0 ? '\n\nSeite wird neu geladen.' : ''));
         window.location.href = '/logs?tab=jobs&status=duplicate';
     } catch (e) {
         alert('Cleanup Fehler: ' + e.message);

@@ -433,15 +433,37 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
         )
         jobs = candidates.scalars().all()
 
-    # Classify each job: re-queue those with a reachable file, mark-done the rest.
+    # Build a set of filenames that have at least one verified 'done' job in the DB,
+    # so we only mark a stuck winner as 'done' when we know the file is safely in
+    # the library (same check as cleanup-stale-errors uses).
+    filenames_with_done: set[str] = set()
+    if jobs:
+        async with async_session() as session:
+            done_rows = await session.execute(
+                select(Job.filename).where(
+                    Job.status.in_(("done",)),
+                    Job.target_path.isnot(None),
+                    Job.target_path != "",
+                    Job.filename.in_([j.filename for j in jobs]),
+                ).distinct()
+            )
+            filenames_with_done = {r[0] for r in done_rows.fetchall()}
+
+    # Classify each job into one of three buckets:
+    #   requeue_ids  — file still at target_path → move to reprocess, run IA-08
+    #   done_ids     — file gone, but a verified 'done' counterpart exists in DB
+    #   skip_ids     — file gone, no 'done' counterpart → leave untouched
     requeue_ids = []
     done_ids = []
+    skip_ids = []
     for job in jobs:
         tp = job.target_path or ""
         if tp and not tp.startswith("immich:") and os.path.exists(tp):
             requeue_ids.append(job.id)
-        else:
+        elif job.filename in filenames_with_done:
             done_ids.append(job.id)
+        else:
+            skip_ids.append(job.id)
 
     # Re-queue: move file to reprocess/, keep IA-01+IA-02 so pipeline runs IA-08.
     requeued = 0
@@ -450,21 +472,23 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
         async with async_session() as session:
             fresh = await session.get(Job, job_id)
             if not fresh or fresh.status != "duplicate":
-                done_ids.append(job_id)
                 continue
             moved = await prepare_job_for_reprocess(
                 session, fresh,
-                keep_steps={"IA-01", "IA-02"},
+                keep_steps={"IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06", "IA-07"},
                 move_file=True,
                 commit=True,
             )
             if moved:
                 requeued += 1
             else:
-                # File vanished between classify and move — fall through to done
-                done_ids.append(job_id)
+                # File vanished between classify and move — treat like 'done' if possible
+                if fresh.filename in filenames_with_done:
+                    done_ids.append(job_id)
+                else:
+                    skip_ids.append(job_id)
 
-    # Mark-done: bulk update for all remaining jobs.
+    # Mark-done: bulk update only the verified candidates.
     marked_done = len(done_ids)
     if done_ids:
         async with async_session() as session:
@@ -476,8 +500,10 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
             await session.commit()
 
     total = requeued + marked_done
+    skipped = len(skip_ids)
     try:
-        detail = f"re-queued: {requeued}, marked done: {marked_done}"
+        detail = (f"re-queued: {requeued}, marked done: {marked_done}, "
+                  f"skipped (no done counterpart): {skipped}")
         await log_info("api", f"Stuck-Duplicate-Winner-Cleanup: {total} Jobs bereinigt", detail)
     except Exception:
         pass
@@ -487,7 +513,8 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
     is_fetch = "application/json" in accept or requested_with == "fetch"
 
     if is_fetch:
-        return JSONResponse({"status": "ok", "requeued": requeued, "marked_done": marked_done, "total": total})
+        return JSONResponse({"status": "ok", "requeued": requeued, "marked_done": marked_done,
+                             "skipped": skipped, "total": total})
 
     return RedirectResponse(url="/logs?tab=jobs&status=duplicate", status_code=303)
 
