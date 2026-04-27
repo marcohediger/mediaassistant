@@ -147,7 +147,8 @@ async function cleanupStuckDuplicates(ev) {
         const requeued = data.requeued || 0;
         const done = data.marked_done || 0;
         const skipped = data.skipped || 0;
-        if (total === 0 && skipped === 0) {
+        const raced = data.raced || 0;
+        if (total === 0 && skipped === 0 && raced === 0) {
             alert('Keine hängenden Duplikat-Gewinner gefunden — nichts zu tun.');
             btn.textContent = origText;
             btn.style.pointerEvents = '';
@@ -157,6 +158,7 @@ async function cleanupStuckDuplicates(ev) {
         if (requeued > 0) msg += '\n  ' + requeued + ' neu eingereiht (Datei vorhanden).';
         if (done > 0) msg += '\n  ' + done + ' als "done" markiert (Datei verifiziert).';
         if (skipped > 0) msg += '\n\n⚠️ ' + skipped + ' Job' + (skipped === 1 ? '' : 's') + ' übersprungen — kein "done"-Gegenstück in DB gefunden.';
+        if (raced > 0) msg += '\n\nℹ️ ' + raced + ' Job' + (raced === 1 ? '' : 's') + ' wurde inzwischen von der Pipeline aufgegriffen.';
         alert(msg + (total > 0 ? '\n\nSeite wird neu geladen.' : ''));
         window.location.href = '/logs?tab=jobs&status=duplicate';
     } catch (e) {

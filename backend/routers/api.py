@@ -465,13 +465,18 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
         else:
             skip_ids.append(job.id)
 
-    # Re-queue: move file to reprocess/, keep IA-01+IA-02 so pipeline runs IA-08.
+    # Re-queue: move file to reprocess/, keep IA-01..IA-07 so pipeline only re-runs IA-08.
     requeued = 0
+    raced = 0
     from pipeline.reprocess import prepare_job_for_reprocess
     for job_id in requeue_ids:
         async with async_session() as session:
             fresh = await session.get(Job, job_id)
             if not fresh or fresh.status != "duplicate":
+                # Pipeline (or another caller) claimed this job between
+                # classification and re-queue — count it so the totals
+                # add up rather than silently dropping it.
+                raced += 1
                 continue
             moved = await prepare_job_for_reprocess(
                 session, fresh,
@@ -503,7 +508,7 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
     skipped = len(skip_ids)
     try:
         detail = (f"re-queued: {requeued}, marked done: {marked_done}, "
-                  f"skipped (no done counterpart): {skipped}")
+                  f"skipped (no done counterpart): {skipped}, raced: {raced}")
         await log_info("api", f"Stuck-Duplicate-Winner-Cleanup: {total} Jobs bereinigt", detail)
     except Exception:
         pass
@@ -514,7 +519,7 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
 
     if is_fetch:
         return JSONResponse({"status": "ok", "requeued": requeued, "marked_done": marked_done,
-                             "skipped": skipped, "total": total})
+                             "skipped": skipped, "raced": raced, "total": total})
 
     return RedirectResponse(url="/logs?tab=jobs&status=duplicate", status_code=303)
 
