@@ -80,6 +80,9 @@ async def _migrate_columns(conn):
         "CREATE INDEX IF NOT EXISTS idx_job_hash_status ON jobs(file_hash, status)",
         "CREATE INDEX IF NOT EXISTS idx_job_phash_status ON jobs(phash, status)",
         "CREATE INDEX IF NOT EXISTS idx_job_status_created ON jobs(status, created_at)",
+        # Speeds up the cleanup-stale-errors / cleanup-stuck-duplicate-winners
+        # endpoints — both look up jobs by filename in batches.
+        "CREATE INDEX IF NOT EXISTS idx_job_filename ON jobs(filename)",
     ]
     for sql in indexes:
         await conn.execute(sqlalchemy.text(sql))
