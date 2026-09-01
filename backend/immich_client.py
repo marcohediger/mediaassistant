@@ -828,6 +828,49 @@ async def get_recent_assets(since: str | None = None, *, api_key: str | None = N
     return assets
 
 
+# Sentinels returned by check_connection() mapped to i18n keys in the
+# "modules" section. Both the dashboard and the settings test buttons render
+# them, so the mapping lives next to the code that produces the sentinels.
+CONNECTION_STATUS_KEYS = {
+    "no_url": "status_no_url",
+    "no_api_key": "status_missing",
+    "auth_failed": "status_auth_failed",
+    "permission_denied": "status_permission_denied",
+    "connection_failed": "status_connection_failed",
+    "timeout": "status_timeout",
+}
+
+
+def describe_connection_detail(detail: str, i18n: dict) -> str:
+    """Render a check_connection() detail as a translated, user-facing string.
+
+    Keeps Immich's own message when there is one — that is the part naming
+    the missing permission.
+    """
+    sentinel, _, server_msg = detail.partition(": ")
+    key = CONNECTION_STATUS_KEYS.get(sentinel)
+    if not key:
+        return detail
+    text = i18n.get("modules", {}).get(key, key)
+    return f"{text} — {server_msg}" if server_msg else text
+
+
+def _server_message(resp: httpx.Response) -> str:
+    """Immich's own error text for a failed response, collapsed to one line.
+
+    Immich answers 401/403 with {"message": "..."} — that message names the
+    exact missing permission, which is the only thing that tells a user apart
+    "wrong key" from "key without the required permission".
+    """
+    try:
+        msg = resp.json().get("message")
+    except Exception:
+        msg = None
+    if not msg:
+        msg = resp.text.strip()[:200]
+    return " ".join(str(msg).split())
+
+
 async def check_connection(*, api_key: str | None = None) -> tuple[bool, str]:
     """Test the Immich connection. Returns (ok, detail)."""
     url, api_key = await _resolve_api_key(api_key)
@@ -846,13 +889,15 @@ async def check_connection(*, api_key: str | None = None) -> tuple[bool, str]:
                 name = data.get("name", "")
                 email = data.get("email", "")
                 return True, f"{name} ({email})" if email else "connected"
-            if resp.status_code == 401:
-                return False, "auth_failed"
-            if resp.status_code == 403:
-                # Immich >= 3.0 gives routes without an explicit permission an
-                # implied "all" permission. A narrower key still authenticates
-                # (no 401) but every request is refused with 403.
-                return False, "permission_denied"
+            # 401 = key unknown, 403 = key known but not allowed. Immich >= 3.0
+            # gives routes without an explicit permission an implied "all"
+            # permission, so a narrower key authenticates (no 401) and is then
+            # refused on every route. The server message is carried along after
+            # the sentinel so callers can show why.
+            if resp.status_code in (401, 403):
+                sentinel = "auth_failed" if resp.status_code == 401 else "permission_denied"
+                server_msg = _server_message(resp)
+                return False, f"{sentinel}: {server_msg}" if server_msg else sentinel
             return False, f"HTTP {resp.status_code}"
     except httpx.ConnectError:
         return False, "connection_failed"

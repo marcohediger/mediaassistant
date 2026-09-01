@@ -704,6 +704,9 @@
             <input type="password" id="immich_api_key" name="immich_api_key" placeholder="••••••••">
             <small>{{ t.settings.immich_api_key_hint }}</small>
         </div>
+        <div class="inbox-actions" style="margin-bottom: 1rem;">
+            <button type="button" class="btn btn-small btn-secondary" onclick="postAction('/settings/immich/test', {})">{{ t.settings.immich_test }}</button>
+        </div>
         <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
         <h3>{{ t.settings.immich_poll }}</h3>
         <p class="section-note" style="margin-bottom: 1rem;">{{ t.settings.immich_poll_desc }}</p>

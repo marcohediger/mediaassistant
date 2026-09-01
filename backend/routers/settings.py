@@ -1,5 +1,6 @@
 import html
 import os
+from urllib.parse import quote
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
@@ -560,6 +561,29 @@ async def delete_immich_user(request: Request, user_id: int):
     return RedirectResponse(url="/settings?msg=iu_deleted", status_code=302)
 
 
+async def _describe_immich_detail(detail: str) -> str:
+    """Translate a check_connection() detail into the configured UI language."""
+    from i18n import load_lang, DEFAULT_LANGUAGE
+    from immich_client import describe_connection_detail
+    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+    return describe_connection_detail(detail, load_lang(lang))
+
+
+@router.post("/immich/test")
+async def test_immich_global(request: Request):
+    """Test the global Immich API key — the per-user entries have their own."""
+    from immich_client import check_connection
+    ok, detail = await check_connection()
+    msg = "immich_test_ok" if ok else "immich_test_failed"
+    msg_type = "" if ok else "&msg_type=error"
+    if not ok:
+        detail = await _describe_immich_detail(detail)
+    return RedirectResponse(
+        url=f"/settings?msg={msg}{msg_type}&msg_detail={quote(detail)}",
+        status_code=302,
+    )
+
+
 @router.post("/immich-user/{user_id}/test")
 async def test_immich_user(request: Request, user_id: int):
     from immich_client import check_connection, get_user_api_key
@@ -567,7 +591,11 @@ async def test_immich_user(request: Request, user_id: int):
     if not key:
         return RedirectResponse(url="/settings?msg=iu_not_found&msg_type=error", status_code=302)
     ok, detail = await check_connection(api_key=key)
-    if ok:
-        from urllib.parse import quote
-        return RedirectResponse(url=f"/settings?msg=iu_test_ok&msg_detail={quote(detail)}", status_code=302)
-    return RedirectResponse(url=f"/settings?msg=iu_test_failed&msg_type=error", status_code=302)
+    msg = "iu_test_ok" if ok else "iu_test_failed"
+    msg_type = "" if ok else "&msg_type=error"
+    if not ok:
+        detail = await _describe_immich_detail(detail)
+    return RedirectResponse(
+        url=f"/settings?msg={msg}{msg_type}&msg_detail={quote(detail)}",
+        status_code=302,
+    )

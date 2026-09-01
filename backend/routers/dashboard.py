@@ -177,22 +177,11 @@ async def _check_filewatcher(i18n: dict) -> tuple[bool, str]:
 
 
 async def _check_immich(i18n: dict) -> tuple[bool, str]:
-    from immich_client import check_connection
+    from immich_client import check_connection, describe_connection_detail
     ok, detail = await check_connection()
     if ok:
         return True, _t("status_connected", i18n)
-    status_map = {
-        "no_url": "status_no_url",
-        "no_api_key": "status_missing",
-        "auth_failed": "status_auth_failed",
-        "permission_denied": "status_permission_denied",
-        "connection_failed": "status_connection_failed",
-        "timeout": "status_timeout",
-    }
-    i18n_key = status_map.get(detail)
-    if i18n_key:
-        return False, _t(i18n_key, i18n)
-    return False, detail
+    return False, describe_connection_detail(detail, i18n)
 
 
 MODULE_HEALTH_CHECKS = {

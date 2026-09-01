@@ -1,5 +1,42 @@
 # Changelog
 
+## v2.32.3 — 2026-09-01
+
+### UI/Fix: Immich-Verbindungstest sagt endlich, warum er scheitert
+
+Live-Diagnose eines 403 gegen Immich 3.1.0 scheiterte daran, dass die
+Oberfläche den Grund an drei Stellen verschluckt hat. Der Benutzer
+klickte den Testen-Button acht Mal und bekam acht Mal "Verbindung
+fehlgeschlagen" — dieselbe Meldung für 401, 403, DNS-Fehler und
+Timeout. Der einzige Weg zur Ursache war das Container-Log.
+
+Drei Änderungen:
+
+**Immichs eigene Fehlermeldung wird durchgereicht.** `check_connection`
+hängt bei 401/403 die `message` aus der Antwort an den Sentinel
+(`permission_denied: Missing required permission: all`). Genau dieser
+Text nennt die fehlende Berechtigung und war bisher der einzige Weg,
+"falscher Key" von "Key ohne Berechtigung" zu unterscheiden.
+
+**Testen-Button für den globalen API-Key.** Bisher hatten nur die
+Einträge unter "Immich-Benutzer" einen Test — der globale Key, mit dem
+der Poller und die halbe Pipeline laufen, war nur über das Dashboard
+prüfbar. Neue Route `POST /settings/immich/test`.
+
+**Fehlgeschlagene Tests zeigen ein Detail.** `iu_test_failed` hat
+`detail` bisher weggeworfen. Beide Test-Routen übersetzen jetzt über
+die gemeinsame Funktion `describe_connection_detail`, die auch das
+Dashboard nutzt — statt die Sentinel→i18n-Zuordnung zu duplizieren.
+
+Verifiziert gegen einen lokalen Fake-Immich für 403/401/200, jeweils
+über alle drei Oberflächen (Dashboard, Global-Test, Benutzer-Test).
+Bei 403 steht dort jetzt "API-Key ohne Berechtigung «all» — Missing
+required permission: all" statt "HTTP 403" bzw. "Verbindung
+fehlgeschlagen".
+
+Hinweis zum Verhalten: Der Test prüft immer den **gespeicherten** Key,
+nicht den ins Feld getippten. Erst speichern, dann testen.
+
 ## v2.32.2 — 2026-09-01
 
 ### Fix: Dashboard meldete Geocoding und Immich fälschlich/unklar als 403
