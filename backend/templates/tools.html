@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t.tools.title }}</h1>
+
+<div class="settings-section" id="section-sidecar-tags">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.tools.tags_title }}</h2>
+            <span class="section-desc">{{ t.tools.tags_desc }}</span>
+        </div>
+    </div>
+    <div class="section-body">
+        <p class="section-note" style="margin-bottom: 1rem;">
+            {{ t.tools.tags_hint }} <code>{{ library_path }}</code>
+        </p>
+
+        <div class="form-group">
+            <label for="tag_pattern">{{ t.tools.pattern }}</label>
+            <input type="text" id="tag_pattern" value="^\d{4}-\d{2}-\d{2}$" spellcheck="false" oninput="sidecarInvalidate()">
+            <small>{{ t.tools.pattern_hint }}</small>
+        </div>
+
+        <div class="inbox-actions" style="align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^\\d{4}-\\d{2}-\\d{2}$')">{{ t.tools.preset_date }}</button>
+            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^\\d{4}$')">{{ t.tools.preset_year }}</button>
+        </div>
+
+        <div class="inbox-actions" style="align-items: center; gap: 0.75rem;">
+            <button type="button" class="btn btn-small btn-primary" id="btn_scan" onclick="sidecarRun('scan')">{{ t.tools.scan }}</button>
+            <button type="button" class="btn btn-small btn-danger" id="btn_remove" disabled onclick="sidecarRemove()">{{ t.tools.remove }}</button>
+            <span id="sidecar_state" class="test-result"></span>
+        </div>
+
+        <div id="sidecar_result" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+
+<script>
+var LAST_SCAN_PATTERN = null;
+
+function sidecarInvalidate() {
+    // Any edit voids the preview — the server refuses a removal whose pattern
+    // does not match the previewed one, this just keeps the UI honest.
+    document.getElementById('btn_remove').disabled = true;
+    document.getElementById('sidecar_result').innerHTML = '';
+    LAST_SCAN_PATTERN = null;
+}
+function sidecarPreset(p) {
+    document.getElementById('tag_pattern').value = p;
+    sidecarInvalidate();
+}
+
+function sidecarRun(mode) {
+    var pattern = document.getElementById('tag_pattern').value;
+    var state = document.getElementById('sidecar_state');
+    var body = new URLSearchParams();
+    body.append('pattern', pattern);
+    state.textContent = '{{ t.tools.running }}';
+    state.style.color = '';
+    document.getElementById('btn_scan').disabled = true;
+    document.getElementById('btn_remove').disabled = true;
+    fetch('/tools/tags/' + mode, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body
+    }).then(function (r) { return r.json(); })
+      .then(function (d) {
+          if (!d.ok) { sidecarFail(d.detail); return; }
+          pollSidecar(pattern);
+      }).catch(function (e) { sidecarFail(String(e)); });
+}
+
+function sidecarRemove() {
+    if (!confirm('{{ t.tools.remove_confirm }}')) { return; }
+    sidecarRun('remove');
+}
+
+function sidecarFail(msg) {
+    var state = document.getElementById('sidecar_state');
+    state.textContent = msg;
+    state.style.color = 'var(--error)';
+    document.getElementById('btn_scan').disabled = false;
+}
+
+function pollSidecar(pattern) {
+    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
+      .then(function (p) {
+          var state = document.getElementById('sidecar_state');
+          if (p.running) {
+              var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
+              state.textContent = (p.phase || '') + n;
+              setTimeout(function () { pollSidecar(pattern); }, 1000);
+              return;
+          }
+          document.getElementById('btn_scan').disabled = false;
+          if (p.error) { sidecarFail(p.error); return; }
+          state.textContent = '';
+          renderSidecar(p.result, pattern);
+      }).catch(function (e) { sidecarFail(String(e)); });
+}
+
+function renderSidecar(res, pattern) {
+    var box = document.getElementById('sidecar_result');
+    if (!res) { box.innerHTML = ''; return; }
+    var h = '';
+    if (res.mode === 'scan') {
+        h += '<p><strong>' + res.sidecars_matched + '</strong> {{ t.tools.of }} ' +
+             res.sidecars_total + ' {{ t.tools.sidecars_scanned }}</p>';
+        if (res.tags.length) {
+            h += '<table class="data-table"><thead><tr><th>{{ t.tools.tag }}</th><th>{{ t.tools.count }}</th></tr></thead><tbody>';
+            res.tags.forEach(function (t) {
+                h += '<tr><td><code>' + t[0] + '</code></td><td>' + t[1] + '</td></tr>';
+            });
+            h += '</tbody></table>';
+            h += '<p class="section-note">{{ t.tools.sample }}<br>' +
+                 res.sample.map(function (f) { return '<code>' + f + '</code>'; }).join('<br>') + '</p>';
+            h += '<p class="section-note" style="color: var(--success);">{{ t.tools.preview_note }}</p>';
+            document.getElementById('btn_remove').disabled = false;
+            LAST_SCAN_PATTERN = pattern;
+        } else {
+            h += '<p class="section-note">{{ t.tools.no_match }}</p>';
+        }
+    } else {
+        h += '<p><strong>' + res.sidecars_changed + '</strong> {{ t.tools.sidecars_changed }}, ' +
+             res.tags_removed + ' {{ t.tools.tags_removed }}';
+        if (res.sidecars_failed) { h += ' — ' + res.sidecars_failed + ' {{ t.tools.failed }}'; }
+        h += '</p>';
+    }
+    box.innerHTML = h;
+}
+</script>
+{% endblock %}

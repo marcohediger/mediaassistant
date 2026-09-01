@@ -4,7 +4,8 @@
     "duplicates": "Duplicates",
     "review": "Review",
     "logs": "Logs",
-    "settings": "Settings"
+    "settings": "Settings",
+    "tools": "Tools"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -452,5 +453,34 @@
   "common": {
     "yes": "Yes",
     "no": "No"
+  },
+  "tools": {
+    "title": "Tools",
+    "tags_title": "Tag cleanup in sidecars",
+    "tags_desc": "Removes keywords from the library's XMP sidecar files.",
+    "tags_hint": "Recursively scans every .xmp file under",
+    "pattern": "Pattern (regular expression)",
+    "pattern_hint": "Tested against each keyword. Example: ^\\d{4}-\\d{2}-\\d{2}$ matches 2020-06-22.",
+    "preset_date": "Date YYYY-MM-DD",
+    "preset_year": "Year",
+    "scan": "Search",
+    "remove": "Remove from sidecars",
+    "remove_confirm": "The matched keywords will be permanently removed from the sidecar files. No backup is kept. Continue?",
+    "running": "Running …",
+    "of": "of",
+    "sidecars_scanned": "sidecars contain matching keywords",
+    "tag": "Keyword",
+    "count": "Occurrences",
+    "sample": "Example files:",
+    "no_match": "No matching keywords found.",
+    "sidecars_changed": "sidecars changed",
+    "tags_removed": "keywords removed",
+    "failed": "failed",
+    "err_no_pattern": "No pattern given",
+    "err_bad_pattern": "Invalid regular expression",
+    "err_busy": "A maintenance task is already running",
+    "err_no_preview": "Run a preview first",
+    "err_pattern_changed": "Pattern changed since the preview — please search again",
+    "preview_note": "Preview — nothing has been changed yet. Exactly this selection will be removed."
   }
 }

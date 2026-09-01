@@ -4,7 +4,8 @@
     "duplicates": "Duplikate",
     "review": "Review",
     "logs": "Logs",
-    "settings": "Einstellungen"
+    "settings": "Einstellungen",
+    "tools": "Werkzeuge"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -452,5 +453,34 @@
   "common": {
     "yes": "Ja",
     "no": "Nein"
+  },
+  "tools": {
+    "title": "Werkzeuge",
+    "tags_title": "Tag-Aufräumen in Sidecars",
+    "tags_desc": "Entfernt Schlagwörter aus den XMP-Sidecar-Dateien der Bibliothek.",
+    "tags_hint": "Durchsucht rekursiv alle .xmp-Dateien unter",
+    "pattern": "Muster (regulärer Ausdruck)",
+    "pattern_hint": "Wird gegen jedes Schlagwort geprüft. Beispiel: ^\\d{4}-\\d{2}-\\d{2}$ trifft 2020-06-22.",
+    "preset_date": "Datum JJJJ-MM-TT",
+    "preset_year": "Jahreszahl",
+    "scan": "Suchen",
+    "remove": "Aus Sidecars entfernen",
+    "remove_confirm": "Die gefundenen Schlagwörter werden endgültig aus den Sidecar-Dateien entfernt. Es wird keine Sicherung angelegt. Fortfahren?",
+    "running": "Läuft …",
+    "of": "von",
+    "sidecars_scanned": "Sidecars enthalten passende Schlagwörter",
+    "tag": "Schlagwort",
+    "count": "Vorkommen",
+    "sample": "Beispieldateien:",
+    "no_match": "Keine passenden Schlagwörter gefunden.",
+    "sidecars_changed": "Sidecars geändert",
+    "tags_removed": "Schlagwörter entfernt",
+    "failed": "fehlgeschlagen",
+    "err_no_pattern": "Kein Muster angegeben",
+    "err_bad_pattern": "Ungültiger regulärer Ausdruck",
+    "err_busy": "Eine Wartungsaufgabe läuft bereits",
+    "err_no_preview": "Bitte zuerst eine Vorschau erzeugen",
+    "err_pattern_changed": "Muster wurde seit der Vorschau geändert — bitte erneut suchen",
+    "preview_note": "Vorschau — es wurde noch nichts geändert. Entfernt wird genau diese Auswahl."
   }
 }
