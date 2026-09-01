@@ -1,5 +1,49 @@
 # Changelog
 
+## v2.32.9 — 2026-09-01
+
+### Fix: Filewatcher startete seit v2.32.6 überhaupt nicht mehr
+
+Regression aus v2.32.6, gefunden beim ersten Praxistest der Diagnose-
+Schnittstelle. Beim Umbau der Cursor-Reparatur wurde der Quelltext
+zwischen `_repair_immich_poll_cursor` und `start_filewatcher` ersetzt —
+und dazwischen lag `_recover_immich_error_jobs`. Die Funktion
+verschwand, ihr Aufruf blieb stehen.
+
+`start_filewatcher` warf damit bei jedem Start `NameError`, und zwar
+**vor** dem Erzeugen des Pipeline-Workers. Betroffen sind v2.32.6,
+v2.32.7 und v2.32.8. Die Folge auf dem Live-System: kein Immich-Poll,
+kein Inbox-Scan, kein Job wurde verarbeitet. Die Weboberfläche
+antwortete normal weiter, der Zustand war von aussen nicht zu sehen.
+
+Die Diagnose lief über die neue Schnittstelle: `last_poll` fünf Stunden
+alt, zwei Jobs dauerhaft in `queued`, seit dem Neustart kein einziger
+Eintrag von filewatcher, immich_poll oder pipeline — und
+`migration.immich_cursor_repair` fehlte, obwohl
+`migration.immich_error_recovery` gesetzt war. Der Absturz musste also
+genau zwischen den beiden Aufrufen liegen.
+
+### Fix: Ein sterbender Hintergrundprozess bleibt nicht mehr unsichtbar
+
+Der eigentliche Grund, warum das drei Releases lang unbemerkt blieb:
+Filewatcher und health_watcher laufen als `asyncio.create_task` ohne
+Fehlerbehandlung. Stirbt so ein Task, verschluckt asyncio die Ausnahme
+still — im Logtabelle steht nichts, die Oberfläche wirkt gesund, und nur
+das Container-Log kennt den Traceback.
+
+Beide laufen jetzt über `_supervise`: Die Ausnahme landet im
+Anwendungslog **und** als Fehlereintrag in der Datenbank, damit sie im
+Log-Menü und im Diagnosebericht sichtbar ist.
+
+Verifiziert gegen eine Kopie der Live-DB: `start_filewatcher` läuft nach
+sechs Sekunden noch, die Cursor-Reparatur wird ausgeführt (`last_poll`
+01.09. → 04.04.), und ein absichtlich abstürzender Testtask erzeugt
+genau einen Fehlereintrag.
+
+Lehre fürs nächste Mal: Die Migrationen waren einzeln getestet, der
+Startpfad selbst nie. Ein Test, der `start_filewatcher` wirklich
+startet, hätte den fehlenden Namen sofort gezeigt.
+
 ## v2.32.8 — 2026-09-01
 
 ### Diagnose-Schnittstelle: ein Abruf statt DB-Kopie und Log-Ausschnitten

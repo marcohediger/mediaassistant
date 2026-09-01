@@ -677,6 +677,58 @@ async def _repair_immich_poll_cursor():
     logger.info("Immich poll cursor rewound: %s -> %s", last_poll, rewind.isoformat())
 
 
+async def _recover_immich_error_jobs():
+    """One-time requeue of file-not-found errors whose asset is still in Immich.
+
+    Until v2.32.5 the reprocess helper derived the asset id only from an
+    `immich:<id>` target_path, so jobs that failed before IA-08 wrote that
+    reference were abandoned even though `immich_asset_id` made them
+    downloadable. Those jobs are dead weight: the poller's dedup counts every
+    job with an asset id, so the asset is never picked up again either.
+
+    Runs once — the flag keeps a restart from re-queueing jobs the user has
+    since dealt with.
+    """
+    if await config_manager.get(RECOVERY_FLAG, False):
+        return
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job.id, Job.debug_key).where(
+                Job.status == "error",
+                Job.immich_asset_id.isnot(None),
+                Job.error_message.like("Datei nicht auffindbar%"),
+            )
+        )
+        candidates = result.all()
+
+    if not candidates:
+        await config_manager.set(RECOVERY_FLAG, True)
+        return
+
+    from pipeline import reset_job_for_retry
+    recovered = 0
+    for job_id, debug_key in candidates:
+        try:
+            if await reset_job_for_retry(job_id):
+                recovered += 1
+        except Exception as e:
+            await log_warning("filewatcher", f"{debug_key} Wiedervorlage fehlgeschlagen", str(e))
+
+    # Only burn the one-time flag once the pass actually achieved something.
+    # Recovering nothing means Immich was unreachable — the same situation
+    # that produced these jobs — so leave the flag unset and try again next
+    # start. Jobs that succeeded left `error` and are not selected again, so
+    # a repeat run never redoes finished work.
+    if recovered:
+        await config_manager.set(RECOVERY_FLAG, True)
+    await log_info(
+        "filewatcher",
+        f"{recovered} von {len(candidates)} Immich-Fehlerjobs zur Wiederholung eingereiht",
+        "einmalige Wiedervorlage" if recovered else "nichts gerettet — Versuch beim nächsten Start erneut",
+    )
+    logger.info("Immich error recovery: %d/%d requeued", recovered, len(candidates))
+
+
 async def start_filewatcher(shutdown_event: asyncio.Event):
     """Main filewatcher loop, runs as background task."""
     logger.info("Filewatcher started")
