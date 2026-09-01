@@ -932,6 +932,47 @@ async def list_tags(*, api_key: str | None = None) -> list[dict]:
     return resp.json()
 
 
+async def list_tag_assets(tag_id: str, *, api_key: str | None = None) -> list[str]:
+    """Asset ids carrying a tag, following the cursor to the end."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich-URL oder API-Key fehlt")
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    ids: list[str] = []
+    cursor = None
+    async with httpx.AsyncClient(timeout=60) as client:
+        while True:
+            body: dict = {"tagIds": [tag_id], "size": 1000}
+            if cursor:
+                body["cursor"] = cursor
+            resp = await client.post(f"{url}/api/search/metadata", headers=headers, json=body)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
+            assets = (resp.json() or {}).get("assets") or {}
+            items = assets.get("items") or []
+            ids.extend(a["id"] for a in items if isinstance(a, dict) and a.get("id"))
+            cursor = assets.get("nextCursor")
+            if not cursor or not items:
+                return ids
+
+
+async def untag_assets(tag_id: str, asset_ids: list[str], *, api_key: str | None = None) -> None:
+    """Remove a tag from the given assets. The tag itself survives — that is
+    the point of the per-asset mode."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich-URL oder API-Key fehlt")
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.request(
+            "DELETE", f"{url}/api/tags/{tag_id}/assets",
+            headers=headers, json={"ids": asset_ids},
+        )
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
+
+
 async def delete_tag(tag_id: str, *, api_key: str | None = None) -> None:
     """Delete one tag. Its asset assignments go with it, the assets stay.
 

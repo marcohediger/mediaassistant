@@ -499,6 +499,10 @@
     "confirm_both": "Die angezeigten Schlagwörter werden aus den Sidecar-Dateien entfernt und die passenden Tags aus Immich gelöscht. Es wird keine Sicherung angelegt. Fortfahren?",
     "preset_date_dots": "Datum TT.MM.JJJJ",
     "preset_all_dates": "Alle Datumsformate",
-    "preset_numeric": "Zahlen und Datumsangaben"
+    "preset_numeric": "Zahlen und Datumsangaben",
+    "per_asset": "Nur Zuordnung je Bild entfernen (Tag behalten)",
+    "per_asset_total": "Betrifft {n} Bild-Zuordnungen.",
+    "immich_untagged": "Zuordnungen in Immich entfernt",
+    "also_delete": "Danach das leere Tag ebenfalls löschen"
   }
 }

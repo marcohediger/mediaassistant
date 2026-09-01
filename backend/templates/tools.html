@@ -32,6 +32,16 @@
                 <span>{{ t.tools.scope_immich }}</span>
             </label>
         </div>
+        <label class="switch-inline" id="per_asset_row" style="margin-left: 2.5rem;">
+            <input type="checkbox" id="do_per_asset" onchange="sidecarInvalidate()">
+            <span class="switch-slider-sm"></span>
+            <span>{{ t.tools.per_asset }}</span>
+        </label>
+        <label class="switch-inline" id="also_delete_row" style="margin-left: 5rem; margin-bottom: 0.5rem;">
+            <input type="checkbox" id="do_also_delete" onchange="sidecarInvalidate()">
+            <span class="switch-slider-sm"></span>
+            <span>{{ t.tools.also_delete }}</span>
+        </label>
         <p class="section-note" style="margin-bottom: 1rem;">{{ t.tools.scope_hint }}</p>
 
         <div class="inbox-actions" style="align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
@@ -76,7 +86,23 @@ function sidecarLabel() {
     btn.textContent = btn.dataset[key];
     btn.dataset.activeConfirm = btn.dataset['confirm' + key.charAt(0).toUpperCase() + key.slice(1)];
 }
+function sidecarSubSwitch() {
+    // The sub-switch only means anything with Immich on; greying it out is
+    // clearer than silently ignoring it.
+    var on = document.getElementById('do_immich').checked;
+    var box = document.getElementById('do_per_asset');
+    box.disabled = !on;
+    if (!on) { box.checked = false; }
+    document.getElementById('per_asset_row').style.opacity = on ? '' : '0.45';
+
+    // Deleting the emptied tag only applies to the per-asset path.
+    var sub = document.getElementById('do_also_delete');
+    sub.disabled = !box.checked;
+    if (!box.checked) { sub.checked = false; }
+    document.getElementById('also_delete_row').style.opacity = box.checked ? '' : '0.45';
+}
 function sidecarInvalidate() {
+    sidecarSubSwitch();
     sidecarLabel();
     // Any edit voids the preview — the server refuses a removal whose pattern
     // does not match the previewed one, this just keeps the UI honest.
@@ -96,6 +122,8 @@ function sidecarRun(mode) {
     body.append('pattern', pattern);
     if (document.getElementById('do_sidecars').checked) { body.append('sidecars', '1'); }
     if (document.getElementById('do_immich').checked) { body.append('immich', '1'); }
+    if (document.getElementById('do_per_asset').checked) { body.append('per_asset', '1'); }
+    if (document.getElementById('do_also_delete').checked) { body.append('also_delete', '1'); }
     state.textContent = '{{ t.tools.running }}';
     state.style.color = '';
     document.getElementById('btn_scan').disabled = true;
@@ -115,7 +143,7 @@ function sidecarRemove() {
     if (!confirm(document.getElementById('btn_remove').dataset.activeConfirm)) { return; }
     sidecarRun('remove');
 }
-document.addEventListener('DOMContentLoaded', sidecarLabel);
+document.addEventListener('DOMContentLoaded', function () { sidecarSubSwitch(); sidecarLabel(); });
 
 function sidecarFail(msg) {
     var state = document.getElementById('sidecar_state');
@@ -149,8 +177,14 @@ function renderImmichPreview(im) {
     var h = '<p><strong>' + im.tags.length + '</strong> {{ t.tools.of }} ' + im.total +
             ' {{ t.tools.immich_matched }}</p>';
     if (im.tags.length) {
-        h += '<p class="section-note">' +
-             im.tags.map(function (t) { return '<code>' + t.name + '</code>'; }).join(' ') + '</p>';
+        h += '<p class="section-note">' + im.tags.map(function (t) {
+            return '<code>' + t.name + '</code>' +
+                   (t.assets ? ' <small>(' + t.assets.length + ')</small>' : '');
+        }).join(' ') + '</p>';
+        if (im.per_asset) {
+            var total = im.tags.reduce(function (n, t) { return n + (t.assets ? t.assets.length : 0); }, 0);
+            h += '<p class="section-note">' + '{{ t.tools.per_asset_total }}'.replace('{n}', total) + '</p>';
+        }
     }
     if (im.collateral.length) {
         h += '<p class="section-note" style="color: var(--error);">{{ t.tools.cascade_warning }}<br>' +
@@ -191,7 +225,11 @@ function renderSidecar(res, pattern) {
             : '<p class="section-note">{{ t.tools.sidecars_off }}';
         if (res.sidecars_failed) { h += ' — ' + res.sidecars_failed + ' {{ t.tools.failed }}'; }
         h += '</p>';
-        h += '<p><strong>' + (res.immich_deleted || 0) + '</strong> {{ t.tools.immich_deleted }}';
+        h += '<p><strong>' + (res.immich_deleted || 0) + '</strong> ' +
+             (res.immich_per_asset ? '{{ t.tools.immich_untagged }}' : '{{ t.tools.immich_deleted }}');
+        if (res.immich_per_asset && res.immich_tags_deleted) {
+            h += ', ' + res.immich_tags_deleted + ' {{ t.tools.immich_deleted }}';
+        }
 
         if (res.immich_failed) { h += ' — ' + res.immich_failed + ' {{ t.tools.failed }}'; }
         h += '</p>';

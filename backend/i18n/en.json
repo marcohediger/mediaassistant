@@ -499,6 +499,10 @@
     "confirm_both": "The listed keywords will be removed from the sidecar files and the matching tags deleted in Immich. No backup is kept. Continue?",
     "preset_date_dots": "Date DD.MM.YYYY",
     "preset_all_dates": "All date formats",
-    "preset_numeric": "Numbers and dates"
+    "preset_numeric": "Numbers and dates",
+    "per_asset": "Only remove the assignment per asset (keep the tag)",
+    "per_asset_total": "Affects {n} asset assignments.",
+    "immich_untagged": "assignments removed in Immich",
+    "also_delete": "Delete the emptied tag afterwards"
   }
 }
