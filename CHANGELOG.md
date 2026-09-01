@@ -1,5 +1,65 @@
 # Changelog
 
+## v2.32.11 — 2026-09-01
+
+### Neu: Register „Werkzeuge" mit Tag-Aufräumen in den Sidecars
+
+Nach einem falsch gesetzten Schalter standen datumsförmige Schlagwörter
+(`2020-06-22` und Geschwister) in der Bibliothek. In Immich lassen die
+sich selbst beseitigen — der eingebaute Job `tag-cleanup` räumt leere
+Tags weg, und weil `tag.parentId` in Immichs Schema `ON DELETE CASCADE`
+trägt, nimmt das Löschen eines Jahres-Tags alle Datums-Kinder mit.
+
+Was Immich **nicht** anfasst, sind die `.xmp`-Sidecars auf der Platte:
+Immich schreibt sie ausschliesslich über seinen Job `SidecarWrite`, nie
+nebenbei bei einer Tag-Änderung. Die falschen Schlagwörter überleben dort
+also jedes Aufräumen in Immich und kämen bei einer Neuindizierung zurück.
+
+Neues Register **Werkzeuge**, Abschnitt „Tag-Aufräumen in Sidecars".
+
+**Vorschau ist Pflicht, und gelöscht wird genau die Vorschau.** Das
+Entfernen führt bewusst *keinen* neuen Durchlauf aus, sondern arbeitet
+auf der Datei- und Schlagwortliste, die zuvor angezeigt wurde. Damit kann
+nicht passieren, dass ein zwischenzeitlich geändertes Muster etwas
+löscht, das nie jemand gesehen hat.
+
+Abgesichert ist das serverseitig, nicht nur im Browser:
+
+- Entfernen ohne vorherige Vorschau -> 409
+- Entfernen mit einem Muster, das von der Vorschau abweicht -> 409
+- nach dem Entfernen ist die Vorschau verbraucht, der nächste Aufruf -> 409
+
+Im Browser sperrt zusätzlich jede Änderung am Musterfeld den
+Entfernen-Knopf und verwirft die angezeigte Vorschau.
+
+**Suchen** liest alle `.xmp` unterhalb des Bibliothekspfads in einem
+einzigen exiftool-Durchlauf und zeigt jedes passende Schlagwort mit
+seiner Häufigkeit, dazu Beispieldateien. **Entfernen** streicht diese
+Schlagwörter aus den betroffenen Sidecars, in Blöcken zu 200 Dateien,
+damit der Fortschritt sichtbar bleibt und die Argumentliste begrenzt.
+
+Das Muster ist ein regulärer Ausdruck und wird gegen jedes einzelne
+Schlagwort geprüft; zwei Schaltflächen setzen die üblichen Fälle
+(`^\d{4}-\d{2}-\d{2}$`, `^\d{4}$`). Ungültige Ausdrücke werden
+abgewiesen, statt auf halbem Weg zu scheitern. Beide Läufe teilen sich
+den bestehenden Wartungs-Slot samt Sperre und Fortschrittsanzeige.
+
+**Ohne Sicherung:** exiftool arbeitet mit `-overwrite_original`, es
+bleiben keine `_original`-Kopien liegen. Entfernt werden ausschliesslich
+die passenden Schlagwörter — alle übrigen bleiben unberührt.
+
+Verifiziert im Anwendungs-Image mit echtem exiftool 13.25:
+  Entfernen ohne Vorschau        -> 409 abgelehnt
+  Vorschau                       -> 1 Datei, Schlagwort 2020-06-22
+  Entfernen mit anderem Muster   -> 409 abgelehnt
+  Entfernen wie in der Vorschau  -> 1 Sidecar geändert, 0 Fehler
+  erneut ohne neue Vorschau      -> 409 abgelehnt
+  danach                         -> "Urlaub" und "Familie" unverändert
+  GET /tools                     -> 200 mit allen Bedienelementen
+
+Der Fall „exiftool liefert ein einzelnes Schlagwort als Zeichenkette
+statt als Liste" ist dabei mit abgedeckt.
+
 ## v2.32.10 — 2026-09-01
 
 ### Fix: Upload-Aufräumen konnte fremde Assets endgültig löschen
