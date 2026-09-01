@@ -791,7 +791,10 @@ async def _search_assets_for_type(
             json=body,
         )
         if resp.status_code != 200:
-            break
+            # Must not look like "no results": the caller advances its poll
+            # cursor on an empty answer, so swallowing an error here silently
+            # drops every asset uploaded while Immich was unreachable.
+            raise RuntimeError(f"Immich search/metadata HTTP {resp.status_code}")
         data = resp.json()
         items = data.get("assets", {}).get("items", [])
         if not items:
