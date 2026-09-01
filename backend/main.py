@@ -8,7 +8,7 @@ from config import config_manager
 from database import init_db, seed_inbox_from_env
 from filewatcher import start_filewatcher
 from health_watcher import start_health_watcher
-from routers import dashboard, setup, settings, logs, api, duplicates, review
+from routers import dashboard, setup, settings, logs, api, duplicates, review, diagnostics
 
 # Configure logging for Docker stdout
 log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -62,3 +62,4 @@ app.include_router(logs.router)
 app.include_router(api.router)
 app.include_router(duplicates.router)
 app.include_router(review.router)
+app.include_router(diagnostics.router)

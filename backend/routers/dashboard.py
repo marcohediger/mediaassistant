@@ -195,9 +195,16 @@ MODULE_HEALTH_CHECKS = {
 }
 
 
-async def _get_module_status(i18n: dict) -> list[dict]:
+async def _get_module_status(i18n: dict, *, record: bool = True) -> list[dict]:
+    """Health of every module.
+
+    `record=False` makes the call side-effect free: no state-change logs, no
+    `_last_module_status` update, no cache read or write. The diagnostics
+    endpoint uses it — a read-only report must not alter what the dashboard
+    logs afterwards, and must not serve a cached snapshot as if it were fresh.
+    """
     global _module_cache, _module_cache_time
-    if _module_cache and (time.monotonic() - _module_cache_time) < MODULE_CACHE_TTL:
+    if record and _module_cache and (time.monotonic() - _module_cache_time) < MODULE_CACHE_TTL:
         # Re-translate labels from cache (detail strings are re-fetched on full refresh)
         for s in _module_cache:
             s["label"] = _get_module_label(s["name"], i18n)
@@ -226,7 +233,7 @@ async def _get_module_status(i18n: dict) -> list[dict]:
             if not configured:
                 status = "misconfigured"
                 detail = f"{_t('status_missing', i18n)}: {', '.join(missing)}"
-                if _last_module_status.get(m.name) != "misconfigured":
+                if record and _last_module_status.get(m.name) != "misconfigured":
                     await log_warning(m.name, "Module not configured", f"Missing keys: {', '.join(missing)}")
             else:
                 health_check = MODULE_HEALTH_CHECKS.get(m.name)
@@ -234,17 +241,18 @@ async def _get_module_status(i18n: dict) -> list[dict]:
                     healthy, detail = await health_check(i18n)
                     if healthy:
                         status = "ready"
-                        if _last_module_status.get(m.name) == "error":
+                        if record and _last_module_status.get(m.name) == "error":
                             await log_info(m.name, "Connection restored", detail)
                     else:
                         status = "error"
-                        if _last_module_status.get(m.name) != "error":
+                        if record and _last_module_status.get(m.name) != "error":
                             await log_error(m.name, detail)
                 else:
                     status = "ready"
                     detail = _t("status_ok", i18n)
 
-            _last_module_status[m.name] = status
+            if record:
+                _last_module_status[m.name] = status
 
         statuses.append({
             "name": m.name,
@@ -298,8 +306,9 @@ async def _get_module_status(i18n: dict) -> list[dict]:
 
     statuses = merged
 
-    _module_cache = statuses
-    _module_cache_time = time.monotonic()
+    if record:
+        _module_cache = statuses
+        _module_cache_time = time.monotonic()
     return statuses
 
 

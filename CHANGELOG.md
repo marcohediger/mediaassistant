@@ -1,5 +1,70 @@
 # Changelog
 
+## v2.32.8 — 2026-09-01
+
+### Diagnose-Schnittstelle: ein Abruf statt DB-Kopie und Log-Ausschnitten
+
+Die Fehlersuche des heutigen Tages lief über kopierte 340-MB-Datenbanken
+und eingefügte Log-Ausschnitte. Der entscheidende Messwert — dass das
+KI-Backend die Verbindung sofort annimmt und dann 9 bis 14 Sekunden
+schweigt — liess sich so gar nicht ermitteln, sondern nur von aussen per
+`curl`.
+
+`GET /api/diagnostics` liefert jetzt einen **rein lesenden**
+Zustandsbericht als JSON:
+
+- Version, Laufzeit, Pipeline-Status samt Auto-Pause-Grund
+- Zustand **jedes Moduls**, über dieselben Health-Checks wie das Dashboard
+- **Vollständige Einstellungen**, verschlüsselte Werte nur als Zustand
+- Jobs nach Status, häufigste Fehlermeldungen mit Zeitraum, die 15 neuesten Jobs
+- Logs auf Abruf: `?logs=N` (max. 500), `?level=ERROR`, `?job=MA-2026-XXXXX`
+  liefert zusätzlich den vollständigen Datensatz dieses Jobs
+- **Zeitmessung gegen beide KI-Backends** — ein Backend, das die Verbindung
+  annimmt und dann hängt, sieht in jedem Up/Down-Test gesund aus
+
+**Mehrere Tokens, in den Einstellungen verwaltet.** Neuer Abschnitt
+"Diagnose": Token mit Bezeichnung erzeugen, einzeln ein- und ausschalten,
+löschen. Das Klartext-Token erscheint genau einmal — im Antwortkörper,
+nicht per Redirect, damit es weder in der URL noch in Browserverlauf oder
+Zugriffslog landet. Gespeichert wird **nur der SHA-256-Hash**: Eine Kopie
+der Datenbank enthält kein verwendbares Token. Ohne aktives Token
+antwortet die Route 404 — eine Instanz ohne Zustimmung verrät nicht
+einmal, dass es den Pfad gibt. Ein falsches Token liefert dieselbe 404,
+und Fehlversuche werden bewusst nicht geloggt, damit ein Scan die
+Logtabelle nicht flutet.
+
+Die Route umgeht die OIDC-Sitzung — das ist ihr Zweck, sie muss aus einer
+Shell ohne Browser funktionieren — und trägt ihre Prüfung deshalb selbst.
+`DIAGNOSTICS_TOKEN` aus der Umgebung gilt weiterhin.
+
+**Wirklich nur lesend.** `_get_module_status` schrieb bisher
+Zustandswechsel-Logs und pflegte internen Zustand; ein Diagnose-Abruf
+hätte damit beeinflusst, was das Dashboard danach protokolliert. Der neue
+Parameter `record=False` schaltet Logs, Zustandsmerker und Cache ab.
+Gemessen an einer Kopie der Live-DB verändert ein Abruf ausser dem
+Zugriffsvermerk **nichts**: Jobs, Konfiguration und Job-Status bleiben
+Bit für Bit gleich.
+
+### Fix: Ein unlesbares Geheimnis legt nicht mehr ganze Seiten lahm
+
+Beim Bauen aufgefallen: Passt `.secret_key` nicht mehr zum gespeicherten
+Chiffrat — kopierte Datenbank, neu erzeugter Schlüssel —, warf
+`ConfigManager.get` bis in den Request hinein. Ein einziger unlesbarer
+Wert riss damit das gesamte Dashboard mit (HTTP 500), weil die
+Modulprüfung `immich.api_key` liest.
+
+`get` liefert in diesem Fall jetzt den Default und schreibt eine
+Fehlerzeile ins Log. Das betroffene Modul erscheint als
+"misconfigured — Fehlend: immich.api_key" statt die Seite zu sprengen,
+und der Diagnosebericht benennt solche Werte explizit als
+`undecryptable`.
+
+Verifiziert: ohne Token 404, falscher Token 404, deaktiviertes Token 404,
+reaktiviert 200, gelöscht 404, zweites Token weiterhin gültig; Parameter
+`logs`/`level`/`job` inklusive Deckelung bei 500; Payload gegen
+Klartext-Geheimnisse geprüft; Schreibfreiheit gegen eine Live-DB-Kopie
+nachgewiesen.
+
 ## v2.32.7 — 2026-09-01
 
 ### UI: Modellauswahl zeigt nur Modelle, die Bilder verarbeiten können

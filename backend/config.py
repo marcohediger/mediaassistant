@@ -1,9 +1,12 @@
 import json
+import logging
 import os
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
 from database import async_session
 from models import Config, Module
+
+logger = logging.getLogger("mediaassistant.config")
 
 
 class ConfigManager:
@@ -32,7 +35,16 @@ class ConfigManager:
             value = result.value
             if result.encrypted:
                 fernet = await self._get_fernet()
-                value = fernet.decrypt(value.encode()).decode()
+                try:
+                    value = fernet.decrypt(value.encode()).decode()
+                except InvalidToken:
+                    # .secret_key no longer matches this ciphertext — a copied
+                    # database, a regenerated key. Returning the default keeps
+                    # one unreadable secret from taking down every page that
+                    # renders configuration (the dashboard used to answer 500).
+                    # /api/diagnostics reports such keys as "undecryptable".
+                    logger.error("Config key %r cannot be decrypted — .secret_key mismatch", key)
+                    return default
             try:
                 return json.loads(value)
             except (json.JSONDecodeError, ValueError):
