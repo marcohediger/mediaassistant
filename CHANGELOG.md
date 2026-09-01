@@ -1,5 +1,50 @@
 # Changelog
 
+## v2.32.6 — 2026-09-01
+
+### Fix: Poller verlor stillschweigend vier Wochen Uploads
+
+Aus der Live-DB: Der letzte aus Immich eingezogene Job stammt vom
+03.08.2026 23:50, der nächste vom 01.09.2026 12:16 — dazwischen vier
+Wochen ohne einen einzigen Job, während im Log genau **eine**
+Fehlermeldung steht. Alles, was in dieser Zeit hochgeladen wurde, war
+nicht etwa verzögert, sondern dauerhaft aus dem Suchfenster gefallen.
+
+Zwei Defekte griffen ineinander:
+
+**Der HTTP-Fehler wurde verschluckt.** `_search_assets_for_type` brach
+bei allem ausser 200 mit `break` ab und lieferte eine leere Liste — ohne
+Ausnahme. Ein 403 sah für den Poller exakt aus wie "keine neuen Assets".
+
+**Der Cursor lief trotzdem weiter.** Nach jedem Durchgang wurde
+`immich.last_poll` unbedingt auf `jetzt − 5 Minuten` gesetzt. Vier Wochen
+lang wanderte `createdAfter` also im Minutentakt vorwärts, während nichts
+ankam.
+
+Beides ist behoben: Die Suche wirft jetzt bei jedem Nicht-200, und der
+Cursor wird nur fortgeschrieben, wenn der Abruf für alle Schlüssel
+erfolgreich war. Ein Ausfall kostet damit Verzögerung statt Daten.
+
+**Einmalige Reparatur über die gesamte Historie.** Die Ingest-Historie
+enthält mehrere solcher Lücken (14.05.–28.05., 28.05.–25.06.,
+03.08.–01.09.), und nichts in den Daten unterscheidet einen Ausfall von
+einer ruhigen Woche. Statt zu raten wird der Cursor beim Start einmalig
+auf den Tag vor dem allerersten eingezogenen Asset zurückgesetzt, sodass
+der Poller die komplette Spanne erneut abgeht.
+
+Das ist bezahlbar, weil das erneute Einlesen nur den Abruf kostet: Dedup
+über Asset-ID und SHA-256 verwirft alles bereits Verarbeitete, bevor ein
+Job entsteht, und was MediaAssistant selbst zurückgeschrieben hat, filtert
+die `deviceId`-Prüfung heraus. Assets, die älter als der erste Ingest
+sind, bleiben unangetastet — dieselbe Regel wie bei der Erstaktivierung.
+
+Verifiziert gegen eine Kopie der Live-DB (5431 Immich-Jobs):
+  403 vom Server    -> RuntimeError statt leerer Liste
+  Poll mit Fehler   -> Cursor unveraendert
+  Cursor-Reparatur  -> 01.09. 10:48 UTC zurueck auf 04.04. 09:31 UTC
+                       (aeltester Immich-Job: 05.04. 09:31)
+  Zweiter Lauf      -> unveraendert
+
 ## v2.32.5 — 2026-09-01
 
 ### Fix: Immich-Jobs überleben einen Neustart, 52 verlorene Fehlerjobs zurückgeholt

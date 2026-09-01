@@ -344,10 +344,12 @@ async def _poll_immich():
             processed_hashes_by_user.setdefault(row[1], set()).add(row[0])
 
     # Poll each user
+    poll_failed = False
     for user_id, user_label, api_key in user_keys:
         try:
             assets = await get_recent_assets(since=last_poll, api_key=api_key)
         except Exception as e:
+            poll_failed = True
             await log_error("immich_poll", f"Failed for user {user_label}", str(e))
             continue
 
@@ -410,6 +412,12 @@ async def _poll_immich():
     # at most once. The buffer protects against clock skew between
     # MediaAssistant and Immich, and against assets arriving in the
     # interval between `now = ...` (line 277) and the HTTP request.
+    if poll_failed:
+        # Leave the cursor untouched. Moving it after a failed fetch drops
+        # everything uploaded in the meantime out of the createdAfter window
+        # for good — that is how four weeks of uploads went missing while
+        # Immich answered 403 (see v2.32.6).
+        return
     overlap_cursor = (
         datetime.fromisoformat(now) - timedelta(minutes=5)
     ).isoformat()
@@ -613,58 +621,60 @@ async def _scan_csv_retry():
 
 
 RECOVERY_FLAG = "migration.immich_error_recovery"
+CURSOR_REPAIR_FLAG = "migration.immich_cursor_repair"
 
 
-async def _recover_immich_error_jobs():
-    """One-time requeue of file-not-found errors whose asset is still in Immich.
+async def _repair_immich_poll_cursor():
+    """One-time rewind of the poll cursor across the whole ingest history.
 
-    Until v2.32.5 the reprocess helper derived the asset id only from an
-    `immich:<id>` target_path, so jobs that failed before IA-08 wrote that
-    reference were abandoned even though `immich_asset_id` made them
-    downloadable. Those jobs are dead weight: the poller's dedup counts every
-    job with an asset id, so the asset is never picked up again either.
+    Until v2.32.6 a failing `search/metadata` looked like "no new assets", so
+    the cursor advanced anyway and everything uploaded while Immich was
+    unreachable fell out of the `createdAfter` window for good. The history
+    holds several such stretches, and nothing in the data distinguishes an
+    outage from a genuinely quiet week — so rather than guess, rewind to the
+    very first asset this instance ever ingested and let the poller walk the
+    whole span again.
 
-    Runs once — the flag keeps a restart from re-queueing jobs the user has
-    since dealt with.
+    That is affordable because re-scanning only costs the fetch: dedup by
+    asset id and sha256 drops everything already processed before a job is
+    created, and assets MediaAssistant wrote back carry its own deviceId and
+    are filtered out. Assets older than the first ingest stay untouched —
+    the same "skip what predates us" rule that applied on first activation.
     """
-    if await config_manager.get(RECOVERY_FLAG, False):
+    if await config_manager.get(CURSOR_REPAIR_FLAG, False):
         return
+    await config_manager.set(CURSOR_REPAIR_FLAG, True)
+
+    last_poll = await config_manager.get("immich.last_poll", None)
+    if not last_poll:
+        return
+    try:
+        current = datetime.fromisoformat(last_poll)
+    except ValueError:
+        return
+
     async with async_session() as session:
-        result = await session.execute(
-            select(Job.id, Job.debug_key).where(
-                Job.status == "error",
-                Job.immich_asset_id.isnot(None),
-                Job.error_message.like("Datei nicht auffindbar%"),
-            )
-        )
-        candidates = result.all()
-
-    if not candidates:
-        await config_manager.set(RECOVERY_FLAG, True)
+        oldest = (await session.execute(
+            select(Job.created_at)
+            .where(Job.source_label == "Immich")
+            .order_by(Job.created_at.asc())
+            .limit(1)
+        )).scalar()
+    if not oldest:
         return
 
-    from pipeline import reset_job_for_retry
-    recovered = 0
-    for job_id, debug_key in candidates:
-        try:
-            if await reset_job_for_retry(job_id):
-                recovered += 1
-        except Exception as e:
-            await log_warning("filewatcher", f"{debug_key} Wiedervorlage fehlgeschlagen", str(e))
-
-    # Only burn the one-time flag once the pass actually achieved something.
-    # Recovering nothing means Immich was unreachable — the same situation
-    # that produced these jobs — so leave the flag unset and try again next
-    # start. Jobs that succeeded left `error` and are not selected again, so
-    # a repeat run never redoes finished work.
-    if recovered:
-        await config_manager.set(RECOVERY_FLAG, True)
+    # jobs.created_at is naive local time while the cursor is UTC. A day of
+    # slack absorbs that offset — overlapping is free, missing assets is not.
+    rewind = (oldest - timedelta(days=1)).replace(tzinfo=timezone.utc)
+    if rewind >= current:
+        return
+    await config_manager.set("immich.last_poll", rewind.isoformat())
     await log_info(
-        "filewatcher",
-        f"{recovered} von {len(candidates)} Immich-Fehlerjobs zur Wiederholung eingereiht",
-        "einmalige Wiedervorlage" if recovered else "nichts gerettet — Versuch beim nächsten Start erneut",
+        "immich_poll",
+        "Poll-Cursor auf den Beginn der Historie zurückgesetzt — alle verpassten Uploads werden nachgeholt",
+        f"{last_poll} -> {rewind.isoformat()}",
     )
-    logger.info("Immich error recovery: %d/%d requeued", recovered, len(candidates))
+    logger.info("Immich poll cursor rewound: %s -> %s", last_poll, rewind.isoformat())
 
 
 async def start_filewatcher(shutdown_event: asyncio.Event):
@@ -695,6 +705,7 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
             await run_pipeline(job.id)
 
     await _recover_immich_error_jobs()
+    await _repair_immich_poll_cursor()
 
     # Start pipeline worker as separate background task
     worker_task = asyncio.create_task(_pipeline_worker(shutdown_event))
