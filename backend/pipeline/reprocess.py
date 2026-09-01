@@ -86,13 +86,24 @@ async def _move_file_for_reprocess(job) -> bool:
         src = job.original_path
 
     if not src:
-        # Last-resort: if target_path is an immich:<asset_id> reference,
-        # download the original from Immich into REPROCESS_DIR. This
-        # makes retry work for jobs whose only surviving copy lives in
-        # Immich (typical state for any job whose inbox file IA-08
-        # already removed after upload).
+        # Last-resort: download the original from Immich into REPROCESS_DIR.
+        # This makes retry work for jobs whose only surviving copy lives in
+        # Immich — the typical state for any job whose inbox file IA-08
+        # already removed after upload.
+        #
+        # The asset id comes from either handle: IA-08 writes
+        # `target_path = immich:<id>` once the upload succeeded, but a job
+        # that failed *before* that still knows its asset via
+        # `immich_asset_id`. For Immich-sourced jobs that id is the only
+        # handle there is — their local copy lives in a container temp dir
+        # that a redeploy wipes, so without this fallback every retry fails
+        # on the missing file (live: MA-2026-70150).
+        asset_id = None
         if _is_immich_target(job.target_path):
             asset_id = job.target_path[len("immich:"):]
+        elif job.immich_asset_id:
+            asset_id = job.immich_asset_id
+        if asset_id:
             try:
                 # Lazy import to avoid an immich_client → reprocess
                 # circular at module-load time and to keep this module
@@ -106,7 +117,12 @@ async def _move_file_for_reprocess(job) -> bool:
                     asset_id, REPROCESS_DIR, api_key=user_api_key,
                 )
             except Exception:
-                # Asset gone from Immich too — no source anywhere.
+                # Asset gone from Immich too — no source anywhere. Apply the
+                # same stale-target cleanup the no-source tail below does, so
+                # reaching this branch via immich_asset_id leaves the job in
+                # the state callers saw before that fallback existed.
+                if not _is_immich_target(job.target_path):
+                    job.target_path = None
                 return False
 
             # Move the just-downloaded file to a debug-key-suffixed name
