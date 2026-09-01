@@ -1,5 +1,6 @@
 import html
 import os
+import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy import select
@@ -604,6 +605,65 @@ async def _describe_immich_detail(detail: str) -> str:
     from immich_client import describe_connection_detail
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
     return describe_connection_detail(detail, load_lang(lang))
+
+
+def _lmstudio_base(url: str) -> str:
+    """Strip the OpenAI-compatible `/v1` suffix to reach LM Studio's own API."""
+    base = url.rstrip("/")
+    return base[: -len("/v1")] if base.endswith("/v1") else base
+
+
+@router.get("/ai-models")
+async def list_ai_models(request: Request):
+    """Model ids offered by a backend, narrowed to the ones that can see images.
+
+    The OpenAI-compatible `/models` endpoint reports ids and nothing else. LM
+    Studio additionally serves `/api/v0/models`, where each entry carries a
+    `type` — `vlm` marks the vision-capable models, the only kind IA-05 can
+    use. Backends without that endpoint fall back to the plain list, flagged
+    so the UI says the capabilities are unknown instead of implying a filter
+    that never ran.
+
+    Takes the URL from the query when the field holds an unsaved value, so the
+    list can be pulled before saving — same contract as the connection tests.
+    """
+    url = (request.query_params.get("url") or "").strip()
+    if not url:
+        key = "ai2.backend_url" if request.query_params.get("backend") == "2" else "ai.backend_url"
+        url = await config_manager.get(key, "")
+    if not url:
+        return JSONResponse({"ok": False, "detail": await _t_settings("ai_models_no_url"),
+                             "models": [], "filtered": False})
+
+    def ids(entries, only_vision):
+        return sorted(
+            str(m["id"]) for m in entries
+            if isinstance(m, dict) and m.get("id")
+            and (not only_vision or m.get("type") == "vlm")
+        )
+
+    async with httpx.AsyncClient(timeout=8) as client:
+        try:
+            resp = await client.get(f"{_lmstudio_base(url)}/api/v0/models")
+            if resp.status_code == 200:
+                entries = resp.json().get("data", [])
+                if any(isinstance(m, dict) and m.get("type") for m in entries):
+                    return JSONResponse({"ok": True, "detail": "",
+                                         "models": ids(entries, True), "filtered": True})
+        except Exception:
+            pass  # not an LM Studio backend — fall through to the generic list
+
+        try:
+            resp = await client.get(f"{url.rstrip('/')}/models")
+            if resp.status_code != 200:
+                return JSONResponse({"ok": False, "detail": f"HTTP {resp.status_code}",
+                                     "models": [], "filtered": False})
+            entries = resp.json().get("data", [])
+        except Exception as e:
+            return JSONResponse({"ok": False, "detail": f"{type(e).__name__}: {e}",
+                                 "models": [], "filtered": False})
+
+    return JSONResponse({"ok": True, "detail": "", "models": ids(entries, False), "filtered": False})
 
 
 @router.post("/immich/test")

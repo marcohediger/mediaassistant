@@ -1,5 +1,42 @@
 # Changelog
 
+## v2.32.7 — 2026-09-01
+
+### UI: Modellauswahl zeigt nur Modelle, die Bilder verarbeiten können
+
+Der Modellname war ein leeres Textfeld — wer ihn ändern wollte, musste
+die exakte ID kennen und fehlerfrei abtippen. Ein Tippfehler fällt erst
+auf, wenn die Pipeline am ersten Bild scheitert. Schlimmer: Nichts hielt
+davon ab, ein reines Text- oder Embedding-Modell einzutragen, mit dem
+IA-05 grundsätzlich nichts anfangen kann.
+
+Neue Route `GET /settings/ai-models` fragt das Backend selbst. Der
+OpenAI-kompatible `/models`-Endpunkt liefert nur IDs und keine
+Fähigkeiten — LM Studio bedient zusätzlich `/api/v0/models`, wo jeder
+Eintrag ein `type` trägt. `vlm` markiert die bildfähigen Modelle, und nur
+die kommen in die Liste.
+
+Am produktiven Backend heisst das: **7 von 14** Modellen. Die 5 reinen
+Sprachmodelle und 2 Embedding-Modelle verschwinden aus der Auswahl.
+
+Backends ohne diese API fallen auf die einfache Liste zurück, dann aber
+sichtbar gekennzeichnet — der Hinweis sagt "Bildfähigkeit nicht
+abfragbar" statt einen Filter zu suggerieren, der nie gelaufen ist.
+
+Bewusst ein Eingabefeld mit `<datalist>` statt eines `<select>`: Ist das
+Backend gerade nicht erreichbar, bleibt der gespeicherte Wert erhalten und
+das Feld normal benutzbar. Ein Auswahlfeld ohne Optionen würde die
+Konfiguration beim nächsten Speichern stillschweigend leeren.
+
+Die Liste kommt beim Laden der Seite und erneut, sobald die Backend-URL
+geändert wird — die URL aus dem Feld hat Vorrang vor der gespeicherten,
+sodass ein neues Backend vor dem Speichern ausprobiert werden kann.
+
+Verifiziert gegen drei Backends:
+  LM Studio produktiv      -> 7 bildfaehige Modelle, gefiltert
+  nur /v1/models           -> vollstaendige Liste, als ungefiltert markiert
+  nicht erreichbar         -> ConnectError im Klartext, Feld bleibt nutzbar
+
 ## v2.32.6 — 2026-09-01
 
 ### Fix: Poller verlor stillschweigend vier Wochen Uploads

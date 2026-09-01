@@ -511,7 +511,9 @@
             </div>
             <div class="form-group">
                 <label for="ai_model">{{ t.settings.model }}</label>
-                <input type="text" id="ai_model" name="ai_model" value="{{ cfg.ai_model }}">
+                <input type="text" id="ai_model" name="ai_model" value="{{ cfg.ai_model }}" list="ai_model_options" autocomplete="off">
+                <datalist id="ai_model_options"></datalist>
+                <small id="ai_model_hint" class="test-result" data-found="{{ t.settings.ai_models_found }}" data-any="{{ t.settings.ai_models_found_any }}"></small>
             </div>
             <div class="form-group" style="max-width: 5rem;">
                 <label for="ai_slots">{{ t.settings.slots }}</label>
@@ -539,7 +541,9 @@
             </div>
             <div class="form-group">
                 <label for="ai2_model">{{ t.settings.model }}</label>
-                <input type="text" id="ai2_model" name="ai2_model" value="{{ cfg.ai2_model }}">
+                <input type="text" id="ai2_model" name="ai2_model" value="{{ cfg.ai2_model }}" list="ai2_model_options" autocomplete="off">
+                <datalist id="ai2_model_options"></datalist>
+                <small id="ai2_model_hint" class="test-result" data-found="{{ t.settings.ai_models_found }}" data-any="{{ t.settings.ai_models_found_any }}"></small>
             </div>
             <div class="form-group" style="max-width: 5rem;">
                 <label for="ai2_slots">{{ t.settings.slots }}</label>
@@ -871,6 +875,38 @@ function postAction(url, data) {
     document.body.appendChild(f);
     f.submit();
 }
+function loadAiModels(modelId, urlId) {
+    var urlEl = document.getElementById(urlId);
+    var list = document.getElementById(modelId + '_options');
+    var hint = document.getElementById(modelId + '_hint');
+    if (!urlEl || !urlEl.value) { list.innerHTML = ''; hint.textContent = ''; return; }
+    fetch('/settings/ai-models?url=' + encodeURIComponent(urlEl.value))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            list.innerHTML = '';
+            (d.models || []).forEach(function (m) {
+                var o = document.createElement('option');
+                o.value = m;
+                list.appendChild(o);
+            });
+            if (d.ok) {
+                var tpl = d.filtered ? hint.dataset.found : hint.dataset.any;
+                hint.textContent = tpl.replace('{n}', (d.models || []).length);
+                hint.style.color = '';
+            } else {
+                hint.textContent = d.detail;
+                hint.style.color = 'var(--error)';
+            }
+        })
+        .catch(function (e) { hint.textContent = String(e); hint.style.color = 'var(--error)'; });
+}
+document.addEventListener('DOMContentLoaded', function () {
+    [['ai_model', 'ai_url'], ['ai2_model', 'ai2_url']].forEach(function (p) {
+        loadAiModels(p[0], p[1]);
+        var u = document.getElementById(p[1]);
+        if (u) { u.addEventListener('change', function () { loadAiModels(p[0], p[1]); }); }
+    });
+});
 function testConnection(url, data, outId) {
     var out = document.getElementById(outId);
     out.textContent = '\u2026';
