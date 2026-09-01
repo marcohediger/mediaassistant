@@ -137,6 +137,16 @@ def _sha1_b64(path: str) -> str:
     return base64.b64encode(h.digest()).decode("ascii")
 
 
+class ImmichDuplicateUnavailable(RuntimeError):
+    """Immich reports the file as a duplicate of an asset it will not hand out.
+
+    Happens when the original was deleted or trashed: Immich keeps blocking the
+    upload (immich-app/immich#7032) while the referenced asset stays invisible
+    to this account. Retrying cannot change that — only emptying the trash or
+    restoring the asset can — so callers must not treat it as transient.
+    """
+
+
 async def safe_upload_asset(
     file_path: str,
     album_names: list[str] | None = None,
@@ -184,12 +194,28 @@ async def safe_upload_asset(
             asset_id = result.get("id")
             if not asset_id:
                 raise RuntimeError(f"upload returned no asset id: {result!r}")
-            orphan_id = asset_id
 
-            info = await get_asset_info(asset_id, api_key=api_key)
+            # Immich answers with a required `status`: "created" or
+            # "duplicate". Only an asset this upload actually created may be
+            # cleaned up below — on a duplicate the id belongs to a
+            # pre-existing asset, and delete_asset() uses force=True, which
+            # skips the trash. Deleting there would destroy someone's photo.
+            status = str(result.get("status") or "").lower()
+            orphan_id = asset_id if status != "duplicate" else None
+
+            info, reason = await fetch_asset_info(asset_id, api_key=api_key)
             if not info:
+                if status == "duplicate":
+                    raise ImmichDuplicateUnavailable(
+                        f"Immich kennt die Datei bereits als Asset {asset_id}, "
+                        f"liefert es aber nicht aus ({reason}). Vermutlich wurde "
+                        f"es gelöscht oder liegt im Papierkorb — dann blockiert "
+                        f"Immich den erneuten Upload dauerhaft. Ein weiterer "
+                        f"Versuch ändert daran nichts; Papierkorb leeren oder "
+                        f"Asset wiederherstellen."
+                    )
                 raise RuntimeError(
-                    f"asset {asset_id} not reachable via GET after upload"
+                    f"asset {asset_id} not reachable via GET after upload ({reason})"
                 )
 
             actual_size = (info.get("exifInfo") or {}).get("fileSizeInByte")
@@ -211,6 +237,10 @@ async def safe_upload_asset(
             )
             return result
 
+        except ImmichDuplicateUnavailable:
+            # Terminal by nature — retrying re-uploads the same file and gets
+            # the same unreachable id back. Surface it to the caller at once.
+            raise
         except Exception as exc:
             last_error = exc
             if orphan_id:
@@ -549,22 +579,37 @@ async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None)
     return {"status": "tagged", "tag_name": tag_name, "tag_id": tag_id, "asset_id": asset_id}
 
 
-async def get_asset_info(asset_id: str, *, api_key: str | None = None) -> dict | None:
-    """Get asset info from Immich (includes exifInfo with fileSizeInByte)."""
+ASSET_INFO_TIMEOUT = 15
+
+
+async def fetch_asset_info(asset_id: str, *, api_key: str | None = None) -> tuple[dict | None, str]:
+    """Asset info plus the reason when it could not be fetched.
+
+    `get_asset_info` collapses 400/403/404 and timeouts into a bare None. That
+    is what made "Immich points at a deleted asset" indistinguishable from "the
+    server was briefly slow" for months — the status code never reached anyone.
+    """
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key or not asset_id:
-        return None
+        return None, "Immich-URL oder API-Key fehlt"
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=ASSET_INFO_TIMEOUT) as client:
             resp = await client.get(
                 f"{url}/api/assets/{asset_id}",
                 headers={"x-api-key": api_key},
             )
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception:
-        pass
-    return None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"[:160]
+    if resp.status_code == 200:
+        return resp.json(), ""
+    detail = _server_message(resp) or resp.text[:120]
+    return None, f"HTTP {resp.status_code}{' — ' + detail if detail else ''}"
+
+
+async def get_asset_info(asset_id: str, *, api_key: str | None = None) -> dict | None:
+    """Get asset info from Immich (includes exifInfo with fileSizeInByte)."""
+    info, _ = await fetch_asset_info(asset_id, api_key=api_key)
+    return info
 
 
 async def asset_exists(asset_id: str, *, api_key: str | None = None) -> bool:

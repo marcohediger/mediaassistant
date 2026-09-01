@@ -402,6 +402,8 @@
     "status_not_configured": "Module not configured",
     "status_connection_restored": "Connection restored",
     "status_connection_failed": "Connection failed",
+    "status_busy": "Busy — no answer within {n}s",
+    "status_slow": "Connected (slow, {n}s)",
     "status_timeout": "Timeout",
     "status_not_immich": "Response did not come from Immich (proxy or firewall)",
     "status_permission_denied": "API key lacks \"all\" permission",
