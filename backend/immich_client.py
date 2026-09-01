@@ -848,6 +848,11 @@ async def check_connection(*, api_key: str | None = None) -> tuple[bool, str]:
                 return True, f"{name} ({email})" if email else "connected"
             if resp.status_code == 401:
                 return False, "auth_failed"
+            if resp.status_code == 403:
+                # Immich >= 3.0 gives routes without an explicit permission an
+                # implied "all" permission. A narrower key still authenticates
+                # (no 401) but every request is refused with 403.
+                return False, "permission_denied"
             return False, f"HTTP {resp.status_code}"
     except httpx.ConnectError:
         return False, "connection_failed"

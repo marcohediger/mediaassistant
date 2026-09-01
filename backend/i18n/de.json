@@ -387,6 +387,7 @@
     "status_connection_restored": "Verbindung wiederhergestellt",
     "status_connection_failed": "Verbindung fehlgeschlagen",
     "status_timeout": "Timeout",
+    "status_permission_denied": "API-Key ohne Berechtigung «all»",
     "status_auth_failed": "Auth fehlgeschlagen",
     "status_not_found": "nicht gefunden",
     "status_inboxes_active": "{n} Verzeichnis(se) aktiv"

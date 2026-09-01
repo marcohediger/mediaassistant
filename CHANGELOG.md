@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.32.2 — 2026-09-01
+
+### Fix: Dashboard meldete Geocoding und Immich fälschlich/unklar als 403
+
+Zwei unabhängige Ursachen, die im Log gleich aussahen ("beide 403").
+
+**Geocoding — echter Bug im Healthcheck.** `_check_geocoding` baute
+seinen eigenen `httpx.AsyncClient` ohne Header und lief damit mit dem
+Default-User-Agent `python-httpx/x.y` gegen Nominatim. Nominatim
+blockt Default-Library-UAs per Usage-Policy mit HTTP 403. Direkter
+A/B-Test gegen `nominatim.openstreetmap.org/reverse`:
+Default-UA → 403, `MediaAssistant/<version>` → 200. Der Healthcheck
+schickt jetzt denselben `USER_AGENT` wie IA-03. Die Pipeline war nie
+betroffen — sie hat den Header immer gesetzt. Deshalb zeigte das
+Dashboard "Geocoding down", während Geotagging real funktionierte.
+
+**Immich — kein Bug bei uns, aber unbrauchbare Fehlermeldung.**
+Die produktive Immich-Instanz läuft inzwischen 3.1.0. Seit Immich
+3.0 (PR immich-app/immich#20250) haben Routen ohne explizit gesetzte
+Permission eine implizite `all`-Permission; ein API-Key ohne `all`
+authentifiziert sich weiterhin sauber (kein 401), wird aber auf jeder
+Route mit 403 abgewiesen. Verifiziert: ohne Key → 401, mit
+Fantasie-Key → 401, mit dem konfigurierten Key → 403. Der Reverse
+Proxy scheidet als Ursache aus (leitet 401 unverändert durch).
+
+`check_connection` unterscheidet 403 jetzt von 401 und liefert
+`permission_denied`; Dashboard und i18n zeigen "API-Key ohne
+Berechtigung «all»" statt eines nackten "HTTP 403". Behebung
+serverseitig: API-Key in Immich mit `all`-Permission neu anlegen und
+in den Einstellungen hinterlegen.
+
 ## v2.31.4 — 2026-04-20
 
 ### Logging-Pflicht: Vor/Nach-Pattern für destruktive Aktionen

@@ -387,6 +387,7 @@
     "status_connection_restored": "Connection restored",
     "status_connection_failed": "Connection failed",
     "status_timeout": "Timeout",
+    "status_permission_denied": "API key lacks \"all\" permission",
     "status_auth_failed": "Auth failed",
     "status_not_found": "not found",
     "status_inboxes_active": "{n} director(ies) active"
