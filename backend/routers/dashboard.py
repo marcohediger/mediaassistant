@@ -86,12 +86,16 @@ async def _check_ai_backend_2(i18n: dict) -> tuple[bool, str]:
 
 
 async def _check_geocoding(i18n: dict) -> tuple[bool, str]:
+    # Nominatim rejects requests carrying a default library User-Agent with
+    # HTTP 403, so the health check has to identify itself exactly like the
+    # pipeline does — otherwise the module shows as down while IA-03 works.
+    from pipeline.step_ia03_geocoding import USER_AGENT
     url = await config_manager.get("geo.url")
     provider = await config_manager.get("geo.provider", "nominatim")
     if not url:
         return False, _t("status_no_url", i18n)
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, headers={"User-Agent": USER_AGENT}) as client:
             if provider == "nominatim":
                 test_url = f"{url.rstrip('/')}/reverse?lat=47.3769&lon=8.5417&format=json"
             elif provider == "photon":
@@ -181,6 +185,7 @@ async def _check_immich(i18n: dict) -> tuple[bool, str]:
         "no_url": "status_no_url",
         "no_api_key": "status_missing",
         "auth_failed": "status_auth_failed",
+        "permission_denied": "status_permission_denied",
         "connection_failed": "status_connection_failed",
         "timeout": "status_timeout",
     }
