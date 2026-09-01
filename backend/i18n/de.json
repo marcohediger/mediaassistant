@@ -464,8 +464,6 @@
     "preset_date": "Datum JJJJ-MM-TT",
     "preset_year": "Jahreszahl",
     "scan": "Suchen",
-    "remove": "Aus Sidecars entfernen",
-    "remove_confirm": "Die gefundenen Schlagwörter werden endgültig aus den Sidecar-Dateien entfernt. Es wird keine Sicherung angelegt. Fortfahren?",
     "running": "Läuft …",
     "of": "von",
     "sidecars_scanned": "Sidecars enthalten passende Schlagwörter",
@@ -492,6 +490,14 @@
     "scope_immich": "Tags in Immich löschen",
     "scope_hint": "Beide Hälften sind unabhängig. Nur Sidecars, nur Immich oder beides — mindestens eine muss aktiv sein. Hinweis: Bilder, die nach Immich hochgeladen wurden, haben lokal keinen Sidecar mehr.",
     "sidecars_off": "Sidecars sind nicht einbezogen.",
-    "err_no_scope": "Mindestens eine der beiden Hälften muss aktiv sein"
+    "err_no_scope": "Mindestens eine der beiden Hälften muss aktiv sein",
+    "remove_sidecars": "Aus Sidecars entfernen",
+    "remove_immich": "Aus Immich löschen",
+    "remove_both": "Aus Sidecars und Immich entfernen",
+    "confirm_sidecars": "Die angezeigten Schlagwörter werden endgültig aus den Sidecar-Dateien entfernt. Es wird keine Sicherung angelegt. Fortfahren?",
+    "confirm_immich": "Die angezeigten Tags werden endgültig aus Immich gelöscht. Die Bilder selbst bleiben erhalten, verlieren aber diese Verschlagwortung. Fortfahren?",
+    "confirm_both": "Die angezeigten Schlagwörter werden aus den Sidecar-Dateien entfernt und die passenden Tags aus Immich gelöscht. Es wird keine Sicherung angelegt. Fortfahren?",
+    "preset_date_dots": "Datum TT.MM.JJJJ",
+    "preset_all_dates": "Alle Datumsformate"
   }
 }
