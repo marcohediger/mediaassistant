@@ -19,14 +19,35 @@ logging.basicConfig(
 )
 
 
+async def _supervise(name: str, coro):
+    """Run a background task and make its death visible.
+
+    Both watchers are fire-and-forget. Without this an exception in either one
+    stops all processing while the web UI keeps answering normally — v2.32.6
+    shipped exactly that: a NameError killed the filewatcher at startup, and
+    nothing polled or processed for hours with no trace in the log table.
+    """
+    try:
+        await coro
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logging.getLogger("mediaassistant").exception("Background task %s died", name)
+        try:
+            from system_logger import log_error
+            await log_error(name, f"Hintergrundprozess abgestürzt: {type(e).__name__}: {e}")
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await config_manager.seed_from_env()
     await seed_inbox_from_env()
     shutdown_event = asyncio.Event()
-    watcher_task = asyncio.create_task(start_filewatcher(shutdown_event))
-    health_task = asyncio.create_task(start_health_watcher(shutdown_event))
+    watcher_task = asyncio.create_task(_supervise("filewatcher", start_filewatcher(shutdown_event)))
+    health_task = asyncio.create_task(_supervise("health_watcher", start_health_watcher(shutdown_event)))
     yield
     shutdown_event.set()
     watcher_task.cancel()
