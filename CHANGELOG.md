@@ -1,5 +1,73 @@
 # Changelog
 
+## v2.32.10 — 2026-09-01
+
+### Fix: Upload-Aufräumen konnte fremde Assets endgültig löschen
+
+Gefunden bei der Analyse von `MA-2026-69564`, der seit dem 25. Juni bei
+jedem Versuch an derselben Stelle scheitert.
+
+`safe_upload_asset` merkt sich die von Immich zurückgegebene Asset-ID als
+`orphan_id` und löscht sie, wenn die anschliessende Prüfung fehlschlägt —
+mit `force=True`, also **endgültig und am Papierkorb vorbei**. Immich
+liefert diese ID aber auch, wenn es die Datei als **Duplikat** erkennt,
+und dann gehört sie einem längst vorhandenen Asset, das dieser Upload nie
+erzeugt hat.
+
+Bei `MA-2026-69564` ist neunmal nichts passiert, weil Immich das Löschen
+mit HTTP 400 verweigerte. Wäre das Asset lesbar gewesen und nur die
+Grössenprüfung fehlgeschlagen, hätte MediaAssistant ein fremdes Foto
+unwiderruflich gelöscht.
+
+Die Upload-Antwort trägt laut Immich-Spezifikation ein **verpflichtendes**
+`status`-Feld mit `created` oder `duplicate` — der Code las bisher nur die
+`id`. Jetzt wird `orphan_id` nur noch bei `created` gesetzt: Aufgeräumt
+wird ausschliesslich, was dieser Upload selbst angelegt hat.
+
+### Fix: Blockierte Duplikate laufen nicht mehr in die Endlosschleife
+
+Meldet Immich ein Duplikat und gibt das Asset trotzdem nicht heraus, ist
+das ein Dauerzustand: Immich blockiert den erneuten Upload einer gelöschten
+Datei (immich-app/immich#7032), während das referenzierte Asset für das
+Konto unsichtbar bleibt. Kein Wiederholungsversuch kann daran etwas
+ändern — `MA-2026-69564` hat es neunmal bewiesen.
+
+Neue Ausnahme `ImmichDuplicateUnavailable` bricht sofort ab statt dreimal
+zu versuchen, und die Meldung nennt den Sachverhalt samt Auswegen:
+Papierkorb leeren oder Asset wiederherstellen.
+
+### Fix: HTTP-Status des Asset-Abrufs wird nicht mehr verschluckt
+
+`get_asset_info` machte aus 400, 403, 404 und einem Timeout einheitlich
+`None`. Genau deshalb war seit Juni nicht feststellbar, was mit der Datei
+los ist. Neu liefert `fetch_asset_info` den Grund mit; das Zeitlimit steigt
+von 5 auf 15 Sekunden. In der Fehlermeldung steht jetzt
+"HTTP 400 — Not found or no asset.read access" statt eines nackten
+"not reachable via GET".
+
+### Fix: Ausgelastetes KI-Backend ist kein Ausfall
+
+Der Healthcheck brach nach fest verdrahteten 5 Sekunden ab, während die
+Pipeline mit `ai.timeout` bis zu 120 Sekunden wartet. Auf einem geteilten
+LM Studio, das für einen anderen Dienst rechnet, kippte das Modul dadurch
+im Wechsel auf Fehler und zurück — samt Fehlerzeilen im Log, obwohl nichts
+kaputt war.
+
+Das Zeitlimit kommt jetzt aus `ai.timeout`, gedeckelt auf 30 Sekunden, und
+die Fälle werden unterschieden: Verbindung abgelehnt heisst weiterhin
+Ausfall, ein ausbleibendes Antwortpaket bei stehender Verbindung heisst
+"Ausgelastet" und gilt als verbunden. Langsame Antworten melden ihre Dauer
+mit. Beide KI-Prüfungen teilen sich dafür eine gemeinsame Funktion statt
+zweier identischer Kopien.
+
+Verifiziert gegen Fake-Backends:
+  Immich meldet duplicate -> ImmichDuplicateUnavailable, 0 DELETE-Aufrufe
+  Immich meldet created   -> 3 Versuche, 3 Aufraeum-DELETEs (wie bisher)
+  KI antwortet sofort     -> "Verbunden"
+  KI braucht 4 s          -> "Verbunden (langsam, 4s)"
+  KI antwortet nie        -> "Ausgelastet", Modul bleibt bereit
+  KI nicht erreichbar     -> "Verbindung fehlgeschlagen"
+
 ## v2.32.9 — 2026-09-01
 
 ### Fix: Filewatcher startete seit v2.32.6 überhaupt nicht mehr

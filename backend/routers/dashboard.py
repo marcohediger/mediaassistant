@@ -49,40 +49,52 @@ MODULE_REQUIREMENTS = {
 }
 
 
-async def _check_ai_backend(i18n: dict) -> tuple[bool, str]:
-    url = await config_manager.get("ai.backend_url")
+async def _probe_ai_backend(config_key: str, i18n: dict) -> tuple[bool, str]:
+    """Reachability of an OpenAI-compatible backend, tolerant of a busy one.
+
+    The pipeline waits up to `ai.timeout` (default 120 s) for an answer, so a
+    hardcoded 5-second check declared a merely busy backend dead and flipped
+    the module to error whenever someone else's job occupied the GPU — the
+    error/restored flapping seen on a shared LM Studio. A backend that accepts
+    the connection is up: slow is not down.
+    """
+    url = await config_manager.get(config_key)
     if not url:
         return False, _t("status_no_url", i18n)
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        limit = int(await config_manager.get("ai.timeout", 120))
+    except (TypeError, ValueError):
+        limit = 120
+    # Long enough for a queued backend, short enough not to stall the dashboard.
+    limit = max(5, min(limit, 30))
+
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=limit) as client:
             resp = await client.get(f"{url.rstrip('/')}/models")
-            if resp.status_code == 200:
-                return True, _t("status_connected", i18n)
-            return False, f"HTTP {resp.status_code}"
-    except httpx.ConnectError:
+    except (httpx.ConnectError, httpx.ConnectTimeout):
         return False, f"{_t('status_connection_failed', i18n)}: {url}"
-    except httpx.TimeoutException:
-        return False, f"{_t('status_timeout', i18n)}: {url}"
+    except httpx.ReadTimeout:
+        # Connection accepted, no answer in time — the backend is there and
+        # busy. The pipeline would still wait; the health check should too.
+        return True, _t("status_busy", i18n).replace("{n}", str(limit))
     except Exception as e:
         return False, str(e)
+
+    if resp.status_code != 200:
+        return False, f"HTTP {resp.status_code}"
+    elapsed = time.monotonic() - started
+    if elapsed >= 2:
+        return True, _t("status_slow", i18n).replace("{n}", f"{elapsed:.0f}")
+    return True, _t("status_connected", i18n)
+
+
+async def _check_ai_backend(i18n: dict) -> tuple[bool, str]:
+    return await _probe_ai_backend("ai.backend_url", i18n)
 
 
 async def _check_ai_backend_2(i18n: dict) -> tuple[bool, str]:
-    url = await config_manager.get("ai2.backend_url")
-    if not url:
-        return False, _t("status_no_url", i18n)
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{url.rstrip('/')}/models")
-            if resp.status_code == 200:
-                return True, _t("status_connected", i18n)
-            return False, f"HTTP {resp.status_code}"
-    except httpx.ConnectError:
-        return False, f"{_t('status_connection_failed', i18n)}: {url}"
-    except httpx.TimeoutException:
-        return False, f"{_t('status_timeout', i18n)}: {url}"
-    except Exception as e:
-        return False, str(e)
+    return await _probe_ai_backend("ai2.backend_url", i18n)
 
 
 async def _check_geocoding(i18n: dict) -> tuple[bool, str]:
