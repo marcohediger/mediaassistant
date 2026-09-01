@@ -1,5 +1,42 @@
 # Changelog
 
+## v2.32.15 — 2026-09-01
+
+### Tag-Aufräumen in Immich: drei Wege statt einem
+
+Bisher gab es nur „Tag löschen", was über den Fremdschlüssel auch alle
+Zuordnungen mitnimmt. Zwei verschachtelte Unterschalter unter „Tags in
+Immich löschen" erlauben jetzt die feineren Varianten:
+
+  ohne Unterschalter            -> DELETE /api/tags/{id}
+  „Nur Zuordnung je Bild"       -> DELETE /api/tags/{id}/assets
+  zusätzlich „Tag danach löschen" -> erst die Zuordnungen, dann das Tag
+
+Im Einzelmodus werden für jedes getroffene Tag die betroffenen Bilder
+über die Suche ermittelt (blätternd per Cursor) und die Zuordnung in
+Blöcken gelöst. Das Tag selbst bleibt bestehen — Immichs eigener
+Wartungsjob `tag-cleanup` räumt leere Tags weg, wer das mag.
+
+Beide Unterschalter sind nur bedienbar, wenn die übergeordnete Stufe
+aktiv ist, und werden sonst ausgegraut statt stillschweigend ignoriert.
+
+**Die Vorschau wird dadurch aussagekräftiger.** Im Einzelmodus werden die
+Asset-IDs ohnehin gebraucht, also zeigt sie pro Tag die Anzahl
+betroffener Bilder und darunter die Gesamtsumme — aus „diese Tags" wird
+„diese Tags an so vielen Bildern". Die Kaskaden-Warnung entfällt in
+diesem Modus, weil ohne Tag-Löschung nichts kaskadieren kann.
+
+Wie die übrigen Schalter gehören auch diese zur **Vorschau**: Wird einer
+zwischen Vorschau und Ausführung umgelegt, verweigert der Server den Lauf
+(409).
+
+Verifiziert gegen ein Immich-Doppel mit fünf Bildern am Datums-Tag:
+  nur Zuordnung          -> UNTAG mit allen 5 IDs, Tag bleibt (0 geloescht)
+  Zuordnung + Tag        -> UNTAG, danach DELETE_TAG, in dieser Reihenfolge
+  nur Tag loeschen       -> nur DELETE_TAG
+  Vorschau im Einzelmodus-> "2020-06-22 (5)"
+  Schalter nachtraeglich umgelegt -> 409 abgelehnt
+
 ## v2.32.14 — 2026-09-01
 
 ### UI: Voreinstellung für rein numerische Tags

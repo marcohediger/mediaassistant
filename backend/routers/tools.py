@@ -108,7 +108,7 @@ def _immich_matches(tags: list[dict], rx: re.Pattern) -> tuple[list[dict], list[
     return matched, sorted(collateral)
 
 
-async def _scan_immich(rx: re.Pattern) -> dict:
+async def _scan_immich(rx: re.Pattern, per_asset: bool) -> dict:
     """Preview of the Immich side. Never raises — Immich may be unreachable
     while the sidecar half is still perfectly workable."""
     from immich_client import list_tags
@@ -118,16 +118,30 @@ async def _scan_immich(rx: re.Pattern) -> dict:
         return {"available": False, "error": f"{type(e).__name__}: {e}"[:160],
                 "tags": [], "collateral": []}
     matched, collateral = _immich_matches(tags, rx)
+    entries = [{"id": t.get("id"), "name": _tag_name(t)} for t in matched]
+
+    # Per-asset mode needs the asset ids anyway, and counting them turns the
+    # preview from "these tags" into "these tags on this many pictures".
+    if per_asset and entries:
+        from immich_client import list_tag_assets
+        for e in entries:
+            try:
+                e["assets"] = await list_tag_assets(e["id"])
+            except Exception as ex:
+                e["assets"] = []
+                e["error"] = f"{type(ex).__name__}: {ex}"[:120]
+
     return {
         "available": True,
         "error": "",
         "total": len(tags),
-        "tags": [{"id": t.get("id"), "name": _tag_name(t)} for t in matched],
-        "collateral": collateral,
+        "per_asset": per_asset,
+        "tags": entries,
+        "collateral": [] if per_asset else collateral,
     }
 
 
-async def _scan(pattern: str, with_sidecars: bool, with_immich: bool):
+async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset: bool, also_delete: bool):
     from routers.api import _cleanup_progress, _cleanup_finish
     try:
         library = await config_manager.get("library.base_path", "/library")
@@ -147,12 +161,14 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool):
                   "total": 0, "tags": [], "collateral": []}
         if with_immich:
             _cleanup_progress["phase"] = "Immich-Tags werden gelesen"
-            immich = {"enabled": True, **await _scan_immich(rx)}
+            immich = {"enabled": True, **await _scan_immich(rx, per_asset)}
 
         _last_scan.clear()
         _last_scan.update({"pattern": pattern, "counts": counts, "files": files,
                            "sidecars_enabled": with_sidecars,
                            "immich_enabled": with_immich,
+                           "immich_per_asset": per_asset,
+                           "immich_also_delete": also_delete,
                            "immich_tags": immich["tags"] if with_immich else []})
         _cleanup_finish(result={
             "mode": "scan",
@@ -174,7 +190,7 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool):
         _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
-async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool):
+async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_asset: bool, _also_delete: bool):
     """Strip the keywords from the sidecars the preview listed.
 
     Deliberately no fresh scan: the user approved a concrete set of files and
@@ -211,14 +227,45 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool):
         # Immich second: the sidecars are the source a re-index would read
         # back, so they have to be clean before the tags go.
         immich_deleted, immich_failed, immich_error = 0, 0, ""
+        tags_deleted = 0
         immich_tags = list(_last_scan.get("immich_tags") or [])
-        if immich_tags:
+        per_asset = bool(_last_scan.get("immich_per_asset"))
+        if immich_tags and per_asset:
+            # Remove the assignment, keep the tag. Immich's own tag-cleanup job
+            # can sweep up the now-empty tags afterwards.
+            _cleanup_progress["phase"] = "Zuordnungen werden je Asset entfernt"
+            from immich_client import untag_assets
+            for tag in immich_tags:
+                ids = list(tag.get("assets") or [])
+                if not ids:
+                    continue
+                try:
+                    for start in range(0, len(ids), REMOVE_CHUNK):
+                        await untag_assets(tag["id"], ids[start:start + REMOVE_CHUNK])
+                    immich_deleted += len(ids)
+                except Exception as e:
+                    immich_failed += len(ids)
+                    immich_error = f"{type(e).__name__}: {e}"[:160]
+
+            # Optional second step: drop the now-empty tags as well.
+            if _last_scan.get("immich_also_delete"):
+                _cleanup_progress["phase"] = "Leere Tags werden gelöscht"
+                from immich_client import delete_tag
+                for tag in immich_tags:
+                    try:
+                        await delete_tag(tag["id"])
+                        tags_deleted += 1
+                    except Exception as e:
+                        immich_failed += 1
+                        immich_error = f"{type(e).__name__}: {e}"[:160]
+        elif immich_tags:
             _cleanup_progress["phase"] = "Immich-Tags werden gelöscht"
             from immich_client import delete_tag
             for tag in immich_tags:
                 try:
                     await delete_tag(tag["id"])
                     immich_deleted += 1
+                    tags_deleted += 1
                 except Exception as e:
                     immich_failed += 1
                     immich_error = f"{type(e).__name__}: {e}"[:160]
@@ -232,7 +279,9 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool):
             "sidecars_changed": changed,
             "sidecars_failed": failed,
             "tags_removed": len(counts),
+            "immich_per_asset": per_asset,
             "immich_deleted": immich_deleted,
+            "immich_tags_deleted": tags_deleted,
             "immich_failed": immich_failed,
             "immich_error": immich_error,
         })
@@ -260,6 +309,8 @@ async def _start(request: Request, worker, *, require_preview: bool = False) -> 
     pattern = (form.get("pattern") or "").strip()
     with_sidecars = bool(form.get("sidecars"))
     with_immich = bool(form.get("immich"))
+    per_asset = bool(form.get("per_asset")) and with_immich
+    also_delete = bool(form.get("also_delete")) and per_asset
     if not (with_sidecars or with_immich):
         return JSONResponse({"ok": False, "detail": await _t("err_no_scope")}, status_code=400)
     if not pattern:
@@ -279,11 +330,13 @@ async def _start(request: Request, worker, *, require_preview: bool = False) -> 
         # Both switches are part of the preview: flipping one after the fact
         # would change what gets deleted without anyone having seen it.
         if (bool(_last_scan.get("sidecars_enabled")) != with_sidecars
-                or bool(_last_scan.get("immich_enabled")) != with_immich):
+                or bool(_last_scan.get("immich_enabled")) != with_immich
+                or bool(_last_scan.get("immich_per_asset")) != per_asset
+                or bool(_last_scan.get("immich_also_delete")) != also_delete):
             return JSONResponse({"ok": False, "detail": await _t("err_scope_changed")}, status_code=409)
 
     _cleanup_reset("sidecar_tags")
-    asyncio.create_task(worker(pattern, with_sidecars, with_immich))
+    asyncio.create_task(worker(pattern, with_sidecars, with_immich, per_asset, also_delete))
     return JSONResponse({"ok": True})
 
 
