@@ -75,28 +75,95 @@ def _collect(entries: list[dict], rx: re.Pattern) -> tuple[dict, list[str]]:
     return counts, files
 
 
-async def _scan(pattern: str):
+def _tag_name(tag: dict) -> str:
+    return str(tag.get("name") or tag.get("value") or "")
+
+
+def _immich_matches(tags: list[dict], rx: re.Pattern) -> tuple[list[dict], list[str]]:
+    """Tags to delete, plus the names the cascade would take along uninvited.
+
+    `tag.parentId` is ON DELETE CASCADE in Immich, so deleting a matched tag
+    also removes every descendant — including ones the pattern never matched.
+    Those are listed separately instead of quietly disappearing.
+    """
+    matched = [t for t in tags if rx.search(_tag_name(t))]
+    matched_ids = {t.get("id") for t in matched}
+
+    children: dict[str, list[dict]] = {}
+    for t in tags:
+        children.setdefault(t.get("parentId"), []).append(t)
+
+    collateral: list[str] = []
+    seen = set(matched_ids)
+    stack = list(matched_ids)
+    while stack:
+        for child in children.get(stack.pop(), []):
+            cid = child.get("id")
+            if cid in seen:
+                continue
+            seen.add(cid)
+            stack.append(cid)
+            if cid not in matched_ids:
+                collateral.append(_tag_name(child))
+    return matched, sorted(collateral)
+
+
+async def _scan_immich(rx: re.Pattern) -> dict:
+    """Preview of the Immich side. Never raises — Immich may be unreachable
+    while the sidecar half is still perfectly workable."""
+    from immich_client import list_tags
+    try:
+        tags = await list_tags()
+    except Exception as e:
+        return {"available": False, "error": f"{type(e).__name__}: {e}"[:160],
+                "tags": [], "collateral": []}
+    matched, collateral = _immich_matches(tags, rx)
+    return {
+        "available": True,
+        "error": "",
+        "total": len(tags),
+        "tags": [{"id": t.get("id"), "name": _tag_name(t)} for t in matched],
+        "collateral": collateral,
+    }
+
+
+async def _scan(pattern: str, with_sidecars: bool, with_immich: bool):
     from routers.api import _cleanup_progress, _cleanup_finish
     try:
         library = await config_manager.get("library.base_path", "/library")
-        _cleanup_progress["phase"] = "Sidecars werden gelesen"
-        entries = await _read_library_subjects(library)
-        _cleanup_progress["total"] = len(entries)
-        _cleanup_progress["current"] = len(entries)
-        _cleanup_progress["phase"] = "Treffer werden gesammelt"
-
         rx = _compile(pattern)
-        counts, files = _collect(entries, rx)
+
+        # Reading every sidecar is the expensive half — skip it entirely when
+        # the run is meant for Immich only.
+        entries, counts, files = [], {}, []
+        if with_sidecars:
+            _cleanup_progress["phase"] = "Sidecars werden gelesen"
+            entries = await _read_library_subjects(library)
+            _cleanup_progress["total"] = len(entries)
+            _cleanup_progress["current"] = len(entries)
+            _cleanup_progress["phase"] = "Treffer werden gesammelt"
+            counts, files = _collect(entries, rx)
+        immich = {"enabled": False, "available": False, "error": "",
+                  "total": 0, "tags": [], "collateral": []}
+        if with_immich:
+            _cleanup_progress["phase"] = "Immich-Tags werden gelesen"
+            immich = {"enabled": True, **await _scan_immich(rx)}
+
         _last_scan.clear()
-        _last_scan.update({"pattern": pattern, "counts": counts, "files": files})
+        _last_scan.update({"pattern": pattern, "counts": counts, "files": files,
+                           "sidecars_enabled": with_sidecars,
+                           "immich_enabled": with_immich,
+                           "immich_tags": immich["tags"] if with_immich else []})
         _cleanup_finish(result={
             "mode": "scan",
             "pattern": pattern,
             "library": library,
+            "sidecars_enabled": with_sidecars,
             "sidecars_total": len(entries),
             "sidecars_matched": len(files),
             "tags": sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])),
             "sample": files[:MAX_SAMPLE],
+            "immich": immich,
         })
         await log_info(
             "tools",
@@ -107,7 +174,7 @@ async def _scan(pattern: str):
         _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
-async def _remove(_pattern: str):
+async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool):
     """Strip the keywords from the sidecars the preview listed.
 
     Deliberately no fresh scan: the user approved a concrete set of files and
@@ -118,12 +185,7 @@ async def _remove(_pattern: str):
         pattern = _last_scan.get("pattern", "")
         counts = dict(_last_scan.get("counts") or {})
         files = list(_last_scan.get("files") or [])
-        if not files:
-            _cleanup_finish(result={"mode": "remove", "pattern": pattern,
-                                    "sidecars_changed": 0, "tags_removed": 0})
-            return
-
-        _cleanup_progress["total"] = len(files)
+        _cleanup_progress["total"] = max(len(files), 1)
         _cleanup_progress["phase"] = "Schlagwörter werden entfernt"
         # Removing a value a file does not carry is a no-op, so the whole
         # approved set can be passed for every chunk.
@@ -146,14 +208,33 @@ async def _remove(_pattern: str):
                 )
             _cleanup_progress["current"] = min(start + REMOVE_CHUNK, len(files))
 
+        # Immich second: the sidecars are the source a re-index would read
+        # back, so they have to be clean before the tags go.
+        immich_deleted, immich_failed, immich_error = 0, 0, ""
+        immich_tags = list(_last_scan.get("immich_tags") or [])
+        if immich_tags:
+            _cleanup_progress["phase"] = "Immich-Tags werden gelöscht"
+            from immich_client import delete_tag
+            for tag in immich_tags:
+                try:
+                    await delete_tag(tag["id"])
+                    immich_deleted += 1
+                except Exception as e:
+                    immich_failed += 1
+                    immich_error = f"{type(e).__name__}: {e}"[:160]
+
         # The preview is spent — the files no longer carry those keywords.
         _last_scan.clear()
         _cleanup_finish(result={
             "mode": "remove",
             "pattern": pattern,
+            "sidecars_enabled": bool(_last_scan.get("sidecars_enabled")),
             "sidecars_changed": changed,
             "sidecars_failed": failed,
             "tags_removed": len(counts),
+            "immich_deleted": immich_deleted,
+            "immich_failed": immich_failed,
+            "immich_error": immich_error,
         })
         await log_info(
             "tools",
@@ -177,6 +258,10 @@ async def _start(request: Request, worker, *, require_preview: bool = False) -> 
 
     form = await request.form()
     pattern = (form.get("pattern") or "").strip()
+    with_sidecars = bool(form.get("sidecars"))
+    with_immich = bool(form.get("immich"))
+    if not (with_sidecars or with_immich):
+        return JSONResponse({"ok": False, "detail": await _t("err_no_scope")}, status_code=400)
     if not pattern:
         return JSONResponse({"ok": False, "detail": await _t("err_no_pattern")}, status_code=400)
     if _compile(pattern) is None:
@@ -187,13 +272,18 @@ async def _start(request: Request, worker, *, require_preview: bool = False) -> 
     if require_preview:
         # The browser also disables the button, but that is decoration — the
         # guard that matters is here. Delete only what a preview has shown.
-        if not _last_scan.get("files"):
+        if not (_last_scan.get("files") or _last_scan.get("immich_tags")):
             return JSONResponse({"ok": False, "detail": await _t("err_no_preview")}, status_code=409)
         if _last_scan.get("pattern") != pattern:
             return JSONResponse({"ok": False, "detail": await _t("err_pattern_changed")}, status_code=409)
+        # Both switches are part of the preview: flipping one after the fact
+        # would change what gets deleted without anyone having seen it.
+        if (bool(_last_scan.get("sidecars_enabled")) != with_sidecars
+                or bool(_last_scan.get("immich_enabled")) != with_immich):
+            return JSONResponse({"ok": False, "detail": await _t("err_scope_changed")}, status_code=409)
 
     _cleanup_reset("sidecar_tags")
-    asyncio.create_task(worker(pattern))
+    asyncio.create_task(worker(pattern, with_sidecars, with_immich))
     return JSONResponse({"ok": True})
 
 

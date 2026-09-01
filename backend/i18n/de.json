@@ -456,8 +456,8 @@
   },
   "tools": {
     "title": "Werkzeuge",
-    "tags_title": "Tag-Aufräumen in Sidecars",
-    "tags_desc": "Entfernt Schlagwörter aus den XMP-Sidecar-Dateien der Bibliothek.",
+    "tags_title": "Tag-Aufräumen in Sidecars und Immich",
+    "tags_desc": "Entfernt Schlagwörter aus den XMP-Sidecar-Dateien und die passenden Tags aus Immich.",
     "tags_hint": "Durchsucht rekursiv alle .xmp-Dateien unter",
     "pattern": "Muster (regulärer Ausdruck)",
     "pattern_hint": "Wird gegen jedes Schlagwort geprüft. Beispiel: ^\\d{4}-\\d{2}-\\d{2}$ trifft 2020-06-22.",
@@ -481,6 +481,17 @@
     "err_busy": "Eine Wartungsaufgabe läuft bereits",
     "err_no_preview": "Bitte zuerst eine Vorschau erzeugen",
     "err_pattern_changed": "Muster wurde seit der Vorschau geändert — bitte erneut suchen",
-    "preview_note": "Vorschau — es wurde noch nichts geändert. Entfernt wird genau diese Auswahl."
+    "preview_note": "Vorschau — es wurde noch nichts geändert. Entfernt wird genau diese Auswahl.",
+    "immich_matched": "Immich-Tags passen zum Muster",
+    "immich_unavailable": "Immich nicht erreichbar — es werden nur die Sidecars bereinigt:",
+    "immich_deleted": "Tags in Immich gelöscht",
+    "cascade_warning": "Achtung: Diese Tags hängen als Unterebene darunter und werden von Immich mitgelöscht, obwohl sie nicht zum Muster passen:",
+    "immich_off": "Immich ist nicht einbezogen — nur die Sidecars werden bereinigt.",
+    "err_scope_changed": "Der Immich-Schalter wurde seit der Vorschau geändert — bitte erneut suchen",
+    "scope_sidecars": "In XMP-Sidecars bereinigen",
+    "scope_immich": "Tags in Immich löschen",
+    "scope_hint": "Beide Hälften sind unabhängig. Nur Sidecars, nur Immich oder beides — mindestens eine muss aktiv sein. Hinweis: Bilder, die nach Immich hochgeladen wurden, haben lokal keinen Sidecar mehr.",
+    "sidecars_off": "Sidecars sind nicht einbezogen.",
+    "err_no_scope": "Mindestens eine der beiden Hälften muss aktiv sein"
   }
 }

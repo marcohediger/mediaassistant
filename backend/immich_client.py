@@ -920,6 +920,33 @@ def _server_message(resp: httpx.Response) -> str:
     return " ".join(str(msg).split()) if msg else ""
 
 
+async def list_tags(*, api_key: str | None = None) -> list[dict]:
+    """All tags of the key's account. Raises so callers can report the reason."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich-URL oder API-Key fehlt")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{url}/api/tags", headers={"x-api-key": api_key})
+    if resp.status_code != 200:
+        raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
+    return resp.json()
+
+
+async def delete_tag(tag_id: str, *, api_key: str | None = None) -> None:
+    """Delete one tag. Its asset assignments go with it, the assets stay.
+
+    Immich cascades to child tags (`tag.parentId` is ON DELETE CASCADE), so
+    callers must know the descendants before calling this.
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich-URL oder API-Key fehlt")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.delete(f"{url}/api/tags/{tag_id}", headers={"x-api-key": api_key})
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
+
+
 async def check_connection(*, api_key: str | None = None) -> tuple[bool, str]:
     """Test the Immich connection. Returns (ok, detail)."""
     url, api_key = await _resolve_api_key(api_key)
