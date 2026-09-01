@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.32.14 — 2026-09-01
+
+### UI: Voreinstellung für rein numerische Tags
+
+Im Live-Bestand tauchten neben Datumsangaben auch Ordnernamen wie `01`
+bis `12`, `007`, `112` und blosse Jahreszahlen als Tags auf — Reste
+derselben Fehlkonfiguration, die die Datums-Tags erzeugt hat. Die
+bisherigen Voreinstellungen trafen davon nur einen Teil.
+
+Neu: **Zahlen und Datumsangaben**
+
+  ^(\d+|\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4})$
+
+Geprüft an 29 echten Tag-Namen aus dem Live-Bestand: Das Muster trifft
+23 davon — sämtliche reinen Zahlen und beide Datumsformate — und lässt
+genau die sechs stehen, die nach Inhalt aussehen: `-10%`,
+`100-Jahr-Jubiläum`, `1950er`, `1980er`, `20 Minuten` und
+`24. Dezember 2021`.
+
+Alle fünf Voreinstellungen wurden zusätzlich in der Form geprüft, in der
+sie der Browser aus dem Knopf erhält.
+
 ## v2.32.13 — 2026-09-01
 
 ### UI: Löschknopf benennt, was er tatsächlich anfasst

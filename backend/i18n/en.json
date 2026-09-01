@@ -498,6 +498,7 @@
     "confirm_immich": "The listed tags will be permanently deleted in Immich. The assets themselves stay, but lose this tagging. Continue?",
     "confirm_both": "The listed keywords will be removed from the sidecar files and the matching tags deleted in Immich. No backup is kept. Continue?",
     "preset_date_dots": "Date DD.MM.YYYY",
-    "preset_all_dates": "All date formats"
+    "preset_all_dates": "All date formats",
+    "preset_numeric": "Numbers and dates"
   }
 }

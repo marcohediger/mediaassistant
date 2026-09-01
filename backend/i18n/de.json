@@ -498,6 +498,7 @@
     "confirm_immich": "Die angezeigten Tags werden endgültig aus Immich gelöscht. Die Bilder selbst bleiben erhalten, verlieren aber diese Verschlagwortung. Fortfahren?",
     "confirm_both": "Die angezeigten Schlagwörter werden aus den Sidecar-Dateien entfernt und die passenden Tags aus Immich gelöscht. Es wird keine Sicherung angelegt. Fortfahren?",
     "preset_date_dots": "Datum TT.MM.JJJJ",
-    "preset_all_dates": "Alle Datumsformate"
+    "preset_all_dates": "Alle Datumsformate",
+    "preset_numeric": "Zahlen und Datumsangaben"
   }
 }
