@@ -1,5 +1,55 @@
 # Changelog
 
+## v2.32.5 — 2026-09-01
+
+### Fix: Immich-Jobs überleben einen Neustart, 52 verlorene Fehlerjobs zurückgeholt
+
+Live-Befund aus der DB-Analyse: `MA-2026-70150` (`IMG_2473.JPG`) wurde
+vom Immich-Poller angelegt, das Asset nach `/tmp/ma_immich_*/`
+heruntergeladen — und 45 Sekunden später kam ein Redeploy. Der neue
+Container hat ein leeres `/tmp`, der Resume-Block in `start_filewatcher`
+setzte den Job auf `queued`, und die Pipeline scheiterte an IA-05 und
+IA-08 mit `FileNotFoundError`.
+
+**Die Rettungslogik gab es bereits, sie griff nur nicht.**
+`_move_file_for_reprocess` lädt ein Asset aus Immich nach, wenn keine
+lokale Datei mehr auffindbar ist — leitet die Asset-ID aber
+ausschliesslich aus `target_path = immich:<id>` ab. Diese Referenz
+schreibt erst IA-08 nach erfolgreichem Upload. Jobs, die vorher
+scheitern, kennen ihr Asset nur über `immich_asset_id`, und genau dieses
+Feld wurde ignoriert. Fuer Immich-Jobs ist es der einzige Griff, den es
+gibt: ihre lokale Kopie liegt in einem Container-Temp-Verzeichnis, das
+ein Redeploy wegwirft.
+
+Die Asset-ID kommt jetzt aus beiden Quellen. Schlägt der Download
+trotzdem fehl, greift dieselbe Aufräumlogik wie bisher — der Job landet
+im selben Zustand, den Aufrufer vor dem Fallback gesehen haben.
+
+**Die Folge war schlimmer als ein Fehlerjob.** Die Dedup des Pollers
+zählt jeden Job mit gesetzter `immich_asset_id`, ohne den Status zu
+prüfen. Ein solcher Fehlerjob schliesst sein Asset damit dauerhaft von
+weiteren Polls aus — das Bild wird nie verarbeitet, ohne dass irgendwo
+etwas fehlt.
+
+**Einmalige Wiedervorlage der Altlasten.** Beim Start werden
+Fehlerjobs mit `immich_asset_id` und "Datei nicht auffindbar" einmal
+über `reset_job_for_retry` neu eingereiht. Das Flag wird nur gesetzt,
+wenn der Lauf tatsächlich etwas gerettet hat: nichts gerettet heisst,
+dass Immich nicht erreichbar war — also dieselbe Lage, die diese Jobs
+erzeugt hat —, und der nächste Start versucht es erneut. Erfolgreiche
+Jobs verlassen `error` und werden nicht noch einmal ausgewählt, ein
+Wiederholungslauf macht also keine Arbeit doppelt.
+
+Verifiziert gegen eine Kopie der Live-DB (65 982 Jobs, 81 Fehler):
+  Start ohne erreichbares Immich -> 81 Fehler, Flag bleibt ungesetzt
+  Start mit Immich               -> 29 Fehler, 52 eingereiht, Flag gesetzt
+  Weiterer Start                 -> unveraendert
+
+Von den verbleibenden 29 haben 27 nur noch einen Inbox-Pfad und sind
+allein über die Datei auf der Disk zu retten; 2 sind gewöhnliche
+Fehler (KI-Backend nicht erreichbar, Immich-Upload), die ein normaler
+Retry erledigt.
+
 ## v2.32.4 — 2026-09-01
 
 ### UI/Fix: Verbindungstest ohne Umweg, gespeicherte Schlüssel sichtbar, fremde 403 nicht mehr Immich angelastet
