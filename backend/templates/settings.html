@@ -855,6 +855,63 @@
     </div>
 </div>
 
+<div class="settings-section" id="section-diagnostics">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.diagnostics }}</h2>
+            <span class="section-desc">{{ t.settings.diagnostics_desc }}</span>
+        </div>
+    </div>
+    <div class="section-body">
+        {% if cfg.diagnostics_tokens %}
+        <div class="inbox-list" id="diag_list">
+            {% for tk in cfg.diagnostics_tokens %}
+            <div class="inbox-item" id="diag-{{ tk.id }}">
+                <div class="inbox-row">
+                    <div class="form-group">
+                        <label>{{ t.settings.diagnostics_label }}</label>
+                        <input type="text" value="{{ tk.label }}" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>{{ t.settings.diagnostics_created }}</label>
+                        <input type="text" value="{{ tk.created }}" readonly>
+                    </div>
+                </div>
+                <div class="inbox-options">
+                    <span class="test-result" style="color: {{ 'var(--success)' if tk.active else 'var(--text-muted)' }}">
+                        {{ t.settings.diagnostics_on if tk.active else t.settings.diagnostics_off }}
+                    </span>
+                    <div class="inbox-actions">
+                        <button type="button" class="btn btn-small btn-secondary" onclick="diagToken('{{ tk.id }}/toggle')">{{ t.settings.diagnostics_toggle }}</button>
+                        <button type="button" class="btn btn-small btn-danger" onclick="if(confirm('{{ t.settings.diagnostics_delete_confirm }}')) diagToken('{{ tk.id }}/delete')">{{ t.settings.delete }}</button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="section-note">{{ t.settings.diagnostics_none }}</p>
+        {% endif %}
+
+        <div class="inbox-add">
+            <h3>{{ t.settings.diagnostics_add }}</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="diag_label">{{ t.settings.diagnostics_label }}</label>
+                    <input type="text" id="diag_label" placeholder="Claude">
+                </div>
+            </div>
+            <button type="button" class="btn btn-small btn-primary" onclick="createDiagToken()">{{ t.settings.diagnostics_generate }}</button>
+        </div>
+
+        <div id="diag_token_box" style="display: none; margin-top: 1rem;">
+            <label for="diag_token">{{ t.settings.diagnostics_token_once }}</label>
+            <input type="text" id="diag_token" readonly onclick="this.select()">
+            <small>{{ t.settings.diagnostics_usage }}</small>
+        </div>
+    </div>
+</div>
+
 <div class="form-actions">
     <button type="submit" class="btn btn-primary">{{ t.settings.save_all }}</button>
 </div>
@@ -874,6 +931,23 @@ function postAction(url, data) {
     }
     document.body.appendChild(f);
     f.submit();
+}
+function createDiagToken() {
+    var body = new URLSearchParams();
+    body.append('label', document.getElementById('diag_label').value);
+    fetch('/settings/diagnostics/token', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body
+    }).then(function (r) { return r.json(); })
+      .then(function (d) {
+        document.getElementById('diag_token').value = d.token;
+        document.getElementById('diag_token_box').style.display = '';
+      });
+}
+function diagToken(action) {
+    fetch('/settings/diagnostics/token/' + action, {method: 'POST'})
+        .then(function () { location.reload(); });
 }
 function loadAiModels(modelId, urlId) {
     var urlEl = document.getElementById(urlId);

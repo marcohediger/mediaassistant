@@ -87,6 +87,7 @@ async def _get_cfg() -> dict:
         # Length only — never the key itself. Renders as one placeholder dot
         # per character so a stored key is distinguishable from an empty field.
         "immich_api_key_len": await _stored_key_len(stored_keys["immich"]),
+        "diagnostics_tokens": _diag_public(await _diag_tokens()),
         "immich_poll_enabled": await config_manager.get("immich.poll_enabled", False),
         "video_thumbnail_enabled": await config_manager.get("video.thumbnail_enabled", False),
         "video_thumbnail_frames": await config_manager.get("video.thumbnail_frames", 8),
@@ -611,6 +612,77 @@ def _lmstudio_base(url: str) -> str:
     """Strip the OpenAI-compatible `/v1` suffix to reach LM Studio's own API."""
     base = url.rstrip("/")
     return base[: -len("/v1")] if base.endswith("/v1") else base
+
+
+async def _diag_tokens() -> list[dict]:
+    try:
+        return list(await config_manager.get("diagnostics.tokens", []) or [])
+    except Exception:
+        return []
+
+
+def _diag_public(entries: list[dict]) -> list[dict]:
+    """Token list for display — never the hash."""
+    return [
+        {"id": e.get("id"), "label": e.get("label", ""),
+         "created": e.get("created", ""), "active": bool(e.get("active"))}
+        for e in entries if isinstance(e, dict)
+    ]
+
+
+@router.post("/diagnostics/token")
+async def create_diagnostics_token(request: Request):
+    """Create a diagnostics token and return it once.
+
+    Returned in the response body rather than a redirect, so it never lands in
+    a URL, the browser history or an access log. Only its hash is stored — the
+    plaintext cannot be shown again, losing it means creating a new one.
+    """
+    import secrets
+    from datetime import datetime
+    from routers.diagnostics import token_hash
+
+    form = await request.form()
+    label = _sanitize((form.get("label") or "").strip()) or "Token"
+    token = secrets.token_hex(32)
+    entries = await _diag_tokens()
+    entries.append({
+        "id": secrets.token_hex(4),
+        "label": label,
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "hash": token_hash(token),
+        "active": True,
+    })
+    await config_manager.set("diagnostics.tokens", entries)
+    await log_info("settings", "Diagnose-Token erzeugt", label)
+    return JSONResponse({"ok": True, "token": token, "tokens": _diag_public(entries)})
+
+
+@router.post("/diagnostics/token/{token_id}/toggle")
+async def toggle_diagnostics_token(request: Request, token_id: str):
+    """Switch one token on or off without deleting it."""
+    entries = await _diag_tokens()
+    label, state = None, None
+    for e in entries:
+        if e.get("id") == token_id:
+            e["active"] = not e.get("active")
+            label, state = e.get("label", ""), e["active"]
+    if label is None:
+        return JSONResponse({"ok": False, "tokens": _diag_public(entries)}, status_code=404)
+    await config_manager.set("diagnostics.tokens", entries)
+    await log_info("settings", "Diagnose-Token " + ("aktiviert" if state else "deaktiviert"), label)
+    return JSONResponse({"ok": True, "tokens": _diag_public(entries)})
+
+
+@router.post("/diagnostics/token/{token_id}/delete")
+async def delete_diagnostics_token(request: Request, token_id: str):
+    entries = await _diag_tokens()
+    remaining = [e for e in entries if e.get("id") != token_id]
+    if len(remaining) == len(entries):
+        return JSONResponse({"ok": False, "tokens": _diag_public(entries)}, status_code=404)
+    await config_manager.set("diagnostics.tokens", remaining)
+    await log_info("settings", "Diagnose-Token gelöscht", token_id)
+    return JSONResponse({"ok": True, "tokens": _diag_public(remaining)})
 
 
 @router.get("/ai-models")

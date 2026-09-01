@@ -54,7 +54,10 @@ def get_session_secret() -> str:
 
 
 # Paths that never require authentication
-EXEMPT_PREFIXES = ("/static/", "/api/health", "/setup", "/auth/")
+# /api/diagnostics carries its own bearer-token check and must work without a
+# browser session — that is its whole purpose. It answers 404 unless
+# DIAGNOSTICS_TOKEN is set, so an instance that never opted in stays closed.
+EXEMPT_PREFIXES = ("/static/", "/api/health", "/api/diagnostics", "/setup", "/auth/")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
