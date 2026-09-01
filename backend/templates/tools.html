@@ -20,6 +20,20 @@
             <small>{{ t.tools.pattern_hint }}</small>
         </div>
 
+        <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; margin-bottom: 0.5rem;">
+            <label class="switch-inline">
+                <input type="checkbox" id="do_sidecars" checked onchange="sidecarInvalidate()">
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.tools.scope_sidecars }}</span>
+            </label>
+            <label class="switch-inline">
+                <input type="checkbox" id="do_immich" onchange="sidecarInvalidate()">
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.tools.scope_immich }}</span>
+            </label>
+        </div>
+        <p class="section-note" style="margin-bottom: 1rem;">{{ t.tools.scope_hint }}</p>
+
         <div class="inbox-actions" style="align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
             <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^\\d{4}-\\d{2}-\\d{2}$')">{{ t.tools.preset_date }}</button>
             <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^\\d{4}$')">{{ t.tools.preset_year }}</button>
@@ -55,6 +69,8 @@ function sidecarRun(mode) {
     var state = document.getElementById('sidecar_state');
     var body = new URLSearchParams();
     body.append('pattern', pattern);
+    if (document.getElementById('do_sidecars').checked) { body.append('sidecars', '1'); }
+    if (document.getElementById('do_immich').checked) { body.append('immich', '1'); }
     state.textContent = '{{ t.tools.running }}';
     state.style.color = '';
     document.getElementById('btn_scan').disabled = true;
@@ -99,21 +115,43 @@ function pollSidecar(pattern) {
       }).catch(function (e) { sidecarFail(String(e)); });
 }
 
+function renderImmichPreview(im) {
+    if (!im || !im.enabled) { return '<p class="section-note">{{ t.tools.immich_off }}</p>'; }
+    if (!im.available) {
+        return '<p class="section-note" style="color: var(--error);">{{ t.tools.immich_unavailable }} ' + im.error + '</p>';
+    }
+    var h = '<p><strong>' + im.tags.length + '</strong> {{ t.tools.of }} ' + im.total +
+            ' {{ t.tools.immich_matched }}</p>';
+    if (im.tags.length) {
+        h += '<p class="section-note">' +
+             im.tags.map(function (t) { return '<code>' + t.name + '</code>'; }).join(' ') + '</p>';
+    }
+    if (im.collateral.length) {
+        h += '<p class="section-note" style="color: var(--error);">{{ t.tools.cascade_warning }}<br>' +
+             im.collateral.map(function (n) { return '<code>' + n + '</code>'; }).join(' ') + '</p>';
+    }
+    return h;
+}
 function renderSidecar(res, pattern) {
     var box = document.getElementById('sidecar_result');
     if (!res) { box.innerHTML = ''; return; }
     var h = '';
     if (res.mode === 'scan') {
-        h += '<p><strong>' + res.sidecars_matched + '</strong> {{ t.tools.of }} ' +
-             res.sidecars_total + ' {{ t.tools.sidecars_scanned }}</p>';
-        if (res.tags.length) {
-            h += '<table class="data-table"><thead><tr><th>{{ t.tools.tag }}</th><th>{{ t.tools.count }}</th></tr></thead><tbody>';
-            res.tags.forEach(function (t) {
-                h += '<tr><td><code>' + t[0] + '</code></td><td>' + t[1] + '</td></tr>';
-            });
-            h += '</tbody></table>';
-            h += '<p class="section-note">{{ t.tools.sample }}<br>' +
-                 res.sample.map(function (f) { return '<code>' + f + '</code>'; }).join('<br>') + '</p>';
+        h += res.sidecars_enabled
+            ? '<p><strong>' + res.sidecars_matched + '</strong> {{ t.tools.of }} ' +
+              res.sidecars_total + ' {{ t.tools.sidecars_scanned }}</p>'
+            : '<p class="section-note">{{ t.tools.sidecars_off }}</p>';
+        h += renderImmichPreview(res.immich);
+        if (res.tags.length || (res.immich && res.immich.tags.length)) {
+            if (res.tags.length) {
+                h += '<table class="data-table"><thead><tr><th>{{ t.tools.tag }}</th><th>{{ t.tools.count }}</th></tr></thead><tbody>';
+                res.tags.forEach(function (t) {
+                    h += '<tr><td><code>' + t[0] + '</code></td><td>' + t[1] + '</td></tr>';
+                });
+                h += '</tbody></table>';
+                h += '<p class="section-note">{{ t.tools.sample }}<br>' +
+                     res.sample.map(function (f) { return '<code>' + f + '</code>'; }).join('<br>') + '</p>';
+            }
             h += '<p class="section-note" style="color: var(--success);">{{ t.tools.preview_note }}</p>';
             document.getElementById('btn_remove').disabled = false;
             LAST_SCAN_PATTERN = pattern;
@@ -121,10 +159,19 @@ function renderSidecar(res, pattern) {
             h += '<p class="section-note">{{ t.tools.no_match }}</p>';
         }
     } else {
-        h += '<p><strong>' + res.sidecars_changed + '</strong> {{ t.tools.sidecars_changed }}, ' +
-             res.tags_removed + ' {{ t.tools.tags_removed }}';
+        h += res.sidecars_enabled
+            ? '<p><strong>' + res.sidecars_changed + '</strong> {{ t.tools.sidecars_changed }}, ' +
+              res.tags_removed + ' {{ t.tools.tags_removed }}'
+            : '<p class="section-note">{{ t.tools.sidecars_off }}';
         if (res.sidecars_failed) { h += ' — ' + res.sidecars_failed + ' {{ t.tools.failed }}'; }
         h += '</p>';
+        h += '<p><strong>' + (res.immich_deleted || 0) + '</strong> {{ t.tools.immich_deleted }}';
+
+        if (res.immich_failed) { h += ' — ' + res.immich_failed + ' {{ t.tools.failed }}'; }
+        h += '</p>';
+        if (res.immich_error) {
+            h += '<p class="section-note" style="color: var(--error);">' + res.immich_error + '</p>';
+        }
     }
     box.innerHTML = h;
 }

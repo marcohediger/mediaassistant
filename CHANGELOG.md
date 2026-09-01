@@ -1,5 +1,62 @@
 # Changelog
 
+## v2.32.12 — 2026-09-01
+
+### Tag-Aufräumen: Sidecars und Immich getrennt wählbar
+
+v2.32.11 bereinigte ausschliesslich die XMP-Sidecars. Für Bilder, die in
+Immich liegen, hilft das nicht: Nach einem erfolgreichen Upload entfernt
+IA-08 die lokale Datei, und der Sidecar ist zuvor als `sidecarData` an
+Immich übergeben worden — beide liegen danach nur noch in Immichs
+Speicher, auf den MediaAssistant keinen Zugriff hat.
+
+Ob Immichs Job „Sidecar Metadaten → Synchronisieren" entfernte
+Schlagwörter aus der Datenbank streicht oder nur neue ergänzt, ist nicht
+dokumentiert; darauf zu bauen hiesse raten. Das Werkzeug räumt deshalb
+selbst auf — und zwar dort, wo man es haben will.
+
+**Zwei unabhängige Schalter** decken alle Fälle ab:
+
+- *In XMP-Sidecars bereinigen* (standardmässig an)
+- *Tags in Immich löschen* (standardmässig aus)
+
+Nur Sidecars, nur Immich oder beides; sind beide aus, wird der Lauf
+abgewiesen. Ist die Sidecar-Hälfte aus, entfällt der Durchlauf über alle
+`.xmp`-Dateien — ein reiner Immich-Lauf ist damit in Sekunden fertig
+statt eine grosse Bibliothek zu lesen.
+
+Beide Schalter gehören zur **Vorschau**, nicht bloss zur Ausführung: Wird
+einer zwischen Vorschau und Löschen umgelegt, verweigert der Server den
+Lauf (HTTP 409). Sonst liesse sich ohne Immich vorschauen, umschalten und
+Tags löschen, die nie jemand angezeigt bekam. Im Browser verwirft jede
+Änderung an einem Schalter zusätzlich die angezeigte Vorschau.
+
+Sind Immich-Tags einbezogen, zeigt die Vorschau die passenden Tags mit
+Namen und der Gesamtzahl. Beim Entfernen werden erst die Sidecars
+bereinigt, dann die Tags gelöscht — die Sidecars sind die Quelle, aus der
+eine Neuindizierung zurücklesen würde.
+
+**Warnung vor der Kaskade.** `tag.parentId` ist in Immich
+`ON DELETE CASCADE`: Löscht man ein Tag, verschwinden alle darunter
+liegenden mit, auch solche, die dem Muster nicht entsprechen. Die
+Vorschau listet diese Mitbetroffenen in Rot auf, statt sie
+stillschweigend zu opfern.
+
+**Immich darf fehlen.** Ist die Instanz nicht erreichbar, nennt die
+Vorschau den Grund; eine eingeschaltete Sidecar-Bereinigung läuft
+trotzdem.
+
+Verifiziert im Anwendungs-Image gegen eine Testbibliothek und ein
+Immich-Doppel mit vier Tags (`2020` → `2020-06-22` → `Urlaub`, dazu
+`Familie`):
+  beide Schalter aus  -> 400 abgelehnt
+  nur Immich          -> Vorschau ohne Sidecar-Teil, 1 Tag; entfernt 0/1
+  nur Sidecars        -> Vorschau ohne Immich-Teil, 1 Datei; entfernt 1/0
+  Schalter nach der Vorschau umgelegt -> 409 abgelehnt
+  Kaskaden-Warnung    -> nennt "Urlaub" als mitbetroffen
+  Immich tot          -> Grund in der Vorschau, Sidecars trotzdem sauber
+  danach              -> "Urlaub" im Sidecar unverändert vorhanden
+
 ## v2.32.11 — 2026-09-01
 
 ### Neu: Register „Werkzeuge" mit Tag-Aufräumen in den Sidecars

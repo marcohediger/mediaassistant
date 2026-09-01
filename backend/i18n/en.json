@@ -456,8 +456,8 @@
   },
   "tools": {
     "title": "Tools",
-    "tags_title": "Tag cleanup in sidecars",
-    "tags_desc": "Removes keywords from the library's XMP sidecar files.",
+    "tags_title": "Tag cleanup in sidecars and Immich",
+    "tags_desc": "Removes keywords from the XMP sidecar files and the matching tags from Immich.",
     "tags_hint": "Recursively scans every .xmp file under",
     "pattern": "Pattern (regular expression)",
     "pattern_hint": "Tested against each keyword. Example: ^\\d{4}-\\d{2}-\\d{2}$ matches 2020-06-22.",
@@ -481,6 +481,17 @@
     "err_busy": "A maintenance task is already running",
     "err_no_preview": "Run a preview first",
     "err_pattern_changed": "Pattern changed since the preview — please search again",
-    "preview_note": "Preview — nothing has been changed yet. Exactly this selection will be removed."
+    "preview_note": "Preview — nothing has been changed yet. Exactly this selection will be removed.",
+    "immich_matched": "Immich tags match the pattern",
+    "immich_unavailable": "Immich unreachable — only the sidecars will be cleaned:",
+    "immich_deleted": "tags deleted in Immich",
+    "cascade_warning": "Careful: these tags sit below the matched ones and Immich deletes them too, although they do not match the pattern:",
+    "immich_off": "Immich is not included — only the sidecars will be cleaned.",
+    "err_scope_changed": "The Immich switch changed since the preview — please search again",
+    "scope_sidecars": "Clean XMP sidecars",
+    "scope_immich": "Delete tags in Immich",
+    "scope_hint": "Both halves are independent. Sidecars only, Immich only, or both — at least one must be active. Note: assets uploaded to Immich no longer have a local sidecar.",
+    "sidecars_off": "Sidecars are not included.",
+    "err_no_scope": "At least one of the two halves must be active"
   }
 }
