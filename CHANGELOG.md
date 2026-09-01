@@ -1,5 +1,41 @@
 # Changelog
 
+## v2.32.13 — 2026-09-01
+
+### UI: Löschknopf benennt, was er tatsächlich anfasst
+
+Seit v2.32.12 sind Sidecars und Immich getrennt schaltbar, die
+Schaltfläche hiess aber weiterhin starr „Aus Sidecars entfernen" — auch
+bei einem reinen Immich-Lauf, bei dem kein einziger Sidecar angerührt
+wird. Die verwirrendste Stelle des ganzen Werkzeugs.
+
+Beschriftung und Rückfrage richten sich jetzt nach den Schaltern:
+
+  nur Sidecars -> "Aus Sidecars entfernen"
+  nur Immich   -> "Aus Immich löschen"
+  beides       -> "Aus Sidecars und Immich entfernen"
+
+Beim reinen Immich-Lauf steht in der Sicherheitsabfrage nicht mehr die
+irreführende Warnung über Sidecar-Dateien ohne Sicherung, sondern der
+zutreffende Hinweis: Die Bilder bleiben erhalten, verlieren aber diese
+Verschlagwortung.
+
+### UI: Zwei weitere Muster-Voreinstellungen
+
+Im Live-Bestand tauchten neben `2020-06-22` auch `20.11.2018` und blosse
+Jahreszahlen auf — Formate, die das Datums-Muster bewusst nicht trifft.
+Statt drei Durchgänge gibt es jetzt vier Voreinstellungen:
+
+  Datum JJJJ-MM-TT    ^\d{4}-\d{2}-\d{2}$
+  Datum TT.MM.JJJJ    ^\d{2}\.\d{2}\.\d{4}$
+  Jahreszahl          ^\d{4}$
+  Alle Datumsformate  ^(\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4}|\d{4})$
+
+Geprüft gegen die echten Tag-Namen aus dem Live-Bestand: Das kombinierte
+Muster trifft `2019-10-11`, `20.11.2018` und `2020`, lässt aber `1980er`,
+`Urlaub` und `Familie` unberührt. Alle vier Ausdrücke wurden zusätzlich
+in der Form geprüft, in der sie der Browser aus dem Knopf erhält.
+
 ## v2.32.12 — 2026-09-01
 
 ### Tag-Aufräumen: Sidecars und Immich getrennt wählbar

@@ -464,8 +464,6 @@
     "preset_date": "Date YYYY-MM-DD",
     "preset_year": "Year",
     "scan": "Search",
-    "remove": "Remove from sidecars",
-    "remove_confirm": "The matched keywords will be permanently removed from the sidecar files. No backup is kept. Continue?",
     "running": "Running …",
     "of": "of",
     "sidecars_scanned": "sidecars contain matching keywords",
@@ -492,6 +490,14 @@
     "scope_immich": "Delete tags in Immich",
     "scope_hint": "Both halves are independent. Sidecars only, Immich only, or both — at least one must be active. Note: assets uploaded to Immich no longer have a local sidecar.",
     "sidecars_off": "Sidecars are not included.",
-    "err_no_scope": "At least one of the two halves must be active"
+    "err_no_scope": "At least one of the two halves must be active",
+    "remove_sidecars": "Remove from sidecars",
+    "remove_immich": "Delete in Immich",
+    "remove_both": "Remove from sidecars and Immich",
+    "confirm_sidecars": "The listed keywords will be permanently removed from the sidecar files. No backup is kept. Continue?",
+    "confirm_immich": "The listed tags will be permanently deleted in Immich. The assets themselves stay, but lose this tagging. Continue?",
+    "confirm_both": "The listed keywords will be removed from the sidecar files and the matching tags deleted in Immich. No backup is kept. Continue?",
+    "preset_date_dots": "Date DD.MM.YYYY",
+    "preset_all_dates": "All date formats"
   }
 }
