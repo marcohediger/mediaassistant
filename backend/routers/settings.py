@@ -1,8 +1,7 @@
 import html
 import os
-from urllib.parse import quote
 from fastapi import APIRouter, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy import select
 from config import config_manager
 from database import async_session
@@ -32,13 +31,33 @@ async def _get_modules_dict() -> dict:
 from pipeline.step_ia05_ai import DEFAULT_SYSTEM_PROMPT as _DEFAULT_AI_PROMPT
 
 
+async def _stored_key_len(value_or_none) -> int:
+    """Length of a stored secret, 0 when absent.
+
+    Callers pass an already-awaited value; a key that cannot be decrypted
+    (mismatched .secret_key) must surface as "not stored" rather than break
+    the page that renders it.
+    """
+    return len(value_or_none or "")
+
+
 async def _get_cfg() -> dict:
+    stored_keys = {}
+    for name, key in (("ai", "ai.api_key"), ("ai2", "ai2.api_key"), ("immich", "immich.api_key")):
+        try:
+            stored_keys[name] = await config_manager.get(key, "")
+        except Exception:
+            # Encrypted with a different .secret_key — show as "not stored"
+            # instead of breaking the whole settings page.
+            stored_keys[name] = ""
     return {
         "ui_language": await config_manager.get("ui.language", "de"),
         "ui_theme": await config_manager.get("ui.theme", "dark"),
         "ai_url": await config_manager.get("ai.backend_url", ""),
         "ai_model": await config_manager.get("ai.model", ""),
         "ai_prompt": await config_manager.get("ai.prompt", "") or _DEFAULT_AI_PROMPT,
+        "ai_api_key_len": await _stored_key_len(stored_keys["ai"]),
+        "ai2_api_key_len": await _stored_key_len(stored_keys["ai2"]),
         "ai_image_resize": await config_manager.get("ai.image_resize", False),
         "ai_image_max_px": await config_manager.get("ai.image_max_px", 1024),
         "ai_slots": await config_manager.get("ai.slots", 1),
@@ -64,6 +83,9 @@ async def _get_cfg() -> dict:
         "scheduled_time": await config_manager.get("filewatcher.scheduled_time", "23:00"),
         "library_path": await config_manager.get("library.base_path", "/library"),
         "immich_url": await config_manager.get("immich.url", ""),
+        # Length only — never the key itself. Renders as one placeholder dot
+        # per character so a stored key is distinguishable from an empty field.
+        "immich_api_key_len": await _stored_key_len(stored_keys["immich"]),
         "immich_poll_enabled": await config_manager.get("immich.poll_enabled", False),
         "video_thumbnail_enabled": await config_manager.get("video.thumbnail_enabled", False),
         "video_thumbnail_frames": await config_manager.get("video.thumbnail_frames", 8),
@@ -90,6 +112,14 @@ async def settings_page(request: Request):
         library_categories = cats_result.scalars().all()
         iu_result = await session.execute(select(ImmichUser).order_by(ImmichUser.id))
         immich_users = iu_result.scalars().all()
+
+    from immich_client import get_user_api_key
+    for iu in immich_users:
+        try:
+            key = await get_user_api_key(iu.id)
+        except Exception:
+            key = None
+        iu.api_key_len = await _stored_key_len(key)
 
     # Translate message key from query params
     msg_key = request.query_params.get("msg")
@@ -561,6 +591,13 @@ async def delete_immich_user(request: Request, user_id: int):
     return RedirectResponse(url="/settings?msg=iu_deleted", status_code=302)
 
 
+async def _t_settings(key: str) -> str:
+    """Translated string from the settings section, in the configured language."""
+    from i18n import load_lang, DEFAULT_LANGUAGE
+    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+    return load_lang(lang).get("settings", {}).get(key, key)
+
+
 async def _describe_immich_detail(detail: str) -> str:
     """Translate a check_connection() detail into the configured UI language."""
     from i18n import load_lang, DEFAULT_LANGUAGE
@@ -571,31 +608,36 @@ async def _describe_immich_detail(detail: str) -> str:
 
 @router.post("/immich/test")
 async def test_immich_global(request: Request):
-    """Test the global Immich API key — the per-user entries have their own."""
+    """Test the global Immich API key — the per-user entries have their own.
+
+    Tests the key typed into the field when there is one, otherwise the stored
+    key, so testing does not require saving first. Answers JSON so the button
+    can render the result next to itself instead of reloading the page into a
+    banner at the top.
+    """
     from immich_client import check_connection
-    ok, detail = await check_connection()
-    msg = "immich_test_ok" if ok else "immich_test_failed"
-    msg_type = "" if ok else "&msg_type=error"
+    form = await request.form()
+    typed = (form.get("immich_api_key") or "").strip()
+    ok, detail = await check_connection(api_key=typed or None)
     if not ok:
         detail = await _describe_immich_detail(detail)
-    return RedirectResponse(
-        url=f"/settings?msg={msg}{msg_type}&msg_detail={quote(detail)}",
-        status_code=302,
-    )
+    return JSONResponse({"ok": ok, "detail": detail})
 
 
 @router.post("/immich-user/{user_id}/test")
 async def test_immich_user(request: Request, user_id: int):
+    """Same contract as the global test: typed key wins, result comes back as JSON."""
     from immich_client import check_connection, get_user_api_key
-    key = await get_user_api_key(user_id)
+    form = await request.form()
+    key = (form.get("iu_api_key") or "").strip()
     if not key:
-        return RedirectResponse(url="/settings?msg=iu_not_found&msg_type=error", status_code=302)
+        try:
+            key = await get_user_api_key(user_id)
+        except Exception:
+            key = None
+    if not key:
+        return JSONResponse({"ok": False, "detail": await _t_settings("iu_not_found")})
     ok, detail = await check_connection(api_key=key)
-    msg = "iu_test_ok" if ok else "iu_test_failed"
-    msg_type = "" if ok else "&msg_type=error"
     if not ok:
         detail = await _describe_immich_detail(detail)
-    return RedirectResponse(
-        url=f"/settings?msg={msg}{msg_type}&msg_detail={quote(detail)}",
-        status_code=302,
-    )
+    return JSONResponse({"ok": ok, "detail": detail})

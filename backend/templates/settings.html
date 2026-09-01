@@ -520,7 +520,7 @@
         </div>
         <div class="form-group">
             <label for="ai_api_key">{{ t.settings.api_key }}</label>
-            <input type="password" id="ai_api_key" name="ai_api_key" placeholder="••••••••">
+            <input type="password" id="ai_api_key" name="ai_api_key" placeholder="{{ '•' * cfg.ai_api_key_len }}">
             <small>{{ t.settings.api_key_hint }}</small>
         </div>
         <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
@@ -548,7 +548,7 @@
         </div>
         <div class="form-group">
             <label for="ai2_api_key">{{ t.settings.api_key }}</label>
-            <input type="password" id="ai2_api_key" name="ai2_api_key" placeholder="••••••••">
+            <input type="password" id="ai2_api_key" name="ai2_api_key" placeholder="{{ '•' * cfg.ai2_api_key_len }}">
             <small>{{ t.settings.api_key_hint }}</small>
         </div>
         <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
@@ -701,11 +701,12 @@
         </div>
         <div class="form-group">
             <label for="immich_api_key">{{ t.settings.immich_api_key }}</label>
-            <input type="password" id="immich_api_key" name="immich_api_key" placeholder="••••••••">
+            <input type="password" id="immich_api_key" name="immich_api_key" placeholder="{{ '•' * cfg.immich_api_key_len }}">
             <small>{{ t.settings.immich_api_key_hint }}</small>
         </div>
-        <div class="inbox-actions" style="margin-bottom: 1rem;">
-            <button type="button" class="btn btn-small btn-secondary" onclick="postAction('/settings/immich/test', {})">{{ t.settings.immich_test }}</button>
+        <div class="inbox-actions" style="margin-bottom: 1rem; align-items: center; gap: 0.75rem;">
+            <button type="button" class="btn btn-small btn-secondary" onclick="testConnection('/settings/immich/test', {immich_api_key: document.getElementById('immich_api_key').value}, 'immich_test_result')">{{ t.settings.immich_test }}</button>
+            <span id="immich_test_result" class="test-result"></span>
         </div>
         <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
         <h3>{{ t.settings.immich_poll }}</h3>
@@ -730,7 +731,7 @@
                     </div>
                     <div class="form-group">
                         <label>{{ t.settings.immich_user_api_key }}</label>
-                        <input type="password" data-iu="api_key" placeholder="••••••••">
+                        <input type="password" data-iu="api_key" placeholder="{{ '•' * iu.api_key_len }}">
                     </div>
                 </div>
                 <div class="inbox-options">
@@ -739,9 +740,10 @@
                         <span class="switch-slider-sm"></span>
                         <span>{{ t.settings.active }}</span>
                     </label>
+                    <span id="iu_test_result_{{ iu.id }}" class="test-result"></span>
                     <div class="inbox-actions">
                         <button type="button" class="btn btn-small btn-secondary" onclick="saveImmichUser({{ iu.id }})">{{ t.settings.save }}</button>
-                        <button type="button" class="btn btn-small btn-secondary" onclick="postAction('/settings/immich-user/{{ iu.id }}/test', {})">{{ t.settings.immich_user_test }}</button>
+                        <button type="button" class="btn btn-small btn-secondary" onclick="testConnection('/settings/immich-user/{{ iu.id }}/test', {iu_api_key: document.querySelector('#iu-{{ iu.id }} [data-iu=api_key]').value}, 'iu_test_result_{{ iu.id }}')">{{ t.settings.immich_user_test }}</button>
                         <button type="button" class="btn btn-small btn-danger" onclick="if(confirm('{{ t.settings.immich_user_delete_confirm }}')) postAction('/settings/immich-user/{{ iu.id }}/delete', {})">{{ t.settings.delete }}</button>
                     </div>
                 </div>
@@ -868,6 +870,26 @@ function postAction(url, data) {
     }
     document.body.appendChild(f);
     f.submit();
+}
+function testConnection(url, data, outId) {
+    var out = document.getElementById(outId);
+    out.textContent = '\u2026';
+    out.style.color = '';
+    var body = new URLSearchParams();
+    for (var k in data) { body.append(k, data[k]); }
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body
+    }).then(function (r) {
+        return r.json();
+    }).then(function (d) {
+        out.textContent = d.detail;
+        out.style.color = d.ok ? 'var(--success)' : 'var(--error)';
+    }).catch(function (e) {
+        out.textContent = String(e);
+        out.style.color = 'var(--error)';
+    });
 }
 function saveImmichUser(id) {
     var box = document.getElementById('iu-' + id);

@@ -838,6 +838,7 @@ CONNECTION_STATUS_KEYS = {
     "permission_denied": "status_permission_denied",
     "connection_failed": "status_connection_failed",
     "timeout": "status_timeout",
+    "not_immich": "status_not_immich",
 }
 
 
@@ -862,13 +863,13 @@ def _server_message(resp: httpx.Response) -> str:
     exact missing permission, which is the only thing that tells a user apart
     "wrong key" from "key without the required permission".
     """
+    if "json" not in resp.headers.get("content-type", "").lower():
+        return ""
     try:
         msg = resp.json().get("message")
     except Exception:
-        msg = None
-    if not msg:
-        msg = resp.text.strip()[:200]
-    return " ".join(str(msg).split())
+        return ""
+    return " ".join(str(msg).split()) if msg else ""
 
 
 async def check_connection(*, api_key: str | None = None) -> tuple[bool, str]:
@@ -894,6 +895,13 @@ async def check_connection(*, api_key: str | None = None) -> tuple[bool, str]:
             # permission, so a narrower key authenticates (no 401) and is then
             # refused on every route. The server message is carried along after
             # the sentinel so callers can show why.
+            # Immich answers with JSON. An HTML body means something in front
+            # of it — reverse proxy, firewall, captive portal — replied
+            # instead, and the status code then says nothing about the API key.
+            if "json" not in resp.headers.get("content-type", "").lower():
+                origin = resp.headers.get("server", "")
+                detail = f"HTTP {resp.status_code}"
+                return False, f"not_immich: {detail} ({origin})" if origin else f"not_immich: {detail}"
             if resp.status_code in (401, 403):
                 sentinel = "auth_failed" if resp.status_code == 401 else "permission_denied"
                 server_msg = _server_message(resp)
