@@ -1402,3 +1402,9 @@ a.dup-badge-link:hover { opacity: 0.75; }
     color: var(--text-muted);
     font-size: 0.75rem;
 }
+
+/* Inline result of a connection test, rendered next to its button */
+.test-result {
+    font-size: 0.85rem;
+    word-break: break-word;
+}

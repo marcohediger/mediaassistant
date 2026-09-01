@@ -1,5 +1,64 @@
 # Changelog
 
+## v2.32.4 — 2026-09-01
+
+### UI/Fix: Verbindungstest ohne Umweg, gespeicherte Schlüssel sichtbar, fremde 403 nicht mehr Immich angelastet
+
+**Der Verbindungstest läuft an Ort und Stelle.** Bisher war ein Test eine
+Reise: Key oben eintragen, ganz nach unten scrollen zum Sammel-Speichern,
+wieder hoch zum Testen-Knopf, Seitenneuladen, wieder hoch zum Banner, um
+das Ergebnis zu lesen. Drei Sprünge für eine Ja/Nein-Auskunft.
+
+Beide Testen-Knöpfe schicken jetzt den **ins Feld getippten** Schlüssel
+mit und prüfen nur dann den gespeicherten, wenn das Feld leer ist —
+Speichern vor dem Testen entfällt. Die Routen antworten mit JSON statt
+mit einem Redirect, und das Ergebnis erscheint direkt neben dem Knopf,
+grün oder rot. Kein Seitenneuladen, kein Scrollen, und der getippte Wert
+bleibt stehen.
+
+Damit sind `immich_test_ok`, `immich_test_failed`, `iu_test_ok` und
+`iu_test_failed` überflüssig und aus beiden i18n-Dateien entfernt.
+
+**Passwortfelder zeigen die Länge des gespeicherten Werts.** Bisher stand
+in jedem Key-Feld derselbe feste Placeholder aus acht Punkten — egal ob
+ein Schlüssel hinterlegt war oder nicht. Leer und gespeichert sahen
+identisch aus, und wer ins Feld klickte, sah den Cursor links stehen und
+schloss daraus, nichts sei gespeichert. Jetzt rendert der Placeholder
+einen Punkt pro Zeichen des gespeicherten Werts; kein Wert, keine Punkte.
+
+Bewusst weiterhin **Placeholder statt `value`**: Der Schlüssel verlässt
+den Server nicht, und ein Speichern mit unberührtem Feld kann den
+hinterlegten Wert nicht versehentlich durch Punkte ersetzen. Betroffen
+sind alle vier Felder — globaler Immich-Key, Key je Immich-Benutzer,
+sowie KI-Backend 1 und 2.
+
+**403 von einem fremden Responder wird nicht mehr als fehlende
+Berechtigung ausgegeben.** v2.32.3 hat jeden 403 als "API-Key ohne
+Berechtigung «all»" beschriftet. Im Live-Fall kam der 403 aber gar nicht
+von Immich, sondern als HTML-Fehlerseite von einem vorgelagerten
+Reverse-Proxy, der die Quell-IP des MediaAssistant-Hosts blockte — die
+Anfrage erreichte Immich nie. Die Meldung schickte den Benutzer damit
+mehrfach auf die falsche Fährte, den API-Key zu wechseln.
+
+Immich antwortet immer mit JSON. `check_connection` prüft deshalb den
+Content-Type: kein JSON bedeutet, dass etwas davor geantwortet hat, und
+der Status sagt dann nichts über den API-Key aus. Neuer Sentinel
+`not_immich` → "Antwort kam nicht von Immich (Proxy oder Firewall)",
+inklusive Status und `Server`-Header. `_server_message` liefert nur noch
+JSON-Meldungen, statt rohes HTML in die Oberfläche zu kippen.
+
+**Entschlüsselungsfehler zerlegen die Settings-Seite nicht mehr.** Für
+die Längenanzeige müssen die Schlüssel entschlüsselt werden. Passt
+`.secret_key` nicht zum gespeicherten Chiffrat, warf Fernet bisher bis
+in den Request hinein. Solche Werte gelten jetzt als "nicht gespeichert"
+— was sie praktisch auch sind.
+
+Verifiziert gegen einen lokalen Fake-Immich über alle vier Fälle:
+  HTML 403 -> "Antwort kam nicht von Immich (Proxy oder Firewall) — HTTP 403 (nginx)"
+  JSON 403 -> "API-Key ohne Berechtigung «all» — Missing required permission: all"
+  JSON 401 -> "Auth fehlgeschlagen — Invalid API key"
+  JSON 200 -> "Verbunden"
+
 ## v2.32.3 — 2026-09-01
 
 ### UI/Fix: Immich-Verbindungstest sagt endlich, warum er scheitert
