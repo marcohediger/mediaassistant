@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.32.17 — 2026-09-01
+
+### UI: Laufendes Tag-Aufräumen wird beim Zurückkehren wieder angezeigt
+
+Verlässt man die Seite während eines Laufs, lief die Aufgabe im
+Hintergrund weiter — die Oberfläche wusste davon aber nichts mehr. Beim
+Zurückkehren stand nur „Eine Wartungsaufgabe läuft bereits" neben
+gesperrten Knöpfen, ohne Fortschritt und ohne Ergebnis. Die übrigen
+Aufräum-Aufgaben können das seit v2.32.0; im Werkzeuge-Register fehlte
+es.
+
+Beim Laden der Seite wird jetzt der Status abgefragt:
+
+- **Lauf aktiv** → Knöpfe gesperrt, Fortschrittsanzeige nimmt den Faden
+  wieder auf. Läuft eine *andere* Wartungsaufgabe, sagt die Anzeige das
+  ausdrücklich, statt einen Fehler zu zeigen.
+- **Lauf beendet** → das Ergebnis wird angezeigt. Bei einer Vorschau
+  werden zusätzlich Muster und alle vier Schalter auf den Stand
+  zurückgesetzt, mit dem sie erzeugt wurde — sonst verweigert der Server
+  das anschliessende Entfernen zu Recht, weil die Auswahl nicht mehr zur
+  Vorschau passt.
+
+Dafür trägt das Vorschau-Ergebnis nun auch die Stellung des Schalters
+„Tag danach löschen"; die übrigen drei waren bereits enthalten.
+
+Verifiziert am laufenden Dienst: `/api/jobs/cleanup-status` liefert
+Aufgabentyp, Phase, Muster sowie alle vier Schalterstellungen —
+ausreichend, um die Seite vollständig wiederherzustellen.
+
 ## v2.32.16 — 2026-09-01
 
 ### Fix: Einzelmodus entfernte nur die ersten 1000 Zuordnungen je Tag

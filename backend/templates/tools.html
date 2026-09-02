@@ -135,7 +135,7 @@ function sidecarRun(mode) {
     }).then(function (r) { return r.json(); })
       .then(function (d) {
           if (!d.ok) { sidecarFail(d.detail); return; }
-          pollSidecar(pattern);
+          pollSidecar();
       }).catch(function (e) { sidecarFail(String(e)); });
 }
 
@@ -143,7 +143,43 @@ function sidecarRemove() {
     if (!confirm(document.getElementById('btn_remove').dataset.activeConfirm)) { return; }
     sidecarRun('remove');
 }
-document.addEventListener('DOMContentLoaded', function () { sidecarSubSwitch(); sidecarLabel(); });
+function sidecarRestore(res) {
+    // Put the switches back the way the preview was taken, so the remove
+    // button refers to exactly that run — the server would refuse otherwise.
+    document.getElementById('tag_pattern').value = res.pattern || '';
+    document.getElementById('do_sidecars').checked = !!res.sidecars_enabled;
+    document.getElementById('do_immich').checked = !!(res.immich && res.immich.enabled);
+    document.getElementById('do_per_asset').checked = !!(res.immich && res.immich.per_asset);
+    document.getElementById('do_also_delete').checked = !!res.immich_also_delete;
+    sidecarSubSwitch();
+    sidecarLabel();
+}
+function sidecarResume() {
+    // A run keeps going when the page is closed. On return, pick it back up
+    // instead of leaving the user with "a task is already running".
+    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
+        .then(function (p) {
+            if (p.running) {
+                document.getElementById('btn_scan').disabled = true;
+                document.getElementById('btn_remove').disabled = true;
+                if (p.task === 'sidecar_tags') {
+                    pollSidecar();
+                } else {
+                    document.getElementById('sidecar_state').textContent = '{{ t.tools.other_task }}';
+                }
+                return;
+            }
+            if (p.task === 'sidecar_tags' && p.result) {
+                if (p.result.mode === 'scan') { sidecarRestore(p.result); }
+                renderSidecar(p.result);
+            }
+        }).catch(function () { /* Anzeige bleibt wie sie ist */ });
+}
+document.addEventListener('DOMContentLoaded', function () {
+    sidecarSubSwitch();
+    sidecarLabel();
+    sidecarResume();
+});
 
 function sidecarFail(msg) {
     var state = document.getElementById('sidecar_state');
@@ -152,20 +188,20 @@ function sidecarFail(msg) {
     document.getElementById('btn_scan').disabled = false;
 }
 
-function pollSidecar(pattern) {
+function pollSidecar() {
     fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
       .then(function (p) {
           var state = document.getElementById('sidecar_state');
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
               state.textContent = (p.phase || '') + n;
-              setTimeout(function () { pollSidecar(pattern); }, 1000);
+              setTimeout(pollSidecar, 1000);
               return;
           }
           document.getElementById('btn_scan').disabled = false;
           if (p.error) { sidecarFail(p.error); return; }
           state.textContent = '';
-          renderSidecar(p.result, pattern);
+          renderSidecar(p.result);
       }).catch(function (e) { sidecarFail(String(e)); });
 }
 
@@ -195,7 +231,7 @@ function renderImmichPreview(im) {
     }
     return h;
 }
-function renderSidecar(res, pattern) {
+function renderSidecar(res) {
     var box = document.getElementById('sidecar_result');
     if (!res) { box.innerHTML = ''; return; }
     var h = '';
@@ -217,7 +253,7 @@ function renderSidecar(res, pattern) {
             }
             h += '<p class="section-note" style="color: var(--success);">{{ t.tools.preview_note }}</p>';
             document.getElementById('btn_remove').disabled = false;
-            LAST_SCAN_PATTERN = pattern;
+            LAST_SCAN_PATTERN = res.pattern;
         } else {
             h += '<p class="section-note">{{ t.tools.no_match }}</p>';
         }
