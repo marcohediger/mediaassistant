@@ -407,7 +407,12 @@ function renderMerge(res) {
         ? '<p class="section-note" style="color: var(--error);">{{ t.tools.cancelled }}</p>' : '';
     if (res.mode === 'merge_scan') {
         if (!res.group_count) {
-            box.innerHTML = h + '<p class="section-note">{{ t.tools.merge_none }}</p>';
+            h += '<p class="section-note">{{ t.tools.merge_none }}</p>';
+            if (res.orphan_count) {
+                h += '<p class="section-note">{{ t.tools.merge_orphans }}<br>' +
+                     res.orphans.map(function (n) { return '<code>' + n + '</code>'; }).join(' ') + '</p>';
+            }
+            box.innerHTML = h;
             return;
         }
         h += '<p><strong>' + res.group_count + '</strong> {{ t.tools.merge_groups }}';
@@ -433,6 +438,13 @@ function renderMerge(res) {
         h += '</tbody></table>';
         if (res.group_count > res.groups.length) {
             h += '<p class="section-note">' + '{{ t.tools.merge_shown }}'.replace('{n}', res.groups.length) + '</p>';
+        }
+        if (res.orphan_count) {
+            h += '<p class="section-note">{{ t.tools.merge_orphans }}<br>' +
+                 res.orphans.map(function (n) { return '<code>' + n + '</code>'; }).join(' ') +
+                 (res.orphan_count > res.orphans.length
+                    ? ' <small>… ' + (res.orphan_count - res.orphans.length) + ' weitere</small>' : '') +
+                 '</p>';
         }
         h += '<p class="section-note" style="color: var(--success);">{{ t.tools.merge_preview_note }}</p>';
         MERGE_READY = true;

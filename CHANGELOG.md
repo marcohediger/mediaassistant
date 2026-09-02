@@ -1,5 +1,50 @@
 # Changelog
 
+## v2.32.22 — 2026-09-02
+
+### Fix: zerstörtes `ß` wurde nicht repariert
+
+`Au?en` ist `Außen`, dessen ß eine defekte Zeichenkodierung zerstört
+hat. Der Ersatzsatz probierte aber nur einzelne Buchstaben durch, und
+damit ging die Rechnung nie auf:
+
+    Au?en   mit ? -> s    ergibt  ausen
+    Außen   normalisiert  ergibt  außen  und  aussen
+
+Ein `s` zu wenig, also kein Treffer. `ss` und `ß` gehören jetzt zu den
+Ersatzmöglichkeiten. Damit finden sich:
+
+    Au?en    ->  Außen
+    Stra?e   ->  Strasse
+    Fu?ball  ->  Fußball
+    Grö?e    ->  Grösse
+
+Die heile Entsprechung darf dabei selbst geschrieben sein, wie sie will
+— `Au?enraum` findet `Aussenraum` genauso wie `Außenraum`.
+
+### Neu: kaputte Schreibweisen ohne Entsprechung werden benannt
+
+Ein kaputter Name wird nur dann berichtigt, wenn es die heile Fassung
+irgendwo tatsächlich gibt. Gibt es sie nicht, lässt sich nicht erraten,
+was gemeint war — `Au?enbereich` könnte ohne Partner alles Mögliche
+sein. Solche Namen blieben bisher stumm liegen: sie tauchten in keiner
+Gruppe auf, und die Vorschau erwähnte sie mit keinem Wort.
+
+Die Vorschau führt sie jetzt getrennt auf, mitsamt der Erklärung, warum
+sie stehen bleiben. Damit ist entscheidbar, ob man sie von Hand
+berichtigt oder mit dem Muster-Werkzeug darüber löscht.
+
+Das gilt auch, wenn es überhaupt keine Gruppe gibt: bisher stand dann
+nur „keine unterschiedlichen Schreibweisen gefunden" da — ausgerechnet
+die Namen, wegen denen gesucht wurde, fielen unter den Tisch.
+
+### Mehr Partner mit eingeschalteter Sidecar-Hälfte
+
+Gesucht wird in Sidecars und Immich zusammen. Eine heile Schreibweise,
+die es nur noch in einer XMP-Datei gibt, zählt als Partner — mit
+ausgeschalteter Sidecar-Hälfte bleibt derselbe kaputte Name dagegen
+ohne Entsprechung liegen.
+
 ## v2.32.21 — 2026-09-02
 
 ### Fix: der Hinweistext beschrieb noch den Stand vor den Schaltern
