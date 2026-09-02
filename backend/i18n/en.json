@@ -527,6 +527,7 @@
     "merge_scope_hint": "Both halves recommended: merging in Immich alone lets the next re-index re-create the old spelling from the sidecar. B = photos in Immich, D = sidecar files.",
     "merge_files": "sidecar files will be rewritten",
     "merge_files_done": "sidecar files rewritten",
-    "merge_failed_names": "Not merged (still there, nothing was lost):"
+    "merge_failed_names": "Not merged (still there, nothing was lost):",
+    "merge_orphans": "Damaged spellings with no intact counterpart — there is nothing here to guess from. They are left untouched; fix them by hand or delete them with the pattern tool above:"
   }
 }

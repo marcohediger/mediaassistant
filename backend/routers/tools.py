@@ -224,19 +224,26 @@ def _is_damaged(name: str) -> bool:
     return any(ch in name for ch in _DAMAGED_CHARS)
 
 
-def _damaged_keys(name: str) -> set[str]:
-    """Keys for a name whose umlauts a broken encoding destroyed.
+# What a destroyed character can stand for. `ss` and `ß` are both here and
+# both needed: `Au?en` is `Außen`, whose two normalised forms are `außen`
+# and `aussen` — a single `s` matches neither of them.
+_REPAIRS = ("a", "o", "u", "e", "s", "ss", "ß")
 
-    `?berschwemmungen` is `Überschwemmungen` with the Ü lost. Which letter it
-    was cannot be read off the string, so every plausible one is tried; a
-    wrong guess simply finds no partner and the name stays untouched.
+
+def _damaged_keys(name: str) -> set[str]:
+    """Keys for a name whose special characters a broken encoding destroyed.
+
+    `?berschwemmungen` is `Überschwemmungen` with the Ü lost, `Au?en` is
+    `Außen` with the ß lost. Which character it was cannot be read off the
+    string, so every plausible one is tried; a wrong guess simply finds no
+    partner and the name stays untouched.
     """
     base = name.strip().lower()
     slots = [i for i, ch in enumerate(base) if ch in _DAMAGED_CHARS]
     if not slots or len(slots) > 2:
         return set()
     keys: set[str] = set()
-    for combo in itertools.product("aoues", repeat=len(slots)):
+    for combo in itertools.product(_REPAIRS, repeat=len(slots)):
         chars = list(base)
         for pos, ch in zip(slots, combo):
             chars[pos] = ch
@@ -597,6 +604,13 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
             plan.append({"winner": members[0], "losers": members[1:]})
 
         plan.sort(key=lambda g: -sum(m["assets"] + m["files"] for m in g["losers"]))
+
+        # Damaged names that found no healthy partner are left untouched on
+        # purpose — but silently leaving them out means the user never learns
+        # they are still there. So they are reported.
+        grouped = {m["name"] for g in plan for m in [g["winner"]] + g["losers"]}
+        orphans = sorted(e["name"] for e in universe
+                         if _is_damaged(e["name"]) and e["name"] not in grouped)
         _last_merge.clear()
         _last_merge.update({"groups": plan, "sidecar_files": sidecar_files,
                             "sidecars_enabled": with_sidecars, "immich_enabled": with_immich})
@@ -611,6 +625,8 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
             "moves": sum(m["assets"] for g in plan for m in g["losers"]),
             "files": len({f for g in plan for m in g["losers"]
                           for f in sidecar_files.get(m["name"], [])}),
+            "orphans": orphans[:MAX_SAMPLE],
+            "orphan_count": len(orphans),
         })
         await log_info("tools", f"Schreibweisen: {len(plan)} Gruppen gefunden",
                        f"{sum(len(g['losers']) for g in plan)} Schreibweisen würden zusammengeführt")

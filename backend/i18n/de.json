@@ -527,6 +527,7 @@
     "merge_scope_hint": "Beide Hälften empfohlen: wird nur in Immich zusammengeführt, legt der nächste Einlesevorgang die alte Schreibweise aus der Sidecar-Datei wieder an. B = Bilder in Immich, D = Sidecar-Dateien.",
     "merge_files": "Sidecar-Dateien werden angepasst",
     "merge_files_done": "Sidecar-Dateien angepasst",
-    "merge_failed_names": "Nicht zusammengeführt (stehen weiterhin da, es ging nichts verloren):"
+    "merge_failed_names": "Nicht zusammengeführt (stehen weiterhin da, es ging nichts verloren):",
+    "merge_orphans": "Kaputte Schreibweisen ohne heile Entsprechung — hier lässt sich nicht erraten, was gemeint war. Sie bleiben unangetastet; entweder von Hand berichtigen oder mit dem Muster darüber löschen:"
   }
 }
