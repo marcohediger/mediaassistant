@@ -71,8 +71,43 @@
     </div>
 </div>
 
+<div class="settings-section" id="section-tag-merge">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.tools.merge_title }}</h2>
+            <span class="section-desc">{{ t.tools.merge_desc }}</span>
+        </div>
+    </div>
+    <div class="section-body">
+        <p class="section-note" style="margin-bottom: 1rem;">{{ t.tools.merge_hint }}</p>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; margin-bottom: 0.5rem;">
+            <label class="switch-inline">
+                <input type="checkbox" id="merge_sidecars" checked onchange="mergeInvalidate()">
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.tools.scope_sidecars }}</span>
+            </label>
+            <label class="switch-inline">
+                <input type="checkbox" id="merge_immich" checked onchange="mergeInvalidate()">
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.tools.scope_immich }}</span>
+            </label>
+        </div>
+        <p class="section-note" style="margin-bottom: 1rem;">{{ t.tools.merge_scope_hint }}</p>
+
+        <div class="inbox-actions" style="align-items: center; gap: 0.75rem;">
+            <button type="button" class="btn btn-small btn-primary" id="btn_merge_scan" onclick="mergeRun('scan')">{{ t.tools.merge_scan }}</button>
+            <button type="button" class="btn btn-small btn-danger" id="btn_merge_apply" disabled onclick="mergeApply()">{{ t.tools.merge_apply }}</button>
+            <button type="button" class="btn btn-small btn-secondary" id="btn_merge_cancel" style="display: none;" onclick="sidecarCancel()">{{ t.tools.cancel }}</button>
+            <span id="merge_state" class="test-result"></span>
+        </div>
+        <div id="merge_result" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+
 <script>
 var LAST_SCAN_PATTERN = null;
+var MERGE_READY = false;
 
 function sidecarScope() {
     return {
@@ -162,12 +197,22 @@ function sidecarResume() {
     fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
         .then(function (p) {
             if (p.running) {
+                if (p.task === 'tag_merge') {
+                    mergeBusy(true);
+                    pollMerge();
+                    return;
+                }
                 sidecarBusy(true);
                 if (p.task === 'sidecar_tags') {
                     pollSidecar();
                 } else {
                     document.getElementById('sidecar_state').textContent = '{{ t.tools.other_task }}';
                 }
+                return;
+            }
+            if (p.task === 'tag_merge' && p.result) {
+                if (p.result.mode === 'merge_scan') { mergeRestore(p.result); }
+                renderMerge(p.result);
                 return;
             }
             if (p.task === 'sidecar_tags' && p.result) {
@@ -288,6 +333,126 @@ function renderSidecar(res) {
         if (res.immich_error) {
             h += '<p class="section-note" style="color: var(--error);">' + res.immich_error + '</p>';
         }
+    }
+    box.innerHTML = h;
+}
+function mergeInvalidate() {
+    // Any change voids the preview — the server refuses an apply whose scope
+    // differs from the previewed one, this keeps the buttons honest.
+    MERGE_READY = false;
+    document.getElementById('btn_merge_apply').disabled = true;
+    document.getElementById('merge_result').innerHTML = '';
+}
+function mergeRestore(res) {
+    document.getElementById('merge_sidecars').checked = !!res.sidecars_enabled;
+    document.getElementById('merge_immich').checked = !!res.immich_enabled;
+}
+function mergeBusy(on) {
+    document.getElementById('btn_merge_scan').disabled = on;
+    document.getElementById('btn_merge_apply').disabled = on || !MERGE_READY;
+    var c = document.getElementById('btn_merge_cancel');
+    c.style.display = on ? '' : 'none';
+    c.disabled = false;
+}
+function mergeFail(msg) {
+    var state = document.getElementById('merge_state');
+    state.textContent = msg;
+    state.style.color = 'var(--error)';
+    mergeBusy(false);
+}
+function mergeRun(mode) {
+    var state = document.getElementById('merge_state');
+    state.textContent = '{{ t.tools.running }}';
+    state.style.color = '';
+    if (mode === 'scan') { MERGE_READY = false; document.getElementById('merge_result').innerHTML = ''; }
+    mergeBusy(true);
+    var body = new URLSearchParams();
+    if (document.getElementById('merge_sidecars').checked) { body.append('sidecars', '1'); }
+    if (document.getElementById('merge_immich').checked) { body.append('immich', '1'); }
+    fetch('/tools/merge/' + mode, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.ok) { mergeFail(d.detail); return; }
+            pollMerge();
+        }).catch(function (e) { mergeFail(String(e)); });
+}
+function mergeApply() {
+    if (!confirm('{{ t.tools.merge_confirm }}')) { return; }
+    mergeRun('apply');
+}
+function pollMerge() {
+    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
+      .then(function (p) {
+          var state = document.getElementById('merge_state');
+          if (p.running) {
+              var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
+              state.textContent = (p.phase || '') + n;
+              setTimeout(pollMerge, 1000);
+              return;
+          }
+          mergeBusy(false);
+          if (p.error) { mergeFail(p.error); return; }
+          state.textContent = '';
+          renderMerge(p.result);
+      }).catch(function (e) { mergeFail(String(e)); });
+}
+function renderMerge(res) {
+    var box = document.getElementById('merge_result');
+    if (!res) { box.innerHTML = ''; return; }
+    var h = res.cancelled
+        ? '<p class="section-note" style="color: var(--error);">{{ t.tools.cancelled }}</p>' : '';
+    if (res.mode === 'merge_scan') {
+        if (!res.group_count) {
+            box.innerHTML = h + '<p class="section-note">{{ t.tools.merge_none }}</p>';
+            return;
+        }
+        h += '<p><strong>' + res.group_count + '</strong> {{ t.tools.merge_groups }}';
+        if (res.immich_enabled) { h += ', ' + res.moves + ' {{ t.tools.merge_moves }}'; }
+        if (res.sidecars_enabled) { h += ', ' + res.files + ' {{ t.tools.merge_files }}'; }
+        h += '</p>';
+        if (res.immich_error) {
+            h += '<p class="section-note" style="color: var(--error);">' + res.immich_error + '</p>';
+        }
+        h += '<table class="data-table"><thead><tr><th>{{ t.tools.merge_winner }}</th><th>{{ t.tools.tag }}</th></tr></thead><tbody>';
+        res.groups.forEach(function (g) {
+            var num = function (m) {
+                var parts = [];
+                if (res.immich_enabled) { parts.push(m.assets + '\u2009B'); }
+                if (res.sidecars_enabled) { parts.push(m.files + '\u2009D'); }
+                return ' <small>(' + parts.join(', ') + ')</small>';
+            };
+            h += '<tr><td><code>' + g.winner.name + '</code>' + num(g.winner) + '</td><td>' +
+                 g.losers.map(function (l) {
+                     return '<code>' + l.name + '</code>' + num(l);
+                 }).join(' ') + '</td></tr>';
+        });
+        h += '</tbody></table>';
+        if (res.group_count > res.groups.length) {
+            h += '<p class="section-note">' + '{{ t.tools.merge_shown }}'.replace('{n}', res.groups.length) + '</p>';
+        }
+        h += '<p class="section-note" style="color: var(--success);">{{ t.tools.merge_preview_note }}</p>';
+        MERGE_READY = true;
+        document.getElementById('btn_merge_apply').disabled = false;
+    } else {
+        if (res.sidecars_enabled) {
+            h += '<p><strong>' + res.files_changed + '</strong> {{ t.tools.merge_files_done }}';
+            if (res.files_failed) { h += ' — ' + res.files_failed + ' {{ t.tools.failed }}'; }
+            h += '</p>';
+        }
+        if (res.immich_enabled) {
+            h += '<p><strong>' + res.merged + '</strong> {{ t.tools.merge_done }}, ' +
+                 res.moved + ' {{ t.tools.merge_moved }}';
+            if (res.failed) { h += ' — ' + res.failed + ' {{ t.tools.failed }}'; }
+            h += '</p>';
+        }
+        if (res.error) {
+            h += '<p class="section-note" style="color: var(--error);">' + res.error + '</p>';
+        }
+        MERGE_READY = false;
     }
     box.innerHTML = h;
 }

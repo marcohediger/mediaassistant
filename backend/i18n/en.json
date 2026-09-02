@@ -508,6 +508,24 @@
     "preset_mixed": "Mixed scripts",
     "preset_noletters": "No letters",
     "cancel": "Cancel",
-    "cancelled": "Cancelled — the numbers below show what was done up to that point."
+    "cancelled": "Cancelled — the numbers below show what was done up to that point.",
+    "merge_title": "Merge spelling variants",
+    "merge_desc": "Finds tags that mean the same thing but differ in capitalisation, accents, hyphens or spacing.",
+    "merge_hint": "Only Immich is searched. The spelling with the most photos wins; the others are moved onto it and then deleted. No photo loses a tag.",
+    "merge_scan": "Find variants",
+    "merge_apply": "Merge",
+    "merge_confirm": "Each group's tags will be moved onto the main spelling and then deleted. Continue?",
+    "merge_groups": "groups found",
+    "merge_moves": "assignments will be moved",
+    "merge_none": "No differing spellings found.",
+    "merge_winner": "kept",
+    "merge_shown": "Showing the first {n} groups; all of them are merged.",
+    "merge_done": "tags merged",
+    "merge_moved": "assignments moved",
+    "merge_preview_note": "Preview — nothing has been changed yet.",
+    "err_changed": "The selection changed since the preview — please search again",
+    "merge_scope_hint": "Both halves recommended: merging in Immich alone lets the next re-index re-create the old spelling from the sidecar. B = photos in Immich, D = sidecar files.",
+    "merge_files": "sidecar files will be rewritten",
+    "merge_files_done": "sidecar files rewritten"
   }
 }
