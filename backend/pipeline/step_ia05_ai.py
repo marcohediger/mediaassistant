@@ -130,6 +130,21 @@ def has_mixed_scripts(text: str) -> bool:
     return len(_scripts_of(text)) > 1
 
 
+def is_unusable_keyword(text: str) -> bool:
+    """Keywords that carry no meaning and only clutter the tag list.
+
+    Two kinds: a mix of writing systems (a model artefact), and anything
+    without a single letter — bare numbers, version fragments like "7.2",
+    lone punctuation, and the question-mark runs left behind when text was
+    squeezed through an encoding that could not represent it.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return True
+    if has_mixed_scripts(text):
+        return True
+    return not any(ch.isalpha() for ch in text)
+
+
 async def execute(job, session) -> dict:
     """IA-05: KI-Analyse via OpenAI-kompatiblem Endpunkt.
 
@@ -450,14 +465,14 @@ Use this information together with the image content for your classification."""
     # once such a tag reaches Immich it has to be hunted down by hand.
     tags = result.get("tags")
     if isinstance(tags, list):
-        clean = [t for t in tags if not (isinstance(t, str) and has_mixed_scripts(t))]
+        clean = [t for t in tags if not is_unusable_keyword(t)]
         if len(clean) != len(tags):
             dropped = [t for t in tags if t not in clean]
             result["tags"] = clean
             result["_dropped_mixed_script"] = dropped
             await log_warning(
                 "ai",
-                f"{job.debug_key} IA-05: {len(dropped)} Schlagwörter mit gemischten Schriften verworfen",
+                f"{job.debug_key} IA-05: {len(dropped)} unbrauchbare Schlagwörter verworfen",
                 ", ".join(str(d) for d in dropped)[:400],
             )
 

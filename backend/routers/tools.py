@@ -33,6 +33,15 @@ MAX_SAMPLE = 25
 # field changed in the meantime or the library moved on.
 _last_scan: dict = {}
 
+# Set by the cancel route, read by the loops. A module-level flag rather than
+# a key in _cleanup_progress: that dict gets rebound on every reset, so a
+# reference taken earlier would point at the wrong object.
+_cancel: dict = {"requested": False}
+
+
+def _cancelled() -> bool:
+    return bool(_cancel["requested"])
+
 
 def _compile(pattern: str) -> re.Pattern | None:
     try:
@@ -127,6 +136,8 @@ async def _scan_immich(rx: re.Pattern, per_asset: bool) -> dict:
         from routers.api import _cleanup_progress
         _cleanup_progress["total"] = len(entries)
         for i, e in enumerate(entries, 1):
+            if _cancelled():
+                break
             try:
                 e["assets"] = await count_tag_assets(e["id"])
             except Exception as ex:
@@ -175,6 +186,7 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset:
                            "immich_tags": immich["tags"] if with_immich else []})
         _cleanup_finish(result={
             "mode": "scan",
+            "cancelled": _cancelled(),
             "pattern": pattern,
             "library": library,
             "sidecars_enabled": with_sidecars,
@@ -212,6 +224,8 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
         removals = [f"-Subject-={value}" for value in counts]
         changed, failed = 0, 0
         for start in range(0, len(files), REMOVE_CHUNK):
+            if _cancelled():
+                break
             chunk = files[start:start + REMOVE_CHUNK]
             proc = await asyncio.to_thread(
                 subprocess.run,
@@ -242,6 +256,8 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
             _cleanup_progress["total"] = len(immich_tags)
             _cleanup_progress["current"] = 0
             for i, tag in enumerate(immich_tags, 1):
+                if _cancelled():
+                    break
                 _cleanup_progress["phase"] = (
                     f"Zuordnungen entfernen: {tag.get('name', '')} "
                     f"({i}/{len(immich_tags)}, {immich_deleted} erledigt)"
@@ -249,6 +265,8 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
                 try:
                     ids = await list_tag_assets(tag["id"])
                     for start in range(0, len(ids), REMOVE_CHUNK):
+                        if _cancelled():
+                            break
                         await untag_assets(tag["id"], ids[start:start + REMOVE_CHUNK])
                         immich_deleted += len(ids[start:start + REMOVE_CHUNK])
                 except Exception as e:
@@ -262,6 +280,8 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
                 _cleanup_progress["current"] = 0
                 from immich_client import delete_tag
                 for n, tag in enumerate(immich_tags, 1):
+                    if _cancelled():
+                        break
                     _cleanup_progress["phase"] = f"Leere Tags löschen ({n}/{len(immich_tags)})"
                     _cleanup_progress["current"] = n
                     try:
@@ -275,6 +295,8 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
             _cleanup_progress["current"] = 0
             from immich_client import delete_tag
             for n, tag in enumerate(immich_tags, 1):
+                if _cancelled():
+                    break
                 _cleanup_progress["phase"] = f"Tags löschen ({n}/{len(immich_tags)})"
                 _cleanup_progress["current"] = n
                 try:
@@ -289,6 +311,7 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
         _last_scan.clear()
         _cleanup_finish(result={
             "mode": "remove",
+            "cancelled": _cancelled(),
             "pattern": pattern,
             "sidecars_enabled": bool(_last_scan.get("sidecars_enabled")),
             "sidecars_changed": changed,
@@ -359,6 +382,7 @@ async def _start(request: Request, worker, *, require_preview: bool = False) -> 
                 or bool(_last_scan.get("immich_also_delete")) != also_delete):
             return JSONResponse({"ok": False, "detail": await _t("err_scope_changed")}, status_code=409)
 
+    _cancel["requested"] = False
     _cleanup_reset("sidecar_tags")
     asyncio.create_task(worker(pattern, with_sidecars, with_immich, per_asset, also_delete))
     return JSONResponse({"ok": True})
@@ -369,6 +393,19 @@ async def tools_page(request: Request):
     return await render(request, "tools.html", {
         "library_path": await config_manager.get("library.base_path", "/library"),
     })
+
+
+@router.post("/tags/cancel")
+async def cancel_sidecar_tags(request: Request):
+    """Ask the running pass to stop at the next safe point.
+
+    Cooperative rather than a hard kill: the loops finish the batch they are
+    in, so nothing is left half-written, and the result still reports what was
+    done up to that point.
+    """
+    _cancel["requested"] = True
+    await log_info("tools", "Abbruch angefordert")
+    return JSONResponse({"ok": True})
 
 
 @router.post("/tags/scan")

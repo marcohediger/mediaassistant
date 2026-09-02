@@ -935,21 +935,23 @@ async def list_tags(*, api_key: str | None = None) -> list[dict]:
 async def count_tag_assets(tag_id: str, *, api_key: str | None = None) -> int:
     """Exact number of assets carrying a tag — one request, no paging.
 
-    The search answer carries `total`; asking for a single item is enough.
+    Uses `/search/statistics`, not `/search/metadata`. The latter's `total`
+    describes the returned page despite its wording, so asking with `size=1`
+    answered 1 for a tag holding hundreds of pictures — every preview count
+    was wrong until this was measured against a real instance.
     """
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich-URL oder API-Key fehlt")
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
-            f"{url}/api/search/metadata",
+            f"{url}/api/search/statistics",
             headers={"x-api-key": api_key, "Content-Type": "application/json"},
-            json={"tagIds": [tag_id], "size": 1},
+            json={"tagIds": [tag_id]},
         )
     if resp.status_code != 200:
         raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
-    assets = (resp.json() or {}).get("assets") or {}
-    return int(assets.get("total") or assets.get("count") or 0)
+    return int((resp.json() or {}).get("total") or 0)
 
 
 async def list_tag_assets(tag_id: str, *, api_key: str | None = None) -> list[str]:

@@ -1,5 +1,54 @@
 # Changelog
 
+## v2.32.19 — 2026-09-02
+
+### Fix: Vorschau zählte jedes Tag mit 1 statt mit seiner echten Bildzahl
+
+`count_tag_assets` fragte `POST /search/metadata` mit `size=1` und las das
+Feld `total`. Dessen Beschreibung lautet „Total number of matching
+assets" — gemessen an einer echten Instanz beschreibt es aber die
+**zurückgegebene Seite**. Ein Tag mit 33 Bildern meldete deshalb `1`.
+
+    search/statistics              -> total = 33   richtig
+    search/metadata mit size=1     -> total =  1   falsch
+    search/metadata mit size=1000  -> total = 33
+
+Gezählt wird jetzt über `POST /search/statistics`, das genau dafür
+gedacht ist. Gegengeprüft an vier echten Tags (33, 60, 92, 9 Bilder):
+Zählung und vollständiges Blättern stimmen überein.
+
+Das Entfernen war davon nicht betroffen — es blättert seit v2.32.16
+selbst und arbeitete vollständig. Falsch waren allein die Zahlen in der
+Vorschau.
+
+### Neu: Abbrechen-Knopf
+
+Ein Lauf über hunderte Tags liess sich bisher nur durch einen Neustart
+stoppen. Neben den Aktionsknöpfen erscheint während eines Laufs
+**Abbrechen**. Der Abbruch ist kooperativ: Die Schleifen beenden den
+Block, in dem sie stecken, und halten dann an — nichts bleibt halb
+geschrieben. Das Ergebnis wird trotzdem angezeigt und ausdrücklich als
+abgebrochen gekennzeichnet, mit den bis dahin erreichten Zahlen.
+
+### Neu: Voreinstellung „Ohne Buchstaben"
+
+    ^[\W\d_]+$
+
+Trifft alles, was **keinen einzigen Buchstaben** enthält: reine Zahlen,
+Versionsfragmente wie `7.2`, einzelne Satzzeichen wie `..`, beide
+Datumsformate und die Fragezeichen-Ketten, die entstehen, wenn Text durch
+eine Kodierung gepresst wird, die seine Zeichen nicht darstellen kann.
+
+An 27 echten Tag-Namen geprüft: alle 14 unbrauchbaren getroffen, alle 13
+sinnvollen verschont — darunter `70 Jahre`, `80er-Jahre-Party`,
+`Αγία Μαρίνα`, `مطار دبي` und `白宮`.
+
+### IA-05 verwirft dieselben Fälle an der Quelle
+
+Der Filter aus v2.32.18 prüfte nur auf gemischte Schriften. Er verwirft
+jetzt auch Schlagwörter ohne Buchstaben und leere Zeichenketten — dieselbe
+Regel wie die neue Voreinstellung, nur bevor etwas geschrieben wird.
+
 ## v2.32.18 — 2026-09-01
 
 ### Fix: IA-05 verwirft Schlagwörter mit gemischten Schriften

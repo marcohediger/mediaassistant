@@ -51,6 +51,7 @@
             <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^(\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4}|\\d{4})$')">{{ t.tools.preset_all_dates }}</button>
             <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^(\\d+|\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4})$')">{{ t.tools.preset_numeric }}</button>
             <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('(?=.*[A-Za-z])(?=.*[\\u4e00-\\u9fff])|(?=.*[\\u0370-\\u03ff])(?=.*[\\u0400-\\u04ff])')">{{ t.tools.preset_mixed }}</button>
+            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^[\\W\\d_]+$')">{{ t.tools.preset_noletters }}</button>
         </div>
 
         <div class="inbox-actions" style="align-items: center; gap: 0.75rem;">
@@ -62,6 +63,7 @@
                     data-confirm-sidecars="{{ t.tools.confirm_sidecars }}"
                     data-confirm-immich="{{ t.tools.confirm_immich }}"
                     data-confirm-both="{{ t.tools.confirm_both }}">{{ t.tools.remove_sidecars }}</button>
+            <button type="button" class="btn btn-small btn-secondary" id="btn_cancel" style="display: none;" onclick="sidecarCancel()">{{ t.tools.cancel }}</button>
             <span id="sidecar_state" class="test-result"></span>
         </div>
 
@@ -127,8 +129,7 @@ function sidecarRun(mode) {
     if (document.getElementById('do_also_delete').checked) { body.append('also_delete', '1'); }
     state.textContent = '{{ t.tools.running }}';
     state.style.color = '';
-    document.getElementById('btn_scan').disabled = true;
-    document.getElementById('btn_remove').disabled = true;
+    sidecarBusy(true);
     fetch('/tools/tags/' + mode, {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -161,8 +162,7 @@ function sidecarResume() {
     fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
         .then(function (p) {
             if (p.running) {
-                document.getElementById('btn_scan').disabled = true;
-                document.getElementById('btn_remove').disabled = true;
+                sidecarBusy(true);
                 if (p.task === 'sidecar_tags') {
                     pollSidecar();
                 } else {
@@ -182,11 +182,22 @@ document.addEventListener('DOMContentLoaded', function () {
     sidecarResume();
 });
 
+function sidecarCancel() {
+    document.getElementById('btn_cancel').disabled = true;
+    fetch('/tools/tags/cancel', {method: 'POST'});
+}
+function sidecarBusy(on) {
+    document.getElementById('btn_scan').disabled = on;
+    document.getElementById('btn_remove').disabled = on || !LAST_SCAN_PATTERN;
+    var c = document.getElementById('btn_cancel');
+    c.style.display = on ? '' : 'none';
+    c.disabled = false;
+}
 function sidecarFail(msg) {
     var state = document.getElementById('sidecar_state');
     state.textContent = msg;
     state.style.color = 'var(--error)';
-    document.getElementById('btn_scan').disabled = false;
+    sidecarBusy(false);
 }
 
 function pollSidecar() {
@@ -199,7 +210,7 @@ function pollSidecar() {
               setTimeout(pollSidecar, 1000);
               return;
           }
-          document.getElementById('btn_scan').disabled = false;
+          sidecarBusy(false);
           if (p.error) { sidecarFail(p.error); return; }
           state.textContent = '';
           renderSidecar(p.result);
@@ -235,7 +246,8 @@ function renderImmichPreview(im) {
 function renderSidecar(res) {
     var box = document.getElementById('sidecar_result');
     if (!res) { box.innerHTML = ''; return; }
-    var h = '';
+    var h = res.cancelled
+        ? '<p class="section-note" style="color: var(--error);">{{ t.tools.cancelled }}</p>' : '';
     if (res.mode === 'scan') {
         h += res.sidecars_enabled
             ? '<p><strong>' + res.sidecars_matched + '</strong> {{ t.tools.of }} ' +
