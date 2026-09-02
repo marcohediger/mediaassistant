@@ -173,6 +173,9 @@ Für das, was schon in Sidecars und Immich liegt, gibt es das Register
 fehlen weiterhin. Ein sinnvolles, aber falsches Wort erkennt kein Filter
 — dafür bleibt `ma-ghost-tag-detect`.
 
+Die KI-Stufe für Synonyme und Englisch → Deutsch ist
+[Issue #45](https://git.marcohediger.ch/MediaAssistant/ma-core/issues/45).
+
 ---
 
 ## Mittel / Niedrig (Auswahl)

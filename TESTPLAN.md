@@ -619,6 +619,9 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 > soll, und keine Änderung darf ohne bestätigte Vorschau passieren.
 > Getestet gegen eine echte Immich-Instanz und echte XMP-Dateien —
 > Zählungen und Blätterlogik lassen sich mit Attrappen nicht prüfen.
+>
+> **Noch kein automatisiertes Skript** — bisher Handarbeit,
+> siehe [Issue #44](https://git.marcohediger.ch/MediaAssistant/ma-core/issues/44).
 
 **Löschen nach Muster**
 

@@ -676,7 +676,7 @@ Zwei Beobachtungen aus dem Lauf, beide in `KNOWN_RISKS.md` festgehalten:
 
 **Offene Lücke:** ein Skript `test_tools_tags.py`, das 12e/12f
 automatisiert. Ohne das ist die Tag-Pflege bei jeder Änderung wieder
-Handarbeit.
+Handarbeit. → [Issue #44](https://git.marcohediger.ch/MediaAssistant/ma-core/issues/44)
 
 ### 2026-04-13c (v2.29.1)
 

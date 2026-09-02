@@ -171,7 +171,7 @@ vollständige **Immich-Instanz** und alle Hilfsdienste verfügbar:
 | Container | Zugang | Zweck |
 |---|---|---|
 | `mediaassistant-dev` | `http://localhost:8000` | MA Dev (hot-reload) |
-| `immich_server` | `http://192.168.0.104:2283` | Immich API + Web-UI |
+| `immich_server` | `http://192.168.0.104:2283` | Immich API + Web-UI (**v2.6.3**, Produktion läuft 3.1.0 — [Issue #48](https://git.marcohediger.ch/MediaAssistant/ma-core/issues/48)) |
 | `immich_machine_learning` | intern | Immich ML |
 | `immich_redis` | intern | Redis für Immich |
 | `immich_postgres` | intern | PostgreSQL für Immich |
