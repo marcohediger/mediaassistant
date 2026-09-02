@@ -505,6 +505,9 @@
     "immich_untagged": "Zuordnungen in Immich entfernt",
     "also_delete": "Danach das leere Tag ebenfalls löschen",
     "other_task": "Eine andere Wartungsaufgabe läuft gerade.",
-    "preset_mixed": "Gemischte Schriften"
+    "preset_mixed": "Gemischte Schriften",
+    "preset_noletters": "Ohne Buchstaben",
+    "cancel": "Abbrechen",
+    "cancelled": "Abgebrochen — die Zahlen unten zeigen, was bis dahin erledigt wurde."
   }
 }
