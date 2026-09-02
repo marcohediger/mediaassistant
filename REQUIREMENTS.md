@@ -1,5 +1,21 @@
 # REQUIREMENTS — MediaAssistant
 
+> **Historisches Dokument — die Spezifikation von v1.** Es hält fest, was
+> ursprünglich gebaut werden sollte, samt „Nicht umsetzen" und „Optional
+> (v3)". Es wird bewusst **nicht** nachgeführt: als Zeitdokument ist es
+> mehr wert denn als zweite, halb gepflegte Beschreibung des Ist-Zustands.
+>
+> Der aktuelle Stand steht woanders:
+> - Funktionsumfang für Nutzer → [`README.md`](README.md)
+> - Alle Funktionen im Code → [`SHARED_FUNCTIONS.md`](SHARED_FUNCTIONS.md)
+> - Was wann warum geändert wurde → [`CHANGELOG.md`](CHANGELOG.md)
+> - Konventionen und Stolperfallen → [`AGENTS.md`](AGENTS.md)
+>
+> Seit dieser Spec dazugekommen und hier **nicht** beschrieben: Duplikat-
+> Review mit Seite-an-Seite-Vergleich, OIDC-Anmeldung, KI-Loadbalancer über
+> mehrere Backends, Register „Werkzeuge" (Tag-Aufräumen und Schreibweisen
+> zusammenführen) und die nur lesende Diagnose-API.
+
 ## Projektbeschreibung
 Dauerhafter Docker-Service der Fotos/Videos automatisch verarbeitet:
 EXIF auslesen → KI-Analyse → Tags schreiben → in Zielstruktur ablegen.

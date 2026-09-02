@@ -1,6 +1,10 @@
 # Known Risks
 
-Ergebnis eines Logik- und Architektur-Reviews (Stand: 2026-04-20). Dokumentiert bekannte theoretische Risiken — **keine akuten Bugs**. Die meisten triggern nur in seltenen Crash-/Race-Szenarien. Kontext: Single-Admin-LAN-Setup, Server mit USV, kein Internet-Exposure.
+Ergebnis eines Logik- und Architektur-Reviews (Stand: 2026-04-20, durchgesehen 2026-09-02). Dokumentiert bekannte theoretische Risiken — **keine akuten Bugs**. Die meisten triggern nur in seltenen Crash-/Race-Szenarien. Kontext: Single-Admin-LAN-Setup, Server mit USV, kein Internet-Exposure.
+
+Einträge, die inzwischen erledigt sind, bleiben mit ✅ und Fix-Version
+stehen — die Begründung, warum es ein Risiko war, ist beim nächsten
+ähnlichen Fall mehr wert als eine gelöschte Zeile.
 
 **Grundsatz:** Nicht anfassen solange das System stabil läuft. Diese Liste dient als Orientierung, falls später gezielt refactorisiert wird.
 
@@ -59,12 +63,23 @@ ExifTool `-o` überschreibt existierende `.xmp`-Sidecar ohne User-eingetragene T
 
 ---
 
-### K-8 — `delete_asset(force=True)` hardcoded
-**Datei:** `backend/immich_client.py:666-684`
+### K-8 — `delete_asset(force=True)` hardcoded — ✅ schärfster Pfad entschärft (v2.32.5)
+**Datei:** `backend/immich_client.py`
 
 Umgeht Immich-Trash. Keine Recovery möglich. Insbesondere relevant in Kombination mit K-4.
 
-**Fix (nicht priorisiert):** `force=False` default, explizite Opt-in-Pfade.
+**Was tatsächlich passiert ist:** `safe_upload_asset` behandelte einen
+Upload, den Immich als Duplikat abwies, wie einen eigenen Fehlschlag und
+rief `delete_asset(force=True)` auf die zurückgegebene ID — das ist aber
+die ID des **bestehenden** Assets. Ein zweiter Upload eines Bildes, das
+schon in Immich lag, konnte so das Original permanent löschen.
+
+`AssetMediaResponseDto` hat ein Pflichtfeld `status` mit `created` oder
+`duplicate`. Das wird jetzt gelesen; `orphan_id` wird nur bei
+`status != "duplicate"` gesetzt.
+
+**Rest-Risiko (nicht priorisiert):** `force=False` als Default, explizite
+Opt-in-Pfade.
 
 ---
 
@@ -88,14 +103,20 @@ Serielle `await run_pipeline(job.id)`-Aufrufe im Poll-Loop. 100 neue Assets → 
 
 ---
 
-### H-3 — Immich-Poll ohne Overlap-Buffer
-**Datei:** `backend/filewatcher.py:382`
+### H-3 — Immich-Poll ohne Overlap-Buffer — ⚠️ ist eingetreten (v2.32.4)
+**Datei:** `backend/filewatcher.py`
 
 `last_poll = now` ohne Overlap. Clock-Skew zwischen MediaAssistant-Host und Immich-Server droppt Assets im Grenzbereich.
 
-**Fix (gering):** `last_poll = now - timedelta(minutes=5)`. Dedup via `already_by_id` existiert.
+**Der teure Teil war ein anderer:** Der Cursor wurde **auch nach einem
+gescheiterten Abruf** weitergestellt. Damit übersprang der Poller genau
+die Assets, deren Abruf fehlgeschlagen war — in Produktion vier Wochen
+Handy-Uploads, die nie in die Pipeline kamen. Ein `poll_failed`-Guard
+verhindert das jetzt; die Lücke wurde per Cursor-Rückdrehung über die
+ganze Historie aufgeholt.
 
-**Issue:** siehe Tracker.
+**Rest-Risiko (gering):** Der Clock-Skew-Overlap fehlt weiterhin. Dedup
+via `already_by_id` existiert.
 
 ---
 
@@ -135,12 +156,22 @@ Nur ein konfigurierter Provider pro Job. README suggeriert Nominatim → Photon 
 
 ---
 
-### H-12 — AI-Tags ohne Validierung
-**Datei:** `backend/pipeline/step_ia05_ai.py:384-413` → IA-07
+### H-12 — AI-Tags ohne Validierung — 🔶 teilweise entschärft (v2.32.x)
+**Datei:** `backend/pipeline/step_ia05_ai.py` → IA-07
 
-AI-Response-Tags werden 1:1 in EXIF/Immich geschrieben. Keine Max-Länge, keine Whitelist, keine Profanity/Sprach-Filter. `ma-ghost-tag-detect` ist Post-hoc-Workaround.
+AI-Response-Tags wurden 1:1 in EXIF/Immich geschrieben. Keine Max-Länge, keine Whitelist, keine Profanity/Sprach-Filter. `ma-ghost-tag-detect` ist Post-hoc-Workaround.
 
-**Fix (nicht priorisiert):** Server-Side Tag-Validation (max-len, Regex-Whitelist).
+**Was jetzt greift:** `is_unusable_keyword` verwirft an der Quelle, was
+offensichtlich Ausschuss ist — leere Wörter, Wörter ohne einen einzigen
+Buchstaben (`?????`, `---`, reine Zahlen) und Schrift-Mischungen wie
+`Sunset夕日`. Verworfenes wird geloggt.
+
+Für das, was schon in Sidecars und Immich liegt, gibt es das Register
+**Werkzeuge**: Löschen nach Muster und Zusammenführen von Schreibweisen.
+
+**Rest-Risiko (nicht priorisiert):** Max-Länge und inhaltliche Whitelist
+fehlen weiterhin. Ein sinnvolles, aber falsches Wort erkennt kein Filter
+— dafür bleibt `ma-ghost-tag-detect`.
 
 ---
 
@@ -210,6 +241,63 @@ Lange Video-Konvertierungen in IA-04 können als stale markiert werden obwohl si
 Status-Wert `orphan` in Enum, aber nirgends gesetzt. Nur in Filtern.
 
 **Fix (gering, aufräumen):** Entfernen oder dokumentieren wann er gesetzt werden soll.
+
+---
+
+## Neu erkannt (2026-09-02)
+
+### S-1 — Immich legt gelöschte Tags aus der Sidecar neu an
+**Betrifft:** jede Tag-Operation gegen Immich
+
+Immich schreibt Tag-Namen in die XMP-Sidecar des Assets. Wird ein Tag in
+Immich gelöscht, steht der Name aber weiter in der Datei, legt der
+nächste Einlesevorgang das Tag **neu an — mit neuer ID**. An einer
+laufenden Instanz reproduziert, Datei im Zugriff:
+
+    <rdf:li>Teststrand</rdf:li>
+    <rdf:li>TESTSTRAND</rdf:li>
+
+Das ist kein Bug in MediaAssistant und lässt sich von aussen nicht
+abstellen. Konsequenz für jede künftige Tag-Funktion: **Immich allein
+anzufassen genügt nie.** Aufräumen und Zusammenführen haben deshalb
+beide Schalter, Sidecar-Hälfte voreingestellt an.
+
+### S-2 — Hintergrund-Tasks starben lautlos
+**Datei:** `backend/main.py` — ✅ behoben (v2.32.9)
+
+Ein NameError in `start_filewatcher` legte Scannen, Pollen und
+Verarbeiten still. Der Task starb beim Start, die App lief weiter, das
+Dashboard zeigte nichts an — **drei Releases lang, ohne eine einzige
+Meldung.** Gefunden wurde es erst über die Diagnose-API.
+
+`_supervise` hüllt jetzt jeden Hintergrund-Task ein und schreibt seinen
+Tod in die DB.
+
+**Die eigentliche Lehre:** Die Migrationen waren unit-getestet, der
+Startpfad selbst nie. Ein Test, der `start_filewatcher` wirklich
+aufruft, hätte das in einer Sekunde gefunden.
+
+### S-3 — Werkzeuge ändern die Library in grossem Umfang
+**Datei:** `backend/routers/tools.py`
+
+Löschen und Zusammenführen fassen tausende XMP-Dateien und Immich-Tags in
+einem Lauf an. Es gibt kein Undo.
+
+Abgesichert ist das durch: Pflicht-Vorschau, serverseitige Prüfung, dass
+Muster und Schalter beim Ausführen exakt der Vorschau entsprechen (sonst
+HTTP 409), Abbruch-Flag in jeder Schleife, und Protokoll vor und nach
+jedem Lauf.
+
+**Nicht abgesichert:** ein zu weit gefasster regulärer Ausdruck, den der
+Nutzer in der Vorschau durchwinkt. Die Vorschau zeigt Trefferzahl und
+Beispiele — sie zu lesen bleibt Teil der Bedienung.
+
+### S-4 — Immichs Index hinkt Schreibvorgängen nach
+**Betrifft:** Tests, nicht Produktion
+
+Direkt nach `tag_assets` melden `count_tag_assets` und `list_tag_assets`
+noch `0`; nach ~2 s stimmt es. Ein Test ohne Wartezeit misst sich selbst
+und produziert Phantom-Fehler.
 
 ---
 

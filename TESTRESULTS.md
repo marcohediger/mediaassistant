@@ -642,6 +642,42 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 
 Kurze, **anonymisierte** Bemerkungen — keine personenbezogenen Daten.
 
+### 2026-09-02 (v2.32.20) — **manuell verifiziert, kein Skript**
+
+> **Wichtig:** Die TOOL-* und DIAG-* IDs aus `TESTPLAN.md` 12e/12f haben
+> **noch kein automatisiertes Skript.** Was unten steht, wurde von Hand
+> gegen die Dev-Immich-Instanz und echte XMP-Dateien geprüft. Diese Zeile
+> ist keine Suite-Statistik und gehört nicht in die Matrix oben.
+
+Geprüft und bestanden:
+
+- Gruppierung der Schreibweisen: Gross-/Kleinschreibung, Umlaut-Formen,
+  Leerzeichen und Bindestriche fallen zusammen; verschiedene Wörter und
+  Mehrzahl-Formen bleiben getrennt; Namen anderer Schriften fallen nicht
+  zusammen. (TOOL-M1 bis M5)
+- Kaputte Umlaute: eindeutige Fälle werden zugeordnet, mehrdeutige nach
+  Grösse entschieden, kaputte Namen verbinden nie zwei gesunde, mehr als
+  zwei kaputte Stellen bleiben unangetastet. (TOOL-D1 bis D7)
+- Sidecar-Lauf über vier echte XMP-Dateien: Verlierer ersetzt, übrige
+  Schlagwörter unverändert, Datei mit beiden Schreibweisen behält genau
+  eine. (TOOL-M9, M10)
+- Immich-Lauf Ende zu Ende: Gewinner trägt danach die Vereinigung aller
+  Bilder, Verlierer-Tags weg, kaputter Name gewinnt nicht. (TOOL-M7, M8,
+  D3)
+
+Zwei Beobachtungen aus dem Lauf, beide in `KNOWN_RISKS.md` festgehalten:
+
+- Immichs Index hinkt Schreibvorgängen ~2 s nach. Ein erster Testlauf
+  ohne Wartezeit meldete Nullen und sah wie ein Zählfehler aus — es war
+  der Test, der zu früh gemessen hat. (S-4)
+- Ein in Immich gelöschtes Tag kam mit neuer ID zurück, weil sein Name
+  noch in der XMP-Datei stand. Das hat das Design geändert: das
+  Zusammenführen fasst seither beide Seiten an. (S-1)
+
+**Offene Lücke:** ein Skript `test_tools_tags.py`, das 12e/12f
+automatisiert. Ohne das ist die Tag-Pflege bei jeder Änderung wieder
+Handarbeit.
+
 ### 2026-04-13c (v2.29.1)
 
 - Vollständiger Testlauf aller 8 Suites.

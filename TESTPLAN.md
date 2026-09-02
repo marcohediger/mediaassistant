@@ -613,6 +613,72 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 - **NFL-I2b:** Retry mit Datei nur in Immich → Datei reachable nach Retry
 - **NFL-I2c:** Retry mit Datei nur in Immich → Immich-Asset noch da
 
+## 12e. Werkzeuge — Tag-Pflege (TOOL)
+
+> **Kritisch:** Kein Bild darf ein Schlagwort verlieren, das es behalten
+> soll, und keine Änderung darf ohne bestätigte Vorschau passieren.
+> Getestet gegen eine echte Immich-Instanz und echte XMP-Dateien —
+> Zählungen und Blätterlogik lassen sich mit Attrappen nicht prüfen.
+
+**Löschen nach Muster**
+
+- **TOOL-S1:** Suche liefert Trefferzahl, Schlagwortliste und Beispiel-Dateien
+- **TOOL-S2:** Immich-Hälfte zählt je Tag die **echte** Bildzahl (nicht die Seitengrösse)
+- **TOOL-S3:** Vorschau zeigt Kaskaden-Kollateral (Kind-Tags von `parentId`)
+- **TOOL-R1:** Entfernen ohne vorherige Vorschau → HTTP 409
+- **TOOL-R2:** Muster nach der Vorschau geändert → HTTP 409
+- **TOOL-R3:** Schalter nach der Vorschau geändert → HTTP 409
+- **TOOL-R4:** Sidecars: Schlagwort ist nach dem Lauf aus der XMP verschwunden
+- **TOOL-R5:** Sidecars: übrige Schlagwörter der Datei unverändert
+- **TOOL-R6:** Immich: Tag mit >1000 Zuordnungen wird **vollständig** geleert
+- **TOOL-R7:** Per-Asset-Modus entfernt die Zuordnung, Tag bleibt bestehen
+- **TOOL-R8:** Per-Asset + „Tag danach löschen" entfernt auch das leere Tag
+- **TOOL-C1:** Abbrechen während des Laufs stoppt die nächste Schleife
+- **TOOL-C2:** Abgebrochener Lauf meldet `cancelled` und Teilzahlen
+- **TOOL-P1:** Seite verlassen und zurückkehren → laufender Auftrag wird weiter angezeigt
+- **TOOL-P2:** Nach Abschluss zeigt die Seite das Ergebnis des letzten Laufs
+
+**Schreibweisen zusammenführen**
+
+- **TOOL-M1:** `Strand|strand|STRAND` bilden eine Gruppe
+- **TOOL-M2:** `Zürich|Zurich|Zuerich` bilden eine Gruppe (beide Normalformen)
+- **TOOL-M3:** `Europapark|Europa Park|Europa-Park` bilden eine Gruppe
+- **TOOL-M4:** `Haus`/`Maus` und `Hund`/`Hunde` bleiben **getrennt**
+- **TOOL-M5:** Griechische und arabische Namen fallen nicht zusammen
+- **TOOL-M6:** Gewinner = meiste Bilder + Dateien; bei Gleichstand der längere Name
+- **TOOL-M7:** Nach dem Lauf trägt der Gewinner die **Vereinigung** aller Bilder
+- **TOOL-M8:** Verlierer-Tags sind danach in Immich weg
+- **TOOL-M9:** Sidecars: Verlierer-Schreibweise ist durch die Gewinner-Schreibweise ersetzt
+- **TOOL-M10:** Datei, die schon beide Schreibweisen trug, hat danach **genau eine** (keine Dublette)
+- **TOOL-M11:** Ausführen ohne Vorschau → HTTP 409
+- **TOOL-M12:** Schalter nach der Vorschau geändert → HTTP 409
+
+**Kaputte Umlaute**
+
+- **TOOL-D1:** `?berschwemmungen` wird `Überschwemmungen` zugeordnet
+- **TOOL-D2:** `K?se` wird `Käse` zugeordnet
+- **TOOL-D3:** Kaputte Schreibweise gewinnt nie, auch mit mehr Bildern
+- **TOOL-D4:** `M?ller` bei `Müller` **und** `Moller` → Entscheidung nach Grösse, nicht Alphabet
+- **TOOL-D5:** Kaputter Name verbindet nie zwei gesunde Namen miteinander
+- **TOOL-D6:** `?????` (mehr als zwei kaputte Stellen) bleibt unangetastet
+- **TOOL-D7:** Kaputter Name ohne Partner bleibt unangetastet
+
+## 12f. Diagnose-API (DIAG)
+
+> Nur lesend. Kein Aufruf darf etwas verändern, kein Geheimnis austreten.
+
+- **DIAG-A1:** Ohne Token → HTTP 404 (nicht 401 — der Endpunkt verrät sich nicht)
+- **DIAG-A2:** Mit falschem Token → HTTP 404
+- **DIAG-A3:** Mit ausgeschaltetem Token → HTTP 404
+- **DIAG-A4:** Mit gültigem Token → HTTP 200 und vollständiger Report
+- **DIAG-A5:** Mehrere Token gleichzeitig gültig
+- **DIAG-S1:** Kein Geheimnis im Report — nur `set` / `unset` / `undecryptable`
+- **DIAG-S2:** Kein Aufruf schreibt Logs oder Cache (`record=False`)
+- **DIAG-R1:** `?logs=N` begrenzt die Zeilenzahl, Obergrenze greift
+- **DIAG-R2:** `?level=ERROR` filtert nach Stufe
+- **DIAG-R3:** `?job=MA-…` liefert die Historie eines Jobs
+- **DIAG-R4:** Report enthält Version, Pipeline-Zustand, Modul-Zustände, Einstellungen, Job-Zahlen, Immich- und KI-Probe, Inboxen
+
 ## 13. Race-Condition-Tests
 
 > Code-Pfad-Tests gegen die `run_pipeline`/`retry_job`-Race-

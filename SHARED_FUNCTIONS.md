@@ -98,6 +98,38 @@
 | `copy_asset_metadata` | `async (from_id, to_id, *, api_key=None) -> dict` | Alben/Faces/Stacks kopieren. |
 | `delete_asset` | `async (asset_id, *, force=True, api_key=None) -> dict` | Löschen (**permanent** per Default). |
 
+### Tags (Server-weit)
+
+> Die `*_assets`-Helper arbeiten auf Tag-Ebene, nicht auf Asset-Ebene.
+> `tag_asset`/`untag_asset` bleiben für einzelne Assets.
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `list_tags` | `async (*, api_key=None) -> list[dict]` | Alle Tags des Accounts. Wirft, damit der Aufrufer den Grund melden kann. |
+| `count_tag_assets` | `async (tag_id, *, api_key=None) -> int` | Exakte Bildzahl über `POST /search/statistics`. **Nicht** `search/metadata` — dessen `total` beschreibt die Seite, nicht den Treffer. |
+| `list_tag_assets` | `async (tag_id, *, api_key=None) -> list[str]` | Alle Asset-IDs eines Tags, blättert bis zum Ende (`nextCursor` **und** `nextPage`). |
+| `tag_assets` | `async (tag_id, asset_ids, *, api_key=None) -> None` | Tag an mehrere Assets hängen (`PUT /tags/{id}/assets`). |
+| `untag_assets` | `async (tag_id, asset_ids, *, api_key=None) -> None` | Zuordnung lösen, Tag bleibt (`DELETE /tags/{id}/assets`). |
+| `delete_tag` | `async (tag_id, *, api_key=None) -> None` | Tag löschen. **Kaskadiert auf Kind-Tags** (`parentId ON DELETE CASCADE`). |
+
+### Fehler & Diagnose
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `fetch_asset_info` | `async (asset_id, *, api_key=None) -> tuple[dict\|None, str]` | Asset-Details **plus** Grund, wenn keine kommen (`not_found`, `no_access`, …). |
+| `describe_connection_detail` | `(detail, i18n) -> str` | Übersetzt einen Verbindungs-Statuscode in einen lesbaren Satz. |
+| `_server_message` | `(resp) -> str` | Fehlertext **nur** aus JSON-Antworten. Verhindert, dass HTML eines Reverse-Proxys als Immich-Meldung durchgeht. |
+| `ImmichDuplicateUnavailable` | `RuntimeError` | Upload lief in ein Duplikat, dessen Original nicht erreichbar ist. |
+
+> **Zwei gemessene Eigenheiten von Immich**, die jeder Aufrufer kennen muss:
+> 1. **Der Index hinkt ~2 s nach.** Direkt nach `tag_assets` melden sowohl
+>    `count_tag_assets` als auch `list_tag_assets` noch `0`. Wer sofort
+>    nachzählt, misst sich selbst — nicht den Server.
+> 2. **Gelöschte Tags kommen zurück.** Immich schreibt Tag-Namen in die
+>    XMP-Sidecar. Steht der Name dort noch, legt der nächste Einlesevorgang
+>    das Tag neu an — mit neuer ID. Tag-Operationen in Immich sind nur
+>    dauerhaft, wenn die Sidecar mitgezogen wird.
+
 ---
 
 ## config.py — ConfigManager
@@ -186,6 +218,15 @@
 
 ---
 
+## main.py — App-Startup
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `lifespan` | `asynccontextmanager` | Startet und beendet die Hintergrund-Tasks. |
+| `_supervise` | `async (name, coro)` | Hüllt einen Hintergrund-Task ein und schreibt seinen Tod in die DB. Ohne das stirbt ein Task lautlos: eine Regression liess Filewatcher, Poller und Worker über drei Releases stehen, ohne eine einzige Meldung. **Muss über dem `@asynccontextmanager`-Dekorator stehen**, sonst greift der Dekorator auf `_supervise` statt auf `lifespan`. |
+
+---
+
 ## filewatcher.py — Dateiüberwachung & Poller
 
 | Funktion | Signatur | Beschreibung |
@@ -201,6 +242,12 @@
 | `_next_debug_key` | `async () -> str` | Nächster Debug-Key (In-Memory Counter). |
 | `_pipeline_worker` | `async (shutdown_event)` | Background-Worker: Jobs aus Queue verarbeiten. |
 | `_scan_csv_retry` | `async ()` | CSV-Retry-Ordner scannen. |
+| `_recover_immich_error_jobs` | `async ()` | Einmal-Migration: Jobs, die an einem Immich-Fehler dauerhaft hingen, zurück in die Queue. Flag `migration.immich_error_recovery` wird **nur bei Erfolg** gesetzt. |
+| `_repair_immich_poll_cursor` | `async ()` | Einmal-Migration: `immich.last_poll` auf den ältesten Immich-Job minus einen Tag zurückdrehen, wenn der Cursor übersprungen hat. Flag `migration.immich_cursor_repair`. |
+
+> **`immich.last_poll` wird nach einem fehlgeschlagenen Abruf nicht
+> weitergestellt.** Sonst überspringt der Poller genau die Assets, deren
+> Abruf gescheitert ist — in Produktion waren das vier Wochen Uploads.
 | `_run_job` | `async (job_id, filename, debug_key)` | Einzelnen Pipeline-Job starten. |
 
 ---
@@ -254,13 +301,20 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | IA-02 | `step_ia02_duplicates.py` | Duplikat-Erkennung (SHA256 + pHash) | `execute_video_phash`, `_quality_score`, `_compute_phash`, `_compute_video_phash`, `_phash_from_preview`, `_file_exists`, `_extract_folder_tags`, `_handle_duplicate` |
 | IA-03 | `step_ia03_geocoding.py` | Geocoding (GPS → Ort) | `_reverse_nominatim`, `_reverse_photon`, `_reverse_google`, `_http_get_with_retry`, `_throttle`, `_cache_key` |
 | IA-04 | `step_ia04_convert.py` | Format-Konvertierung (→ temp JPEG) | `_extract_video_frames`, `_ffmpeg_extract_frame`, `_glob_temp_files` |
-| IA-05 | `step_ia05_ai.py` | KI-Analyse (Tags, Description) | `_resize_for_ai` |
+| IA-05 | `step_ia05_ai.py` | KI-Analyse (Tags, Description) | `_resize_for_ai`, `has_mixed_scripts`, `is_unusable_keyword`, `_scripts_of` |
 | IA-06 | `step_ia06_ocr.py` | OCR-Texterkennung | — |
 | IA-07 | `step_ia07_exif_write.py` | Keywords/Description schreiben | `_write_direct`, `_write_sidecar` |
 | IA-08 | `step_ia08_sort.py` | Sortierung / Immich-Upload | `_get_folder_album_names`, `_tag_immich_asset`, `_resolve_path`, `_is_dir_empty`, `_force_remove_dir`, `_cleanup_empty_dirs`, `_eval_exif_expression`, `_eval_single_condition`, `_match_sorting_rules` |
 | IA-09 | `step_ia09_notify.py` | E-Mail-Benachrichtigung | — |
 | IA-10 | `step_ia10_cleanup.py` | Temp-Dateien aufräumen | — |
 | IA-11 | `step_ia11_log.py` | Job-Abschluss loggen | — |
+
+> **Schlagwort-Filter in IA-05:** `is_unusable_keyword` verwirft ein Wort,
+> bevor es gespeichert wird, wenn es leer ist, keinen einzigen Buchstaben
+> enthält (`?????`, `---`, reine Zahlen) oder Schriften mischt
+> (`Sunset夕日`) — solche Wörter entstehen, wenn das Modell ins Straucheln
+> kommt, und sind hinterher in Sidecars **und** Immich zu putzen. Verworfene
+> Wörter werden geloggt, nicht stillschweigend geschluckt.
 
 ---
 
@@ -287,13 +341,66 @@ Jeder Step hat: `async execute(job, session) -> dict`
 |---|---|
 | `dashboard` | Dashboard HTML-Seite. |
 | `dashboard_json` | Live-Update JSON. |
-| `_get_module_status` | Health-Status aller Module. |
+| `_get_module_status` | Health-Status aller Module. `record=False` liest nur, ohne Logs/Cache zu schreiben — dafür nutzt es die Diagnose-API. |
 | `_get_throughput` | Durchsatz-Statistiken. |
-| `_check_ai_backend` / `_check_ai_backend_2` | KI-Backend Connectivity. |
+| `_probe_ai_backend` | Gemeinsame Prüfung für beide KI-Backends. Trennt „Backend aus" (ConnectError) von „Backend beschäftigt" (ReadTimeout → gilt weiter als bereit). Timeout aus `ai.timeout`, gedeckelt auf 30 s. |
+| `_check_ai_backend` / `_check_ai_backend_2` | Dünne Aufrufer von `_probe_ai_backend`. |
 | `_check_geocoding` | Geocoding Connectivity. |
 | `_check_smtp` | SMTP Connectivity. |
 | `_check_filewatcher` | Inbox-Verzeichnisse prüfen. |
 | `_check_immich` | Immich Connectivity. |
+
+### routers/tools.py — Werkzeuge (Tag-Pflege)
+
+> Beide Abschnitte teilen sich den Fortschritts-Slot aus `routers/api.py`
+> (`_cleanup_progress`) und unterscheiden sich über den Task-Namen
+> `sidecar_tags` bzw. `tag_merge`. Deshalb läuft immer nur einer.
+
+| Funktion | Beschreibung |
+|---|---|
+| `tools_page` | HTML-Seite des Registers. |
+| `scan_sidecar_tags` / `remove_sidecar_tags` | Suchen und Entfernen nach Muster. |
+| `scan_merge` / `apply_merge` | Suchen und Ausführen des Zusammenführens. |
+| `cancel_sidecar_tags` | Setzt das Abbruch-Flag; jede Schleife prüft es. |
+| `_start` | Gemeinsamer Start: lehnt ab, wenn schon etwas läuft oder der Umfang von der Vorschau abweicht. |
+
+**Sidecar-Helper**
+
+| Funktion | Beschreibung |
+|---|---|
+| `_read_library_subjects` | Ein `exiftool -j -Subject -r` über die ganze Library. |
+| `_subjects` | `Subject` als Liste — exiftool liefert bei einem einzigen Wert einen blanken String. |
+| `_collect` | Treffer-Schlagwort → Anzahl, plus die Dateien, die es tragen. |
+
+**Zusammenführen (Schreibweisen)**
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `_merge_keys` | `(name) -> set[str]` | Zwei normalisierte Formen je Name: NFKD ohne Diakritika ohne Sonderzeichen, plus die Variante mit ausgeschriebenen Umlauten. So trifft `Zürich` sowohl `Zurich` als auch `Zuerich`. Buchstaben aller Schriften überleben — griechische und arabische Namen fallen nicht zusammen. |
+| `_group_variants` | `(tags) -> list[list[dict]]` | Union-Find über gemeinsame Schlüssel. Nur Gruppen mit mehr als einem Mitglied. |
+| `_is_damaged` / `_damaged_keys` | `(name)` | Namen mit `?` oder `\ufffd`: alle plausiblen Umlaute werden durchprobiert (max. 2 kaputte Stellen). |
+| `_build_groups` | `(names) -> (groups, pending)` | Erst die starken Varianten, dann die kaputten Namen **anhängen**. Ein kaputter Name darf nie zwei gesunde verbinden — `M?ller` passt auf `Müller` wie auf `Moller`. Mehrdeutige kommen als `pending` zurück und werden vom Aufrufer nach Grösse entschieden. |
+| `_scan_merge` | `async (with_sidecars, with_immich)` | Vorschau über **beide** Quellen. Die Namensmenge ist die Vereinigung aus Sidecar-Schlagwörtern und Immich-Tags. |
+| `_merge_apply` | `async ()` | Führt genau den Plan aus der Vorschau aus. Sidecars zuerst, Immich danach. |
+
+> **Gewinner-Regel:** kaputte Schreibweise nie, sonst meiste Bilder +
+> Dateien, bei Gleichstand der längere Name — der hat seine Umlaute und
+> Leerzeichen noch.
+
+> **exiftool-Reihenfolge beim Ersetzen:** `-Subject-=alt … -Subject-=neu
+> -Subject+=neu`. Das Entfernen des Gewinners **vor** dem Hinzufügen
+> verhindert eine Dublette in Dateien, die schon beide Schreibweisen tragen.
+
+### routers/diagnostics.py — Diagnose-API (nur lesend)
+
+| Funktion | Beschreibung |
+|---|---|
+| `diagnostics` | Der gesamte Report als JSON. Query: `?logs=N&level=…&job=MA-…`. |
+| `_authorized` | Bearer-Token gegen die aktiven Token-Hashes. **Ohne gültigen Token: 404**, nicht 401 — der Endpunkt verrät seine Existenz nicht. |
+| `token_hash` / `_active_hashes` | SHA-256; im Klartext wird ein Token nur einmal bei der Erzeugung angezeigt. |
+| `_secret_state` | Gibt für Geheimnisse **nur** `set` / `unset` / `undecryptable` zurück, nie den Wert. |
+| `_probe` | Verbindungstest gegen eine URL für den Report. |
+| `_int_param` | Query-Parameter mit Default und Obergrenze. |
 
 ### routers/duplicates.py — Duplikat-UI
 
