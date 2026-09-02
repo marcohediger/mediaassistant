@@ -504,6 +504,7 @@
     "per_asset_total": "Affects {n} asset assignments.",
     "immich_untagged": "assignments removed in Immich",
     "also_delete": "Delete the emptied tag afterwards",
-    "other_task": "Another maintenance task is running."
+    "other_task": "Another maintenance task is running.",
+    "preset_mixed": "Mixed scripts"
   }
 }

@@ -1,5 +1,42 @@
 # Changelog
 
+## v2.32.18 — 2026-09-01
+
+### Fix: IA-05 verwirft Schlagwörter mit gemischten Schriften
+
+Im Live-Bestand standen Tags wie `Hallen走廊`, `Ski道`, `Sch屬sel` und
+`Ρижама` — deutsche Wörter mit einem eingestreuten CJK-Zeichen, oder ein
+griechisches Rho mitten im kyrillischen Wort. Keine Zeichensatz-
+Verstümmelung: Das mehrsprachige Modell (`qwen3-vl`) setzt gelegentlich
+ein fremdes Token mitten ins Wort. Wiederherstellen lässt sich das nicht,
+denn `屬` enthält nicht die Zeichen von `lüs` — es ist schlicht ein
+anderes Zeichen.
+
+IA-05 prüft die Schlagwörter des Modells jetzt auf Schriftmischung und
+verwirft die betroffenen, bevor sie in Sidecar oder Immich landen. Was
+verworfen wurde, steht als Warnung im Log — die Entscheidung bleibt
+nachvollziehbar.
+
+**Einheitliche Schriften bleiben unangetastet.** Griechische Ortsnamen
+(`Δήμος Αλίμου`), arabische Flughäfen (`مطار دبي`) und chinesische
+Bezeichnungen (`白宮`) stammen aus dem Geocoding und sind gültig; nur die
+Mischung aus zwei Systemen ist das Artefakt.
+
+Verifiziert an 20 echten Beispielen aus dem Live-Bestand: alle acht
+gemischten verworfen, alle zwölf einheitlichen behalten — darunter
+`Café`, `Île de Ré` und `Zürich`, deren Akzente korrekt als lateinisch
+gelten.
+
+### UI: Voreinstellung „Gemischte Schriften"
+
+Für die bereits vorhandenen Tags eine sechste Voreinstellung im
+Werkzeuge-Register:
+
+    (?=.*[A-Za-z])(?=.*[\u4e00-\u9fff])|(?=.*[\u0370-\u03ff])(?=.*[\u0400-\u04ff])
+
+Sie trifft dieselben Fälle wie der neue Filter und verschont die
+einheitlich fremdsprachigen Tags.
+
 ## v2.32.17 — 2026-09-01
 
 ### UI: Laufendes Tag-Aufräumen wird beim Zurückkehren wieder angezeigt
