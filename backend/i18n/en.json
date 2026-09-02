@@ -511,7 +511,7 @@
     "cancelled": "Cancelled — the numbers below show what was done up to that point.",
     "merge_title": "Merge spelling variants",
     "merge_desc": "Finds tags that mean the same thing but differ in capitalisation, accents, hyphens or spacing.",
-    "merge_hint": "Only Immich is searched. The spelling with the most photos wins; the others are moved onto it and then deleted. No photo loses a tag.",
+    "merge_hint": "The spelling with the most photos wins; on a tie, the longer one. The other tags are moved onto it first and deleted only afterwards — no photo loses a keyword.",
     "merge_scan": "Find variants",
     "merge_apply": "Merge",
     "merge_confirm": "Each group's tags will be moved onto the main spelling and then deleted. Continue?",
@@ -526,6 +526,7 @@
     "err_changed": "The selection changed since the preview — please search again",
     "merge_scope_hint": "Both halves recommended: merging in Immich alone lets the next re-index re-create the old spelling from the sidecar. B = photos in Immich, D = sidecar files.",
     "merge_files": "sidecar files will be rewritten",
-    "merge_files_done": "sidecar files rewritten"
+    "merge_files_done": "sidecar files rewritten",
+    "merge_failed_names": "Not merged (still there, nothing was lost):"
   }
 }

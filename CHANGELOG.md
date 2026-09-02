@@ -1,5 +1,53 @@
 # Changelog
 
+## v2.32.21 — 2026-09-02
+
+### Fix: der Hinweistext beschrieb noch den Stand vor den Schaltern
+
+Über den Schaltern stand „Gesucht wird ausschliesslich in Immich" —
+geblieben aus der ersten Fassung, bevor das Zusammenführen die Sidecars
+mitbekam. Direkt darunter warb ein zweiter Hinweis für genau diese
+Sidecar-Hälfte. Der Text widersprach der Bedienoberfläche, an der er
+klebte.
+
+### Fix: „ReadTimeout:" und dahinter nichts
+
+`httpx.ReadTimeout` trägt keine Meldung, und die Formatierung setzte
+stur `f"{typ}: {meldung}"` zusammen. Ein Lauf mit sieben
+fehlgeschlagenen Tags meldete deshalb wörtlich:
+
+    ReadTimeout:
+
+Das ist genau so viel Information wie gar keine Meldung. Leere
+Ausnahmen bekommen jetzt einen Satz:
+
+    ReadTimeout: Immich hat nicht rechtzeitig geantwortet
+    ConnectTimeout: Immich war nicht erreichbar
+
+### Neu: fehlgeschlagene Schreibweisen werden benannt
+
+Bisher stand nur eine Zahl da. Welche sieben von 786 Tags übrig
+geblieben waren, liess sich weder ablesen noch nachschlagen. Jetzt
+nennt das Ergebnis die betroffenen Schreibweisen, und jede einzelne geht
+mit ihrem Grund ins Protokoll.
+
+Der Hinweis dazu sagt ausdrücklich, was ein Fehlschlag bedeutet: das
+Tag steht noch da, es ist nichts verloren gegangen. Ein Abbruch mitten
+in einer Gruppe kann kein Bild um sein Schlagwort bringen, weil erst
+umgehängt und danach gelöscht wird.
+
+### Neu: eine zweite Chance bei Zeitüberschreitung
+
+Eine einzelne langsame Antwort kostete bisher das ganze Tag. Bei einem
+Zeitfehler wird der Aufruf genau einmal wiederholt — nur bei einem
+Zeitfehler, ein HTTP 400 wird nicht wiederholt.
+
+Alle drei betroffenen Aufrufe vertragen das, ohne Schaden anzurichten:
+ein Asset erneut zu markieren, das das Tag schon trägt, ist wirkungslos,
+und `delete_tag` wertet HTTP 404 neu als erledigt statt als Fehler.
+Sonst hätte der zweite Versuch ein längst gelöschtes Tag als Fehlschlag
+gezählt.
+
 ## v2.32.20 — 2026-09-02
 
 ### Neu: Schreibweisen zusammenführen

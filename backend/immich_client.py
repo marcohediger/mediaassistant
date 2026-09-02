@@ -1039,6 +1039,8 @@ async def delete_tag(tag_id: str, *, api_key: str | None = None) -> None:
         raise RuntimeError("Immich-URL oder API-Key fehlt")
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.delete(f"{url}/api/tags/{tag_id}", headers={"x-api-key": api_key})
+    if resp.status_code == 404:
+        return
     if resp.status_code not in (200, 204):
         raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
 

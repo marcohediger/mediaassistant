@@ -10,6 +10,7 @@ survive in the library and come back on any re-index.
 import asyncio
 import json
 import itertools
+import httpx
 import unicodedata
 import os
 import re
@@ -488,6 +489,39 @@ async def _t(key: str) -> str:
     return load_lang(lang).get("tools", {}).get(key, key)
 
 
+def _reason(exc: Exception) -> str:
+    """A usable one-liner for an exception.
+
+    `httpx.ReadTimeout` carries an empty message, so the plain formatting
+    produced a bare "ReadTimeout:" with nothing behind the colon — which is
+    exactly as much as no message at all.
+    """
+    text = str(exc).strip()
+    if not text:
+        text = {
+            "ReadTimeout": "Immich hat nicht rechtzeitig geantwortet",
+            "ConnectTimeout": "Immich war nicht erreichbar",
+            "PoolTimeout": "keine freie Verbindung zu Immich",
+        }.get(type(exc).__name__, "ohne Meldung")
+    return f"{type(exc).__name__}: {text}"[:200]
+
+
+async def _retry_once(label: str, factory):
+    """Run an Immich call, and give a timeout exactly one second chance.
+
+    A single slow answer should not cost a whole tag. Every call retried
+    here is idempotent: re-tagging an asset that already carries the tag is
+    a no-op, and deleting a tag that is already gone returns 404, which
+    `delete_tag` treats as done.
+    """
+    try:
+        return await factory()
+    except httpx.TimeoutException as e:
+        await log_warning("tools", f"Immich-Zeitüberschreitung bei {label} — zweiter Versuch",
+                          _reason(e))
+        return await factory()
+
+
 async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
     """Preview: which spellings mean the same thing, and which one survives.
 
@@ -599,6 +633,7 @@ async def _merge_apply(*_ignored):
         do_immich = bool(_last_merge.get("immich_enabled"))
         files_changed, files_failed = 0, 0
         merged, moved, failed, last_error = 0, 0, 0, ""
+        failed_names: list[str] = []
 
         if do_sidecars:
             _cleanup_progress["total"] = len(groups)
@@ -643,17 +678,28 @@ async def _merge_apply(*_ignored):
                 for loser in g["losers"]:
                     if not loser.get("id"):
                         continue
+                    name = loser["name"]
                     try:
-                        ids = await list_tag_assets(loser["id"])
+                        ids = await _retry_once(f'„{name}“ lesen',
+                                                lambda: list_tag_assets(loser["id"]))
                         if ids and g["winner"].get("id"):
                             for start in range(0, len(ids), REMOVE_CHUNK):
-                                await tag_assets(g["winner"]["id"], ids[start:start + REMOVE_CHUNK])
+                                chunk = ids[start:start + REMOVE_CHUNK]
+                                await _retry_once(
+                                    f'„{name}“ umhängen',
+                                    lambda c=chunk: tag_assets(g["winner"]["id"], c))
                             moved += len(ids)
-                        await delete_tag(loser["id"])
+                        await _retry_once(f'„{name}“ löschen',
+                                          lambda: delete_tag(loser["id"]))
                         merged += 1
                     except Exception as e:
                         failed += 1
-                        last_error = f"{type(e).__name__}: {e}"[:160]
+                        last_error = _reason(e)
+                        failed_names.append(name)
+                        # Naming the tag is the whole point: without it the
+                        # user cannot tell which spellings were left behind.
+                        await log_warning(
+                            "tools", f'Schreibweise „{name}“ nicht zusammengeführt', last_error)
                 _cleanup_progress["current"] = i
 
         _last_merge.clear()
@@ -663,6 +709,7 @@ async def _merge_apply(*_ignored):
             "sidecars_enabled": do_sidecars, "immich_enabled": do_immich,
             "files_changed": files_changed, "files_failed": files_failed,
             "merged": merged, "moved": moved, "failed": failed, "error": last_error,
+            "failed_names": failed_names[:MAX_SAMPLE],
         })
         await log_info(
             "tools",
