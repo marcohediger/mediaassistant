@@ -192,10 +192,14 @@ access. Tokens are generated in **Settings**, several can exist side by side,
 and each one can be switched off without deleting it.
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" https://your-host/diagnostics
-curl -H "Authorization: Bearer $TOKEN" "https://your-host/diagnostics?logs=200&level=ERROR"
-curl -H "Authorization: Bearer $TOKEN" "https://your-host/diagnostics?job=MA-2026-12345"
+curl -H "Authorization: Bearer $TOKEN" https://your-host/api/diagnostics
+curl -H "Authorization: Bearer $TOKEN" "https://your-host/api/diagnostics?logs=200&level=ERROR"
+curl -H "Authorization: Bearer $TOKEN" "https://your-host/api/diagnostics?job=MA-2026-12345"
 ```
+
+The path is `/api/diagnostics`. Only that prefix is exempt from the login
+middleware — `/diagnostics` is redirected to the login page and never
+reaches the token check.
 
 The report covers the version, pipeline state, every module's health, the
 settings, job counts, the Immich and AI connectivity probes, the inbox
