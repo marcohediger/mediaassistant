@@ -280,6 +280,25 @@ Tod in die DB.
 Startpfad selbst nie. Ein Test, der `start_filewatcher` wirklich
 aufruft, hätte das in einer Sekunde gefunden.
 
+### S-5 — Ein Release kann ausgeliefert werden, ohne startfähig zu sein
+**Datei:** `backend/version.py` — ✅ Wache eingebaut (v2.32.23)
+
+v2.32.22 ging mit einer null Byte grossen `version.py` raus; der
+Container stürzte beim Start endlos ab. Verursacht hat es das Hochzählen
+der Version:
+
+    open(v, "w").write(open(v).read().replace(alt, neu))
+
+Python wertet das äussere `open(v, "w")` zuerst aus — die Datei ist auf
+null gekürzt, bevor das innere `read()` läuft.
+
+**Die Lücke war nicht der Einzeiler, sondern dass es niemandem auffiel.**
+Alle Tests waren grün, weil kein einziger den Startpfad importiert.
+Dasselbe Muster wie bei S-2. `test_startup_imports.py` schliesst das:
+`version.py`, `main.py`, `pipeline`, `filewatcher` — mehr nicht.
+
+**Regel:** in einem Ausdruck nie gleichzeitig lesen und schreiben.
+
 ### S-3 — Werkzeuge ändern die Library in grossem Umfang
 **Datei:** `backend/routers/tools.py`
 

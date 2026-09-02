@@ -220,6 +220,37 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_retry_file_lifecycle.py` | 110 Asserts: kompletter Retry-File-Lifecycle gegen echtes Immich (sidecar+direct, immich+file-storage, error+warning, missing-file, stale-warning, stuck-state) | `docker exec mediaassistant-dev python /app/test_retry_file_lifecycle.py` |
 | `backend/test_testplan_final.py` | 68 Asserts: API/UI Smoke-Tests | `docker exec mediaassistant-dev python /app/test_testplan_final.py` |
 | `backend/test_ai_backends.py` | AI-Backend-Loadbalancer | `docker exec mediaassistant-dev python /app/test_ai_backends.py` |
+| `backend/test_startup_imports.py` | Startpfad importierbar (Release-Vorstufe) | `docker exec mediaassistant-dev python /app/test_startup_imports.py` |
+
+### Pflicht-Vorstufe: startet die App überhaupt?
+
+> **Vor allem anderen, und zwar am gebauten Image, nicht nur lokal.**
+
+```bash
+docker exec mediaassistant-dev python /app/test_startup_imports.py
+docker run --rm --entrypoint python3 ghcr.io/marcohediger/mediaassistant:<VERSION> \
+    /app/test_startup_imports.py
+```
+
+Das Skript prüft nur, ob sich `version.py`, `main.py`, `pipeline` und
+`filewatcher` importieren lassen und Routen registriert werden. Das
+klingt nach zu wenig, um ein eigenes Skript zu rechtfertigen — es ist
+aber genau die Lücke, durch die zweimal ein kaputtes Release
+durchgegangen ist:
+
+- **v2.32.22** ging mit einer leeren `version.py` raus. Der Container
+  lief in eine Endlosschleife aus `ImportError`. Ursache war
+  `open(v, "w").write(open(v).read()...)` beim Hochzählen der Version:
+  Python wertet das äussere `open(v, "w")` zuerst aus, die Datei ist
+  gekürzt, bevor gelesen wird. **Nie in einem Ausdruck lesen und
+  schreiben** — erst lesen, dann schreiben.
+- **v2.32.6 bis v2.32.8** liefen drei Releases lang ohne Filewatcher,
+  Poller und Worker, weil eine Ersetzung `_recover_immich_error_jobs`
+  gelöscht hatte und `start_filewatcher` einen NameError warf.
+
+In beiden Fällen waren **sämtliche Unit-Tests grün**, weil kein
+einziger den Startpfad importiert. Ein Test, der nur `import main`
+macht, hätte beide in einer Sekunde gefunden.
 
 ### Pflicht-E2E-Test: Release-Gate
 
