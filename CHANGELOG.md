@@ -1,5 +1,41 @@
 # Changelog
 
+## v2.32.23 — 2026-09-02
+
+### Fix: v2.32.22 startete nicht — `version.py` war leer
+
+Der Container von v2.32.22 lief in eine Endlosschleife aus Abstürzen:
+
+    ImportError: cannot import name 'VERSION' from 'version' (/app/version.py)
+
+Die Datei war null Byte gross, im Image wie im Tag. Ursache war der
+Einzeiler, mit dem die Versionsnummer hochgezählt wurde:
+
+    open(v, "w").write(open(v).read().replace(alt, neu))
+
+Python wertet das äussere `open(v, "w")` **zuerst** aus. Damit ist die
+Datei schon auf null gekürzt, bevor das innere `open(v).read()`
+überhaupt läuft — gelesen wird eine leere Datei, geschrieben wird eine
+leere Zeichenkette. Der Austausch war nie beteiligt.
+
+Betroffen ist ausschliesslich v2.32.22. v2.32.21 und älter sind heil.
+
+### Neu: `test_startup_imports.py`
+
+Sämtliche Tests liefen grün durch, während das Image nicht startete —
+weil kein einziger den Startpfad importiert. Genau das ist im Juni schon
+einmal passiert: eine Ersetzung löschte `_recover_immich_error_jobs`,
+und Filewatcher, Poller und Worker standen drei Releases lang still.
+
+Das neue Skript prüft nur eines, dafür verlässlich: dass sich
+`version.py`, `main.py`, `pipeline` und `filewatcher` importieren
+lassen und die App Routen registriert.
+
+    docker exec mediaassistant-dev python /app/test_startup_imports.py
+
+Gegengeprüft mit absichtlich geleerter `version.py`: 0 von 4, Rückgabe­
+wert 1. Der Fehler wäre aufgefallen, bevor irgendetwas gebaut wurde.
+
 ## v2.32.22 — 2026-09-02
 
 ### Fix: zerstörtes `ß` wurde nicht repariert
