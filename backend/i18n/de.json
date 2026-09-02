@@ -503,6 +503,7 @@
     "per_asset": "Nur Zuordnung je Bild entfernen (Tag behalten)",
     "per_asset_total": "Betrifft {n} Bild-Zuordnungen.",
     "immich_untagged": "Zuordnungen in Immich entfernt",
-    "also_delete": "Danach das leere Tag ebenfalls löschen"
+    "also_delete": "Danach das leere Tag ebenfalls löschen",
+    "other_task": "Eine andere Wartungsaufgabe läuft gerade."
   }
 }

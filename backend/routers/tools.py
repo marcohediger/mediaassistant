@@ -178,6 +178,7 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset:
             "pattern": pattern,
             "library": library,
             "sidecars_enabled": with_sidecars,
+            "immich_also_delete": also_delete,
             "sidecars_total": len(entries),
             "sidecars_matched": len(files),
             "tags": sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])),
