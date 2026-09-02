@@ -1,5 +1,70 @@
 # Changelog
 
+## v2.32.20 — 2026-09-02
+
+### Neu: Schreibweisen zusammenführen
+
+Ein zweiter Abschnitt im Register „Werkzeuge" findet Tags, die dasselbe
+meinen, sich aber in Gross-/Kleinschreibung, Umlauten, Bindestrichen oder
+Leerzeichen unterscheiden, und führt sie auf eine Schreibweise zusammen.
+
+    Strand | strand | STRAND        ->  Strand
+    Zürich | Zurich | Zuerich       ->  Zürich
+    Google Fotos | GoogleFotos      ->  Google Fotos
+    Fußspuren | Fussspuren          ->  Fußspuren
+
+Es gewinnt die Schreibweise mit den meisten Bildern, bei Gleichstand die
+längere — das ist die, die ihre Umlaute und Leerzeichen noch hat. Die
+übrigen Tags werden auf sie umgehängt und erst danach gelöscht, damit
+kein Bild seinen Tag verliert.
+
+Zusammengeführt wird ausschliesslich, was Zeichen für Zeichen dasselbe
+Wort ist. `Haus` und `Maus` oder `Hund` und `Hunde` bleiben getrennt; es
+gibt keine Ähnlichkeitssuche, die zwei verschiedene Wörter zusammenzieht.
+
+### Neu: kaputte Umlaute werden repariert
+
+Tags wie `?berschwemmungen` sind `Überschwemmungen`, deren Ü eine defekte
+Zeichenkodierung zerstört hat. Welcher Buchstabe es war, steht nicht mehr
+in der Zeichenkette, also werden alle plausiblen durchprobiert — passt
+eine tatsächlich vorhandene Schreibweise, wird das Tag ihr zugeschlagen:
+
+    ?berschwemmungen  ->  Überschwemmungen
+    K?se              ->  Käse
+
+Eine kaputte Schreibweise gewinnt nie, auch wenn sie mehr Bilder hat.
+Passt sie auf mehrere Wörter — `M?ller` auf `Müller` wie auf `Moller` —,
+entscheidet die Grösse und nicht das Alphabet. Findet sich gar kein
+Partner, bleibt das Tag unangetastet, statt geraten zu werden.
+
+### Wichtig: das Zusammenführen fasst beide Seiten an
+
+Der Abschnitt hat dieselben zwei Schalter wie das Aufräumen, und beide
+sind voreingestellt an. Der Grund ist gemessen, nicht vermutet: nach
+einem Zusammenführen allein in Immich stand die alte Schreibweise
+weiterhin in der Sidecar-Datei —
+
+    <rdf:li>Teststrand</rdf:li>
+    <rdf:li>TESTSTRAND</rdf:li>
+
+— und tauchte kurz darauf als neues Tag mit neuer ID wieder in Immich
+auf. Das ist dasselbe Wiederauftauchen wie beim Löschen. In den Sidecars
+wird die alte Schreibweise deshalb durch die neue ersetzt; Dateien, die
+schon beide tragen, behalten sie danach genau einmal.
+
+Gesucht wird in beiden Quellen zusammen. Eine Schreibweise, die es nur
+noch in einer XMP-Datei gibt und in Immich gar nicht mehr, wird dadurch
+mitgefunden — sie ist genau die, die das Tag sonst neu anlegt.
+
+### Vorschau und Abbruch wie gewohnt
+
+Gesucht wird immer zuerst, geändert wird erst auf Knopfdruck. Die
+Vorschau zeigt je Schreibweise, wie viele Bilder in Immich und wie viele
+Sidecar-Dateien betroffen sind. Wer die Schalter danach umstellt,
+verwirft die Vorschau; der Server lehnt eine Ausführung ab, deren Umfang
+nicht dem entspricht, was angezeigt wurde. Der Abbrechen-Knopf und die
+Wiederaufnahme nach dem Verlassen der Seite gelten auch hier.
+
 ## v2.32.19 — 2026-09-02
 
 ### Fix: Vorschau zählte jedes Tag mit 1 statt mit seiner echten Bildzahl

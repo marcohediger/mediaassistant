@@ -996,6 +996,22 @@ async def list_tag_assets(tag_id: str, *, api_key: str | None = None) -> list[st
                     page += 1
 
 
+async def tag_assets(tag_id: str, asset_ids: list[str], *, api_key: str | None = None) -> None:
+    """Attach a tag to the given assets. Assets that already carry it are
+    unaffected, so re-tagging is safe to repeat."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich-URL oder API-Key fehlt")
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.put(
+            f"{url}/api/tags/{tag_id}/assets",
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json={"ids": asset_ids},
+        )
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
+
+
 async def untag_assets(tag_id: str, asset_ids: list[str], *, api_key: str | None = None) -> None:
     """Remove a tag from the given assets. The tag itself survives — that is
     the point of the per-asset mode."""
