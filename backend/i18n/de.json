@@ -511,7 +511,7 @@
     "cancelled": "Abgebrochen — die Zahlen unten zeigen, was bis dahin erledigt wurde.",
     "merge_title": "Schreibweisen zusammenführen",
     "merge_desc": "Findet Tags, die dasselbe meinen, sich aber in Gross-/Kleinschreibung, Umlauten, Bindestrichen oder Leerzeichen unterscheiden.",
-    "merge_hint": "Gesucht wird ausschliesslich in Immich. Zusammengeführt wird auf die Schreibweise mit den meisten Bildern; die übrigen Tags werden auf sie umgehängt und danach gelöscht. Kein Bild geht dabei verloren.",
+    "merge_hint": "Zusammengeführt wird auf die Schreibweise mit den meisten Bildern; bei Gleichstand auf die längere. Die übrigen Tags werden zuerst umgehängt und erst danach gelöscht — kein Bild verliert dabei ein Schlagwort.",
     "merge_scan": "Schreibweisen suchen",
     "merge_apply": "Zusammenführen",
     "merge_confirm": "Die Tags jeder Gruppe werden auf die Hauptschreibweise umgehängt und danach gelöscht. Fortfahren?",
@@ -526,6 +526,7 @@
     "err_changed": "Die Auswahl hat sich seit der Vorschau geändert — bitte neu suchen",
     "merge_scope_hint": "Beide Hälften empfohlen: wird nur in Immich zusammengeführt, legt der nächste Einlesevorgang die alte Schreibweise aus der Sidecar-Datei wieder an. B = Bilder in Immich, D = Sidecar-Dateien.",
     "merge_files": "Sidecar-Dateien werden angepasst",
-    "merge_files_done": "Sidecar-Dateien angepasst"
+    "merge_files_done": "Sidecar-Dateien angepasst",
+    "merge_failed_names": "Nicht zusammengeführt (stehen weiterhin da, es ging nichts verloren):"
   }
 }

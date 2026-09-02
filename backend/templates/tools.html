@@ -448,6 +448,11 @@ function renderMerge(res) {
                  res.moved + ' {{ t.tools.merge_moved }}';
             if (res.failed) { h += ' — ' + res.failed + ' {{ t.tools.failed }}'; }
             h += '</p>';
+            if (res.failed_names && res.failed_names.length) {
+                h += '<p class="section-note">{{ t.tools.merge_failed_names }}<br>' +
+                     res.failed_names.map(function (n) { return '<code>' + n + '</code>'; }).join(' ') +
+                     '</p>';
+            }
         }
         if (res.error) {
             h += '<p class="section-note" style="color: var(--error);">' + res.error + '</p>';
