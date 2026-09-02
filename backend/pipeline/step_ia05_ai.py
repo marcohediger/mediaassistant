@@ -96,6 +96,40 @@ Do NOT use a fixed vocabulary — derive tags strictly from what you actually se
 - nsfw: true if the image contains nudity, explicit sexual content, or other not-safe-for-work material. Always false for landscapes, food, animals, buildings, etc."""
 
 
+# Scripts a keyword may legitimately be written in. A tag mixing two of them
+# is not a translation but an artefact: multilingual models — qwen3-vl among
+# them — occasionally drop a CJK token into the middle of a German word
+# ("Hallen走廊", "Ski道", "Sch屬sel"), or swap a Latin/Cyrillic letter for its
+# Greek lookalike ("Ρижама" with a Greek Rho). Single-script keywords are left
+# alone: Greek place names and Arabic airport names come from geocoding and
+# are perfectly valid.
+_SCRIPT_RANGES = (
+    ("latin", ((0x0041, 0x024F), (0x1E00, 0x1EFF))),
+    ("greek", ((0x0370, 0x03FF), (0x1F00, 0x1FFF))),
+    ("cyrillic", ((0x0400, 0x04FF), (0x0500, 0x052F))),
+    ("hebrew", ((0x0590, 0x05FF),)),
+    ("arabic", ((0x0600, 0x06FF), (0x0750, 0x077F))),
+    ("cjk", ((0x3040, 0x30FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xAC00, 0xD7AF))),
+    ("thai", ((0x0E00, 0x0E7F),)),
+)
+
+
+def _scripts_of(text: str) -> set[str]:
+    found = set()
+    for ch in text:
+        code = ord(ch)
+        for name, ranges in _SCRIPT_RANGES:
+            if any(lo <= code <= hi for lo, hi in ranges):
+                found.add(name)
+                break
+    return found
+
+
+def has_mixed_scripts(text: str) -> bool:
+    """True when a keyword combines two writing systems."""
+    return len(_scripts_of(text)) > 1
+
+
 async def execute(job, session) -> dict:
     """IA-05: KI-Analyse via OpenAI-kompatiblem Endpunkt.
 
@@ -411,6 +445,21 @@ Use this information together with the image content for your classification."""
             "quality": "unbekannt",
             "confidence": 0.0,
         }
+
+    # Drop keywords that mix writing systems before anything stores them —
+    # once such a tag reaches Immich it has to be hunted down by hand.
+    tags = result.get("tags")
+    if isinstance(tags, list):
+        clean = [t for t in tags if not (isinstance(t, str) and has_mixed_scripts(t))]
+        if len(clean) != len(tags):
+            dropped = [t for t in tags if t not in clean]
+            result["tags"] = clean
+            result["_dropped_mixed_script"] = dropped
+            await log_warning(
+                "ai",
+                f"{job.debug_key} IA-05: {len(dropped)} Schlagwörter mit gemischten Schriften verworfen",
+                ", ".join(str(d) for d in dropped)[:400],
+            )
 
     # KI-Kontext für Anzeige im Log-Detail speichern
     result["_context"] = metadata_context
