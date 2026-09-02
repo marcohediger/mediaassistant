@@ -178,11 +178,14 @@ function renderImmichPreview(im) {
             ' {{ t.tools.immich_matched }}</p>';
     if (im.tags.length) {
         h += '<p class="section-note">' + im.tags.map(function (t) {
+            // t.assets is the exact count from Immich's search total.
             return '<code>' + t.name + '</code>' +
-                   (t.assets ? ' <small>(' + t.assets.length + ')</small>' : '');
+                   (typeof t.assets === 'number' ? ' <small>(' + t.assets + ')</small>' : '');
         }).join(' ') + '</p>';
         if (im.per_asset) {
-            var total = im.tags.reduce(function (n, t) { return n + (t.assets ? t.assets.length : 0); }, 0);
+            var total = im.tags.reduce(function (n, t) {
+                return n + (typeof t.assets === 'number' ? t.assets : 0);
+            }, 0);
             h += '<p class="section-note">' + '{{ t.tools.per_asset_total }}'.replace('{n}', total) + '</p>';
         }
     }
