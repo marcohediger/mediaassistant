@@ -55,6 +55,8 @@ MediaAssistant/
 │   │   ├── settings.py
 │   │   ├── setup.py
 │   │   ├── review.py           # "Unknown" review queue
+│   │   ├── tools.py            # Register "Werkzeuge": Tag-Aufräumen + Schreibweisen
+│   │   ├── diagnostics.py      # Nur-lesende Diagnose-API (Token aus Einstellungen)
 │   │   └── auth_oidc.py
 │   ├── templates/              # Jinja2 HTML
 │   ├── static/                 # CSS, JS, Logos
@@ -380,6 +382,49 @@ und resumed automatisch. Wenn du einen Test schreibst, der absichtlich
 das AI-Backend ausfallen lässt, wirst du die ganze Pipeline pausieren —
 restaurieren im finally.
 
+## Immich-Stolperfallen
+
+Alle drei an einer laufenden Instanz gemessen, nicht aus der Doku
+abgeleitet. Immichs API-Beschreibungen sind hier irreführend.
+
+### Der Index hinkt ~2 s nach
+
+Direkt nach `tag_assets` melden `count_tag_assets` **und**
+`list_tag_assets` noch `0`. Wer sofort nachzählt, misst seinen eigenen
+Test, nicht den Server:
+
+    t+0s   statistics=0   metadata-Paging=0
+    t+2s   statistics=3   metadata-Paging=3
+
+In Tests also warten. In Produktion ist das harmlos, weil dort niemand
+im selben Atemzug zuweist und zählt.
+
+### Gelöschte Tags kommen aus der Sidecar zurück
+
+Immich schreibt Tag-Namen in die XMP-Sidecar des Assets. Wird das Tag in
+Immich gelöscht, der Name steht aber weiter in der Datei, legt der
+nächste Einlesevorgang das Tag **neu an — mit neuer ID**:
+
+    <rdf:li>Teststrand</rdf:li>
+    <rdf:li>TESTSTRAND</rdf:li>
+
+Jede Tag-Operation in Immich ist deshalb nur dauerhaft, wenn die Sidecar
+mitgezogen wird. Deswegen haben Aufräumen und Zusammenführen beide
+Schalter, und deswegen ist die Sidecar-Hälfte voreingestellt an.
+
+### `search/metadata` zählt die Seite, nicht den Treffer
+
+`total` klingt nach Gesamtzahl, beschreibt aber die zurückgegebene
+Seite. Zum Zählen `POST /search/statistics` nehmen:
+
+    search/statistics              -> total = 33   richtig
+    search/metadata mit size=1     -> total =  1   falsch
+
+Und beim Blättern **beide** Felder bedienen: `nextCursor` (aktuell) und
+`nextPage` (deprecated, aber das einzige, das ältere Instanzen liefern).
+Wer nur eines auswertet, bricht nach der ersten Seite ab und meldet
+trotzdem Erfolg.
+
 ## Vor jedem Fix
 
 Mantra:
@@ -405,7 +450,7 @@ Mantra:
    IP-Adressen, GPS-Koordinaten oder Immich-Asset-IDs.**
 4. Nur die geänderten Files stagen (kein `git add -A`!).
 5. Commit-Message als HEREDOC, signiert mit
-   `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
+   `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
    wenn der Code per AI-Agent kam.
 6. **Beide Remotes pushen** — origin (Gitea) UND github:
    ```bash
@@ -481,6 +526,12 @@ Mantra:
 | `MA-2026-28103` (IMG_2499.HEIC) | Zirkuläre Duplikat-Erkennung: Retry wurde Duplikat seines eigenen Duplikats | v2.28.43 |
 | `MA-2026-0209` | "Dieses behalten" → IA-02 flaggte Job sofort wieder als Duplikat | v2.28.61 |
 | 6554 defekte Sidecars | v2.28.13-Bug: ExifTool `.tmp` Extension → binäre Bild-Kopien statt XMP | Ext. Tool `ma-sidecar-repair` |
+| Immich + Geocoding melden beide 403 | Geocoding: fehlender User-Agent an Nominatim (echter Bug). Immich: **kein** MA-Bug — der Reverse Proxy blockte den Container, Fix war `immich.url` auf `http://immich_server:2283`. Ein 403 mit HTML-Body kommt nicht von Immich. | v2.32.1 / v2.32.10 |
+| Filewatcher, Poller und Worker standen still | Slice-Ersetzung löschte `_recover_immich_error_jobs`; `start_filewatcher` warf NameError. Drei Releases lang **keine einzige Meldung** — gefunden über die Diagnose-API. Seither hüllt `_supervise` jeden Task ein. | v2.32.9 |
+| 4 Wochen Immich-Uploads nie verarbeitet | `immich.last_poll` wurde auch nach einem gescheiterten Abruf weitergestellt und übersprang genau diese Assets. Aufgeholt per Cursor-Rückdrehung über die ganze Historie. | v2.32.4 |
+| 52 dauerhaft blockierte Jobs | Hingen an einem alten Immich-Fehler und wurden nie erneut versucht. | v2.32.4 |
+| Fremdes Immich-Asset hätte gelöscht werden können | `safe_upload_asset` rief bei einem Duplikat `delete_asset(force=True)` auf die **bestehende** Asset-ID. Seither wird `status` gelesen und `orphan_id` nur bei `status != "duplicate"` gesetzt. | v2.32.5 |
+| Tag-Entfernung meldete Erfolg, war aber unvollständig | `list_tag_assets` folgte nur `nextCursor`; ältere Instanzen liefern nur `nextPage`. Es wurden je Tag nur die ersten 1000 Zuordnungen entfernt. | v2.32.16 |
 
 Weitere Details siehe `CHANGELOG.md`.
 

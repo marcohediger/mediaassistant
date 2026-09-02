@@ -13,6 +13,8 @@ Drop your photos and videos into a folder. MediaAssistant takes care of the rest
 - **Immich integration** — Upload to Immich with albums from folder structure, or auto-tag mobile uploads
 - **OCR** — Text recognition for screenshots and documents
 - **Sorting** — Configurable rules and AI-verified classification sort files into the right folders
+- **Tag tools** — Bulk-remove junk keywords and merge spelling variants across sidecars and Immich
+- **Diagnostics API** — Read-only JSON view of modules, settings, jobs, and logs behind its own tokens
 
 ## Pipeline
 
@@ -119,6 +121,90 @@ Duplicates are detected automatically and placed in a review queue:
 - **Batch-Clean** — automatically keeps the best quality file per group with live progress bar
 - **Not a duplicate** — re-processes the file through the full pipeline
 - GPS, date, keywords, description, and folder tags are merged automatically
+
+## Tag Tools
+
+The **Tools** tab cleans up keywords that have accumulated over time — in the
+XMP sidecars, in Immich, or in both. Nothing is ever changed without a preview
+first, and every run can be cancelled while it is going.
+
+### Removing keywords by pattern
+
+Search by regular expression and see exactly what matches before deleting:
+
+| Preset | Pattern | Finds |
+|---|---|---|
+| Dates | `^\d{4}-\d{2}-\d{2}$` | `2024-08-17` |
+| Years | `^\d{4}$` | `2024` |
+| Numeric | `^(\d+\|\d{4}-\d{2}-\d{2}\|\d{2}\.\d{2}\.\d{4})$` | `7.1`, `2024`, `17.08.2024` |
+| No letters | `^[\W\d_]+$` | `?????`, `---` |
+| Mixed scripts | see preset | `Sunset夕日` |
+
+Two switches decide where the removal happens, plus a sub-switch for Immich:
+
+- **Sidecars** — the keyword is stripped from the XMP files in your library
+- **Immich** — the tag is deleted server-side
+- **Per asset** (sub-switch) — removes the assignment from every asset
+  individually instead of deleting the tag, optionally deleting the emptied
+  tag afterwards
+
+### Merging spelling variants
+
+Finds tags that mean the same thing but were written differently, and merges
+them onto one spelling:
+
+```
+Strand | strand | STRAND        →  Strand
+Zürich | Zurich | Zuerich       →  Zürich
+Europapark | Europa Park        →  Europa Park
+Fußspuren | Fussspuren          →  Fußspuren
+```
+
+The spelling with the most photos wins; on a tie, the longer one — that is the
+one that still has its umlauts and spacing. The others are moved onto it and
+only then deleted, so no photo loses a tag.
+
+Only names that are character-for-character the same word are merged. There is
+no fuzzy matching: `Haus` and `Maus` stay apart, and so do `Hund` and `Hunde`.
+
+**Broken umlauts are repaired.** A tag like `?berschwemmungen` is
+`Überschwemmungen` whose Ü a broken encoding destroyed. Which letter it was
+cannot be read off the string, so every plausible one is tried and only a
+spelling that actually exists can match:
+
+```
+?berschwemmungen  →  Überschwemmungen
+K?se              →  Käse
+```
+
+A damaged spelling never wins, even with more photos. Where it fits several
+words — `M?ller` fits both `Müller` and `Moller` — size decides, not the
+alphabet. With no partner at all, the tag is left alone rather than guessed.
+
+> **Run both halves.** Merging in Immich alone does not hold: the old spelling
+> stays in the XMP sidecar and Immich re-creates it as a new tag on the next
+> re-index. Both switches are on by default for that reason.
+
+## Diagnostics API
+
+A read-only JSON endpoint for looking into a running instance without shell
+access. Tokens are generated in **Settings**, several can exist side by side,
+and each one can be switched off without deleting it.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" https://your-host/diagnostics
+curl -H "Authorization: Bearer $TOKEN" "https://your-host/diagnostics?logs=200&level=ERROR"
+curl -H "Authorization: Bearer $TOKEN" "https://your-host/diagnostics?job=MA-2026-12345"
+```
+
+The report covers the version, pipeline state, every module's health, the
+settings, job counts, the Immich and AI connectivity probes, the inbox
+directories, and the most recent log entries.
+
+Nothing can be changed through it, and no secret is ever returned — an API key
+or password shows up only as `set`, `unset`, or `undecryptable`. Without a
+valid token the endpoint answers `404`, so it does not advertise its own
+existence.
 
 ## Folder Tags
 
