@@ -932,19 +932,48 @@ async def list_tags(*, api_key: str | None = None) -> list[dict]:
     return resp.json()
 
 
+async def count_tag_assets(tag_id: str, *, api_key: str | None = None) -> int:
+    """Exact number of assets carrying a tag — one request, no paging.
+
+    The search answer carries `total`; asking for a single item is enough.
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich-URL oder API-Key fehlt")
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            f"{url}/api/search/metadata",
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json={"tagIds": [tag_id], "size": 1},
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
+    assets = (resp.json() or {}).get("assets") or {}
+    return int(assets.get("total") or assets.get("count") or 0)
+
+
 async def list_tag_assets(tag_id: str, *, api_key: str | None = None) -> list[str]:
-    """Asset ids carrying a tag, following the cursor to the end."""
+    """Every asset id carrying a tag, following the pagination to the end.
+
+    Immich answers with `nextCursor` and, for older clients, the deprecated
+    `nextPage`. Honouring only one of them silently truncates at the first
+    page — which would have left every assignment beyond the first page in
+    place while the run reported success.
+    """
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich-URL oder API-Key fehlt")
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
     ids: list[str] = []
     cursor = None
+    page = 1
     async with httpx.AsyncClient(timeout=60) as client:
         while True:
             body: dict = {"tagIds": [tag_id], "size": 1000}
             if cursor:
                 body["cursor"] = cursor
+            elif page > 1:
+                body["page"] = page
             resp = await client.post(f"{url}/api/search/metadata", headers=headers, json=body)
             if resp.status_code != 200:
                 raise RuntimeError(
@@ -952,9 +981,17 @@ async def list_tag_assets(tag_id: str, *, api_key: str | None = None) -> list[st
             assets = (resp.json() or {}).get("assets") or {}
             items = assets.get("items") or []
             ids.extend(a["id"] for a in items if isinstance(a, dict) and a.get("id"))
-            cursor = assets.get("nextCursor")
-            if not cursor or not items:
+            if not items:
                 return ids
+            cursor = assets.get("nextCursor")
+            nxt = assets.get("nextPage")
+            if not cursor and not nxt:
+                return ids
+            if not cursor:
+                try:
+                    page = int(nxt)
+                except (TypeError, ValueError):
+                    page += 1
 
 
 async def untag_assets(tag_id: str, asset_ids: list[str], *, api_key: str | None = None) -> None:

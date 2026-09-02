@@ -123,13 +123,16 @@ async def _scan_immich(rx: re.Pattern, per_asset: bool) -> dict:
     # Per-asset mode needs the asset ids anyway, and counting them turns the
     # preview from "these tags" into "these tags on this many pictures".
     if per_asset and entries:
-        from immich_client import list_tag_assets
-        for e in entries:
+        from immich_client import count_tag_assets
+        from routers.api import _cleanup_progress
+        _cleanup_progress["total"] = len(entries)
+        for i, e in enumerate(entries, 1):
             try:
-                e["assets"] = await list_tag_assets(e["id"])
+                e["assets"] = await count_tag_assets(e["id"])
             except Exception as ex:
-                e["assets"] = []
+                e["assets"] = 0
                 e["error"] = f"{type(ex).__name__}: {ex}"[:120]
+            _cleanup_progress["current"] = i
 
     return {
         "available": True,
@@ -230,28 +233,36 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
         tags_deleted = 0
         immich_tags = list(_last_scan.get("immich_tags") or [])
         per_asset = bool(_last_scan.get("immich_per_asset"))
+        _last_scan_sidecars = bool(_last_scan.get("sidecars_enabled"))
         if immich_tags and per_asset:
             # Remove the assignment, keep the tag. Immich's own tag-cleanup job
             # can sweep up the now-empty tags afterwards.
-            _cleanup_progress["phase"] = "Zuordnungen werden je Asset entfernt"
-            from immich_client import untag_assets
-            for tag in immich_tags:
-                ids = list(tag.get("assets") or [])
-                if not ids:
-                    continue
+            from immich_client import list_tag_assets, untag_assets
+            _cleanup_progress["total"] = len(immich_tags)
+            _cleanup_progress["current"] = 0
+            for i, tag in enumerate(immich_tags, 1):
+                _cleanup_progress["phase"] = (
+                    f"Zuordnungen entfernen: {tag.get('name', '')} "
+                    f"({i}/{len(immich_tags)}, {immich_deleted} erledigt)"
+                )
                 try:
+                    ids = await list_tag_assets(tag["id"])
                     for start in range(0, len(ids), REMOVE_CHUNK):
                         await untag_assets(tag["id"], ids[start:start + REMOVE_CHUNK])
-                    immich_deleted += len(ids)
+                        immich_deleted += len(ids[start:start + REMOVE_CHUNK])
                 except Exception as e:
-                    immich_failed += len(ids)
+                    immich_failed += 1
                     immich_error = f"{type(e).__name__}: {e}"[:160]
+                _cleanup_progress["current"] = i
 
             # Optional second step: drop the now-empty tags as well.
             if _last_scan.get("immich_also_delete"):
-                _cleanup_progress["phase"] = "Leere Tags werden gelöscht"
+                _cleanup_progress["total"] = len(immich_tags)
+                _cleanup_progress["current"] = 0
                 from immich_client import delete_tag
-                for tag in immich_tags:
+                for n, tag in enumerate(immich_tags, 1):
+                    _cleanup_progress["phase"] = f"Leere Tags löschen ({n}/{len(immich_tags)})"
+                    _cleanup_progress["current"] = n
                     try:
                         await delete_tag(tag["id"])
                         tags_deleted += 1
@@ -259,9 +270,12 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
                         immich_failed += 1
                         immich_error = f"{type(e).__name__}: {e}"[:160]
         elif immich_tags:
-            _cleanup_progress["phase"] = "Immich-Tags werden gelöscht"
+            _cleanup_progress["total"] = len(immich_tags)
+            _cleanup_progress["current"] = 0
             from immich_client import delete_tag
-            for tag in immich_tags:
+            for n, tag in enumerate(immich_tags, 1):
+                _cleanup_progress["phase"] = f"Tags löschen ({n}/{len(immich_tags)})"
+                _cleanup_progress["current"] = n
                 try:
                     await delete_tag(tag["id"])
                     immich_deleted += 1
@@ -285,10 +299,19 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
             "immich_failed": immich_failed,
             "immich_error": immich_error,
         })
+        teile = []
+        if _last_scan_sidecars:
+            teile.append(f"{len(counts)} Schlagwörter aus {changed} Sidecars")
+        if immich_deleted or tags_deleted or immich_failed:
+            teile.append(
+                f"{immich_deleted} Zuordnungen und {tags_deleted} Tags in Immich"
+                if per_asset else f"{immich_deleted} Tags in Immich"
+            )
         await log_info(
             "tools",
-            f"Sidecar-Bereinigung: {len(counts)} Schlagwörter aus {changed} Dateien entfernt",
-            f"Muster={pattern}, fehlgeschlagen={failed}",
+            "Tag-Aufräumen: " + (", ".join(teile) if teile else "nichts zu tun"),
+            f"Muster={pattern}, Sidecar-Fehler={failed}, Immich-Fehler={immich_failed}"
+            + (f", letzter Fehler: {immich_error}" if immich_error else ""),
         )
     except Exception as e:
         _cleanup_finish(error=f"{type(e).__name__}: {e}")

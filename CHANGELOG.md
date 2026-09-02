@@ -1,5 +1,50 @@
 # Changelog
 
+## v2.32.16 — 2026-09-01
+
+### Fix: Einzelmodus entfernte nur die ersten 1000 Zuordnungen je Tag
+
+Aufgefallen an der Live-Vorschau: Mehrere Tags meldeten exakt `1000`
+betroffene Bilder — genau die Seitengrösse. `list_tag_assets` folgte
+ausschliesslich `nextCursor`, Immich beantwortet `search/metadata` aber
+mit dem älteren `nextPage`. Die Schleife brach damit nach der ersten
+Seite ab.
+
+Folge: Ein Lauf hätte bei jedem grossen Tag nur die ersten 1000
+Zuordnungen gelöst — und **Erfolg gemeldet**. Beide Felder werden jetzt
+ausgewertet, `nextCursor` bevorzugt, `nextPage` als Rückfallebene.
+
+### Fix: Vorschau zeigt die echte Anzahl statt einer Seitengrösse
+
+Die Zahl je Tag stammte aus der Länge der ersten Seite. Die Suchantwort
+liefert aber `total`, also die Gesamtzahl — ein Aufruf mit `size=1`
+genügt. Die Vorschau lädt dadurch nicht mehr tausende IDs, nur um sie zu
+zählen, und zeigt trotzdem den exakten Wert.
+
+### UI: Fortschritt und Protokoll beim Aufräumen
+
+Während des Laufs stand nur `(0/1)` — die Fortschrittswerte stammten aus
+der Sidecar-Hälfte und wurden für Immich nie gesetzt. Jetzt nennt die
+Anzeige den gerade bearbeiteten Tag samt Position und bisher gelösten
+Zuordnungen:
+
+    Zuordnungen entfernen: 2020-06-22 (3/127, 412 erledigt)
+    Leere Tags löschen (5/127)
+
+Und das Abschlussprotokoll enthält endlich die Immich-Zahlen. Bisher
+nannte es ausschliesslich die Sidecar-Bilanz, sodass nach einem reinen
+Immich-Lauf nirgends nachvollziehbar war, ob überhaupt etwas passiert
+ist. Neu:
+
+    Tag-Aufräumen: 2350 Zuordnungen und 1 Tags in Immich
+    Muster=…, Sidecar-Fehler=0, Immich-Fehler=0
+
+Verifiziert gegen ein Immich-Doppel mit 2350 Bildern an einem Tag:
+  Vorschau  -> ein Aufruf mit size=1, Anzeige "2020-06-22 (2350)"
+  Blaettern -> drei Seiten (1000 + 1000 + 350) ueber nextPage
+  Entfernen -> 12 Bloecke, zusammen 2350 Zuordnungen, danach das Tag
+  Protokoll -> Immich-Zahlen im Log
+
 ## v2.32.15 — 2026-09-01
 
 ### Tag-Aufräumen in Immich: drei Wege statt einem
