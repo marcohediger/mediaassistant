@@ -44,3 +44,48 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Mirror the finished image to the self-hosted Gitea registry. Nothing is
+  # rebuilt: the manifest and layers are copied as they are, so both
+  # registries hold the same digest. The job is skipped entirely when the
+  # GITEA_REGISTRY variable is not set, so a missing configuration can never
+  # break the main build.
+  mirror-to-gitea:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: ${{ vars.GITEA_REGISTRY != '' }}
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Log in to GitHub Container Registry (read)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Gitea registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.GITEA_REGISTRY }}
+          username: ${{ vars.GITEA_REGISTRY_USER }}
+          password: ${{ secrets.GITEA_REGISTRY_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Copy image to Gitea
+        env:
+          SRC: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+          DST: ${{ vars.GITEA_REGISTRY }}/mediaassistant/mediaassistant
+        run: |
+          docker buildx imagetools create \
+            --tag "$DST:${{ steps.version.outputs.version }}" \
+            --tag "$DST:latest" \
+            "$SRC"
+          echo "--- Digest-Vergleich ---"
+          docker buildx imagetools inspect "$SRC" | grep -m1 Digest
+          docker buildx imagetools inspect "$DST:${{ steps.version.outputs.version }}" | grep -m1 Digest

@@ -498,6 +498,30 @@ Mantra:
    automatisch das Docker-Image und published es als `:2.X.Y` UND
    `:latest` auf `ghcr.io/marcohediger/mediaassistant`. Ohne Tag passiert
    nichts — git-Push allein reicht nicht.
+
+   **Spiegel in die Gitea-Registry.** Ein zweiter Job (`mirror-to-gitea`)
+   kopiert das fertige Image nach `<gitea-host>/mediaassistant/mediaassistant`
+   — kein zweiter Build, identischer Digest. Er läuft nur, wenn in den
+   GitHub-Repo-Einstellungen gesetzt ist:
+
+   | Art | Name | Inhalt |
+   |---|---|---|
+   | Variable | `GITEA_REGISTRY` | Hostname der Gitea-Instanz (steht bewusst **nicht** in der Datei) |
+   | Variable | `GITEA_REGISTRY_USER` | Gitea-Benutzer, z. B. `AI-DEV` |
+   | Secret | `GITEA_REGISTRY_TOKEN` | Gitea-Token mit `write:package` |
+
+   Fehlt `GITEA_REGISTRY`, wird der Job übersprungen; der Haupt-Build ist
+   davon nie betroffen. **Manueller Ersatz**, falls der Automat nicht
+   konfiguriert ist (Token aus `git remote get-url origin`):
+   ```bash
+   docker buildx imagetools create \
+     --tag <gitea-host>/mediaassistant/mediaassistant:2.X.Y \
+     --tag <gitea-host>/mediaassistant/mediaassistant:latest \
+     ghcr.io/marcohediger/mediaassistant:2.X.Y
+   ```
+   Die Gitea-Pakete sind **privat** (Organisation ist privat). Wer von dort
+   zieht, braucht einmalig `docker login <gitea-host>` mit einem Token, der
+   `read:package` darf.
 8. **GitHub Release UND Gitea Release erstellen** (Pflicht — sonst bleibt
    das `Latest`-Badge auf der alten Version stehen). Ein Tag-Push allein
    reicht nicht; Releases sind eine separate API-Resource.

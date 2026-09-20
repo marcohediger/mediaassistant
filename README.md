@@ -100,6 +100,12 @@ docker compose up -d
 
 Web interface: **http://localhost:8000**
 
+The image is published to `ghcr.io/marcohediger/mediaassistant` (`:latest`
+and one tag per version). Every release is also mirrored, digest-identical,
+to a self-hosted Gitea registry; if you run your own, the workflow's
+`mirror-to-gitea` job does the same for you once `GITEA_REGISTRY`,
+`GITEA_REGISTRY_USER` and `GITEA_REGISTRY_TOKEN` are set on the repository.
+
 On first start, a setup wizard guides you through the configuration.
 
 ## Immich Integration
