@@ -483,7 +483,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
         return folder_tags
 
     from file_operations import get_duplicate_dir, resolve_filename_conflict
-    dup_dir = await get_duplicate_dir()
+    dup_dir = await get_duplicate_dir(job)
     filename = os.path.basename(job.original_path)
     dup_path = resolve_filename_conflict(dup_dir, filename)
     await log_info(

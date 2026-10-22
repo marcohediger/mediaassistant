@@ -324,11 +324,22 @@ def _eval_single_condition(cond: str, exif: dict) -> bool:
     return False
 
 
-async def _match_sorting_rules(filename: str, exif: dict, session, is_video: bool = False) -> str | None:
-    """Check file against user-defined sorting rules. Returns category or None."""
+async def _match_sorting_rules(filename: str, exif: dict, session, is_video: bool = False,
+                               *, set_id: int | None) -> str | None:
+    """Check file against the sorting rules of one set. Returns category or None.
+
+    `set_id` has no default on purpose: a caller that forgets it would
+    silently be matched against another set's rules.
+    """
     from models import SortingRule
+    from sets import get_set
+    processing_set = await get_set(session, set_id)
+    if not processing_set:
+        return None
     result = await session.execute(
-        select(SortingRule).where(SortingRule.active == True).order_by(SortingRule.position)
+        select(SortingRule)
+        .where(SortingRule.active == True, SortingRule.set_id == processing_set.id)  # noqa: E712
+        .order_by(SortingRule.position)
     )
     rules = result.scalars().all()
 
@@ -384,7 +395,8 @@ async def execute(job, session) -> dict:
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
 
     # 1) Static sorting rules (always evaluated first)
-    rule_category = await _match_sorting_rules(filename, exif, session, is_video=is_video)
+    rule_category = await _match_sorting_rules(filename, exif, session, is_video=is_video,
+                                               set_id=job.set_id)
 
     if rule_category == "skip":
         job.status = "skipped"
@@ -402,12 +414,9 @@ async def execute(job, session) -> dict:
 
     # 2) AI verifies ALL files — AI returns a category label
     if ai_type:
-        # Validate AI category exists in DB by label (ignore invalid/unknown)
-        from models import LibraryCategory
-        ai_cat_result = await session.execute(
-            select(LibraryCategory).where(LibraryCategory.label == ai_type)
-        )
-        ai_cat = ai_cat_result.scalar()
+        # Validate the AI category exists in this set, by label (ignore invalid/unknown)
+        from sets import find_category
+        ai_cat = await find_category(session, job.set_id, label=ai_type)
 
         # AI overrides static result when it returns a valid, different category
         if ai_cat and ai_cat.key != category and ai_cat.key not in ("error", "duplicate", "unknown"):
@@ -427,12 +436,9 @@ async def execute(job, session) -> dict:
     if geo_result.get("country"):
         exif = {**exif, "country": geo_result["country"], "city": geo_result.get("city", "")}
 
-    # Get path template from library_categories table
-    from models import LibraryCategory
-    cat_result = await session.execute(
-        select(LibraryCategory).where(LibraryCategory.key == category)
-    )
-    lib_cat = cat_result.scalar()
+    # Get path template from the set's categories
+    from sets import find_category, base_path_for
+    lib_cat = await find_category(session, job.set_id, key=category)
     if lib_cat:
         path_template = lib_cat.path_template
     else:
@@ -448,7 +454,7 @@ async def execute(job, session) -> dict:
             f"library.path_{category}",
             fallback_defaults.get(category, "unknown/review/"),
         )
-    base_path = await config_manager.get("library.base_path", "/library")
+    base_path = await base_path_for(session, job)
 
     # Parse date from EXIF
     date = _parse_date(exif.get("date"))

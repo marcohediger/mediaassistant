@@ -87,7 +87,8 @@ async def run_pipeline(job_id: int):
                     mime = exif.get("mime_type", "")
                     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
                     rule_cat = await _match_sorting_rules(
-                        os.path.basename(job.original_path), exif, session, is_video=is_video
+                        os.path.basename(job.original_path), exif, session, is_video=is_video,
+                        set_id=job.set_id,
                     )
                     if rule_cat == "skip":
                         job.status = "skipped"
@@ -301,7 +302,8 @@ async def _move_to_error(job, session):
     if not os.path.exists(job.original_path):
         return
 
-    base_path = await config_manager.get("library.base_path", "/library")
+    from sets import base_path_for
+    base_path = await base_path_for(session, job)
     error_dir = os.path.join(base_path, "error")
     await asyncio.to_thread(os.makedirs, error_dir, exist_ok=True)
 

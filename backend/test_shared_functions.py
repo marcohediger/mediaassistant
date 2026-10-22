@@ -116,7 +116,9 @@ async def main():
 
     # --- get_duplicate_dir ---
     print("\n── get_duplicate_dir ──")
-    r = await no_crash_async("get_duplicate_dir()", get_duplicate_dir)
+    # A job without set_id falls back to the first set's base path.
+    r = await no_crash_async("get_duplicate_dir(job)", get_duplicate_dir,
+                             Job(filename="d.jpg", original_path="/x/d.jpg", debug_key="DD-1"))
     if r:
         check("dup_dir existiert", os.path.isdir(r))
 

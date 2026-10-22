@@ -29,7 +29,7 @@ async def health():
 
 @router.post("/job/{debug_key}/retry")
 async def retry_job_endpoint(debug_key: str):
-    from pipeline import retry_job
+    from pipeline import reset_job_for_retry
     async with async_session() as session:
         result = await session.execute(select(Job).where(Job.debug_key == debug_key))
         job = result.scalar()
@@ -47,7 +47,9 @@ async def retry_job_endpoint(debug_key: str):
     if job.status in ("queued", "processing"):
         return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
 
-    asyncio.create_task(retry_job(job.id))
+    # Only re-queue. The worker runs it within a second, inside the slot
+    # limit like every other job — the old direct start bypassed that.
+    await reset_job_for_retry(job.id)
     return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
 
 

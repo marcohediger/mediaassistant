@@ -1150,9 +1150,11 @@ async def not_duplicate(request: Request):
                 move_file=True,
                 commit=False,
             )
-            # Re-run pipeline in background
-            from pipeline import run_pipeline
-            asyncio.create_task(run_pipeline(job.id))
+            # The job is 'queued' once this session commits; the worker
+            # picks it up from there. Starting run_pipeline here raced that
+            # commit — a task that ran first saw the old status, its claim
+            # failed, and the job just sat in the queue until the worker
+            # came along anyway.
 
         # ── Dissolve orphaned group members ───────────────────────
         # When this job is removed from its duplicate group, any other

@@ -19,6 +19,7 @@ import subprocess
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from sets import library_roots
 from config import config_manager
 from system_logger import log_info, log_warning
 from template_engine import render
@@ -62,10 +63,10 @@ def _subjects(entry: dict) -> list[str]:
     return [str(s) for s in (subj if isinstance(subj, list) else [subj])]
 
 
-async def _read_library_subjects(library: str) -> list[dict]:
+async def _read_library_subjects(libraries: list[str]) -> list[dict]:
     proc = await asyncio.to_thread(
         subprocess.run,
-        ["exiftool", "-j", "-q", "-Subject", "-r", "-ext", "xmp", library],
+        ["exiftool", "-j", "-q", "-Subject", "-r", "-ext", "xmp", *libraries],
         capture_output=True, timeout=SCAN_TIMEOUT_S,
     )
     out = (proc.stdout or b"").decode("utf-8", errors="replace").strip()
@@ -306,7 +307,7 @@ def _attach(groups: list[list[dict]], index: dict[str, int], target: dict, damag
 async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset: bool, also_delete: bool):
     from routers.api import _cleanup_progress, _cleanup_finish
     try:
-        library = await config_manager.get("library.base_path", "/library")
+        library = await library_roots()
         rx = _compile(pattern)
 
         # Reading every sidecar is the expensive half — skip it entirely when
@@ -539,7 +540,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
     from routers.api import _cleanup_progress, _cleanup_finish
     from immich_client import list_tags, count_tag_assets
     try:
-        library = await config_manager.get("library.base_path", "/library")
+        library = await library_roots()
         sidecar_files: dict[str, list[str]] = {}
         if with_sidecars:
             _cleanup_progress["phase"] = "Sidecars werden gelesen"
@@ -778,7 +779,7 @@ async def _start(request: Request, worker, *, require_preview: bool = False) -> 
 @router.get("")
 async def tools_page(request: Request):
     return await render(request, "tools.html", {
-        "library_path": await config_manager.get("library.base_path", "/library"),
+        "library_path": ", ".join(await library_roots()),
     })
 
 

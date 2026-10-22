@@ -74,6 +74,8 @@ def _make_multi() -> None:
     con = sqlite3.connect(COPY)
     con.execute("INSERT INTO inbox_directories (path, label, folder_tags, dry_run, use_immich, "
                 "immich_user_id, active) VALUES ('/inbox_scans', 'Scanner', 0, 1, 0, NULL, 1)")
+    if os.environ.get("MULTI_FIRST_DRY"):
+        con.execute("UPDATE inbox_directories SET dry_run = 1 WHERE id = (SELECT MIN(id) FROM inbox_directories)")
     cur = con.execute("INSERT INTO immich_users (label, api_key, active) VALUES ('Testzugang', 'x', 1)")
     uid = cur.lastrowid
     for key, value in (("immich.poll_enabled", True), ("immich.last_poll", "2026-01-01T00:00:00+00:00")):
@@ -190,7 +192,9 @@ async def main() -> int:
         for i in before["inboxes"]:
             key = (bool(i[3]) and before["folder_module"], bool(i[4]), bool(i[5]), i[6])
             groups.setdefault(key, []).append(i)
-        expected = max(len(groups), 1) + (len(before["poll_users"]) if before["poll"] else 0)
+        first_dry = bool(before["inboxes"]) and bool(before["inboxes"][0][4])
+        expected = max(len(groups), 1) + (len(before["poll_users"]) if before["poll"] else 0) \
+            + (1 if before["poll"] and first_dry else 0)
         report("Anzahl Sets", len(sets) == expected, f"{len(sets)} erwartet {expected}: "
                f"{[s['name'] for s in sets]}")
         first = sets[0]
@@ -220,10 +224,12 @@ async def main() -> int:
                 (i[1], row[0])).fetchone()[0]
             report(f"Jobs aus {i[1]} im Set des Verzeichnisses", n_wrong == 0, f"{n_wrong} abweichend")
 
+        global_poll = next((s for s in sets if s["immich_poll"] and s["immich_poll_user_id"] is None), None)
         report("Immich-Poll wie vorher",
-               bool(first["immich_poll"]) == before["poll"]
-               and (not before["poll"] or first["immich_last_poll"] == before["last_poll"]),
-               f"Poll {'an' if first['immich_poll'] else 'aus'}, Cursor {first['immich_last_poll']}")
+               (global_poll is not None) == before["poll"]
+               and (not before["poll"] or (global_poll["immich_last_poll"] == before["last_poll"]
+                                           and not global_poll["dry_run"])),
+               f"Poll {'an im Set ' + global_poll['name'] if global_poll else 'aus'}")
         polled = sorted(s["immich_poll_user_id"] for s in sets
                         if s["immich_poll"] and s["immich_poll_user_id"] is not None)
         report("Jeder benannte Immich-Zugang wird weiter gepollt",
@@ -235,7 +241,7 @@ async def main() -> int:
                f"{n_jobs} Jobs, {n_null} ohne Set")
         n_immich_wrong = con.execute(
             "SELECT COUNT(*) FROM jobs WHERE source_label = 'Immich' AND immich_user_id IS NULL "
-            "AND set_id IS NOT ?", (first["id"],)).fetchone()[0]
+            "AND set_id IS NOT ?", ((global_poll or first)["id"],)).fetchone()[0]
         report("Immich-Jobs im Poll-Set", not before["poll"] or n_immich_wrong == 0,
                f"{n_immich_wrong} abweichend")
         for s in sets:
