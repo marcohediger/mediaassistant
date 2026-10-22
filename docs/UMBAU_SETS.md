@@ -102,11 +102,23 @@ muss jede Datei dieselbe Kategorie und denselben Zielpfad ergeben wie vorher.
 
 ## Oberfläche
 
-- Neues Register **„Sets"**: Liste, anlegen, bearbeiten, duplizieren, löschen.
-- Set-Editor mit den Abschnitten Allgemein · Eingänge · Zeitplan · Sortier-Regeln ·
-  Ordner-Tags · Ziel-Ablage. „Duplizieren" kopiert Regeln und Kategorien mit.
-- Aus den Einstellungen wandern dorthin: Eingangsverzeichnisse, Filewatcher,
-  Sortier-Regeln, Ziel-Ablage, Ordner-Tags; beim Immich-Abschnitt nur der Poll-Schalter.
+**In den Einstellungen** ein Abschnitt „Verarbeitungs-Sets" mit einer Liste —
+**eine Zeile pro Set**, ganz rechts ein **Stift** zum Bearbeiten im Popup:
+
+```
+ ●  Name          Eingänge                 Zeitplan        Ziel                  Regeln  Ordner-Tags  Warteschlange   ✎
+ ●  Standard      /inbox · Immich-Poll     durchgehend     Immich (global)         10       aus            3        ✎
+ ○  Scanner       /inbox/scans             22:00–06:00     /library/scans           4       an             0        ✎
+                                                                                              [ + Neues Set ]
+```
+
+- ● aktiv / ○ inaktiv. Ein Klick auf den Stift öffnet das Set in einem grossen Popup.
+- Popup mit Reitern: Allgemein · Eingänge · Zeitplan · Sortier-Regeln · Ordner-Tags ·
+  Ziel-Ablage. Unten: Speichern, Abbrechen, Duplizieren, Löschen. „Duplizieren"
+  kopiert Regeln und Kategorien mit.
+- Die bisherigen Einstellungs-Abschnitte Eingangsverzeichnisse, Filewatcher,
+  Sortier-Regeln, Ziel-Ablage und Ordner-Tags gehen in diesem Popup auf; beim
+  Immich-Abschnitt wandert nur der Poll-Schalter ins Set.
 - Dashboard und Diagnose-API zeigen die Sets mit Warteschlange je Set.
 - Review-Ansicht bietet die Kategorien des Sets an, aus dem der Job stammt.
 
@@ -116,7 +128,7 @@ muss jede Datei dieselbe Kategorie und denselben Zielpfad ergeben wie vorher.
 2. Pipeline liest das Set (IA-05, IA-08, Review, `file_operations`, Werkzeuge)
 3. Eingänge neu (`inputs/`), Zeitplan pro Set, Immich ohne Download, Hash-Cache
 4. Ein Worker: alle Einstiege reihen nur ein, Wiederaufnahme reiht nur ein
-5. Oberfläche: Register „Sets", Einstellungen ausdünnen, Dashboard, Diagnose
+5. Oberfläche: Set-Liste in den Einstellungen + Popup-Editor, Dashboard, Diagnose
 6. i18n, Doku, CHANGELOG, Version 2.33.0
 7. Volle Testrunde: Startpfad, E2E, alle Suiten, neue Stories — dann Merge und Release
 
