@@ -1,13 +1,28 @@
 {% extends "base.html" %}
 {% block title %}{{ t.settings.title }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/settings.css?v={{ version }}">{% endblock %}
 {% block content %}
-<h1>{{ t.settings.title }}</h1>
+{%- macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro -%}
+<div class="ui-page-head">
+    <div class="ui-page-head-text">
+        <h1 class="ui-page-title">{{ t.settings.title }}</h1>
+        <p class="ui-page-sub">{{ t.settings.page_sub | default('Verarbeitungs-Sets, Module und Verbindungen an einem Ort.') }}</p>
+    </div>
+</div>
 
 {% if success %}
-<div class="alert alert-success">{{ success }}</div>
+<div class="ui-alert is-success st-flash" role="status">
+    {{ icon('check-circle', 18) }}
+    <div class="ui-alert-body"><p class="ui-alert-text">{{ success }}</p></div>
+</div>
 {% endif %}
 {% if error %}
-<div class="alert alert-error">{{ error }}</div>
+<div class="ui-alert is-error st-flash" role="alert">
+    {{ icon('alert-circle', 18) }}
+    <div class="ui-alert-body"><p class="ui-alert-text">{{ error }}</p></div>
+</div>
 {% endif %}
 
 <form method="post" action="/settings/save" id="settings-form">
@@ -16,64 +31,72 @@
 {% include "settings/_sets_list.html" %}
 
 <!-- Duplicate Detection -->
-<div class="settings-section" id="section-duplicates">
+<div class="settings-section st-module" id="section-duplicates">
     <div class="section-header">
         <div class="section-title">
-            <h2>{{ t.settings.duplicate_detection }}</h2>
+            <h2 id="dup-title">{{ t.settings.duplicate_detection }}</h2>
             <span class="section-desc">{{ t.settings.dup_desc }}</span>
         </div>
-        <label class="switch">
-            <input type="checkbox" name="mod_duplikat_erkennung" value="1" {{ 'checked' if modules.duplikat_erkennung else '' }}>
+        <label class="switch" title="{{ t.settings.enabled }}">
+            <input type="checkbox" name="mod_duplikat_erkennung" value="1" aria-labelledby="dup-title" {{ 'checked' if modules.duplikat_erkennung else '' }}>
             <span class="switch-slider"></span>
         </label>
     </div>
     <div class="section-body">
-        <div class="form-row">
-            <div class="form-group">
-                <label for="phash_threshold">{{ t.settings.phash_threshold }}</label>
-                <input type="number" id="phash_threshold" name="phash_threshold" value="{{ cfg.phash_threshold }}" min="0" max="20" step="1">
-                <small>{{ t.settings.phash_hint }}</small>
+        <div class="ui-option-list">
+            <div class="ui-option">
+                <span class="ui-option-text">
+                    <label class="ui-option-title" for="phash_threshold">{{ t.settings.phash_threshold }}</label>
+                    <span class="ui-option-desc" id="phash_threshold_hint">{{ t.settings.phash_hint }}</span>
+                </span>
+                <div class="ui-option-control">
+                    <input class="ui-input ui-input-narrow" type="number" id="phash_threshold" name="phash_threshold"
+                           value="{{ cfg.phash_threshold }}" min="0" max="20" step="1" aria-describedby="phash_threshold_hint">
+                </div>
             </div>
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.settings.dup_raw_jpg_pair }}</span>
+                    <span class="ui-option-desc">{{ t.settings.dup_raw_jpg_pair_hint }}</span>
+                </span>
+                <span class="ui-switch"><input type="checkbox" role="switch" name="dup_raw_jpg_pair" value="1" {{ 'checked' if cfg.dup_raw_jpg_pair else '' }}><span class="ui-switch-track"></span></span>
+            </label>
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.settings.dup_skip_confirm }}</span>
+                    <span class="ui-option-desc">{{ t.settings.dup_skip_confirm_hint }}</span>
+                </span>
+                <span class="ui-switch"><input type="checkbox" role="switch" name="dup_skip_confirm" value="1" {{ 'checked' if cfg.dup_skip_confirm else '' }}><span class="ui-switch-track"></span></span>
+            </label>
         </div>
-        <label class="switch-inline" style="margin-top: 1rem;">
-            <input type="checkbox" name="dup_raw_jpg_pair" value="1" {{ 'checked' if cfg.dup_raw_jpg_pair else '' }}>
-            <span class="switch-slider-sm"></span>
-            <span>{{ t.settings.dup_raw_jpg_pair }}</span>
-        </label>
-        <small style="display: block; margin-top: 0.25rem;">{{ t.settings.dup_raw_jpg_pair_hint }}</small>
-        <label class="switch-inline" style="margin-top: 1rem;">
-            <input type="checkbox" name="dup_skip_confirm" value="1" {{ 'checked' if cfg.dup_skip_confirm else '' }}>
-            <span class="switch-slider-sm"></span>
-            <span>{{ t.settings.dup_skip_confirm }}</span>
-        </label>
-        <small style="display: block; margin-top: 0.25rem;">{{ t.settings.dup_skip_confirm_hint }}</small>
     </div>
 </div>
 
 <!-- Geocoding -->
-<div class="settings-section" id="section-geocoding">
+<div class="settings-section st-module" id="section-geocoding">
     <div class="section-header">
         <div class="section-title">
-            <h2>{{ t.settings.geocoding }}</h2>
+            <h2 id="geo-title">{{ t.settings.geocoding }}</h2>
             <span class="section-desc">{{ t.settings.geo_desc }}</span>
         </div>
-        <label class="switch">
-            <input type="checkbox" name="mod_geocoding" value="1" {{ 'checked' if modules.geocoding else '' }}>
+        <label class="switch" title="{{ t.settings.enabled }}">
+            <input type="checkbox" name="mod_geocoding" value="1" aria-labelledby="geo-title" {{ 'checked' if modules.geocoding else '' }}>
             <span class="switch-slider"></span>
         </label>
     </div>
     <div class="section-body">
-        <div class="form-row">
-            <div class="form-group">
-                <label for="geo_provider">{{ t.settings.provider }}</label>
-                <select id="geo_provider" name="geo_provider">
+        <div class="ui-fields st-fields-geo">
+            <div class="ui-field">
+                <label class="ui-label" for="geo_provider">{{ t.settings.provider }}</label>
+                <select class="ui-select" id="geo_provider" name="geo_provider">
                     <option value="nominatim" selected>Nominatim (OpenStreetMap)</option>
                 </select>
             </div>
-            <div class="form-group">
-                <label for="geo_url">{{ t.settings.url }}</label>
-                <input type="url" id="geo_url" name="geo_url" value="{{ cfg.geo_url }}">
-                <small>{{ t.settings.url_hint }}</small>
+            <div class="ui-field">
+                <label class="ui-label" for="geo_url">{{ t.settings.url }}</label>
+                <input class="ui-input" type="url" id="geo_url" name="geo_url" value="{{ cfg.geo_url }}"
+                       placeholder="https://nominatim.openstreetmap.org" spellcheck="false" aria-describedby="geo_url_hint">
+                <p class="ui-hint" id="geo_url_hint">{{ t.settings.url_hint }}</p>
             </div>
         </div>
     </div>
@@ -82,37 +105,55 @@
 {% include "settings/_ai.html" %}
 
 <!-- Video Thumbnails -->
-<div class="settings-section" id="section-video-thumbnails">
+{%- set scale = cfg.video_thumbnail_scale | int %}
+{%- if scale not in [25, 50, 75, 100] %}{% set scale = 50 %}{% endif %}
+<div class="settings-section st-module" id="section-video-thumbnails">
     <div class="section-header">
         <div class="section-title">
-            <h2>{{ t.settings.video_thumbnails }}</h2>
+            <h2 id="video-title">{{ t.settings.video_thumbnails }}</h2>
             <span class="section-desc">{{ t.settings.video_thumbnails_desc }}</span>
         </div>
-        <label class="switch">
-            <input type="checkbox" name="video_thumbnail_enabled" value="1" {{ 'checked' if cfg.video_thumbnail_enabled else '' }}>
+        <label class="switch" title="{{ t.settings.video_thumbnail_enabled }}">
+            <input type="checkbox" name="video_thumbnail_enabled" value="1" aria-labelledby="video-title" {{ 'checked' if cfg.video_thumbnail_enabled else '' }}>
             <span class="switch-slider"></span>
         </label>
     </div>
-    <div class="section-body">
-        <div class="form-row">
-            <div class="form-group">
-                <label for="video_thumbnail_frames">{{ t.settings.video_thumbnail_frames }}</label>
-                <input type="range" id="video_thumbnail_frames" name="video_thumbnail_frames"
-                       value="{{ cfg.video_thumbnail_frames }}" min="1" max="50" step="1"
-                       oninput="document.getElementById('frames_val').textContent=this.value"
-                       style="max-width: 300px;">
-                <span id="frames_val" style="font-weight: bold; margin-left: 0.5rem;">{{ cfg.video_thumbnail_frames }}</span>
-                <small style="display: block; margin-top: 0.25rem;">{{ t.settings.video_thumbnail_frames_hint }}</small>
+    <div class="section-body ui-stack ui-stack-lg">
+        <div class="ui-option-list">
+            <div class="ui-option">
+                <span class="ui-option-text">
+                    <label class="ui-option-title" for="video_thumbnail_frames">{{ t.settings.video_thumbnail_frames }}</label>
+                    <span class="ui-option-desc" id="video_thumbnail_frames_hint">{{ t.settings.video_thumbnail_frames_hint }}</span>
+                </span>
+                <div class="ui-option-control st-range">
+                    <input class="st-range-input" type="range" id="video_thumbnail_frames" name="video_thumbnail_frames"
+                           value="{{ cfg.video_thumbnail_frames }}" min="1" max="50" step="1" aria-describedby="video_thumbnail_frames_hint"
+                           oninput="document.getElementById('frames_val').textContent=this.value">
+                    <output class="st-range-value" id="frames_val" for="video_thumbnail_frames">{{ cfg.video_thumbnail_frames }}</output>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="video_thumbnail_scale">{{ t.settings.video_thumbnail_scale }}</label>
-                <select id="video_thumbnail_scale" name="video_thumbnail_scale">
-                    <option value="25" {{ 'selected' if cfg.video_thumbnail_scale == 25 else '' }}>25%</option>
-                    <option value="50" {{ 'selected' if cfg.video_thumbnail_scale == 50 else '' }}>50% — {{ t.settings.resolution_default }}</option>
-                    <option value="75" {{ 'selected' if cfg.video_thumbnail_scale == 75 else '' }}>75%</option>
-                    <option value="100" {{ 'selected' if cfg.video_thumbnail_scale == 100 else '' }}>100% ({{ t.settings.resolution_original }})</option>
-                </select>
-                <small>{{ t.settings.video_thumbnail_scale_hint }}</small>
+        </div>
+        <div class="st-group">
+            <div class="st-group-head">
+                <h3 class="st-group-title" id="video-scale-title">{{ t.settings.video_thumbnail_scale }}</h3>
+                <p class="st-group-desc">{{ t.settings.video_scale_desc | default('Grösse der Einzelbilder im Verhältnis zum Video.') }}</p>
+            </div>
+            <div class="ui-choices ui-choices-4" role="radiogroup" aria-labelledby="video-scale-title">
+                {% for pct in [25, 50, 75, 100] %}
+                <label class="ui-choice">
+                    <input type="radio" name="video_thumbnail_scale" value="{{ pct }}" {{ 'checked' if scale == pct else '' }}>
+                    <span class="ui-choice-body">
+                        <span class="ui-choice-radio"></span>
+                        <span class="ui-choice-text">
+                            <span class="ui-choice-title st-choice-title">{{ pct }} %
+                                {%- if pct == 50 %} <span class="ui-badge is-accent">{{ t.settings.resolution_default }}</span>
+                                {%- elif pct == 100 %} <span class="ui-badge">{{ t.settings.resolution_original }}</span>{% endif %}
+                            </span>
+                            <span class="ui-choice-desc">{{ t.settings['video_scale_' ~ pct ~ '_desc'] }}</span>
+                        </span>
+                    </span>
+                </label>
+                {% endfor %}
             </div>
         </div>
     </div>
@@ -121,59 +162,73 @@
 {% include "settings/_immich.html" %}
 
 <!-- SMTP -->
-<div class="settings-section" id="section-smtp">
+<div class="settings-section st-module" id="section-smtp">
     <div class="section-header">
         <div class="section-title">
-            <h2>{{ t.settings.smtp }}</h2>
+            <h2 id="smtp-title">{{ t.settings.smtp }}</h2>
             <span class="section-desc">{{ t.settings.smtp_desc }}</span>
         </div>
-        <label class="switch">
-            <input type="checkbox" name="mod_smtp" value="1" {{ 'checked' if modules.smtp else '' }}>
+        <label class="switch" title="{{ t.settings.enabled }}">
+            <input type="checkbox" name="mod_smtp" value="1" aria-labelledby="smtp-title" {{ 'checked' if modules.smtp else '' }}>
             <span class="switch-slider"></span>
         </label>
     </div>
-    <div class="section-body">
-        <div class="form-row">
-            <div class="form-group">
-                <label for="smtp_server">{{ t.settings.server }}</label>
-                <input type="text" id="smtp_server" name="smtp_server" value="{{ cfg.smtp_server }}">
+    <div class="section-body ui-stack ui-stack-lg">
+        <div class="ui-form">
+            <div class="ui-fields st-fields-server">
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_server">{{ t.settings.server }}</label>
+                    <input class="ui-input" type="text" id="smtp_server" name="smtp_server" value="{{ cfg.smtp_server }}"
+                           placeholder="smtp.example.com" spellcheck="false" autocomplete="off">
+                </div>
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_port">{{ t.settings.port }}</label>
+                    <input class="ui-input" type="number" id="smtp_port" name="smtp_port" value="{{ cfg.smtp_port }}" min="1" max="65535">
+                </div>
             </div>
-            <div class="form-group">
-                <label for="smtp_port">{{ t.settings.port }}</label>
-                <input type="number" id="smtp_port" name="smtp_port" value="{{ cfg.smtp_port }}">
+            <div class="ui-fields">
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_user">{{ t.settings.username }}</label>
+                    <input class="ui-input" type="text" id="smtp_user" name="smtp_user" value="{{ cfg.smtp_user }}"
+                           spellcheck="false" autocomplete="off">
+                </div>
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_password">{{ t.settings.password }}</label>
+                    {% set pw_len = cfg.smtp_password_len | default(0) %}
+                    <input class="ui-input" type="password" id="smtp_password" name="smtp_password"
+                           placeholder="{{ '•' * pw_len }}" autocomplete="new-password" aria-describedby="smtp_password_hint">
+                    <p class="ui-hint" id="smtp_password_hint">
+                        {%- if pw_len %}{{ (t.settings.smtp_password_stored | default('Passwort gespeichert ({n} Zeichen). Leer lassen, um es zu behalten.')) | replace('{n}', pw_len | string) }}
+                        {%- else %}{{ t.settings.smtp_password_none | default('Kein Passwort gespeichert.') }}{% endif -%}
+                    </p>
+                </div>
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_recipient">{{ t.settings.recipient }}</label>
+                    <input class="ui-input" type="email" id="smtp_recipient" name="smtp_recipient" value="{{ cfg.smtp_recipient }}"
+                           spellcheck="false" autocomplete="off">
+                </div>
             </div>
         </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="smtp_user">{{ t.settings.username }}</label>
-                <input type="text" id="smtp_user" name="smtp_user" value="{{ cfg.smtp_user }}">
-            </div>
-            <div class="form-group">
-                <label for="smtp_password">{{ t.settings.password }}</label>
-                <input type="password" id="smtp_password" name="smtp_password" placeholder="••••••••">
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="smtp_recipient">{{ t.settings.recipient }}</label>
-                <input type="email" id="smtp_recipient" name="smtp_recipient" value="{{ cfg.smtp_recipient }}">
-            </div>
-            <div class="form-group">
-                <label>{{ t.settings.ssl }}</label>
-                <label class="switch-inline" style="height: 2.5rem; display: flex; align-items: center;">
-                    <input type="checkbox" name="smtp_ssl" value="1" {{ 'checked' if cfg.smtp_ssl else '' }}>
-                    <span class="switch-slider-sm"></span>
-                    <span>{{ t.settings.enabled }}</span>
-                </label>
-            </div>
+        <div class="ui-option-list">
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.settings.ssl }}</span>
+                    <span class="ui-option-desc">{{ t.settings.smtp_ssl_desc }}</span>
+                </span>
+                <span class="ui-switch"><input type="checkbox" role="switch" name="smtp_ssl" value="1" {{ 'checked' if cfg.smtp_ssl else '' }}><span class="ui-switch-track"></span></span>
+            </label>
         </div>
     </div>
 </div>
 
 {% include "settings/_diagnostics.html" %}
 
-<div class="form-actions">
-    <button type="submit" class="btn btn-primary">{{ t.settings.save_all }}</button>
+<div class="st-savebar" id="settings-savebar">
+    <p class="st-savebar-note">
+        <span class="st-savebar-idle">{{ icon('info') }}<span>{{ t.settings.save_note | default('Einträge in den Listen werden sofort gespeichert, Schalter und Felder erst mit diesem Knopf.') }}</span></span>
+        <span class="st-savebar-dirty"><span class="ui-dot is-warning"></span><span>{{ t.settings.save_dirty | default('Ungespeicherte Änderungen') }}</span></span>
+    </p>
+    <button type="submit" class="ui-btn ui-btn-primary">{{ icon('check') }}{{ t.settings.save_all }}</button>
 </div>
 
 </form>
@@ -187,4 +242,14 @@
 <script src="/static/js/settings.js?v={{ version }}"></script>
 <script src="/static/js/lists.js?v={{ version }}"></script>
 <script src="/static/js/ai_backends.js?v={{ version }}"></script>
+<script>
+// The save bar says so once a field of the big form has changed.
+(function () {
+    const form = document.getElementById("settings-form");
+    const bar = document.getElementById("settings-savebar");
+    const mark = function () { bar.classList.add("is-dirty"); };
+    form.addEventListener("input", mark);
+    form.addEventListener("change", mark);
+})();
+</script>
 {% endblock %}

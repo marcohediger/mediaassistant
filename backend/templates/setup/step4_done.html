@@ -1,21 +1,24 @@
 {% extends "base.html" %}
-{% block title %}Setup — Fertig{% endblock %}
+{% block title %}{{ t.setup.title }} — {{ t.setup.step_done }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/setup.css?v={{ version }}">{% endblock %}
 {% block content %}
-<div class="setup-container">
-    <div class="setup-progress">
-        <span class="step done">1. KI Backend</span>
-        <span class="step done">2. SMTP</span>
-        <span class="step done">3. Pfade</span>
-        <span class="step active">4. Fertig</span>
-    </div>
+{%- macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro -%}
+<div class="su-wrap">
+    {% include "setup/_stepper.html" %}
 
-    <h1>Setup abgeschlossen!</h1>
-    <p>MediaAssistant ist bereit. Alle Einstellungen können später im Menü unter "Einstellungen" angepasst werden.</p>
-
-    <form method="post" action="/setup/step/4">
-        <div class="form-actions">
-            <a href="/setup/step/3" class="btn btn-secondary">Zurück</a>
-            <button type="submit" class="btn btn-primary">Zum Dashboard</button>
+    <form method="post" action="/setup/step/4" class="ui-card su-card su-done">
+        <div class="ui-card-body su-done-body">
+            <span class="ui-empty-icon is-success su-done-icon">{{ icon('check-circle', 26) }}</span>
+            <p class="su-kicker">{{ t.setup.step_of | replace('{n}', '4') | replace('{total}', '4') }}</p>
+            <h1 class="su-done-title">{{ t.setup.done_title }}</h1>
+            <p class="su-done-text">{{ t.setup.done_text }}</p>
+        </div>
+        <div class="ui-card-foot su-foot">
+            <a href="/setup/step/3" class="ui-btn ui-btn-ghost su-back">{{ icon('arrow-left') }}{{ t.setup.back }}</a>
+            <span class="ui-spacer"></span>
+            <button type="submit" class="ui-btn ui-btn-primary su-next">{{ t.setup.to_dashboard }}{{ icon('arrow-right') }}</button>
         </div>
     </form>
 </div>

@@ -201,19 +201,6 @@ body[data-theme="light"] .lst-card { border-color: #e2e5ea; box-shadow: 0 1px 2p
 
 /* ── AI section: global options below the backend list ──────────── */
 .ai-divider { border-top: 1px solid var(--border); margin: 1.75rem -1.25rem 1.5rem; }
-.ai-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; line-height: 1.4; }
-.ai-option-title { font-size: 0.9rem; font-weight: 500; margin-bottom: 0.25rem; }
-.ai-option-desc { display: block; color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem; }
-.ai-resize-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.ai-resize-row .switch-inline { margin: 0; }
-.ai-resize-row input[type="number"] {
-    width: 6rem; height: 2.25rem; padding: 0 0.6rem;
-    font: inherit; font-size: 0.9rem; color: var(--text);
-    background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
-}
-.ai-resize-row input[type="number"]:focus { outline: none; border-color: var(--primary); }
-.ai-resize-row input[type="number"]:disabled { opacity: 0.55; }
-.ai-resize-row small { margin: 0 0 0 -0.5rem; color: var(--text-muted); }
 
 /* ── AI backend popup (base look from editor.css) ─────────────────── */
 /* Fixed height: the model list appears and vanishes as the URL changes; a
@@ -287,10 +274,3 @@ body[data-theme="light"] .lst-toast { box-shadow: 0 10px 30px rgba(16, 24, 40, 0
 
 /* An Immich input that exists but is switched off. */
 .lst-meta.lst-off { color: var(--text-muted); opacity: 0.7; }
-
-/* Image resize card */
-#section-ai-resize .resize-size { max-width: 18rem; }
-#section-ai-resize .resize-size.is-off { opacity: 0.5; }
-.input-with-unit { display: flex; align-items: center; gap: 0.5rem; }
-.input-with-unit input { flex: 1; min-width: 0; }
-.input-with-unit .unit { color: var(--text-muted); font-size: 0.85rem; }

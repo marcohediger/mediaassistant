@@ -288,7 +288,8 @@
     "next": "Next page",
     "page_select": "Go to page",
     "cancel": "Cancel",
-    "close": "Close"
+    "close": "Close",
+    "fact_exposure": "Exposure"
   },
   "settings": {
     "title": "Settings",
@@ -612,7 +613,8 @@
     "job_details": "Job details",
     "empty_title": "Nothing to review",
     "cancel": "Cancel",
-    "close": "Close"
+    "close": "Close",
+    "no_preview": "No preview"
   },
   "dryrun": {
     "title": "Dry-Run Report",
@@ -933,7 +935,11 @@
     "done_title": "Setup complete",
     "done_text": "MediaAssistant is ready. All settings can be changed later under “Settings”.",
     "to_dashboard": "Go to dashboard",
-    "step_completed": "completed"
+    "step_completed": "completed",
+    "test_ok": "{name}: OK",
+    "test_failed": "{name} failed: {error}",
+    "test_ai1": "AI 1",
+    "test_ai2": "AI 2"
   },
   "status": {
     "done": "Done",
@@ -950,6 +956,7 @@
     "title": "Sign in",
     "text": "Sign in with your SSO account to access MediaAssistant.",
     "logged_out": "You have been signed out.",
-    "button": "Sign in with SSO"
+    "button": "Sign in with SSO",
+    "denied": "Access denied. Your account is not authorised."
   }
 }

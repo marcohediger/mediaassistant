@@ -1,32 +1,54 @@
 {% extends "base.html" %}
-{% block title %}Setup — Pfade{% endblock %}
+{% block title %}{{ t.setup.title }} — {{ t.setup.step_paths }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/setup.css?v={{ version }}">{% endblock %}
 {% block content %}
-<div class="setup-container">
-    <div class="setup-progress">
-        <span class="step done">1. KI Backend</span>
-        <span class="step done">2. SMTP</span>
-        <span class="step active">3. Pfade</span>
-        <span class="step">4. Fertig</span>
+{%- macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro -%}
+<div class="su-wrap">
+    {% include "setup/_stepper.html" %}
+
+    <div class="su-head">
+        <p class="su-kicker">{{ t.setup.step_of | replace('{n}', '3') | replace('{total}', '4') }}</p>
+        <h1 class="ui-page-title">{{ t.setup.paths_title }}</h1>
+        <p class="ui-page-sub">{{ t.setup.paths_sub }}</p>
     </div>
 
-    <h1>Pfade prüfen</h1>
-    <p>Die Pfade werden über Docker Volumes gemountet. Hier siehst du die aktuellen Mounts.</p>
-
-    <form method="post" action="/setup/step/3" class="setup-form">
-        <div class="form-group">
-            <label>Inbox-Verzeichnis</label>
-            <input type="text" name="inbox_path" value="{{ inbox_path }}" readonly>
-            <small>Konfiguriert via Docker Volume Mount</small>
+    <form method="post" action="/setup/step/3" class="ui-card su-card">
+        <div class="ui-card-head">
+            <div class="ui-card-head-text">
+                <h2 class="ui-card-title"><span class="ui-icon-tile ui-icon-tile-sm">{{ icon('folder') }}</span>{{ t.setup.paths_card }}</h2>
+                <p class="ui-card-desc">{{ t.setup.mount_hint }}</p>
+            </div>
         </div>
-        <div class="form-group">
-            <label>Bibliothek-Verzeichnis</label>
-            <input type="text" name="library_path" value="{{ library_path }}" readonly>
-            <small>Konfiguriert via Docker Volume Mount</small>
+        <div class="ui-card-body ui-form">
+            <div class="ui-fields">
+                <div class="ui-field">
+                    <label class="ui-label" for="inbox_path">{{ t.setup.inbox }}</label>
+                    <div class="ui-input-icon">
+                        {{ icon('inbox') }}
+                        <input class="ui-input ui-input-mono" type="text" id="inbox_path" name="inbox_path" value="{{ inbox_path }}" readonly>
+                    </div>
+                </div>
+                <div class="ui-field">
+                    <label class="ui-label" for="library_path">{{ t.setup.library }}</label>
+                    <div class="ui-input-icon">
+                        {{ icon('archive') }}
+                        <input class="ui-input ui-input-mono" type="text" id="library_path" name="library_path" value="{{ library_path }}" readonly>
+                    </div>
+                </div>
+            </div>
+            <div class="ui-alert ui-alert-sm" role="note">
+                {{ icon('layers') }}
+                <div class="ui-alert-body">
+                    <p class="ui-alert-text">{{ (t.setup.set_hint | default('Beide Pfade gehören zum Verarbeitungs-Set „{name}". Weitere Sets mit eigenen Verzeichnissen, Regeln und Ablagen lassen sich später in den Einstellungen anlegen.')) | replace('{name}', set_name) }}</p>
+                </div>
+            </div>
         </div>
-        <p class="section-note">{{ t.get('setup', {}).get('set_hint', 'Beide Pfade gehören zum Verarbeitungs-Set „{name}“. Weitere Sets mit eigenen Verzeichnissen, Regeln und Ablagen lassen sich später in den Einstellungen anlegen.').replace('{name}', set_name) }}</p>
-        <div class="form-actions">
-            <a href="/setup/step/2" class="btn btn-secondary">Zurück</a>
-            <button type="submit" class="btn btn-primary">Weiter</button>
+        <div class="ui-card-foot su-foot">
+            <a href="/setup/step/2" class="ui-btn ui-btn-ghost su-back">{{ icon('arrow-left') }}{{ t.setup.back }}</a>
+            <span class="ui-spacer"></span>
+            <button type="submit" class="ui-btn ui-btn-primary su-next">{{ t.setup.next }}{{ icon('arrow-right') }}</button>
         </div>
     </form>
 </div>

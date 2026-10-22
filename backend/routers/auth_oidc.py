@@ -59,18 +59,14 @@ async def login(request: Request, next: str = "/", logged_out: str = "", error: 
     if AUTH_MODE != "oidc" or oauth is None:
         return RedirectResponse(url="/")
 
-    from version import VERSION
-    from template_engine import templates
+    from template_engine import render
 
-    error_msg = ""
-    if error == "denied":
-        error_msg = "Zugriff verweigert. Dein Konto ist nicht berechtigt."
-
-    return templates.TemplateResponse(request, "login.html", {
+    # render() brings language and theme; the page used to be German and
+    # dark only. The template translates the error code.
+    return await render(request, "login.html", {
         "next_url": next,
         "logged_out": bool(logged_out),
-        "error": error_msg,
-        "version": VERSION,
+        "error": "denied" if error == "denied" else "",
     })
 
 

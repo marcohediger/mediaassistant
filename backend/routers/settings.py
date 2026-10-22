@@ -43,7 +43,8 @@ async def _stored_key_len(value_or_none) -> int:
 
 async def _get_cfg() -> dict:
     stored_keys = {}
-    for name, key in (("ai", "ai.api_key"), ("ai2", "ai2.api_key"), ("immich", "immich.api_key")):
+    for name, key in (("ai", "ai.api_key"), ("ai2", "ai2.api_key"), ("immich", "immich.api_key"),
+                      ("smtp", "smtp.password")):
         try:
             stored_keys[name] = await config_manager.get(key, "")
         except Exception:
@@ -71,6 +72,8 @@ async def _get_cfg() -> dict:
         "smtp_port": await config_manager.get("smtp.port", 587),
         "smtp_user": await config_manager.get("smtp.user", ""),
         "smtp_recipient": await config_manager.get("smtp.recipient", ""),
+        # Length only, like the API keys: one placeholder dot per character.
+        "smtp_password_len": await _stored_key_len(stored_keys["smtp"]),
         "smtp_ssl": await config_manager.get("smtp.ssl", True),
         "immich_url": await config_manager.get("immich.url", ""),
         # Length only — never the key itself. Renders as one placeholder dot
@@ -152,12 +155,13 @@ async def save_settings(request: Request):
         except ValueError:
             pass
 
-    ai_prompt = form.get("ai_prompt", "").strip()
-    if ai_prompt:
-        await config_manager.set("ai.prompt", ai_prompt)
-    elif "ai_prompt_reset" in form:
-        # Reset to default by deleting the config entry
-        await config_manager.set("ai.prompt", "")
+    # Empty means "use the built-in prompt", as the hint under the field
+    # says. Before, an emptied field was ignored and the old custom prompt
+    # stayed. The unchanged default is not stored either, so improvements
+    # to DEFAULT_SYSTEM_PROMPT reach installations that never edited it.
+    if "ai_prompt" in form:
+        ai_prompt = form["ai_prompt"].strip()
+        await config_manager.set("ai.prompt", "" if ai_prompt == _DEFAULT_AI_PROMPT.strip() else ai_prompt)
 
     # Geocoding
     await config_manager.set("geo.provider", form.get("geo_provider", "nominatim"))

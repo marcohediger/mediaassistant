@@ -1,0 +1,23 @@
+{#- Step indicator of the setup wizard, included by step1..4.
+    Expects `step` (1-4) from routers/setup.py. Finished steps link back. -#}
+{%- set su_steps = [t.setup.step_ai, t.setup.step_smtp, t.setup.step_paths, t.setup.step_done] %}
+<nav class="su-stepper-nav" aria-label="{{ t.setup.steps_label }}">
+    <ol class="su-stepper">
+        {%- for label in su_steps %}
+        {%- set n = loop.index %}
+        <li class="su-step{{ ' is-done' if n < step else (' is-current' if n == step else '') }}">
+            {%- if n < step %}
+            <a class="su-step-inner" href="/setup/step/{{ n }}">
+                <span class="su-step-dot"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-check"/></svg></span>
+                <span class="su-step-label">{{ label }}<span class="ui-sr-only"> ({{ t.setup.step_completed }})</span></span>
+            </a>
+            {%- else %}
+            <span class="su-step-inner"{% if n == step %} aria-current="step"{% endif %}>
+                <span class="su-step-dot">{{ n }}</span>
+                <span class="su-step-label">{{ label }}</span>
+            </span>
+            {%- endif %}
+        </li>
+        {%- endfor %}
+    </ol>
+</nav>

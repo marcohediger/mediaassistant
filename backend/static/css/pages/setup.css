@@ -1,0 +1,99 @@
+/* Setup wizard (setup/step1..4, setup/_stepper.html): step indicator,
+ * one card per step with the primary action bottom right.
+ * Colours only from theme variables and --ui-* tokens. */
+
+.su-wrap { max-width: 46rem; margin: 0 auto; }
+
+/* ── Step indicator ─────────────────────────────────────────────────
+   Numbered dots joined by a line; finished steps show a check and link
+   back, the current one is filled. */
+.su-stepper { display: flex; margin: 0 0 2.25rem; padding: 0; list-style: none; }
+.su-step { position: relative; flex: 1 1 0; min-width: 0; }
+/* The line from the previous step to this one */
+.su-step + .su-step::before {
+    content: ""; position: absolute; top: calc(0.9375rem - 1px); height: 2px;
+    left: calc(-50% + 1.4rem); right: calc(50% + 1.4rem);
+    border-radius: 1px; background: var(--border);
+}
+.su-step:is(.is-done, .is-current)::before { background: var(--primary); }
+.su-step-inner {
+    display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+    min-width: 0; padding: 0 0.25rem; text-align: center; color: inherit; text-decoration: none;
+    border-radius: var(--ui-radius);
+}
+a.su-step-inner:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.su-step-dot {
+    display: grid; place-items: center; flex: none;
+    width: 1.875rem; height: 1.875rem; border-radius: 50%;
+    border: 1.5px solid var(--border); background: var(--bg-card);
+    font-size: var(--ui-fs-sm); font-weight: 600; line-height: 1; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    transition: background 0.15s, border-color 0.15s;
+}
+.su-step-label {
+    max-width: 100%; font-size: var(--ui-fs-sm); font-weight: 500; line-height: 1.3;
+    color: var(--text-muted); overflow-wrap: anywhere;
+}
+.su-step.is-current .su-step-dot {
+    background: var(--primary); border-color: var(--primary); color: #fff;
+    box-shadow: 0 0 0 4px var(--ui-accent-soft);
+}
+.su-step.is-current .su-step-label { color: var(--text); font-weight: 600; }
+.su-step.is-done .su-step-dot { background: var(--ui-accent-soft); border-color: var(--primary); color: var(--primary); }
+.su-step.is-done .su-step-dot .ui-i { stroke-width: 2.5; }
+.su-step.is-done .su-step-label { color: var(--text); }
+a.su-step-inner:hover .su-step-dot { background: color-mix(in srgb, var(--primary) 22%, transparent); }
+a.su-step-inner:hover .su-step-label { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── Head above the card ────────────────────────────────────────────── */
+.su-head { margin: 0 0 1.5rem; }
+.su-kicker {
+    margin: 0 0 0.4rem; font-size: var(--ui-fs-xs); font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--primary);
+}
+.su-alert { margin: 0 0 1.25rem; }
+
+/* ── Card ───────────────────────────────────────────────────────────── */
+.su-card .ui-card-head { padding: 1.1rem 1.5rem; }
+.su-card .ui-card-body { padding: 1.5rem; }
+.su-card .ui-card-foot { padding: 0.9rem 1.5rem; }
+.su-next > .ui-i { margin-left: 0; margin-right: -0.15rem; }
+.su-back { margin-left: -0.5rem; }
+/* Server wide, port narrow (side by side on a phone too) */
+.su-fields-server { grid-template-columns: minmax(0, 1fr) 8rem; }
+
+/* Optional block (second AI backend) that opens on demand */
+.su-more {
+    border: 1px solid var(--border); border-radius: var(--ui-radius-lg); background: var(--bg-card);
+}
+.su-more-head {
+    display: flex; align-items: center; gap: 0.85rem;
+    padding: 0.9rem 1rem 0.9rem 1.1rem; list-style: none; cursor: pointer;
+    border-radius: 11px;
+}
+.su-more-head::-webkit-details-marker { display: none; }
+.su-more-head:hover { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+.su-more-head:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.su-more[open] > .su-more-head { border-radius: 11px 11px 0 0; border-bottom: 1px solid var(--ui-line); }
+.su-more-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.su-more-title { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; font-weight: 600; color: var(--text); }
+.su-more-desc { max-width: 60ch; font-size: 0.8rem; line-height: 1.55; color: var(--text-muted); }
+.su-more-chev { flex: none; color: var(--text-muted); transition: transform 0.2s; }
+.su-more[open] .su-more-chev { transform: rotate(180deg); }
+.su-more-body { padding: 1.1rem 1.1rem 1.25rem; }
+
+/* ── Last step ──────────────────────────────────────────────────────── */
+.su-done-body { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; padding: 2.75rem 1.5rem 2.25rem; text-align: center; }
+.su-done-icon { width: 3.5rem; height: 3.5rem; margin-bottom: 0.75rem; border-radius: 50%; }
+.su-done-title { margin: 0; font-size: var(--ui-fs-xl); font-weight: 650; letter-spacing: -0.01em; color: var(--text); }
+.su-done-text { margin: 0.2rem 0 0; max-width: 46ch; font-size: var(--ui-fs-base); line-height: 1.6; color: var(--text-muted); }
+
+@media (max-width: 600px) {
+    .su-stepper { margin-bottom: 1.75rem; }
+    .su-step-label { font-size: var(--ui-fs-xs); }
+    .su-card .ui-card-head, .su-card .ui-card-body { padding-left: 1rem; padding-right: 1rem; }
+    .su-card .ui-card-foot { padding-left: 1rem; padding-right: 1rem; }
+    .su-fields-server { grid-template-columns: minmax(0, 1fr) 6.5rem; }
+    .su-more-body { padding: 1rem 0.9rem 1.1rem; }
+}
+@media (prefers-reduced-motion: reduce) { .su-more-chev { transition: none; } }
