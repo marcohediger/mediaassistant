@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ job.debug_key }} — MediaAssistant{% endblock %}
 {% block content %}
+{% from "_status.html" import status_badge with context %}
 <div class="detail-header" data-page="job-detail" data-debug-key="{{ job.debug_key }}">
     <a href="{{ back_url | default('/logs?tab=jobs') }}" class="btn btn-small btn-secondary">{{ t.job_detail.back }}</a>
     <h1><code>{{ job.debug_key }}</code></h1>
@@ -31,7 +32,7 @@
     </div>
     <div class="detail-card">
         <h3>{{ t.job_detail.status }}</h3>
-        <span class="cell-status"><span class="status-badge status-{{ job.status }}" data-field="status">{{ job.status }}</span>{% if job.dry_run %}<span class="dry-run-mark with-text" title="{{ t.sets.dry_run_hint }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>{{ t.sets.dry_run_short }}</span>{% endif %}</span>
+        <span class="cell-status">{{ status_badge(job.status, field=True) }}{% if job.dry_run %}<span class="dry-run-mark with-text" title="{{ t.sets.dry_run_hint }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>{{ t.sets.dry_run_short }}</span>{% endif %}</span>
     </div>
     <div class="detail-card">
         <h3>{{ t.job_detail.current_step }}</h3>

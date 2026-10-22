@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t.dashboard.title }} — MediaAssistant{% endblock %}
 {% block content %}
+{% from "_status.html" import status_badge with context %}
 <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.5rem;">
     <h1 style="margin: 0;">{{ t.dashboard.title }}</h1>
     <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
@@ -176,7 +177,7 @@ setInterval(refreshPipelineStatus, 5000);
             <tr class="log-row log-{{ job.status }}">
                 <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
                 <td>{{ job.filename }}</td>
-                <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
+                <td>{{ status_badge(job.status) }}</td>
                 <td>{{ job.current_step or '—' }}</td>
                 <td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }}">{{ job.error_message or '' }}</td>
                 <td>{{ job.updated_at.strftime('%d.%m. %H:%M:%S') if job.updated_at else '—' }}</td>

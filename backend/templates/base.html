@@ -107,6 +107,8 @@
     <div id="lightbox" class="lightbox" onclick="this.classList.remove('active')">
         <img id="lightbox-img" src="" alt="">
     </div>
+    {% from "_status.html" import status_badge, STATUSES with context %}
+    <template id="status-badges">{% for s in STATUSES %}{{ status_badge(s) }}{% endfor %}</template>
     <script src="/static/js/app.js?v={{ version }}"></script>
 </body>
 </html>
