@@ -119,6 +119,33 @@ muss jede Datei dieselbe Kategorie und denselben Zielpfad ergeben wie vorher.
 - Die bisherigen Einstellungs-Abschnitte Eingangsverzeichnisse, Filewatcher,
   Sortier-Regeln, Ziel-Ablage und Ordner-Tags gehen in diesem Popup auf; beim
   Immich-Abschnitt wandert nur der Poll-Schalter ins Set.
+### Immich-Zugänge als Liste
+
+Der Immich-Abschnitt der Einstellungen behält die **Server-URL**; Schlüssel und
+Benutzer werden zu **einer Liste nach demselben Muster** — eine Zeile pro Zugang,
+ganz rechts der Stift, Bearbeiten im Popup:
+
+```
+ Name            Immich-Konto              Verbindung   verwendet von     ✎
+ Globaler User   Marco (m…@…)              ✓            Standard          ✎
+ Melissa         Melissa (m…@…)            ✓            Handy Melissa     ✎
+                                                              [ + Neuer Zugang ]
+```
+
+- **„+ Neuer Zugang"** fragt zuerst: **Globaler User** oder **User mit Name**.
+  Globaler User gibt es höchstens einmal; existiert er schon, ist die Wahl gesperrt.
+- In der Namensspalte steht „Globaler User" bzw. der vergebene Name.
+- „Immich-Konto" zeigt, wem der Schlüssel in Immich gehört (`/api/users/me`) —
+  damit ist sichtbar, ob der richtige Schlüssel hinterlegt ist.
+- Im Popup: Name (nur bei benannten), API-Schlüssel, Verbindung testen, Löschen.
+  Löschen ist gesperrt, solange ein Set den Zugang verwendet.
+- Die Sets wählen ihren Zugang (für Upload und für Auto-Tagging) aus dieser Liste.
+
+**Speicherung bleibt wie heute:** der globale Schlüssel in `config.immich.api_key`,
+benannte in `immich_users`; „kein Benutzer" (`immich_user_id = NULL`) heisst global.
+Die Liste ist eine neue Ansicht, kein neues Datenmodell — Jobs und Immich-Aufrufe
+bleiben unberührt.
+
 - Dashboard und Diagnose-API zeigen die Sets mit Warteschlange je Set.
 - Review-Ansicht bietet die Kategorien des Sets an, aus dem der Job stammt.
 
