@@ -85,7 +85,7 @@
         (j) => `<tr class="log-row log-${j.status}">
         <td><a href="/logs/job/${esc(j.debug_key)}" class="log-link-key"><code>${esc(j.debug_key || "—")}</code></a></td>
         <td>${esc(j.filename)}</td>
-        <td>${statusBadge(j.status)}</td>
+        <td>${statusBadge(j.status, true)}</td>
         <td>${esc(j.current_step || "—")}</td>
         <td class="cell-msg${j.status === "error" ? " is-error" : ""}">${esc(j.error_message || "")}</td>
         <td>${esc(j.updated_at)}</td>
@@ -199,9 +199,10 @@
   // ── Helpers ──
   // Status badge (icon + label) cloned from the copies base.html renders,
   // so the icons and translations live in one place (_status.html).
-  function statusBadge(status) {
+  function statusBadge(status, iconOnly) {
     const tpl = document.getElementById("status-badges");
-    const badge = tpl && tpl.content.querySelector(`[data-status="${CSS.escape(status || "")}"]`);
+    const variant = iconOnly ? ".is-icon" : ":not(.is-icon)";
+    const badge = tpl && tpl.content.querySelector(`[data-status="${CSS.escape(status || "")}"]${variant}`);
     if (badge) return badge.outerHTML;
     return `<span class="status-badge status-${esc(status)}" data-status="${esc(status)}">${esc(status)}</span>`;
   }

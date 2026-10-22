@@ -37,9 +37,6 @@
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-.log-table thead {
-    background: #e5e7eb;
-}
 
 .log-table tbody tr:hover {
     background: #f0f1f5;
@@ -49,15 +46,7 @@
     font-weight: 600;
 }
 
-.btn-secondary {
-    background: #e5e7eb;
-    color: var(--text);
-    border: 1px solid var(--border);
-}
 
-.btn-secondary:hover {
-    background: #d1d5db;
-}
 
 .alert-error {
     background: #fef2f2;
@@ -95,10 +84,6 @@
     border-color: #c7d2fe;
 }
 
-code {
-    background: #f0f1f5;
-    color: #1f2937;
-}
 
 .switch-slider {
     background: #d1d5db;

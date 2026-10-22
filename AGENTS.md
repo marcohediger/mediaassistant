@@ -68,8 +68,9 @@ MediaAssistant/
 │   │   ├── tools.py            # Register "Werkzeuge": Tag-Aufräumen + Schreibweisen
 │   │   ├── diagnostics.py      # Nur-lesende Diagnose-API (Token aus Einstellungen)
 │   │   └── auth_oidc.py
-│   ├── templates/              # Jinja2 HTML
-│   ├── static/                 # CSS, JS, Logos
+│   ├── templates/              # Jinja2 HTML (_icons.html = SVG-Sprite, _status.html = Status-Badge)
+│   ├── static/                 # CSS, JS, Logos — css/ui.css = Design-System (siehe docs/DESIGN.md),
+│   │                           #   styleguide.html = alle Bausteine zum Anschauen
 │   ├── i18n/                   # de.json / en.json
 │   ├── version.py              # VERSION-String + DATE
 │   ├── test_duplicate_fix.py   # Race-Conditions + Duplikat-Tests (26 Tests)
@@ -86,6 +87,7 @@ MediaAssistant/
 ├── docker-compose.build.yml    # Build-only
 ├── docker-compose.local.yml    # gitignored — lokale Overrides
 ├── docs/
+│   ├── DESIGN.md               # Design-System: Tokens, Regeln, Bausteine (ui-*) — vor UI-Arbeit lesen
 │   └── sorting-flow.md
 ├── CHANGELOG.md                # Pflicht: jedem Release ein Eintrag
 ├── REQUIREMENTS.md             # Original-Spec, eher historisch
