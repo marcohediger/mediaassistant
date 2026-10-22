@@ -1,0 +1,111 @@
+/* Duplicates page (/duplicates): groups of comparison tiles.
+   Built from the ui-* components; only what they do not cover lives here.
+   Class prefix dp- (the old .dup-* rules in style.css are no longer used). */
+
+/* Menus in the page head */
+.dp-menu .ui-menu-item .ui-count { margin-left: auto; }
+.dp-menu form { margin: 0; }
+
+/* Batch clean progress */
+.dp-progress { margin: 0 0 1.25rem; }
+.dp-progress[hidden] { display: none; }
+.dp-progress-text { margin: 0.55rem 0 0; font-size: var(--ui-fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* Groups */
+.dp-groups { display: flex; flex-direction: column; gap: 1.25rem; }
+.dp-group-head { flex-wrap: wrap; gap: 0.5rem 1rem; padding: 0.85rem 1.25rem; }
+.dp-group-head .ui-card-head-text { flex: 1 1 16rem; }
+.dp-group-title { min-width: 0; }
+.dp-group-title .ui-icon-tile { --ui-tone: var(--warning); --ui-tone-text: var(--ui-warn-text); }
+.dp-group-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 0.15rem 0.45rem; margin-top: 0.15rem; }
+.dp-group-sub .ui-mono { font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.dp-group-sub .ui-mono:hover { color: var(--primary); }
+.dp-group-kind { gap: 0.35rem; }
+.dp-group-body { padding: 1rem; }
+.dp-thumbs { --ui-thumb-min: 15rem; }
+
+/* Tile */
+.dp-thumb .ui-thumb-media > img { transition: transform 0.25s ease; }
+.dp-thumb button.ui-thumb-media:hover > img { transform: scale(1.02); }
+.dp-corner { flex-direction: column; }
+.dp-thumb .ui-thumb-body { gap: 0.5rem; }
+
+/* Facts: icon + label | value, one line each so the rows of all tiles line up */
+.dp-facts { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; font-size: var(--ui-fs-sm); }
+.dp-fact {
+    display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: 0.6rem;
+    align-items: start; min-width: 0; line-height: 1.3rem;
+}
+.dp-fact dt {
+    display: flex; align-items: center; gap: 0.4rem; height: 1.3rem; margin: 0; min-width: 0;
+    font-size: var(--ui-fs-xs); color: var(--text-muted); white-space: nowrap;
+}
+.dp-fact dt > .ui-i { flex: none; opacity: 0.8; align-self: center; }
+.dp-fact-label { overflow: hidden; text-overflow: ellipsis; }
+.dp-fact dd {
+    margin: 0; min-width: 0; color: var(--text); font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Best value of the group / data only this file has */
+.dp-top { color: var(--ui-ok-text); font-weight: 600; }
+.dp-fact dd.dp-meta { display: flex; flex-wrap: wrap; gap: 0.25rem; white-space: normal; overflow: visible; }
+.dp-meta .ui-tag { height: 1.3rem; padding: 0 0.4rem; gap: 0.25rem; font-size: var(--ui-fs-2xs); max-width: 100%; }
+.dp-meta .ui-tag > .ui-truncate { max-width: 9rem; }
+
+.dp-keywords .ui-tag { max-width: 11rem; }
+.dp-desc {
+    margin: 0; font-size: var(--ui-fs-xs); line-height: 1.5; color: var(--text-muted);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.dp-where {
+    display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; margin-top: auto; padding-top: 0.15rem;
+    font-size: var(--ui-fs-2xs); color: var(--text-muted);
+}
+.dp-path {
+    font-family: var(--ui-mono); min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dp-key { align-self: flex-start; font-size: var(--ui-fs-2xs); color: var(--text-muted); }
+.dp-key:hover { color: var(--primary); }
+
+/* Actions */
+.dp-actions { gap: 0.35rem; }
+.dp-action-form { margin: 0; display: flex; }
+.dp-actions .ui-btn[aria-busy="true"] { pointer-events: none; opacity: 0.8; }
+
+/* Pagination */
+.dp-pagination { gap: 0.3rem; margin-top: 1.5rem; }
+.dp-page { min-width: 2rem; padding: 0 0.5rem; font-variant-numeric: tabular-nums; }
+.dp-page.is-current { background: var(--ui-accent-soft); border-color: var(--ui-accent-ring); color: var(--primary); font-weight: 600; cursor: default; }
+.dp-page-step { width: 2rem; padding: 0; }
+.dp-page-step > .ui-i { margin: 0; }
+.dp-page-gap { padding: 0 0.25rem; color: var(--text-muted); }
+.dp-page-select { width: auto; height: var(--ui-ctl-h-xs); margin-left: 0.5rem; font-size: var(--ui-fs-sm); }
+
+/* Confirmation popup */
+.dp-confirm-text { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+
+@media (max-width: 600px) {
+    /* Two tiles side by side, like the other thumbnail grids */
+    .dp-thumbs { --ui-thumb-min: 9.5rem; }
+    .dp-group-head { padding: 0.75rem 0.9rem; }
+    .dp-group-body { padding: 0.65rem; }
+    /* Narrow tiles: icon instead of the label, values keep one line */
+    .dp-fact { grid-template-columns: 0.875rem minmax(0, 1fr); gap: 0.45rem; }
+    .dp-fact-label {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    .dp-facts { font-size: var(--ui-fs-xs); }
+    .dp-actions .dp-action-form, .dp-actions .ui-btn { flex: 1 1 100%; }
+    /* Recommended badge: star only, the tile border and button carry the rest */
+    .dp-recommended .dp-badge-text {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    .dp-recommended { padding: 0 0.4rem; }
+    /* Many pages: arrows around the page picker instead of a row of numbers */
+    .dp-pagination:has(.dp-page-select) :is(.dp-page, .dp-page-gap) { display: none; }
+    .dp-page-select { margin-left: 0; order: 1; }
+    .dp-page-next { order: 2; }
+}

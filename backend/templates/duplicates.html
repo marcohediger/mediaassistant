@@ -1,118 +1,246 @@
 {% extends "base.html" %}
-{% block title %}{{ t.duplicates.title }} — MediaAssistant{% endblock %}
+{% block title %}{{ t.duplicates.heading }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/duplicates.css?v={{ version }}">{% endblock %}
 {% block content %}
-<div class="dup-header">
-    <h1>{{ t.duplicates.title }}</h1>
-    <div class="dup-header-actions">
-        <span class="dup-count">{{ total_groups }} {{ t.duplicates.groups if total_groups != 1 else t.duplicates.group }}</span>
-        <form method="post" action="/api/duplicates/re-evaluate-quality" class="inline-form"
-              onsubmit="return dupConfirm('{{ t.duplicates.re_evaluate_confirm }}')">
-            <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.re_evaluate }}</button>
-        </form>
+{% set d = t.duplicates %}
+{% macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
+
+<div class="ui-page-head">
+    <div class="ui-page-head-text">
+        <h1 class="ui-page-title">{{ d.heading }}
+            {% if total_groups %}<span class="ui-badge ui-badge-lg is-warning">{{ total_groups }} {{ d.groups if total_groups != 1 else d.group }}</span>{% endif %}
+        </h1>
+        <p class="ui-page-sub">{{ d.subtitle }}</p>
+    </div>
+    <div class="ui-page-actions">
         {% if exact_groups > 0 %}
-        <button class="btn btn-small btn-secondary" onclick="startBatchClean({{ current_page }}, '{{ t.duplicates.batch_confirm }}')">{{ t.duplicates.batch_clean }} ({{ t.duplicates.this_page }})</button>
-        <button class="btn btn-small btn-secondary" onclick="startBatchClean(0, '{{ t.duplicates.batch_all_confirm | replace('{n}', exact_groups|string) }}')">{{ t.duplicates.batch_clean_all }} ({{ exact_groups }} {{ t.duplicates.exact }})</button>
+        <div class="ui-menu-wrap">
+            <button type="button" class="ui-btn ui-btn-secondary" aria-haspopup="menu" aria-expanded="false" aria-controls="dp-clean-menu">
+                {{ icon('sparkles') }}{{ d.clean_auto }}{{ icon('chevron-down', 14) }}
+            </button>
+            <div class="ui-menu dp-menu" id="dp-clean-menu" role="menu" hidden>
+                <button type="button" class="ui-menu-item" role="menuitem" data-batch-page="{{ current_page }}"
+                        data-confirm-text="{{ d.batch_confirm }}"{% if not page_exact_groups %} disabled{% endif %}>
+                    {{ icon('list') }}{{ d.clean_page }}<span class="ui-count">{{ page_exact_groups }}</span>
+                </button>
+                <button type="button" class="ui-menu-item" role="menuitem" data-batch-page="0"
+                        data-confirm-text="{{ d.batch_all_confirm | replace('{n}', exact_groups | string) }}">
+                    {{ icon('layers') }}{{ d.clean_all }}<span class="ui-count">{{ exact_groups }}</span>
+                </button>
+            </div>
+        </div>
         {% endif %}
+        <div class="ui-menu-wrap">
+            <button type="button" class="ui-icon-btn ui-icon-btn-outline" aria-haspopup="menu" aria-expanded="false"
+                    aria-controls="dp-more-menu" aria-label="{{ d.more_actions }}" title="{{ d.more_actions }}">{{ icon('more-horizontal', 18) }}</button>
+            <div class="ui-menu dp-menu" id="dp-more-menu" role="menu" hidden>
+                <form method="post" action="/api/duplicates/re-evaluate-quality"
+                      data-confirm-title="{{ d.re_evaluate_title }}" data-confirm-text="{{ d.re_evaluate_confirm }}"
+                      data-confirm-ok="{{ d.re_evaluate_ok }}">
+                    <button type="submit" class="ui-menu-item" role="menuitem">{{ icon('star') }}{{ d.re_evaluate }}</button>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
 
-<div id="batch-progress" style="display:none; margin: 1rem 0; padding: 1rem; background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border);">
-    <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-        <span id="batch-progress-text">...</span>
-        <span id="batch-progress-pct">0%</span>
-    </div>
-    <div style="width:100%; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
-        <div id="batch-progress-bar" style="width:0%; height:100%; background:var(--primary); transition:width 0.3s;"></div>
+<div class="ui-card dp-progress" id="batch-progress" hidden>
+    <div class="ui-card-body">
+        <div class="ui-progress-meta">
+            <strong>{{ d.progress_title }}</strong>
+            <span class="ui-tabular" id="batch-progress-pct">0%</span>
+        </div>
+        <div class="ui-progress" id="batch-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+             aria-label="{{ d.progress_title }}">
+            <div class="ui-progress-bar" id="batch-progress-bar"></div>
+        </div>
+        <p class="dp-progress-text" id="batch-progress-text" aria-live="polite">…</p>
     </div>
 </div>
 
 {% if groups %}
-<div id="dup-groups-container">
+<div id="dup-groups-container" class="dp-groups">
 {% for group in groups %}
 {% include "_dup_group.html" %}
 {% endfor %}
 </div>
 
 {% if total_pages > 1 %}
-<div class="dup-pagination">
+<nav class="ui-pagination dp-pagination" aria-label="{{ d.page_info | replace('{p}', current_page | string) | replace('{n}', total_pages | string) }}">
     {% if current_page > 1 %}
-    <a href="/duplicates?page={{ current_page - 1 }}" class="btn btn-small btn-secondary">&laquo;</a>
+    <a href="/duplicates?page={{ current_page - 1 }}" class="ui-btn ui-btn-secondary ui-btn-sm dp-page-step" aria-label="{{ d.prev }}" title="{{ d.prev }}">{{ icon('chevron-left') }}</a>
+    {% else %}
+    <span class="ui-btn ui-btn-secondary ui-btn-sm dp-page-step" aria-disabled="true">{{ icon('chevron-left') }}</span>
     {% endif %}
 
     {% for p in page_numbers %}
         {% if p == "..." %}
-        <span class="btn btn-small btn-secondary" style="opacity:0.5">…</span>
+        <span class="dp-page-gap" aria-hidden="true">…</span>
         {% elif p == current_page %}
-        <span class="btn btn-small btn-primary">{{ p }}</span>
+        <span class="ui-btn ui-btn-sm dp-page is-current" aria-current="page">{{ p }}</span>
         {% else %}
-        <a href="/duplicates?page={{ p }}" class="btn btn-small btn-secondary">{{ p }}</a>
+        <a href="/duplicates?page={{ p }}" class="ui-btn ui-btn-ghost ui-btn-sm dp-page">{{ p }}</a>
         {% endif %}
     {% endfor %}
 
     {% if current_page < total_pages %}
-    <a href="/duplicates?page={{ current_page + 1 }}" class="btn btn-small btn-secondary">&raquo;</a>
+    <a href="/duplicates?page={{ current_page + 1 }}" class="ui-btn ui-btn-secondary ui-btn-sm dp-page-step dp-page-next" aria-label="{{ d.next }}" title="{{ d.next }}">{{ icon('chevron-right') }}</a>
+    {% else %}
+    <span class="ui-btn ui-btn-secondary ui-btn-sm dp-page-step dp-page-next" aria-disabled="true">{{ icon('chevron-right') }}</span>
     {% endif %}
 
-    <select onchange="window.location.href='/duplicates?page='+this.value" style="margin-left:8px;padding:4px 6px;font-size:0.85rem;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);width:auto;display:inline-block">{% for p in range(1, total_pages + 1) %}<option value="{{ p }}"{{ ' selected' if p == current_page else '' }}>{{ p }}</option>{% endfor %}</select>
-</div>
+    {% if total_pages > 7 %}
+    <select class="ui-select dp-page-select" aria-label="{{ d.page_select }}" onchange="window.location.href='/duplicates?page='+this.value">
+        {% for p in range(1, total_pages + 1) %}<option value="{{ p }}"{{ ' selected' if p == current_page else '' }}>{{ d.page_info | replace('{p}', p | string) | replace('{n}', total_pages | string) }}</option>{% endfor %}
+    </select>
+    {% endif %}
+</nav>
 {% endif %}
 
 {% else %}
-<p class="section-note">{{ t.duplicates.no_duplicates }}</p>
+<div class="ui-card">
+    <div class="ui-empty">
+        <span class="ui-empty-icon is-success">{{ icon('check-circle', 22) }}</span>
+        <p class="ui-empty-title">{{ d.empty_title }}</p>
+        <p class="ui-empty-text">{{ d.empty_text }}</p>
+    </div>
+</div>
 {% endif %}
 
-<style>
-.dup-pagination {
-    display: flex;
-    justify-content: center;
-    gap: 4px;
-    margin: 2rem 0;
-    flex-wrap: wrap;
-}
-.dup-pagination .btn {
-    min-width: 36px;
-    text-align: center;
-}
-</style>
+{# Confirmation popup, shared by keep / not a duplicate / clean-up / re-evaluate #}
+<dialog class="ui-dialog" id="dp-confirm" aria-labelledby="dp-confirm-title" aria-describedby="dp-confirm-text">
+    <form method="dialog" class="ui-dialog-shell">
+        <div class="ui-dialog-head">
+            <div class="ui-dialog-head-text"><h2 class="ui-dialog-title" id="dp-confirm-title"></h2></div>
+            <button type="submit" value="cancel" class="ui-icon-btn" aria-label="{{ d.close }}" title="{{ d.close }}">{{ icon('x', 18) }}</button>
+        </div>
+        <div class="ui-dialog-body"><p class="dp-confirm-text" id="dp-confirm-text"></p></div>
+        <div class="ui-dialog-foot">
+            <button type="submit" value="cancel" class="ui-btn ui-btn-secondary" id="dp-confirm-cancel">{{ d.cancel }}</button>
+            <button type="submit" value="ok" class="ui-btn ui-btn-primary" id="dp-confirm-ok"></button>
+        </div>
+    </form>
+</dialog>
+
+<template id="dp-no-preview"><span class="ui-thumb-placeholder">{{ icon('image', 24) }}{{ d.no_preview }}</span></template>
 
 <script>
 const SKIP_CONFIRM = {{ 'true' if skip_confirm else 'false' }};
-function dupConfirm(msg) {
-    if (SKIP_CONFIRM) return true;
-    return confirm(msg);
+const DP_TEXT = {
+    cleanTitle: {{ d.clean_title | tojson }},
+    cleanOk: {{ d.clean_ok | tojson }},
+    batchDone: {{ d.batch_done | tojson }},
+    batchProgress: {{ d.batch_progress | tojson }},
+    batchRunning: {{ d.batch_running | tojson }},
+};
+
+// Confirmation popup. Resolves true when the user confirms.
+function dpAsk(opts) {
+    const dlg = document.getElementById('dp-confirm');
+    document.getElementById('dp-confirm-title').textContent = opts.title || '';
+    document.getElementById('dp-confirm-text').textContent = opts.text || '';
+    const ok = document.getElementById('dp-confirm-ok');
+    ok.textContent = opts.ok || 'OK';
+    ok.className = 'ui-btn ' + (opts.danger ? 'ui-btn-danger-solid' : 'ui-btn-primary');
+    dlg.returnValue = '';
+    return new Promise(resolve => {
+        dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+        dlg.showModal();
+        // Destructive actions start on "Cancel", harmless ones on the action itself
+        (opts.danger ? document.getElementById('dp-confirm-cancel') : ok).focus();
+    });
 }
 
+function dupConfirm(opts) {
+    if (SKIP_CONFIRM) return Promise.resolve(true);
+    return dpAsk(opts);
+}
+
+function dpBusy(button) {
+    if (!button) return;
+    button.setAttribute('aria-busy', 'true');
+    const svg = button.querySelector('svg use');
+    if (svg) {
+        svg.setAttribute('href', '#ui-i-loader');
+        svg.closest('svg').classList.add('ui-spin');
+    }
+}
+
+// Forms with data-confirm-* (keep, not a duplicate, re-evaluate) ask first.
+document.addEventListener('submit', async (e) => {
+    const form = e.target;
+    if (!form.matches('form[data-confirm-text]')) return;
+    e.preventDefault();
+    if (form.dataset.sending) return;
+    const button = e.submitter || form.querySelector('[type=submit]');
+    closeMenus();
+    const yes = await dupConfirm({
+        title: form.dataset.confirmTitle, text: form.dataset.confirmText,
+        ok: form.dataset.confirmOk, danger: !!form.dataset.confirmDanger,
+    });
+    if (!yes) return;
+    form.dataset.sending = '1';
+    dpBusy(button);
+    form.submit();
+});
+
+// ── Menus (page head) ──
+function closeMenus(except) {
+    document.querySelectorAll('.ui-menu-wrap > [aria-haspopup="menu"][aria-expanded="true"]').forEach(btn => {
+        if (btn === except) return;
+        btn.setAttribute('aria-expanded', 'false');
+        document.getElementById(btn.getAttribute('aria-controls')).hidden = true;
+    });
+}
+document.querySelectorAll('.ui-menu-wrap > [aria-haspopup="menu"]').forEach(btn => {
+    const menu = document.getElementById(btn.getAttribute('aria-controls'));
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = btn.getAttribute('aria-expanded') !== 'true';
+        closeMenus(btn);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        menu.hidden = !open;
+    });
+});
+document.addEventListener('click', (e) => { if (!e.target.closest('.ui-menu')) closeMenus(); });
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const open = document.querySelector('.ui-menu-wrap > [aria-expanded="true"]');
+    if (open) { closeMenus(); open.focus(); }
+});
+
+// ── Batch clean ──
 function showProgress(data) {
     const progressDiv = document.getElementById('batch-progress');
     const progressText = document.getElementById('batch-progress-text');
     const progressPct = document.getElementById('batch-progress-pct');
     const progressBar = document.getElementById('batch-progress-bar');
-    progressDiv.style.display = 'block';
+    const track = document.getElementById('batch-progress-track');
+    progressDiv.hidden = false;
 
     const pct = data.total > 0 ? Math.round(data.current / data.total * 100) : 0;
     progressBar.style.width = pct + '%';
     progressPct.textContent = pct + '%';
+    track.setAttribute('aria-valuenow', pct);
 
     if (data.done) {
-        const tpl = '{{ t.duplicates.batch_done }}';
-        progressText.textContent = tpl
+        progressText.textContent = DP_TEXT.batchDone
             .replace('{kept}', data.kept).replace('{deleted}', data.deleted).replace('{errors}', data.errors);
-        progressBar.style.background = data.errors > 0 ? 'var(--warning)' : 'var(--success)';
+        track.classList.add(data.errors > 0 ? 'is-warning' : 'is-success');
         setTimeout(() => window.location.reload(), 3000);
     } else {
-        const tpl = '{{ t.duplicates.batch_progress }}';
-        progressText.textContent = tpl
+        progressText.textContent = DP_TEXT.batchProgress
             .replace('{current}', data.current).replace('{total}', data.total)
             .replace('{kept}', data.kept).replace('{deleted}', data.deleted).replace('{errors}', data.errors);
     }
 }
 
-function startBatchClean(page, confirmMsg) {
-    if (!SKIP_CONFIRM && !confirm(confirmMsg)) return;
-
+function startBatchClean(page) {
     const progressDiv = document.getElementById('batch-progress');
-    progressDiv.style.display = 'block';
-    document.getElementById('batch-progress-text').textContent = '{{ t.duplicates.batch_running }}';
+    progressDiv.hidden = false;
+    document.getElementById('batch-progress-text').textContent = DP_TEXT.batchRunning;
 
     const formData = new FormData();
     formData.append('page', page);
@@ -127,9 +255,19 @@ function startBatchClean(page, confirmMsg) {
             pollBatchProgress();
         })
         .catch(e => {
-            document.getElementById('batch-progress-text').textContent = 'Fehler: ' + e;
+            document.getElementById('batch-progress-text').textContent = String(e);
         });
 }
+
+document.querySelectorAll('[data-batch-page]').forEach(item => {
+    item.addEventListener('click', async () => {
+        closeMenus();
+        const yes = await dupConfirm({
+            title: DP_TEXT.cleanTitle, text: item.dataset.confirmText, ok: DP_TEXT.cleanOk, danger: true,
+        });
+        if (yes) startBatchClean(parseInt(item.dataset.batchPage, 10));
+    });
+});
 
 function pollBatchProgress() {
     const interval = setInterval(() => {
@@ -156,5 +294,18 @@ fetch('/api/duplicates/batch-clean-status')
     })
     .catch(() => {});
 
+// ── Thumbnails that fail to load get a placeholder instead of a broken image ──
+function dpNoPreview(img) {
+    const media = img.closest('.ui-thumb-media');
+    if (!media) return;
+    const box = document.createElement('div');
+    box.className = 'ui-thumb-media';
+    box.appendChild(document.getElementById('dp-no-preview').content.cloneNode(true));
+    media.replaceWith(box);
+}
+document.querySelectorAll('.dp-thumb .ui-thumb-media img').forEach(img => {
+    if (img.complete && img.naturalWidth === 0) dpNoPreview(img);
+    else img.addEventListener('error', () => dpNoPreview(img), { once: true });
+});
 </script>
 {% endblock %}

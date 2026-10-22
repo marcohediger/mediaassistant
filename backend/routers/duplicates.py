@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import subprocess
 from collections import defaultdict
 from datetime import datetime
@@ -511,6 +512,54 @@ async def api_duplicate_groups(request: Request):
     })
 
 
+def _size_label(size: int) -> str:
+    """Human-readable file size for the comparison tiles."""
+    if not size:
+        return ""
+    if size < 1024 * 1024:
+        return f"{max(1, round(size / 1024))} KB"
+    return f"{size / 1024 / 1024:.1f} MB"
+
+
+def _date_label(value) -> str:
+    """'2026:04:15 10:52:37' or ISO '2026-04-15T10:52:37.338+00:00' -> '2026-04-15 10:52'."""
+    m = re.match(r"(\d{4})[:-](\d{2})[:-](\d{2})(?:[T ](\d{2}):(\d{2}))?", str(value or ""))
+    if not m:
+        return str(value or "")
+    date = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return f"{date} {m.group(4)}:{m.group(5)}" if m.group(4) else date
+
+
+# Metadata chips of the comparison tiles: chip key -> member field
+_DISPLAY_META_FIELD = {"gps": "exif_has_gps", "exif": "exif_has_exif",
+                       "description": "exif_description", "keywords": "exif_keywords"}
+
+
+def _annotate_for_display(members: list[dict]) -> None:
+    """Presentation-only facts for the comparison tiles.
+
+    Marks the largest resolution / file size of a group (only when the
+    members differ) and which metadata chips a member has that another
+    one lacks. Nothing here influences keep, batch clean or the quality score.
+    """
+    def pixels(m):
+        return (m.get("width") or 0) * (m.get("height") or 0)
+
+    all_px = {pixels(m) for m in members}
+    all_size = {m.get("file_size") or 0 for m in members}
+    for m in members:
+        m["ext"] = os.path.splitext(m.get("filename") or "")[1].lstrip(".").upper()
+        m["size_label"] = _size_label(m.get("file_size") or 0)
+        m["date_label"] = _date_label(m.get("exif_date"))
+        m["is_top_px"] = len(all_px) > 1 and pixels(m) == max(all_px) > 0
+        m["is_top_size"] = len(all_size) > 1 and (m.get("file_size") or 0) == max(all_size) > 0
+        m["meta_have"] = [k for k, field in _DISPLAY_META_FIELD.items() if m.get(field)]
+        m["meta_extra"] = [
+            k for k in m["meta_have"]
+            if any(not o.get(_DISPLAY_META_FIELD[k]) for o in members if o is not m)
+        ]
+
+
 @router.get("/duplicates")
 async def duplicates_page(request: Request):
     if not await config_manager.is_setup_complete():
@@ -539,6 +588,7 @@ async def duplicates_page(request: Request):
         members = await _build_group_detail(g["member_keys"], jobs_by_key)
         if len(members) < 2:
             continue
+        _annotate_for_display(members)
         groups.append({
             "original_key": g["original_key"],
             "members": members,
@@ -546,6 +596,7 @@ async def duplicates_page(request: Request):
             "all_exact": g["all_exact"],
             "is_immich_duplicate": g["is_immich_duplicate"],
         })
+    page_exact_groups = sum(1 for g in page_groups if g.get("safe_for_batch", g.get("all_exact")))
 
     # Build pagination page numbers (efficient — only the visible ones)
     page_numbers = []
@@ -559,6 +610,7 @@ async def duplicates_page(request: Request):
         "groups": groups,
         "total_groups": total,
         "exact_groups": exact_count,
+        "page_exact_groups": page_exact_groups,
         "skip_confirm": skip_confirm,
         "current_page": page,
         "total_pages": total_pages,

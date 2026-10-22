@@ -1,98 +1,195 @@
 {% extends "base.html" %}
-{% block title %}{{ t.review.title }} — MediaAssistant{% endblock %}
+{% block title %}{{ t.review.heading }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/review.css?v={{ version }}">{% endblock %}
 {% block content %}
-<div class="review-header">
-    <h1>{{ t.review.title }}</h1>
-    <div class="review-header-actions">
-        <span class="review-count">{{ total }} {{ t.review.files if total != 1 else t.review.file }}</span>
-        {% if total > 0 %}
-        <form method="post" action="/api/review/classify-all" class="inline-form"
-              onsubmit="return confirm('{{ t.review.batch_confirm }}')">
-            <input type="hidden" name="category" value="sourceless">
-            <button type="submit" class="btn btn-small btn-secondary">{{ t.review.batch_sourceless }}</button>
-        </form>
-        {% endif %}
+{% set r = t.review %}
+{% macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
+
+<div class="ui-page-head">
+    <div class="ui-page-head-text">
+        <h1 class="ui-page-title">{{ r.heading }}
+            {% if total %}<span class="ui-badge ui-badge-lg is-violet">{{ total }} {{ r.files if total != 1 else r.file }}</span>{% endif %}
+        </h1>
+        <p class="ui-page-sub">{{ r.subtitle }}</p>
     </div>
+    {% if total > 0 %}
+    <div class="ui-page-actions">
+        <form method="post" action="/api/review/classify-all"
+              data-confirm-title="{{ r.batch_title }}" data-confirm-text="{{ r.batch_confirm }}" data-confirm-ok="{{ r.batch_ok }}">
+            <input type="hidden" name="category" value="sourceless">
+            <button type="submit" class="ui-btn ui-btn-secondary">{{ icon('layers') }}{{ r.batch_sourceless }}</button>
+        </form>
+    </div>
+    {% endif %}
 </div>
 
 {% if items %}
+<div class="rv-list">
 {% for item in items %}
-<div class="review-card">
-    <div class="review-content">
-        <div class="review-thumb">
-            {% if item.immich_asset_id %}
-            <img src="/api/thumbnail/immich/{{ item.immich_asset_id }}" alt="{{ item.filename }}" loading="lazy"
-                 class="lightbox-trigger" data-fullsize="/api/original/immich/{{ item.immich_asset_id }}">
-            {% elif item.exists and not item.is_video %}
-            <img src="/api/review/thumbnail/{{ item.job_id }}" alt="{{ item.filename }}" loading="lazy"
-                 class="lightbox-trigger" data-fullsize="/api/original/local/{{ item.job_id }}">
-            {% elif item.is_video %}
-            <div class="review-thumb-placeholder">Video</div>
+{% set size_label = ((item.file_size_kb / 1024) | round(1) ~ ' MB') if item.file_size_kb >= 1024 else (item.file_size_kb ~ ' KB') %}
+<article class="ui-media rv-item" aria-labelledby="rv-t-{{ item.job_id }}">
+    {% if item.immich_asset_id %}
+    <button type="button" class="ui-media-thumb rv-thumb lightbox-trigger" data-fullsize="/api/original/immich/{{ item.immich_asset_id }}"
+            aria-label="{{ r.preview | replace('{name}', item.filename) }}">
+        <img src="/api/thumbnail/immich/{{ item.immich_asset_id }}" alt="" loading="lazy">
+    </button>
+    {% elif item.exists and not item.is_video %}
+    <button type="button" class="ui-media-thumb rv-thumb lightbox-trigger" data-fullsize="/api/original/local/{{ item.job_id }}"
+            aria-label="{{ r.preview | replace('{name}', item.filename) }}">
+        <img src="/api/review/thumbnail/{{ item.job_id }}" alt="" loading="lazy">
+    </button>
+    {% elif item.is_video %}
+    <div class="ui-media-thumb rv-thumb"><span class="ui-thumb-placeholder">{{ icon('video', 22) }}{{ r.video }}</span></div>
+    {% else %}
+    <div class="ui-media-thumb rv-thumb"><span class="ui-thumb-placeholder">{{ icon('alert-triangle', 22) }}{{ r.not_found }}</span></div>
+    {% endif %}
+
+    <div class="ui-media-body rv-body">
+        <div class="rv-head">
+            <h2 class="rv-title" id="rv-t-{{ item.job_id }}" title="{{ item.filename }}">{{ item.filename }}</h2>
+            <a class="ui-link ui-mono rv-key" href="/logs/job/{{ item.debug_key }}" title="{{ r.job_details }}">{{ item.debug_key }}</a>
+        </div>
+
+        {% if item.ai_description %}
+        <p class="rv-desc">{{ item.ai_description }}</p>
+        {% endif %}
+
+        <div class="rv-meta">
+            {% if item.ai_type %}
+            <span class="ui-badge is-violet" title="{{ r.suggestion }}">{{ icon('sparkles', 12) }}{{ item.ai_type }}{% if item.ai_confidence %} · {{ (item.ai_confidence * 100) | round(0) | int }} %{% endif %}</span>
+            {% elif item.ai_confidence %}
+            <span class="ui-badge" title="{{ r.confidence_title }}">{{ (item.ai_confidence * 100) | round(0) | int }} %</span>
+            {% endif %}
+            {% if item.dimensions %}<span class="rv-fact">{{ icon('image', 14) }}{{ item.dimensions }}</span>{% endif %}
+            <span class="rv-fact" title="{{ r.size }}">{{ icon('file', 14) }}{{ size_label }}</span>
+            {% if item.exif_date %}<span class="rv-fact" title="{{ r.date }}">{{ icon('calendar', 14) }}{{ item.exif_date }}</span>{% endif %}
+            {% if item.exif_camera %}<span class="rv-fact" title="{{ r.camera }}">{{ icon('camera', 14) }}{{ item.exif_camera }}</span>{% endif %}
+            {% if item.has_gps %}
+            <span class="rv-fact">{{ icon('map-pin', 14) }}{{ item.location or 'GPS' }}</span>
             {% else %}
-            <div class="review-thumb-placeholder">{{ t.review.not_found }}</div>
+            <span class="rv-fact is-off">{{ icon('map-pin', 14) }}{{ r.no_gps }}</span>
             {% endif %}
+            {% if not item.has_exif %}<span class="rv-fact is-off">{{ icon('info', 14) }}{{ r.no_exif }}</span>{% endif %}
+            {% if item.ai_people %}<span class="rv-fact" title="{{ r.people }}">{{ icon('user', 14) }}{{ r.people_n | replace('{n}', item.ai_people | string) }}</span>{% endif %}
+            {% if item.ai_quality %}<span class="rv-fact" title="{{ r.quality }}">{{ icon('star', 14) }}{{ item.ai_quality }}</span>{% endif %}
         </div>
 
-        <div class="review-details">
-            <div class="review-title-row">
-                <span class="review-filename" title="{{ item.filename }}">{{ item.filename }}</span>
-                <span class="review-debug-key">{{ item.debug_key }}</span>
-            </div>
-
-            {% if item.ai_description %}
-            <div class="review-description">{{ item.ai_description }}</div>
-            {% endif %}
-
-            <div class="review-meta">
-                {% if item.ai_type %}
-                <span class="review-badge review-badge-type">{{ item.ai_type }}</span>
-                {% endif %}
-                {% if item.ai_confidence %}
-                <span class="review-badge review-badge-confidence">{{ (item.ai_confidence * 100) | round(0) | int }}%</span>
-                {% endif %}
-                <span class="review-meta-item">{{ t.review.size }}: {{ item.file_size_kb }} KB</span>
-                {% if item.dimensions %}
-                <span class="review-meta-item">{{ item.dimensions }}</span>
-                {% endif %}
-                <span class="review-meta-item">{{ t.review.date }}: {{ item.exif_date }}</span>
-                {% if item.exif_camera %}
-                <span class="review-meta-item">{{ t.review.camera }}: {{ item.exif_camera }}</span>
-                {% endif %}
-                <span class="review-meta-item">EXIF: {% if item.has_exif %}✓{% else %}✗{% endif %}</span>
-                <span class="review-meta-item">GPS: {% if item.has_gps %}{{ item.location or '✓' }}{% else %}✗{% endif %}</span>
-                <span class="review-meta-item">{{ t.review.people }}: {{ item.ai_people }}</span>
-                <span class="review-meta-item">{{ t.review.quality }}: {{ item.ai_quality or '—' }}</span>
-            </div>
-
-            {% if item.ai_tags %}
-            <div class="review-tags">
-                {% for tag in item.ai_tags %}
-                <span class="review-tag">{{ tag }}</span>
-                {% endfor %}
-            </div>
-            {% endif %}
+        {% if item.ai_tags %}
+        <div class="ui-tags">
+            {% for tag in item.ai_tags %}<span class="ui-tag">{{ tag }}</span>{% endfor %}
         </div>
+        {% endif %}
+    </div>
 
-        <div class="review-actions">
-            <span class="review-actions-label">{{ t.review.classify_as }}</span>
-            {% for cat in categories_by_set.get(item.set_id, []) %}
-            <form method="post" action="/api/review/classify" class="inline-form">
-                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
-                <input type="hidden" name="category" value="{{ cat.key }}">
-                <button type="submit" class="btn btn-small btn-secondary">{{ cat.label }}</button>
-            </form>
-            {% endfor %}
-            <hr style="border: none; border-top: 1px solid var(--border); margin: 0.25rem 0;">
-            <form method="post" action="/api/review/delete" class="inline-form"
-                  onsubmit="return confirm('{{ t.review.delete_confirm }}')">
-                <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
-                <button type="submit" class="btn btn-small btn-delete">{{ t.review.delete }}</button>
-            </form>
-        </div>
+    <div class="ui-media-actions rv-tools">
+        <form method="post" action="/api/review/delete"
+              data-confirm-title="{{ r.delete_title }}" data-confirm-text="{{ r.delete_text | replace('{name}', item.filename) }}"
+              data-confirm-ok="{{ r.delete }}" data-confirm-danger="1">
+            <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
+            <button type="submit" class="ui-icon-btn is-danger" aria-label="{{ r.delete_label | replace('{name}', item.filename) }}"
+                    title="{{ r.delete }}">{{ icon('trash', 18) }}</button>
+        </form>
+    </div>
+
+    <div class="rv-classify" role="group" aria-label="{{ r.classify_label }}: {{ item.filename }}">
+        <span class="rv-classify-label" aria-hidden="true">{{ r.classify_label }}</span>
+        {% for cat in categories_by_set.get(item.set_id, []) %}
+        {% set suggested = item.ai_type and (item.ai_type == cat.label or item.ai_type == cat.key) %}
+        <form method="post" action="/api/review/classify" class="rv-classify-form">
+            <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
+            <input type="hidden" name="category" value="{{ cat.key }}">
+            <button type="submit" class="ui-btn ui-btn-sm {{ 'ui-btn-primary' if suggested else 'ui-btn-secondary' }}"
+                    {% if suggested %}title="{{ r.suggestion }}"{% endif %}>{% if suggested %}{{ icon('sparkles', 14) }}{% endif %}{{ cat.label }}</button>
+        </form>
+        {% endfor %}
+    </div>
+</article>
+{% endfor %}
+</div>
+{% else %}
+<div class="ui-card">
+    <div class="ui-empty">
+        <span class="ui-empty-icon is-success">{{ icon('check-circle', 22) }}</span>
+        <p class="ui-empty-title">{{ r.empty_title }}</p>
+        <p class="ui-empty-text">{{ r.no_items }}</p>
     </div>
 </div>
-{% endfor %}
-{% else %}
-<p class="section-note">{{ t.review.no_items }}</p>
 {% endif %}
+
+{# Confirmation popup for delete and "file all as sourceless" #}
+<dialog class="ui-dialog" id="rv-confirm" aria-labelledby="rv-confirm-title" aria-describedby="rv-confirm-text">
+    <form method="dialog" class="ui-dialog-shell">
+        <div class="ui-dialog-head">
+            <div class="ui-dialog-head-text"><h2 class="ui-dialog-title" id="rv-confirm-title"></h2></div>
+            <button type="submit" value="cancel" class="ui-icon-btn" aria-label="{{ r.close }}" title="{{ r.close }}">{{ icon('x', 18) }}</button>
+        </div>
+        <div class="ui-dialog-body"><p class="rv-confirm-text" id="rv-confirm-text"></p></div>
+        <div class="ui-dialog-foot">
+            <button type="submit" value="cancel" class="ui-btn ui-btn-secondary" id="rv-confirm-cancel">{{ r.cancel }}</button>
+            <button type="submit" value="ok" class="ui-btn ui-btn-primary" id="rv-confirm-ok"></button>
+        </div>
+    </form>
+</dialog>
+
+<template id="rv-no-preview"><span class="ui-thumb-placeholder">{{ icon('image', 22) }}{{ r.no_preview }}</span></template>
+
+<script>
+// Confirmation popup. Resolves true when the user confirms.
+function rvAsk(opts) {
+    const dlg = document.getElementById('rv-confirm');
+    document.getElementById('rv-confirm-title').textContent = opts.title || '';
+    document.getElementById('rv-confirm-text').textContent = opts.text || '';
+    const ok = document.getElementById('rv-confirm-ok');
+    ok.textContent = opts.ok || 'OK';
+    ok.className = 'ui-btn ' + (opts.danger ? 'ui-btn-danger-solid' : 'ui-btn-primary');
+    dlg.returnValue = '';
+    return new Promise(resolve => {
+        dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+        dlg.showModal();
+        (opts.danger ? document.getElementById('rv-confirm-cancel') : ok).focus();
+    });
+}
+
+// A form is sent once; its item is locked meanwhile so a second click cannot
+// classify the same file twice.
+function rvSend(form, button) {
+    form.dataset.sending = '1';
+    const item = form.closest('.rv-item');
+    if (item) item.setAttribute('aria-busy', 'true');
+    if (button) button.setAttribute('aria-busy', 'true');
+    form.submit();
+}
+
+document.addEventListener('submit', async (e) => {
+    const form = e.target;
+    if (!form.closest('.rv-item, .ui-page-head')) return;
+    e.preventDefault();
+    if (form.dataset.sending) return;
+    const button = e.submitter || form.querySelector('[type=submit]');
+    if (form.dataset.confirmText) {
+        const yes = await rvAsk({
+            title: form.dataset.confirmTitle, text: form.dataset.confirmText,
+            ok: form.dataset.confirmOk, danger: !!form.dataset.confirmDanger,
+        });
+        if (!yes) return;
+    }
+    rvSend(form, button);
+});
+
+// Thumbnails that fail to load get a placeholder instead of a broken image
+function rvNoPreview(img) {
+    const thumb = img.closest('.rv-thumb');
+    if (!thumb) return;
+    const box = document.createElement('div');
+    box.className = 'ui-media-thumb rv-thumb';
+    box.appendChild(document.getElementById('rv-no-preview').content.cloneNode(true));
+    thumb.replaceWith(box);
+}
+document.querySelectorAll('.rv-thumb img').forEach(img => {
+    if (img.complete && img.naturalWidth === 0) rvNoPreview(img);
+    else img.addEventListener('error', () => rvNoPreview(img), { once: true });
+});
+</script>
 {% endblock %}

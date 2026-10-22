@@ -1,0 +1,71 @@
+/* Review page (/review): queue of files waiting for a category.
+   One .ui-media row per file: thumbnail | details | delete, and the
+   category buttons below the details. Class prefix rv- (the old
+   .review-* rules in style.css are no longer used). */
+
+.rv-list { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.rv-item {
+    grid-template-columns: 9rem minmax(0, 1fr) auto;
+    grid-template-areas: "thumb body tools" "thumb classify classify";
+    gap: 0.6rem 1.1rem; padding: 0.9rem;
+}
+.rv-thumb { grid-area: thumb; }
+.rv-body { grid-area: body; gap: 0.45rem; }
+.rv-tools { grid-area: tools; min-width: 0; flex-direction: row; align-items: flex-start; margin: -0.2rem -0.2rem 0 0; }
+.rv-tools form { margin: 0; }
+
+/* Thumbnail as a button (lightbox) */
+button.rv-thumb {
+    width: 100%; padding: 0; border: 0; font: inherit; cursor: zoom-in;
+}
+button.rv-thumb:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ui-accent-ring); }
+button.rv-thumb > img { transition: transform 0.25s ease; }
+button.rv-thumb:hover > img { transform: scale(1.03); }
+
+/* Title line: file name + job key */
+.rv-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.15rem 0.65rem; min-width: 0; }
+.rv-title {
+    margin: 0; min-width: 0; max-width: 100%;
+    font-size: var(--ui-fs-md); font-weight: 600; line-height: 1.35; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rv-key { font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.rv-key:hover { color: var(--primary); }
+.rv-desc { margin: 0; max-width: 80ch; font-size: var(--ui-fs-sm); line-height: 1.5; color: var(--text-muted); }
+
+/* Facts: icon + value, wrapping */
+.rv-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: var(--ui-fs-sm); color: var(--text); }
+.rv-fact { display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rv-fact > .ui-i { color: var(--text-muted); }
+.rv-fact.is-off { color: var(--text-muted); }
+
+/* Category buttons */
+.rv-classify {
+    grid-area: classify; display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem;
+    padding-top: 0.6rem; border-top: 1px solid var(--ui-line);
+}
+.rv-classify-label { margin-right: 0.2rem; font-size: var(--ui-fs-xs); font-weight: 600; color: var(--text-muted); }
+.rv-classify-form { margin: 0; display: flex; }
+
+/* While a form of this item is being sent */
+.rv-item[aria-busy="true"] :is(.rv-classify, .rv-tools) { pointer-events: none; opacity: 0.55; }
+.rv-item .ui-btn[aria-busy="true"] { opacity: 1; }
+
+.rv-confirm-text { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+    /* Small thumbnail beside the details, category buttons across the full width */
+    .rv-item {
+        grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+        grid-template-areas: "thumb body tools" "classify classify classify";
+        gap: 0.65rem 0.8rem; padding: 0.8rem;
+    }
+    .rv-tools { flex-direction: row; flex-wrap: nowrap; }
+    .rv-title { font-size: var(--ui-fs-base); white-space: normal; overflow-wrap: anywhere; }
+    .rv-meta { gap: 0.25rem 0.7rem; font-size: var(--ui-fs-xs); }
+    .rv-thumb .ui-thumb-placeholder { font-size: var(--ui-fs-2xs); text-align: center; }
+    .rv-classify-label { flex-basis: 100%; }
+    .rv-classify-form { flex: 1 1 auto; }
+    .rv-classify-form .ui-btn { flex: 1 1 auto; }
+}
