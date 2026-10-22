@@ -40,6 +40,12 @@ def _fail(detail: str, status: int = 400) -> JSONResponse:
     return JSONResponse({"ok": False, "detail": detail}, status_code=status)
 
 
+def _nested(a: str, b: str) -> bool:
+    """One of the two directories lies inside the other (not equal)."""
+    a, b = a.rstrip("/") + "/", b.rstrip("/") + "/"
+    return a != b and (a.startswith(b) or b.startswith(a))
+
+
 def slugify(label: str) -> str:
     """Category key from its label — the same rule the old settings page used."""
     normalized = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode()
@@ -235,20 +241,32 @@ async def save_set(request: Request, set_id: int):
                 return _fail(await _t("err_access"))
 
         # ── Directories ───────────────────────────────────────────
+        # The scanner walks into every subfolder, so "belongs to exactly one
+        # set" has to hold for nesting too: a folder inside another set's
+        # folder would be scanned by both, and whichever came first took the
+        # file. Nesting within the same set is refused as well — the outer
+        # folder already covers the inner one.
         dirs_in = data.get("directories") or []
-        seen = set()
+        foreign = (await session.execute(select(InboxDirectory).where(
+            InboxDirectory.set_id != set_id))).scalars().all()
+        set_names = {p.id: p.name for p in (await session.execute(select(ProcessingSet))).scalars().all()}
+        seen: list[str] = []
         for d in dirs_in:
             path = (d.get("path") or "").strip().rstrip("/") or "/"
             if not path.startswith("/") or not (d.get("label") or "").strip():
                 return _fail(await _t("err_directory"))
             if path in seen:
                 return _fail(await _t("err_dir_twice", path=path))
-            seen.add(path)
-            other = (await session.execute(select(InboxDirectory).where(
-                InboxDirectory.path == path, InboxDirectory.set_id != set_id))).scalar()
-            if other:
-                owner = await session.get(ProcessingSet, other.set_id) if other.set_id else None
-                return _fail(await _t("err_dir_taken", path=path, set=owner.name if owner else "?"))
+            for mine in seen:
+                if _nested(path, mine):
+                    return _fail(await _t("err_dir_nested_self", path=path, other=mine))
+            seen.append(path)
+            for other in foreign:
+                if other.path.rstrip("/") == path:
+                    return _fail(await _t("err_dir_taken", path=path, set=set_names.get(other.set_id, "?")))
+                if _nested(path, other.path):
+                    return _fail(await _t("err_dir_nested", path=path, other=other.path,
+                                          set=set_names.get(other.set_id, "?")))
 
         # ── Categories ────────────────────────────────────────────
         existing_cats = {c.id: c for c in (await session.execute(

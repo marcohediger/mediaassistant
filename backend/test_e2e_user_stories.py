@@ -156,6 +156,35 @@ async def create_and_run_job(filename, original_path, *, use_immich=True,
     return job_id
 
 
+_SAVED_SET_FOLDER_TAGS = []
+
+
+async def enable_set_folder_tags():
+    """Folder tags are a switch of the processing set now (the global module
+    and the per-directory switch are gone). Jobs without set_id run under the
+    first set, so that one is switched on; main() restores it."""
+    from database import async_session
+    from sets import get_set
+    async with async_session() as session:
+        ps = await get_set(session, None)
+        if not _SAVED_SET_FOLDER_TAGS:
+            _SAVED_SET_FOLDER_TAGS.append((ps.id, ps.folder_tags))
+        ps.folder_tags = True
+        await session.commit()
+        return ps
+
+
+async def restore_set_folder_tags():
+    from database import async_session
+    from models import ProcessingSet
+    for set_id, value in _SAVED_SET_FOLDER_TAGS:
+        async with async_session() as session:
+            ps = await session.get(ProcessingSet, set_id)
+            if ps:
+                ps.folder_tags = value
+                await session.commit()
+
+
 async def cleanup():
     """Clean up test artifacts from Immich and DB."""
     from immich_client import delete_asset
@@ -265,26 +294,22 @@ async def test_us3_poller_handy_upload():
     asset_id = resp.json().get("id", "")
     CLEANUP_ASSETS.append(asset_id)
 
-    # Simuliere was der Poller tut: download + pipeline
+    # What the poller does now: enqueue the asset id only; the worker
+    # downloads the original when it starts the job (worker._run_job).
     if asset_id:
-        from immich_client import download_asset
-        import tempfile
-        tmp = tempfile.mkdtemp(prefix="e2e_us3_")
-        dl_path = await download_asset(asset_id, tmp, api_key=key)
-
         from database import async_session
         from models import Job
-        file_hash = sha256(dl_path)
+        from inputs.common import IMMICH_PENDING
+        from worker import _run_job
 
         async with async_session() as session:
             job = Job(
                 filename=f"__e2e_us3_{TS}.jpg",
-                original_path=dl_path,
+                original_path=f"{IMMICH_PENDING}{asset_id}",
                 source_label="Immich",
                 status="queued",
                 use_immich=True,
                 immich_asset_id=asset_id,
-                file_hash=file_hash,
                 debug_key=f"E2E-US3-{TS}",
             )
             session.add(job)
@@ -292,9 +317,12 @@ async def test_us3_poller_handy_upload():
             job_id = job.id
             CLEANUP_JOBS.append(job_id)
 
-        from pipeline import run_pipeline
-        await run_pipeline(job_id)
+        await _run_job(job_id, f"__e2e_us3_{TS}.jpg", f"E2E-US3-{TS}")
         job = await get_job(job_id)
+        dl_path = job.original_path or ""
+        check("US3-02a Worker hat das Original geladen (file_hash = Upload)",
+              job.file_hash == sha256(path) and dl_path.startswith("/tmp/ma_immich_"),
+              f"path={dl_path}")
 
         check("US3-02 Status done", job.status == "done", f"status={job.status}")
         check("US3-03 immich_asset_id erhalten",
@@ -305,8 +333,11 @@ async def test_us3_poller_handy_upload():
             check("US3-04 Asset existiert in Immich", exists)
             tags = await get_immich_tags(job.immich_asset_id)
             check("US3-05 Tags in Immich geschrieben", len(tags) > 0, f"tags={tags}")
+            if job.immich_asset_id != asset_id:
+                CLEANUP_ASSETS.append(job.immich_asset_id)
 
-        shutil.rmtree(tmp, ignore_errors=True)
+        check("US3-06 IA-10 hat die heruntergeladene Kopie entfernt", not os.path.exists(dl_path),
+              dl_path)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -326,7 +357,7 @@ async def test_us4_poller_skips_own():
     already_by_id = set()
     assets = [ma_asset, phone_asset, web_asset]
 
-    # Exakt der Filter aus filewatcher.py:329
+    # Exakt der Filter aus inputs/immich.py (poll_set)
     new_assets = [
         a for a in assets
         if a["id"] not in already_by_id
@@ -665,8 +696,7 @@ async def test_us9_retry_after_error():
 async def test_us10_folder_tags_album():
     print("\n-- US-10: Folder-Tags -> Album in Immich --")
 
-    from config import config_manager
-    await config_manager.set_module_enabled("ordner_tags", True)
+    std = await enable_set_folder_tags()
 
     # Erstelle Subfolder-Struktur
     album_name = f"E2E_Album_{TS}"
@@ -678,21 +708,10 @@ async def test_us10_folder_tags_album():
     make_unique_jpg(path)
     CLEANUP_FILES.append(path)
 
-    from database import async_session
-    from models import Job, InboxDirectory
-    from sqlalchemy import select
-
-    # Inbox-Konfiguration pruefen
-    async with async_session() as session:
-        result = await session.execute(
-            select(InboxDirectory).where(InboxDirectory.path == "/inbox"))
-        inbox = result.scalar()
-        inbox_has_ftags = inbox.folder_tags if inbox else False
-
     job_id = await create_and_run_job(
         f"__e2e_us10_{TS}.jpg", path,
         use_immich=True, source_inbox_path="/inbox",
-        folder_tags=inbox_has_ftags,
+        folder_tags=bool(std.folder_tags),
     )
     job = await get_job(job_id)
 
@@ -772,8 +791,7 @@ async def test_us11_phash_duplicate():
 async def test_us12_keep_with_tag_merge():
     print("\n-- US-12: Keep mit Folder-Tags Merge --")
 
-    from config import config_manager
-    await config_manager.set_module_enabled("ordner_tags", True)
+    await enable_set_folder_tags()
 
     # Zwei Ordner mit verschiedenen Folder-Tags
     folder_a = f"/inbox/Ferien_US12_{TS}"
@@ -999,6 +1017,7 @@ async def main():
                 print(f"  FAIL  {test_fn.__name__} CRASHED: {exc}")
     finally:
         await config_manager.set_module_enabled("filewatcher", was_enabled)
+        await restore_set_folder_tags()
         await cleanup()
 
     # Summary

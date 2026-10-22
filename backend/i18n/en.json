@@ -655,7 +655,9 @@
     "status_checking": "Checking …",
     "queue_waiting": "{n} queued",
     "activate": "Activate",
-    "deactivate": "Deactivate"
+    "deactivate": "Deactivate",
+    "err_dir_nested": "The directory {path} lies inside {other} or vice versa — {other} belongs to set \"{set}\". The scanner walks into every subfolder, so both sets would see the same files.",
+    "err_dir_nested_self": "{path} lies inside {other} or vice versa — the outer folder already covers the inner one."
   },
   "setup": {
     "set_hint": "Both paths belong to the processing set \"{name}\". Further sets with their own folders, rules and storage can be added later in the settings."

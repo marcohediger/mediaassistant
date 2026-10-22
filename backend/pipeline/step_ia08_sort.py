@@ -371,7 +371,21 @@ async def _match_sorting_rules(filename: str, exif: dict, session, is_video: boo
 
 
 async def execute(job, session) -> dict:
-    """IA-08: Datei in Zielordner verschieben."""
+    """IA-08: Datei in Zielordner verschieben.
+
+    Runs without autoflush. IA-08 changes the job (status "review", target
+    path) and then logs through system_logger, which writes in a session of
+    its own. With autoflush, the next lookup flushed those changes, so this
+    session held SQLite's write lock while the log write waited for it —
+    for the whole 600 s busy timeout, with every other writer blocked, and
+    then the job failed with "database is locked". run_pipeline commits the
+    step right afterwards, so deferring the flush loses nothing.
+    """
+    with session.no_autoflush:
+        return await _execute(job, session)
+
+
+async def _execute(job, session) -> dict:
     # Resolve per-user Immich API key (None = fallback to global)
     user_api_key = None
     if job.immich_user_id:

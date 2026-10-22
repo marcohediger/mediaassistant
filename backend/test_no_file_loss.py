@@ -398,8 +398,17 @@ async def main():
         delete_calls.append(aid)
         return {"status": "deleted"}
 
+    # safe_upload_asset verifies through fetch_asset_info (info + reason since
+    # v2.32.x); get_asset_info is only a wrapper around it. The fakes below are
+    # written as get_asset_info and adapted here.
+    def _as_fetch(fake_get_info_fn):
+        async def _fetch(aid, **kw):
+            info = await fake_get_info_fn(aid, **kw)
+            return info, "" if info else "HTTP 404 — fake: not reachable"
+        return _fetch
+
     with patch.object(immich_client, "upload_asset", new=fake_upload), \
-         patch.object(immich_client, "get_asset_info", new=fake_get_info), \
+         patch.object(immich_client, "fetch_asset_info", new=_as_fetch(fake_get_info)), \
          patch.object(immich_client, "delete_asset", new=fake_delete):
         try:
             await immich_client.safe_upload_asset(src, max_attempts=3)
@@ -432,7 +441,7 @@ async def main():
         return {"status": "deleted"}
 
     with patch.object(immich_client, "upload_asset", new=fake_upload2), \
-         patch.object(immich_client, "get_asset_info", new=fake_get_info2), \
+         patch.object(immich_client, "fetch_asset_info", new=_as_fetch(fake_get_info2)), \
          patch.object(immich_client, "delete_asset", new=fake_delete2):
         result = await immich_client.safe_upload_asset(src, max_attempts=3)
     check("U2a Result hat verifizierte id", result.get("id") == "u2-asset-2",
@@ -463,7 +472,7 @@ async def main():
         return {"status": "deleted"}
 
     with patch.object(immich_client, "upload_asset", new=fake_upload_r1), \
-         patch.object(immich_client, "get_asset_info", new=fake_get_info_r1), \
+         patch.object(immich_client, "fetch_asset_info", new=_as_fetch(fake_get_info_r1)), \
          patch.object(immich_client, "copy_asset_metadata", new=fake_copy_r1), \
          patch.object(immich_client, "delete_asset", new=fake_delete_r1):
         result = await immich_client.safe_replace_asset("r1-old", src)
@@ -495,7 +504,7 @@ async def main():
         raise AssertionError("copy_asset_metadata must NOT be called when upload fails")
 
     with patch.object(immich_client, "upload_asset", new=fake_upload_r2), \
-         patch.object(immich_client, "get_asset_info", new=fake_get_info_r2), \
+         patch.object(immich_client, "fetch_asset_info", new=_as_fetch(fake_get_info_r2)), \
          patch.object(immich_client, "copy_asset_metadata", new=fake_copy_r2), \
          patch.object(immich_client, "delete_asset", new=fake_delete_r2):
         try:
@@ -689,45 +698,36 @@ async def main():
     # ==================================================================
     # F1: Drei Gates für deaktivierten "Ordner-Tag" — Unit-Tests für
     # Fix A (IA-02), Fix B (IA-07), Fix C (duplicates merge) ohne
-    # Pipeline-Loop, gegen die echte is_folder_tags_active-Funktion mit
-    # toggled Module/InboxDirectory state.
+    # Pipeline-Loop, gegen die echte is_folder_tags_active-Funktion.
+    # Ordner-Tags sind ein Schalter des Verarbeitungs-Sets (globales Modul
+    # und Verzeichnis-Schalter gibt es nicht mehr); ein Job ohne set_id
+    # gehört zum ersten Set — dessen Schalter wird umgelegt.
     # ==================================================================
     print("\n── F1: Ordner-Tag AUS — Gate-Tests A/B/C ──")
     from file_operations import is_folder_tags_active
     from pipeline.step_ia02_duplicates import _extract_folder_tags
-    from models import Module, InboxDirectory
+    from sets import get_set
 
-    # Module-State sichern + AUS schalten
+    # Set-Schalter sichern + AUS schalten
     async with async_session() as session:
-        mod = await session.get(Module, "ordner_tags")
-        original_module_enabled = mod.enabled if mod else None
-        if mod:
-            mod.enabled = False
-            await session.commit()
-        else:
-            session.add(Module(name="ordner_tags", enabled=False))
-            await session.commit()
-        # Inbox-Flag auf True (sonst greift der Test gar nicht — wir wollen
-        # ja zeigen dass MODUL-Status alleine reicht zum Blockieren)
-        ib = await session.execute(select(InboxDirectory).where(InboxDirectory.path == "/inbox"))
-        inbox = ib.scalar()
-        original_inbox_ft = None
-        if inbox:
-            original_inbox_ft = inbox.folder_tags
-            inbox.folder_tags = True
-            await session.commit()
+        first_set = await get_set(session, None)
+        first_set_id = first_set.id
+        original_set_ft = first_set.folder_tags
+        first_set.folder_tags = False
+        await session.commit()
 
     # Job mit subfolder-path bauen
     class _FakeJob:
         source_inbox_path = "/inbox"
         original_path = "/inbox/Ferien_Mallorca/foto.jpg"
         folder_tags = True
+        set_id = None
         step_result = None
 
     fake_job = _FakeJob()
 
     # Sanity-Check: is_folder_tags_active liefert False bei Modul aus
-    check("F1-pre is_folder_tags_active = False bei Modul aus",
+    check("F1-pre is_folder_tags_active = False bei Set-Schalter aus",
           await is_folder_tags_active(fake_job) is False,
           "")
 
@@ -735,7 +735,7 @@ async def main():
     # — die Gate ist im Caller _handle_duplicate. Wir simulieren den Caller-
     # Pfad durch das gleiche Pattern (= die Production-Gate testen).
     folder_tags_a = _extract_folder_tags(fake_job) if await is_folder_tags_active(fake_job) else []
-    check("F1a Fix A: bei Modul aus liefert _extract_folder_tags-Pfad []",
+    check("F1a Fix A: bei Set-Schalter aus liefert _extract_folder_tags-Pfad []",
           folder_tags_a == [],
           f"got={folder_tags_a}")
 
@@ -757,7 +757,7 @@ async def main():
         for t in ia02_ft:
             if t and t not in keywords_b:
                 keywords_b.append(t)
-    check("F1b Fix B: bei Modul aus IA-07 liest cached IA-02 nicht",
+    check("F1b Fix B: bei Set-Schalter aus IA-07 liest cached IA-02 nicht",
           keywords_b == [],
           f"got={keywords_b}")
 
@@ -767,34 +767,26 @@ async def main():
     donor_ft_after_gate: list[str] = []
     if folder_tags_active_c:
         donor_ft_after_gate = donor_ft_input
-    check("F1c Fix C: bei Modul aus donor_ft Merge liefert []",
+    check("F1c Fix C: bei Set-Schalter aus donor_ft Merge liefert []",
           donor_ft_after_gate == [],
           f"got={donor_ft_after_gate}")
 
-    # Sanity (positive): mit Modul AN müssten alle drei eine nicht-leere
-    # Liste liefern → das verifiziert dass die Gates nicht overshooten
+    # Sanity (positive): mit Set-Schalter AN müssten alle drei eine
+    # nicht-leere Liste liefern → das verifiziert dass die Gates nicht
+    # overshooten
+    from models import ProcessingSet
     async with async_session() as session:
-        mod = await session.get(Module, "ordner_tags")
-        if mod:
-            mod.enabled = True
-            await session.commit()
+        (await session.get(ProcessingSet, first_set_id)).folder_tags = True
+        await session.commit()
     folder_tags_a_on = _extract_folder_tags(fake_job) if await is_folder_tags_active(fake_job) else []
-    check("F1d Sanity: bei Modul AN liefert _extract_folder_tags Tags",
+    check("F1d Sanity: bei Set-Schalter AN liefert _extract_folder_tags Tags",
           len(folder_tags_a_on) > 0,
           f"got={folder_tags_a_on}")
 
-    # State zurücksetzen (best-effort)
+    # State zurücksetzen
     async with async_session() as session:
-        mod = await session.get(Module, "ordner_tags")
-        if mod and original_module_enabled is not None:
-            mod.enabled = original_module_enabled
-            await session.commit()
-        if inbox is not None and original_inbox_ft is not None:
-            ib = await session.execute(select(InboxDirectory).where(InboxDirectory.path == "/inbox"))
-            inbox2 = ib.scalar()
-            if inbox2:
-                inbox2.folder_tags = original_inbox_ft
-                await session.commit()
+        (await session.get(ProcessingSet, first_set_id)).folder_tags = original_set_ft
+        await session.commit()
 
     # ==================================================================
     # Zusammenfassung

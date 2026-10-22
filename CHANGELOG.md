@@ -105,6 +105,33 @@ der Worker überhaupt anlief. Sie werden jetzt nur neu eingereiht.
   werden nicht mehr bei jedem Durchlauf neu gehasht; gleiche Grösse und
   Änderungszeit heisst gleicher Inhalt.
 
+### Fix: IA-08 blockierte die Datenbank bis zu zehn Minuten
+
+Stufte IA-08 eine Datei als „Review" ein, setzte es den Status und
+suchte danach die Kategorie heraus. Diese Abfrage schrieb die
+Statusänderung automatisch vorab in die Datenbank — die Pipeline hielt
+damit die Schreibsperre von SQLite. Der folgende Log-Eintrag läuft in
+einer eigenen Verbindung und wartete auf genau diese Sperre: die vollen
+600 Sekunden Wartezeit, in denen auch jeder andere Schreiber stillstand.
+Danach brach der Job mit `database is locked` ab und die Datei landete
+im Fehlerordner.
+
+Betroffen waren der Library-Zweig und das direkte Schreiben in Immich-
+Assets; in der Produktion (Sidecar, Upload zu Immich) kam es nicht vor
+— 0 solche Jobs in der Live-Datenbank. Mit Library-Sets wäre es aber
+die Regel geworden. IA-08 läuft jetzt ohne automatisches Vorabschreiben;
+`run_pipeline` übernimmt die Änderungen wie bei jedem Step mit dem
+Commit danach. Der Review-Fall läuft in 8 Sekunden durch statt in die
+Blockade. Gefunden von der neuen E2E-Suite (`test_sets_e2e.py`).
+
+### Fix: verschachtelte Verzeichnisse in verschiedenen Sets
+
+Der Scanner läuft in alle Unterordner. Lag ein Verzeichnis innerhalb des
+Verzeichnisses eines anderen Sets, scannten es beide — welches zuerst
+kam, nahm die Datei. Der Set-Editor lehnt das jetzt ab, ebenso
+ineinander liegende Verzeichnisse im selben Set; ein nur ähnlich
+benannter Nachbar (`/inbox2` neben `/inbox`) bleibt erlaubt.
+
 ### Fix: „Alle als sourceless" tat nichts
 
 Der Sammelknopf in der Review-Ansicht schickte den Schlüssel

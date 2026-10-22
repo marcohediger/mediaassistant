@@ -4,7 +4,12 @@ Runs the startup sequence (init_db, env import, migrate_to_sets) on a COPY of
 the given database and checks that the global configuration ended up in the
 sets exactly, that every directory, rule, category and job has its set, that
 the category table lost its global UNIQUE(key), and that a second start
-changes nothing.
+changes nothing. Write mode and the Google JSON switch are checked on both
+ways into the sets: migrate_to_sets copies the global values into every set,
+and database._migrate_columns copies them once into a database that was
+migrated before the two columns existed (rebuilt here without them). A
+source that is already migrated is the reference itself: the start must
+leave its sets, rules, categories, directories and job assignment alone.
 
     docker exec mediaassistant-dev python /app/test_sets_migration.py            # dev DB
     docker exec mediaassistant-dev python /app/test_sets_migration.py /pfad.db  # any DB
@@ -91,17 +96,67 @@ def _make_multi() -> None:
     con.close()
 
 
+def _write_mode(value) -> str:
+    """The global write mode as the sets take it over: anything unknown is direct."""
+    return value if value in ("direct", "sidecar") else "direct"
+
+
+def _meta_before(con) -> dict:
+    """Write mode and Google JSON switch: global config, and the sets' own
+    values if the source already has sets with these columns."""
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    cols = {r[1] for r in con.execute("PRAGMA table_info(processing_sets)")} \
+        if "processing_sets" in tables else set()
+    has_cols = {"metadata_write_mode", "google_json"} <= cols
+    return {
+        "already_migrated": _cfg(con, "migration.sets_v1", False) is True,
+        "write_mode_cfg": _write_mode(_cfg(con, "metadata.write_mode", "direct")),
+        "google_json_cfg": bool(_cfg(con, "metadata.google_json", False)),
+        "set_meta": {r[0]: (r[1], bool(r[2])) for r in con.execute(
+            "SELECT id, metadata_write_mode, google_json FROM processing_sets")} if has_cols else None,
+    }
+
+
+def _sets_snapshot(con, set_cols: list[str] | None = None) -> dict:
+    """Sets, rules, categories, directories and job assignment of a database
+    that is already migrated — a start has to leave all of it as it is."""
+    if set_cols is None:
+        set_cols = [r[1] for r in con.execute("PRAGMA table_info(processing_sets)")
+                    if r[1] != "updated_at"]
+    rows = lambda sql: [tuple(r) for r in con.execute(sql).fetchall()]  # noqa: E731
+    return {
+        "set_cols": set_cols,
+        "sets": rows(f"SELECT {', '.join(set_cols)} FROM processing_sets ORDER BY id"),
+        "rules": rows("SELECT id, set_id, position, condition, value, target_category, media_type, "
+                      "active FROM sorting_rules ORDER BY id"),
+        "categories": rows("SELECT id, set_id, key, label, path_template, fixed, immich_archive, "
+                           "position FROM library_categories ORDER BY id"),
+        "directories": rows("SELECT id, path, label, set_id, active FROM inbox_directories ORDER BY id"),
+        "job_sets": rows("SELECT set_id, COUNT(*) FROM jobs GROUP BY set_id ORDER BY set_id"),
+    }
+
+
 def _snapshot_before() -> dict:
     """Everything the migration is supposed to carry over, read from the copy."""
     if FRESH:
-        return {"fresh": True}
+        return {"fresh": True, "meta": {"already_migrated": False, "write_mode_cfg": "direct",
+                                        "google_json_cfg": False, "set_meta": None}}
     if MULTI:
         _make_multi()
     con = sqlite3.connect(COPY)
+    meta = _meta_before(con)
+    if meta["already_migrated"]:
+        # The migration must not run again. What the database holds now may
+        # have been edited since (sets, rules, directories) — it is the
+        # reference, not the old global configuration.
+        snap = {"fresh": False, "meta": meta, "already": _sets_snapshot(con)}
+        con.close()
+        return snap
     module = lambda n: bool((con.execute(  # noqa: E731
         "SELECT enabled FROM modules WHERE name = ?", (n,)).fetchone() or [0])[0])
     snap = {
         "fresh": False,
+        "meta": meta,
         "inboxes": con.execute(
             "SELECT id, path, label, folder_tags, dry_run, use_immich, immich_user_id "
             "FROM inbox_directories ORDER BY id").fetchall(),
@@ -161,6 +216,88 @@ def _state(con) -> tuple:
     )
 
 
+def _meta_state(con) -> tuple:
+    return tuple(tuple(r) for r in con.execute(
+        "SELECT id, metadata_write_mode, google_json FROM processing_sets ORDER BY id").fetchall())
+
+
+def _set_cfg(con, key: str, raw: str | None) -> None:
+    """Write a config value exactly as stored (JSON text); None removes it."""
+    if raw is None:
+        con.execute("DELETE FROM config WHERE key = ?", (key,))
+    else:
+        con.execute("INSERT OR REPLACE INTO config (key, value, encrypted) VALUES (?, ?, 0)", (key, raw))
+
+
+def _drop_meta_columns(con) -> None:
+    """Rebuild processing_sets as it was before the two columns existed."""
+    cols = [r for r in con.execute("PRAGMA table_info(processing_sets)")
+            if r[1] not in ("metadata_write_mode", "google_json")]
+    defs = []
+    for _cid, name, typ, notnull, default, pk in cols:
+        d = f"{name} {typ}"
+        if pk:
+            d += " PRIMARY KEY"
+        elif notnull:
+            d += " NOT NULL"
+        if default is not None:
+            d += f" DEFAULT {default}"
+        defs.append(d)
+    names = ", ".join(c[1] for c in cols)
+    con.execute(f"CREATE TABLE processing_sets_pre ({', '.join(defs)})")
+    con.execute(f"INSERT INTO processing_sets_pre ({names}) SELECT {names} FROM processing_sets")
+    con.execute("DROP TABLE processing_sets")
+    con.execute("ALTER TABLE processing_sets_pre RENAME TO processing_sets")
+    con.commit()
+
+
+async def _check_meta_backfill() -> None:
+    """A database migrated to sets before write mode and Google JSON moved
+    into them: the next start adds both columns and copies the former global
+    values into every set — once."""
+    from database import init_db
+
+    # (stored metadata.write_mode, stored metadata.google_json, expected per set)
+    cases = [
+        ('"sidecar"', "true", ("sidecar", True)),
+        ('"direct"', "false", ("direct", False)),
+        ('"quatsch"', "true", ("direct", True)),
+        (None, None, ("direct", False)),
+    ]
+    for raw_mode, raw_json, want in cases:
+        con = sqlite3.connect(COPY)
+        _drop_meta_columns(con)
+        _set_cfg(con, "metadata.write_mode", raw_mode)
+        _set_cfg(con, "metadata.google_json", raw_json)
+        con.commit()
+        con.close()
+        await init_db()
+        con = sqlite3.connect(COPY)
+        got = {r[0]: (r[1], bool(r[2])) for r in con.execute(
+            "SELECT name, metadata_write_mode, google_json FROM processing_sets")}
+        con.close()
+        report(f"Spalten nachgerüstet, Konfiguration {raw_mode}/{raw_json}: jedes Set {want}",
+               bool(got) and all(v == want for v in got.values()), f"{got}")
+
+    # Only once: a value changed in the set afterwards survives the next start,
+    # although the global config says otherwise.
+    con = sqlite3.connect(COPY)
+    first_id = con.execute("SELECT id FROM processing_sets ORDER BY position, id LIMIT 1").fetchone()[0]
+    con.execute("UPDATE processing_sets SET metadata_write_mode = 'sidecar', google_json = 1 "
+                "WHERE id = ?", (first_id,))
+    _set_cfg(con, "metadata.write_mode", '"direct"')
+    _set_cfg(con, "metadata.google_json", "false")
+    con.commit()
+    con.close()
+    await init_db()
+    con = sqlite3.connect(COPY)
+    row = con.execute("SELECT metadata_write_mode, google_json FROM processing_sets WHERE id = ?",
+                      (first_id,)).fetchone()
+    con.close()
+    report("Nachrüstung nur einmal: späterer Wert des Sets bleibt beim nächsten Start",
+           row is not None and (row[0], bool(row[1])) == ("sidecar", True), f"{row}")
+
+
 async def main() -> int:
     print(f"\nQuelle: {'Neuinstallation' if FRESH else SOURCE}")
     before = _snapshot_before()
@@ -187,6 +324,14 @@ async def main() -> int:
         if inbox:
             row = con.execute("SELECT set_id FROM inbox_directories WHERE path = ?", (inbox,)).fetchone()
             report("Neuinstallation: INBOX_PATH gehört zum Set", bool(row) and row[0] == sid, inbox)
+    elif "already" in before:
+        ref = before["already"]
+        now = _sets_snapshot(con, ref["set_cols"])
+        labels = {"sets": "Sets", "rules": "Regeln", "categories": "Kategorien",
+                  "directories": "Verzeichnisse", "job_sets": "Job-Zuordnung zu Sets"}
+        for part, label in labels.items():
+            report(f"Bereits migriert: {label} unverändert", now[part] == ref[part],
+                   f"{len(now[part])} Zeilen, vorher {len(ref[part])}")
     else:
         groups: dict[tuple, list] = {}
         for i in before["inboxes"]:
@@ -275,14 +420,37 @@ async def main() -> int:
             "(SELECT COUNT(*) FROM inbox_directories WHERE set_id IS NULL)").fetchone()[0]
         report("Keine Regel, Kategorie oder Verzeichnis ohne Set", n_orphan == 0, f"{n_orphan}")
 
+    # Write mode and Google JSON switch. A database migrated to sets just now
+    # takes the global values into every set. One migrated before the two
+    # columns existed got them from database._migrate_columns, which copies
+    # the global values once — and one that already had them keeps the sets'
+    # own values, whatever the global config says.
+    meta = before["meta"]
+    if before["fresh"]:
+        # A fresh install has only what seed_from_env wrote (METADATA_* env)
+        meta = {**meta, "write_mode_cfg": _write_mode(_cfg(con, "metadata.write_mode", "direct")),
+                "google_json_cfg": bool(_cfg(con, "metadata.google_json", False))}
+    for s in sets:
+        got = (s["metadata_write_mode"], bool(s["google_json"]))
+        if meta["already_migrated"] and meta["set_meta"] is not None and s["id"] in meta["set_meta"]:
+            want, why = meta["set_meta"][s["id"]], "unverändert"
+        else:
+            want, why = (meta["write_mode_cfg"], meta["google_json_cfg"]), "aus globaler Konfiguration"
+        report(f"„{s['name']}\": Schreibmodus und Google-JSON {why}", got == want,
+               f"{got}, erwartet {want}")
+
     # Second start: nothing may change
-    state_1 = _state(con)
+    state_1 = _state(con) + (_meta_state(con),)
     con.close()
     await _startup()
     con = sqlite3.connect(COPY)
-    report("Zweiter Start ändert nichts", _state(con) == state_1,
-           f"Sets/Regeln/Kategorien vorher {state_1[:3]}, nachher {_state(con)[:3]}")
+    state_2 = _state(con) + (_meta_state(con),)
+    report("Zweiter Start ändert nichts", state_2 == state_1,
+           f"Sets/Regeln/Kategorien vorher {state_1[:3]}, nachher {state_2[:3]}; "
+           f"Schreibmodus/Google-JSON vorher {state_1[-1]}, nachher {state_2[-1]}")
     con.close()
+
+    await _check_meta_backfill()
 
     failed = [r for r in results if not r[1]]
     print(f"\n{len(results) - len(failed)}/{len(results)} bestanden")
