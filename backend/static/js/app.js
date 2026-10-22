@@ -4,6 +4,8 @@
   const POLL_INTERVAL = 5000;
 
   // ── Dashboard auto-refresh ──
+  // The rows rendered here mirror the macros set_row / job_row in
+  // templates/dashboard.html: change both together.
   function initDashboard() {
     const statsGrid = document.getElementById("stats-grid");
     if (!statsGrid) return;
@@ -26,6 +28,17 @@
       const el = document.querySelector(`[data-stat="${key}"]`);
       if (el) el.textContent = val;
     }
+    const tile = (key) => {
+      const el = document.querySelector(`[data-stat="${key}"]`);
+      return el && el.closest(".ui-stat");
+    };
+    // Red only while there are errors; the duplicates tile only when there are any
+    const errors = tile("errors");
+    if (errors) errors.classList.toggle("is-error", stats.errors > 0);
+    const duplicates = tile("duplicates");
+    if (duplicates) duplicates.hidden = !stats.duplicates;
+    const spinner = document.querySelector('[data-stat-icon="processing"]');
+    if (spinner) spinner.classList.toggle("ui-spin", stats.processing > 0);
   }
 
   function updateThroughput(throughput) {
@@ -34,64 +47,74 @@
       const el = document.querySelector(`[data-throughput="${key}"]`);
       if (el) el.textContent = val;
     }
-    // Update ETA display
-    const etaEl = document.querySelector('[data-stat="eta"]');
-    if (etaEl) {
-      if (throughput.eta) {
-        etaEl.textContent = throughput.eta;
-        etaEl.style.display = "";
-      } else {
-        etaEl.style.display = "none";
-      }
-    }
+    // ETA below the "queued" tile, hidden while there is none
+    const eta = document.querySelector('[data-throughput="eta_label"]');
+    if (eta) eta.hidden = !throughput.eta_label;
   }
 
-  // Processing sets come shaped like module cards (status/label/detail).
   function updateSets(sets) {
-    if (sets) renderCards("sets-grid", sets);
+    const tbody = document.getElementById("sets-grid");
+    if (!tbody || !sets) return;
+    const labels = JSON.parse(tbody.dataset.labels || "{}");
+    dashReplaceRows(tbody, sets.map((s) => dashSetRow(s, labels)).join(""));
   }
 
-  function renderCards(gridId, items) {
-    const grid = document.getElementById(gridId);
-    if (!grid) return;
+  // Replaces the rows only when they changed, so focus and hover survive the poll.
+  function dashReplaceRows(tbody, html) {
+    if (tbody._dashHtml === html) return;
+    tbody._dashHtml = html;
+    tbody.innerHTML = html;
+  }
 
-    grid.innerHTML = items
-      .map((m) => {
-        const dot =
-          m.status === "ready"
-            ? "●"
-            : m.status === "error"
-              ? "●"
-              : m.status === "misconfigured"
-                ? "●"
-                : "○";
-        return `<div class="module-card module-${m.status}">
-          <div class="module-top">
-            <span class="module-status">${dot}</span>
-            <span class="module-name">${esc(m.label)}</span>
-          </div>
-          <div class="module-detail">${esc(m.detail)}</div>
-        </div>`;
-      })
-      .join("");
+  function dashSetRow(s, L) {
+    const state = dashEscAttr(s.active ? L.active : L.inactive);
+    const inputs = s.directories.map(
+      (p) => `<span class="ui-cell-meta">${dashIcon("folder-input", 15)}<code class="ui-code">${esc(p)}</code></span>`
+    );
+    if (s.immich_input || s.immich_poll) {
+      inputs.push(`<span class="ui-cell-meta${s.immich_poll ? " is-on" : ""}">${dashIcon("cloud-down", 15)}${esc(s.immich_poll ? L.poll_on : L.poll_off)}</span>`);
+    }
+    if (!inputs.length) inputs.push(`<span>${esc(L.no_inputs)}</span>`);
+    const waiting = esc(L.queue.replace("{n}", s.queue));
+    return `<tr${s.active ? "" : ' class="is-inactive"'}>`
+      + `<th scope="row"><div class="ui-cell-name"><span class="ui-dot ${s.active ? "is-success" : "is-hollow"}" role="img" title="${state}" aria-label="${state}"></span>`
+      + `<span class="dash-set-name"><strong>${esc(s.name)}</strong>${s.dry_run ? `<span class="ui-badge is-warning">${esc(L.dry_run)}</span>` : ""}</span></div></th>`
+      + `<td class="dash-col-inputs"><div class="dash-set-inputs">${inputs.join("")}</div></td>`
+      + `<td class="dash-set-queue">${s.queue ? `<span class="ui-badge is-info">${waiting}</span>` : waiting}</td>`
+      + `<td class="ui-col-actions"><div class="ui-actions"><a class="ui-icon-btn" href="/settings?edit=${encodeURIComponent(s.id)}#section-sets"`
+      + ` title="${dashEscAttr(L.edit)}" aria-label="${dashEscAttr(L.edit)}: ${dashEscAttr(s.name)}">${dashIcon("pencil", 18)}</a></div></td>`
+      + `</tr>`;
   }
 
   function updateRecentJobs(jobs) {
     const tbody = document.getElementById("recent-jobs");
-    if (!tbody) return;
+    if (!tbody || !jobs) return;
+    const card = document.getElementById("recent-jobs-card");
+    const empty = document.getElementById("recent-jobs-empty");
+    if (card) card.hidden = !jobs.length;
+    if (empty) empty.hidden = !!jobs.length;
 
-    tbody.innerHTML = jobs
-      .map(
-        (j) => `<tr class="log-row log-${j.status}">
-        <td><a href="/logs/job/${esc(j.debug_key)}" class="log-link-key"><code>${esc(j.debug_key || "—")}</code></a></td>
-        <td>${esc(j.filename)}</td>
-        <td>${statusBadge(j.status, true)}</td>
-        <td>${esc(j.current_step || "—")}</td>
-        <td class="cell-msg${j.status === "error" ? " is-error" : ""}">${esc(j.error_message || "")}</td>
-        <td>${esc(j.updated_at)}</td>
-      </tr>`
-      )
-      .join("");
+    dashReplaceRows(tbody, jobs.map((j) => {
+      const msg = j.error_message || "";
+      return `<tr>`
+        + `<td class="ui-col-icon">${statusBadge(j.status, true)}</td>`
+        + `<th scope="row"><div class="dash-job"><a class="dash-job-name" href="/logs/job/${dashEscAttr(j.debug_key)}" title="${dashEscAttr(j.filename)}">${esc(j.filename || "—")}</a>`
+        + `<span class="dash-job-key">${esc(j.debug_key || "—")}</span></div></th>`
+        + `<td class="dash-col-step">${esc(j.current_step || "—")}</td>`
+        + `<td class="cell-msg${j.status === "error" ? " is-error" : ""}" title="${dashEscAttr(msg)}">${esc(msg)}</td>`
+        + `<td class="ui-num dash-col-time">${esc(j.updated_at)}</td>`
+        + `</tr>`;
+    }).join(""));
+  }
+
+  // Sprite icon, same markup as the icon() macro in dashboard.html
+  function dashIcon(name, size) {
+    return `<svg class="ui-i" width="${size}" height="${size}" aria-hidden="true" focusable="false"><use href="#ui-i-${name}"/></svg>`;
+  }
+
+  // esc() for attribute values: also the double quote
+  function dashEscAttr(str) {
+    return esc(str).replace(/"/g, "&quot;");
   }
 
   // ── Job Detail auto-refresh ──
