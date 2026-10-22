@@ -50,6 +50,7 @@ DEFAULT_RULES = [
 COPIED_FIELDS = (
     "description", "schedule_mode", "interval_s", "window_start", "window_end",
     "scheduled_days", "scheduled_time", "folder_tags", "dry_run", "ocr_enabled", "ocr_mode",
+    "metadata_write_mode", "google_json",
     "target_mode", "library_base_path", "immich_user_id", "immich_poll",
     "immich_poll_user_id",
 )
@@ -196,6 +197,10 @@ async def migrate_to_sets() -> None:
         }
         base_path = await _cfg(session, "library.base_path", "/library") or "/library"
         ocr_mode = await _cfg(session, "ocr.mode", "smart") or "smart"
+        write_mode = await _cfg(session, "metadata.write_mode", "direct")
+        write_mode = write_mode if write_mode in ("direct", "sidecar") else "direct"
+        google_json = bool(await _cfg(session, "metadata.google_json", False))
+        meta = {"metadata_write_mode": write_mode, "google_json": google_json}
         poll_enabled = bool(await _cfg(session, "immich.poll_enabled", False))
         last_poll = await _cfg(session, "immich.last_poll", None)
 
@@ -218,7 +223,7 @@ async def migrate_to_sets() -> None:
                 name = " + ".join(m.label for m in members)
             ps = ProcessingSet(
                 name=name, description="", active=True, position=pos, **schedule,
-                folder_tags=folder_tags, dry_run=dry_run, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode,
+                folder_tags=folder_tags, dry_run=dry_run, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, **meta,
                 target_mode="immich" if use_immich else "library",
                 library_base_path=base_path, immich_user_id=user_id,
                 immich_poll=False, immich_poll_user_id=None, immich_last_poll=None,
@@ -240,7 +245,7 @@ async def migrate_to_sets() -> None:
                 global_poll = ProcessingSet(
                     name="Immich Auto-Tagging", description="", active=True,
                     position=len(sets) + 1, **schedule, folder_tags=False, dry_run=False,
-                    ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, target_mode="immich",
+                    ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, **meta, target_mode="immich",
                     library_base_path=base_path, immich_user_id=None,
                     immich_poll=True, immich_poll_user_id=None, immich_last_poll=last_poll,
                 )
@@ -258,7 +263,7 @@ async def migrate_to_sets() -> None:
                 ps = ProcessingSet(
                     name=f"Immich Auto-Tagging {u.label}", description="", active=True,
                     position=len(sets) + len(poll_sets) + 1, **schedule,
-                    folder_tags=False, dry_run=False, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode,
+                    folder_tags=False, dry_run=False, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, **meta,
                     target_mode="immich", library_base_path=base_path, immich_user_id=u.id,
                     immich_poll=True, immich_poll_user_id=u.id, immich_last_poll=last_poll,
                 )

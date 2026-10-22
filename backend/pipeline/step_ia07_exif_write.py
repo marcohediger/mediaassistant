@@ -2,7 +2,6 @@ import asyncio
 import os
 import subprocess
 
-from config import config_manager
 from file_operations import is_folder_tags_active as _is_folder_tags_active  # shared
 from system_logger import log_info
 
@@ -127,7 +126,9 @@ async def execute(job, session) -> dict:
     if not keywords and not description:
         return {"status": "skipped", "reason": "no tags to write"}
 
-    write_mode = await config_manager.get("metadata.write_mode", "direct")
+    from sets import get_set
+    processing_set = await get_set(session, job.set_id)
+    write_mode = (processing_set.metadata_write_mode if processing_set else None) or "direct"
 
     # Dry-run: report what would be written, but don't modify file
     if job.dry_run:

@@ -22,6 +22,7 @@ router = APIRouter(prefix="/settings/sets")
 
 SCHEDULE_MODES = {"continuous", "manual", "window", "scheduled"}
 OCR_MODES = {"smart", "always"}
+WRITE_MODES = {"direct", "sidecar"}
 TARGET_MODES = {"library", "immich"}
 RULE_CONDITIONS = {"filename_contains", "filename_pattern", "exif_expression", "extension"}
 MEDIA_TYPES = {None, "image", "video"}
@@ -63,6 +64,7 @@ async def serialize(session, ps: ProcessingSet) -> dict:
         "scheduled_days": ps.scheduled_days or "", "scheduled_time": ps.scheduled_time or "23:00",
         "folder_tags": bool(ps.folder_tags), "dry_run": bool(ps.dry_run),
         "ocr_enabled": bool(ps.ocr_enabled), "ocr_mode": ps.ocr_mode or "smart",
+        "metadata_write_mode": ps.metadata_write_mode or "direct", "google_json": bool(ps.google_json),
         "target_mode": ps.target_mode or "library",
         "library_base_path": ps.library_base_path or "/library",
         "base_path_exists": os.path.isdir(ps.library_base_path or ""),
@@ -104,6 +106,7 @@ async def summaries() -> list[dict]:
             "library_base_path": ps.library_base_path,
             "rules": rule_counts.get(ps.id, 0), "folder_tags": bool(ps.folder_tags),
             "ocr_enabled": bool(ps.ocr_enabled), "dry_run": bool(ps.dry_run),
+            "metadata_write_mode": ps.metadata_write_mode or "direct",
             "queue": queue.get(ps.id, 0),
         })
     return out
@@ -219,7 +222,8 @@ async def save_set(request: Request, set_id: int):
             return _fail(await _t("err_schedule"))
         if mode == "scheduled" and not days:
             return _fail(await _t("err_days"))
-        if data.get("ocr_mode") not in OCR_MODES or data.get("target_mode") not in TARGET_MODES:
+        if data.get("ocr_mode") not in OCR_MODES or data.get("target_mode") not in TARGET_MODES \
+                or data.get("metadata_write_mode") not in WRITE_MODES:
             return _fail(await _t("err_schedule"))
         base = (data.get("library_base_path") or "").strip()
         if not base.startswith("/"):
@@ -294,6 +298,8 @@ async def save_set(request: Request, set_id: int):
         ps.dry_run = bool(data.get("dry_run"))
         ps.ocr_enabled = bool(data.get("ocr_enabled"))
         ps.ocr_mode = data["ocr_mode"]
+        ps.metadata_write_mode = data["metadata_write_mode"]
+        ps.google_json = bool(data.get("google_json"))
         ps.target_mode = data["target_mode"]
         ps.library_base_path = base
         ps.immich_user_id = int(data["immich_user_id"]) if data.get("immich_user_id") not in (None, "") else None

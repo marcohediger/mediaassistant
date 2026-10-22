@@ -62,12 +62,33 @@ async def _migrate_columns(conn):
         ("inbox_directories", "set_id", "ALTER TABLE inbox_directories ADD COLUMN set_id INTEGER"),
         ("sorting_rules", "set_id", "ALTER TABLE sorting_rules ADD COLUMN set_id INTEGER"),
         ("library_categories", "set_id", "ALTER TABLE library_categories ADD COLUMN set_id INTEGER"),
+        # Write mode and Google Takeout JSON moved into the sets after the
+        # sets themselves existed; a database migrated in between takes the
+        # former global values over once (see below).
+        ("processing_sets", "metadata_write_mode",
+         "ALTER TABLE processing_sets ADD COLUMN metadata_write_mode TEXT DEFAULT 'direct'"),
+        ("processing_sets", "google_json",
+         "ALTER TABLE processing_sets ADD COLUMN google_json BOOLEAN DEFAULT 0"),
     ]
+    added = set()
     for table, column, sql in migrations:
         try:
             await conn.execute(sqlalchemy.text(f"SELECT {column} FROM {table} LIMIT 1"))
         except Exception:
             await conn.execute(sqlalchemy.text(sql))
+            added.add((table, column))
+
+    # Config values are stored JSON-encoded; json_extract decodes them.
+    if ("processing_sets", "metadata_write_mode") in added:
+        await conn.execute(sqlalchemy.text(
+            "UPDATE processing_sets SET metadata_write_mode = COALESCE("
+            "(SELECT json_extract(value, '$') FROM config WHERE key = 'metadata.write_mode' "
+            "AND json_extract(value, '$') IN ('direct', 'sidecar')), 'direct')"))
+    if ("processing_sets", "google_json") in added:
+        await conn.execute(sqlalchemy.text(
+            "UPDATE processing_sets SET google_json = COALESCE("
+            "(SELECT CASE WHEN json_extract(value, '$') = 1 THEN 1 ELSE 0 END "
+            "FROM config WHERE key = 'metadata.google_json'), 0)"))
 
     # Performance indexes for large databases (150k+ jobs)
     indexes = [

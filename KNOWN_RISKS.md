@@ -94,12 +94,15 @@ Opt-in-Pfade.
 
 ---
 
-### H-2 — `_poll_immich` blockt Filewatcher-Loop
-**Datei:** `backend/filewatcher.py:339-381`
+### H-2 — `_poll_immich` blockt Filewatcher-Loop — ✅ behoben (v2.33.0)
 
-Serielle `await run_pipeline(job.id)`-Aufrufe im Poll-Loop. 100 neue Assets → ganzer Filewatcher steht bis alle durch sind. Inbox-Scan, CSV-Retry pausieren.
-
-**Fix (nicht priorisiert):** Poller soll nur queuen, Pipeline-Worker nimmt auf.
+Der Poller lud jedes neue Asset herunter und liess die Pipeline darauf
+laufen, eines nach dem anderen, innerhalb der Scan-Schleife — solange
+wurde keine Inbox gescannt. Seit dem Umbau auf Verarbeitungs-Sets reiht
+`inputs.immich.poll_set` nur noch Jobs ein (`original_path =
+"immich-pending:<id>"`); der Worker lädt das Original beim Start des
+Jobs (`worker.fetch_immich_source`). Allgemein gilt jetzt: Eingänge
+reihen nur ein, verarbeitet wird ausschliesslich im Worker.
 
 ---
 
@@ -247,6 +250,29 @@ Status-Wert `orphan` in Enum, aber nirgends gesetzt. Nur in Filtern.
 
 ---
 
+## Neu erkannt (2026-10-22)
+
+### S-6 — Einrichtungs-Assistent nach der Einrichtung offen — ✅ behoben (v2.32.24)
+**Datei:** `backend/routers/setup.py`
+
+`/setup` ist von der Anmeldung ausgenommen. Nach der Einrichtung
+leiteten nur die GET-Seiten weiter; die POST-Schritte nahmen ohne
+Anmeldung Änderungen an KI-Backend-URL/-Schlüssel, SMTP und Ablagepfad
+an. Jetzt sperrt eine Router-Abhängigkeit den ganzen Assistenten.
+
+**Lehre:** Jede Ausnahme in `EXEMPT_PREFIXES` braucht eine eigene
+Zugangsprüfung im Router — die Middleware schützt dort nichts mehr.
+
+### S-7 — Umgebungsvariablen wirken nur noch beim ersten Start
+**Datei:** `backend/config.py`
+
+`FILEWATCHER_*`, `OCR_MODE`, `METADATA_WRITE_MODE`,
+`METADATA_GOOGLE_JSON` und `LIBRARY_BASE_PATH` füllen weiterhin die
+alten globalen Schlüssel. Seit den Verarbeitungs-Sets liest die Pipeline
+diese aber nicht mehr; sie gehen nur bei der ersten Migration in das Set
+„Standard" ein (`LIBRARY_BASE_PATH` zusätzlich als Vorgabe für neue
+Sets). Wer sie danach ändert, sieht keine Wirkung — das steht im README.
+
 ## Neu erkannt (2026-09-02)
 
 ### S-1 — Immich legt gelöschte Tags aus der Sidecar neu an
@@ -329,7 +355,7 @@ und produziert Phantom-Fehler.
 - **A-2** `step_result` JSON-Spalte ohne Schema. Sentinel-Keys mit `_`-Präfix als Workaround.
 - **A-3** Keine Pipeline-Parallelisierung. IA-02 / IA-03 / IA-04 hängen alle nur von IA-01 ab, könnten parallel laufen.
 - **A-4** Kein exponentieller Backoff für Retries.
-- **A-6** `filewatcher.py` ist 830-Zeilen-Gott-File (Scan + Poll + Worker + Recovery + Scheduler).
+- ~~**A-6** `filewatcher.py` ist 830-Zeilen-Gott-File (Scan + Poll + Worker + Recovery + Scheduler).~~ ✅ v2.33.0: zerlegt in `inputs/`, `worker.py`, `recovery.py`; `filewatcher.py` ist nur noch der Taktgeber.
 - **A-7** `_resolve_duplicate_group` ist 370+ Zeilen Business-Logic im Router.
 - **A-8** SQLite Query-Plan für Duplicate-View ungetestet.
 - **A-9** Kein globaler Filesystem-Healthcheck auf Inbox/Library-Mount.

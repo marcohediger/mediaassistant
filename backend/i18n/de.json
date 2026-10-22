@@ -40,7 +40,12 @@
     "file": "Datei",
     "status": "Status",
     "step": "Schritt",
-    "time": "Zeit"
+    "time": "Zeit",
+    "sets": "Verarbeitungs-Sets",
+    "set_directories": "{n} Verzeichnis(se)",
+    "set_poll_on": "Immich-Poll an",
+    "set_poll_off": "Immich-Poll aus",
+    "set_queue": "{n} in Warteschlange"
   },
   "logs": {
     "title": "Logs",
@@ -535,7 +540,7 @@
   },
   "sets": {
     "title": "Verarbeitungs-Sets",
-    "desc": "Jedes Set bündelt Eingänge, Zeitplan, Sortier-Regeln, Ordner-Tags, OCR und Ziel-Ablage.",
+    "desc": "Jedes Set bündelt Eingänge, Zeitplan, Sortier-Regeln, Ordner-Tags, OCR, Metadaten und Ziel-Ablage.",
     "watch": "Überwachung",
     "watch_hint": "Hauptschalter für das Scannen aller Eingangsverzeichnisse. Aus = kein Set scannt seine Verzeichnisse.",
     "new": "Neues Set",
@@ -641,6 +646,10 @@
     "err_category_in_use": "Diese Kategorie wird noch von einer Regel verwendet.",
     "err_rule": "Jede Regel braucht eine gültige Bedingung und einen Wert.",
     "err_rule_target": "Die Regel „{value}\" zeigt auf eine Kategorie, die es im Set nicht gibt.",
-    "err_rule_regex": "Ungültiges Muster in der Regel „{value}\"."
+    "err_rule_regex": "Ungültiges Muster in der Regel „{value}\".",
+    "tab_metadata": "Metadaten"
+  },
+  "setup": {
+    "set_hint": "Beide Pfade gehören zum Verarbeitungs-Set „{name}\". Weitere Sets mit eigenen Verzeichnissen, Regeln und Ablagen lassen sich später in den Einstellungen anlegen."
   }
 }

@@ -38,6 +38,7 @@ SUPERSEDED_SETTINGS = frozenset({
     "immich.poll_enabled", "immich.last_poll", "ocr.mode",
     "filewatcher.schedule_mode", "filewatcher.interval", "filewatcher.window_start",
     "filewatcher.window_end", "filewatcher.scheduled_days", "filewatcher.scheduled_time",
+    "metadata.write_mode", "metadata.google_json",
 })
 
 
@@ -258,6 +259,8 @@ async def diagnostics(request: Request):
                 "dry_run": bool(ps.dry_run),
                 "ocr_enabled": bool(ps.ocr_enabled),
                 "ocr_mode": ps.ocr_mode,
+                "metadata_write_mode": ps.metadata_write_mode,
+                "google_json": bool(ps.google_json),
                 "rules": rule_counts.get(ps.id, 0),
                 "categories": category_counts.get(ps.id, 0),
                 "queue": queue.get(ps.id, {"queued": 0, "processing": 0}),

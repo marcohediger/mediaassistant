@@ -5,7 +5,6 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
-from config import config_manager
 
 logger = logging.getLogger("mediaassistant.pipeline.ia01")
 
@@ -77,7 +76,9 @@ async def execute(job, session) -> dict:
             exif.update(ffprobe_data)
 
     # Google Takeout JSON Sidecar: fehlende Metadaten ergänzen
-    google_json_enabled = await config_manager.get("metadata.google_json", False)
+    from sets import get_set
+    processing_set = await get_set(session, job.set_id)
+    google_json_enabled = bool(processing_set and processing_set.google_json)
     if google_json_enabled:
         json_result = await asyncio.to_thread(_read_google_json, job.original_path)
         if json_result:

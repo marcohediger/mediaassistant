@@ -22,12 +22,12 @@
 | `resolve_filename_conflict` | `(directory, filename, separator="_") -> str` | Eindeutiger Pfad: hängt `_1`, `+1` etc. an bis frei. |
 | `safe_remove` | `(path, *, missing_ok=True) -> bool` | Datei löschen ohne Exception. `True` wenn gelöscht. |
 | `safe_remove_with_log` | `(path) -> list[str]` | Datei + `.log`-Sidecar löschen. Skippt `immich:`-Pfade. |
-| `get_duplicate_dir` | `async () -> str` | Duplikat-Verzeichnis aus Config, erstellt falls nötig. |
+| `get_duplicate_dir` | `async (job) -> str` | Duplikat-Verzeichnis unter dem Basis-Pfad des Job-Sets, erstellt falls nötig. |
 | `resolve_filepath` | `(job) -> str` | Dateipfad auflösen (target → original → temp). |
 | `sanitize_path_component` | `(value) -> str` | Gefährliche Zeichen entfernen (Path-Traversal). |
 | `validate_target_path` | `(target_dir, base_path) -> str` | Pfad innerhalb base_path erzwingen. |
 | `parse_date` | `(date_str) -> datetime \| None` | EXIF-Datum parsen (diverse Formate + Timezone). |
-| `is_folder_tags_active` | `async (job) -> bool` | Folder-Tags Modul + Inbox-Setting prüfen. |
+| `is_folder_tags_active` | `async (job) -> bool` | Job kommt aus einem Verzeichnis **und** sein Set hat Ordner-Tags an (live gelesen). |
 
 ---
 
@@ -227,30 +227,57 @@
 
 ---
 
-## filewatcher.py — Dateiüberwachung & Poller
+## sets.py — Verarbeitungs-Sets
+
+> **Pflicht:** Regeln, Kategorien, Basis-Pfad, Ordner-Tags, OCR und
+> Schreibmodus eines Jobs kommen aus seinem Set — nie aus der globalen
+> Config. Immer über diese Helper.
 
 | Funktion | Signatur | Beschreibung |
 |---|---|---|
-| `start_filewatcher` | `async (shutdown_event)` | Haupt-Loop (Background-Task). |
-| `trigger_manual_scan` | `()` | Manuellen Scan auslösen. |
-| `_scan_inbox` | `async ()` | Inbox scannen, Jobs erstellen. |
-| `_poll_immich` | `async ()` | Immich nach neuen Assets abfragen. |
-| `_create_job_safe` | `async (**kwargs) -> Job \| None` | Job erstellen mit Duplikat-Check. |
-| `_scan_directory` | `(path, min_age) -> list[str]` | Verzeichnis nach Mediendateien scannen. |
-| `_is_file_stable` | `(filepath, expected_size) -> bool` | Datei fertig geschrieben? |
-| `_is_within_schedule` | `async () -> bool` | Innerhalb Zeitplan? |
-| `_next_debug_key` | `async () -> str` | Nächster Debug-Key (In-Memory Counter). |
-| `_pipeline_worker` | `async (shutdown_event)` | Background-Worker: Jobs aus Queue verarbeiten. |
-| `_scan_csv_retry` | `async ()` | CSV-Retry-Ordner scannen. |
-| `_recover_immich_error_jobs` | `async ()` | Einmal-Migration: Jobs, die an einem Immich-Fehler dauerhaft hingen, zurück in die Queue. Flag `migration.immich_error_recovery` wird **nur bei Erfolg** gesetzt. |
-| `_repair_immich_poll_cursor` | `async ()` | Einmal-Migration: `immich.last_poll` auf den ältesten Immich-Job minus einen Tag zurückdrehen, wenn der Cursor übersprungen hat. Flag `migration.immich_cursor_repair`. |
+| `get_set` | `async (session, set_id) -> ProcessingSet \| None` | Set eines Jobs; ohne `set_id` das erste Set. |
+| `categories_of` | `async (session, set_id) -> list[LibraryCategory]` | Kategorien eines Sets in ihrer Reihenfolge. |
+| `find_category` | `async (session, set_id, *, key=None, label=None)` | Eine Kategorie des Sets nach Schlüssel oder Bezeichnung. |
+| `base_path_for` | `async (session, job) -> str` | Basis-Pfad des Job-Sets — auch für `error/` und `error/duplicates/`. |
+| `library_roots` | `async () -> list[str]` | Alle Basis-Pfade aller Sets, ohne ineinander liegende (sonst Doppelzählung). |
+| `seed_set_defaults` | `(session, set_id)` | Standard-Kategorien und -Regeln für ein neues Set. |
+| `copy_set_contents` | `async (session, source_id, target_id)` | Regeln und Kategorien kopieren — in Originalreihenfolge (`ORDER BY id`; der Index auf `(set_id, key)` liefert sonst alphabetisch). |
+| `migrate_to_sets` | `async ()` | Einmalige Überführung der globalen Config in Sets, eine Transaktion, Flag `migration.sets_v1`. |
 
-> **`immich.last_poll` wird nach einem fehlgeschlagenen Abruf nicht
-> weitergestellt.** Sonst überspringt der Poller genau die Assets, deren
-> Abruf gescheitert ist — in Produktion waren das vier Wochen Uploads.
-| `_run_job` | `async (job_id, filename, debug_key)` | Einzelnen Pipeline-Job starten. |
+## filewatcher.py — Taktgeber
 
----
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `start_filewatcher` | `async (shutdown_event)` | Startet Wiederaufnahme und Worker, dann jede Sekunde: fällige aktive Sets → Inbox-Scan + Immich-Poll. |
+| `trigger_manual_scan` | `()` | Lässt alle aktiven Sets sofort laufen, unabhängig von Zeitplan und Intervall. |
+
+## inputs/ — Eingänge (reihen nur ein)
+
+| Funktion | Datei | Beschreibung |
+|---|---|---|
+| `scan_set` | `inbox.py` | Verzeichnisse eines Sets scannen, neue Dateien mit den Set-Einstellungen einreihen. Fragt die DB nur nach den gefundenen Pfaden; Hash-Cache nach (Grösse, mtime). |
+| `poll_set` | `immich.py` | Immich mit dem Zugang des Sets abfragen, Jobs mit `original_path = "immich-pending:<id>"` einreihen. Kein Download. Cursor pro Set, 5 min Überlappung, nach Fehlschlag unverändert. |
+| `scan_csv_retry` | `csv_retry.py` | Dateinamen aus CSVs in `data/csv-retry/` neu einreihen. |
+| `is_within_schedule` | `schedule.py` | `(processing_set) -> bool` — continuous / manual / window / scheduled. |
+| `create_job_safe` | `common.py` | Job anlegen mit kollisionsfreiem Debug-Key; `set_id` ist Pflicht. |
+| `needs_immich_download` | `common.py` | Immich-Job, dessen Original fehlt (frisch gepollt oder `/tmp` nach Neustart weg). |
+| `scan_directory` / `is_file_stable` | `common.py` | Verzeichnis-Walk ohne Symlinks, Stabilitätsprüfung. |
+
+## worker.py — der eine Pipeline-Worker
+
+| Funktion | Signatur | Beschreibung |
+|---|---|---|
+| `pipeline_worker` | `async (shutdown_event)` | Füllt freie Slots mit `queued`-Jobs, Pause, Hänger-Erkennung. Greift laufende Jobs nicht doppelt (`Job.id NOT IN running`). |
+| `fetch_immich_source` | `async (job_id) -> bool` | Lädt das Immich-Original in einen `ma_immich_`-Tempordner; gleicher Inhalt schon verarbeitet → `skipped`. |
+| `_run_job` | `async (job_id, filename, debug_key)` | Download (falls nötig) + `run_pipeline` + Crash-Fallback. |
+
+## recovery.py — einmalig beim Start
+
+| Funktion | Beschreibung |
+|---|---|
+| `requeue_interrupted_jobs` | `processing` → `queued` (max. 3 Versuche) — reiht nur ein, verarbeitet nicht. |
+| `recover_immich_error_jobs` | Einmal-Migration: Immich-Fehlerjobs wieder einreihen. |
+| `repair_immich_poll_cursor` | Einmal-Migration: Poll-Cursor aller Sets auf den Beginn der Historie. |
 
 ## health_watcher.py — Auto-Pause/Resume
 
@@ -301,10 +328,10 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | IA-02 | `step_ia02_duplicates.py` | Duplikat-Erkennung (SHA256 + pHash) | `execute_video_phash`, `_quality_score`, `_compute_phash`, `_compute_video_phash`, `_phash_from_preview`, `_file_exists`, `_extract_folder_tags`, `_handle_duplicate` |
 | IA-03 | `step_ia03_geocoding.py` | Geocoding (GPS → Ort) | `_reverse_nominatim`, `_reverse_photon`, `_reverse_google`, `_http_get_with_retry`, `_throttle`, `_cache_key` |
 | IA-04 | `step_ia04_convert.py` | Format-Konvertierung (→ temp JPEG) | `_extract_video_frames`, `_ffmpeg_extract_frame`, `_glob_temp_files` |
-| IA-05 | `step_ia05_ai.py` | KI-Analyse (Tags, Description) | `_resize_for_ai`, `has_mixed_scripts`, `is_unusable_keyword`, `_scripts_of` |
+| IA-05 | `step_ia05_ai.py` | KI-Analyse (Tags, Description; Kategorien des Job-Sets) | `_resize_for_ai`, `has_mixed_scripts`, `is_unusable_keyword`, `_scripts_of` |
 | IA-06 | `step_ia06_ocr.py` | OCR-Texterkennung | — |
 | IA-07 | `step_ia07_exif_write.py` | Keywords/Description schreiben | `_write_direct`, `_write_sidecar` |
-| IA-08 | `step_ia08_sort.py` | Sortierung / Immich-Upload | `_get_folder_album_names`, `_tag_immich_asset`, `_resolve_path`, `_is_dir_empty`, `_force_remove_dir`, `_cleanup_empty_dirs`, `_eval_exif_expression`, `_eval_single_condition`, `_match_sorting_rules` |
+| IA-08 | `step_ia08_sort.py` | Sortierung / Immich-Upload (Regeln, Kategorien, Basis-Pfad des Job-Sets; `_match_sorting_rules(..., *, set_id)` ohne Standardwert) | `_get_folder_album_names`, `_tag_immich_asset`, `_resolve_path`, `_is_dir_empty`, `_force_remove_dir`, `_cleanup_empty_dirs`, `_eval_exif_expression`, `_eval_single_condition`, `_match_sorting_rules` |
 | IA-09 | `step_ia09_notify.py` | E-Mail-Benachrichtigung | — |
 | IA-10 | `step_ia10_cleanup.py` | Temp-Dateien aufräumen | — |
 | IA-11 | `step_ia11_log.py` | Job-Abschluss loggen | — |
@@ -349,6 +376,16 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | `_check_smtp` | SMTP Connectivity. |
 | `_check_filewatcher` | Inbox-Verzeichnisse prüfen. |
 | `_check_immich` | Immich Connectivity. |
+
+### routers/processing_sets.py — Set-Liste und Set-Editor
+
+| Funktion | Beschreibung |
+|---|---|
+| `summaries` | Eine Zeile pro Set für die Liste in den Einstellungen. |
+| `serialize` | Ein Set samt Verzeichnissen, Regeln und Kategorien als JSON. |
+| `get_set` / `create_set` / `duplicate_set` / `delete_set` | `GET/POST/DELETE /settings/sets…` |
+| `save_set` | `PUT /settings/sets/{id}` — prüft das ganze Set, dann eine Transaktion. Abgelehnt: Regel auf fehlende Kategorie, ungültiges Muster, Verzeichnis eines anderen Sets, feste Kategorie gelöscht u. a. |
+| `slugify` | Kategorie-Schlüssel aus der Bezeichnung (nur beim Anlegen; danach fest). |
 
 ### routers/tools.py — Werkzeuge (Tag-Pflege)
 

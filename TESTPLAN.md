@@ -682,6 +682,44 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 - **DIAG-R3:** `?job=MA-…` liefert die Historie eines Jobs
 - **DIAG-R4:** Report enthält Version, Pipeline-Zustand, Modul-Zustände, Einstellungen, Job-Zahlen, Immich- und KI-Probe, Inboxen
 
+## 12g. Verarbeitungs-Sets (SET)
+
+> Umbau v2.33.0. Migration: `backend/test_sets_migration.py`.
+> End-to-End: `backend/test_sets_e2e.py`. API/Oberfläche: Einstellungen.
+
+**Migration**
+
+- **SET-M1:** Neuinstallation → genau ein Set „Standard" mit Standard-Kategorien und -Regeln, `INBOX_PATH` gehört dazu
+- **SET-M2:** Live-DB-Kopie → ein Set, Zeitplan/Basis-Pfad/OCR/Poll-Cursor übernommen, kein Job ohne Set
+- **SET-M3:** Mehrere Verzeichnisse mit unterschiedlichen Schaltern → ein Set je Gruppe, Jobs im Set ihres Verzeichnisses
+- **SET-M4:** Benannter Immich-Zugang mit Poll → eigenes Set, seine Jobs dort
+- **SET-M5:** Erstes Verzeichnis im Probelauf + Poll → Poll bekommt eigenes Set (Poll-Jobs liefen nie als Probelauf)
+- **SET-M6:** Ordner-Tags = Verzeichnis-Schalter **und** altes Modul; OCR = altes Modul
+- **SET-M7:** Schreibmodus und Google-JSON aus der alten Config — bei frischer Migration **und** bei schon migrierter DB (Spalten nachträglich)
+- **SET-M8:** Zweiter Start ändert nichts
+- **SET-M9:** Kategorie-Tabelle hat danach UNIQUE(set_id, key), nicht mehr UNIQUE(key)
+
+**Verarbeitung**
+
+- **SET-P1:** Zwei Sets, gleiche Datei-Art, unterschiedliche Regeln → jede Datei nach den Regeln ihres Sets
+- **SET-P2:** Fehler- und Duplikat-Ordner unter dem Basis-Pfad des Sets
+- **SET-P3:** OCR aus im Set → IA-06 übersprungen; Schreibmodus/Google-JSON des Sets wirken in IA-07/IA-01
+- **SET-P4:** Inbox-Scan reiht mit den Einstellungen des Sets ein, nicht doppelt beim nächsten Scan
+- **SET-P5:** Immich-Poll reiht ein (`immich-pending:`), lädt nicht herunter; Worker lädt beim Start
+- **SET-P6:** Gleicher Inhalt für denselben Zugang → `skipped`
+- **SET-P7:** Neustart während eines Immich-Jobs → neu eingereiht, Original erneut geladen
+- **SET-P8:** Retry-Knopf und Duplikat-Review reihen nur ein; nur der Worker startet die Pipeline
+
+**Oberfläche / API**
+
+- **SET-U1:** Einstellungsseite rendert Set-Liste, Zugangs-Liste, Token-Liste, Popups, Schnellmenü
+- **SET-U2:** Unverändert speichern ändert nichts
+- **SET-U3:** Regel auf fehlende Kategorie / ungültiges Muster / Verzeichnis eines anderen Sets → abgelehnt, nichts geändert
+- **SET-U4:** Neues Set (Standardvorgaben oder Kopie), Duplizieren (ohne Verzeichnisse), Löschen (nicht das letzte, nicht mit Warteschlange)
+- **SET-U5:** Immich-Zugang global/benannt anlegen; Löschen gesperrt, solange ein Set ihn nutzt
+- **SET-U6:** Schnellmenü schaltet Sprache und Theme ohne Speichern; „Alles speichern" überschreibt sie nicht
+- **SET-U7:** Einrichtungs-Assistent nach der Einrichtung gesperrt (alle POST-Schritte)
+
 ## 13. Race-Condition-Tests
 
 > Code-Pfad-Tests gegen die `run_pipeline`/`retry_job`-Race-

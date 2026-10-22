@@ -1,5 +1,4 @@
 import html
-import os
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -7,7 +6,7 @@ from sqlalchemy import select
 from config import config_manager
 from database import async_session
 from models import Module, ImmichUser, ProcessingSet
-from system_logger import log_warning, log_info
+from system_logger import log_info
 from template_engine import render
 
 
@@ -81,8 +80,6 @@ async def _get_cfg() -> dict:
         "video_thumbnail_enabled": await config_manager.get("video.thumbnail_enabled", False),
         "video_thumbnail_frames": await config_manager.get("video.thumbnail_frames", 8),
         "video_thumbnail_scale": await config_manager.get("video.thumbnail_scale", 50),
-        "metadata_write_mode": await config_manager.get("metadata.write_mode", "direct"),
-        "google_json": await config_manager.get("metadata.google_json", False),
     }
 
 
@@ -202,12 +199,6 @@ async def save_settings(request: Request):
         await config_manager.set("smtp.password", form["smtp_password"], encrypted=True)
     await config_manager.set("smtp.recipient", _sanitize(form.get("smtp_recipient", "")))
     await config_manager.set("smtp.ssl", "smtp_ssl" in form)
-
-    # Metadata write mode
-    await config_manager.set("metadata.write_mode", form.get("metadata_write_mode", "direct"))
-
-    # Google Takeout JSON import
-    await config_manager.set("metadata.google_json", "google_json" in form)
 
     # Immich
     await config_manager.set("immich.url", _sanitize(form.get("immich_url", "")))

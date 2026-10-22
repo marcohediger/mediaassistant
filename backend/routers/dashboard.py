@@ -12,7 +12,6 @@ from database import DEFAULT_MODULES, async_session
 from models import Job, Module, InboxDirectory, ProcessingSet
 from routers.processing_sets import summaries as set_summaries
 from system_logger import log_error, log_info, log_warning
-from models import SystemLog
 from i18n import load_lang, DEFAULT_LANGUAGE
 
 # Track last known status per module to avoid duplicate log entries
@@ -235,7 +234,8 @@ async def _get_module_status(i18n: dict, *, record: bool = True) -> list[dict]:
     global_modules = [name for name, _ in DEFAULT_MODULES]
     async with async_session() as session:
         result = await session.execute(select(Module).where(Module.name.in_(global_modules)))
-        modules = result.scalars().all()
+        # The IN filter returns rows in key order; keep the familiar card order.
+        modules = sorted(result.scalars().all(), key=lambda m: global_modules.index(m.name))
 
     statuses = []
     for m in modules:
