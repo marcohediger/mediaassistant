@@ -52,8 +52,6 @@ button.rv-thumb:hover > img { transform: scale(1.03); }
 .rv-item[aria-busy="true"] :is(.rv-classify, .rv-tools) { pointer-events: none; opacity: 0.55; }
 .rv-item .ui-btn[aria-busy="true"] { opacity: 1; }
 
-.rv-confirm-text { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
-
 @media (max-width: 760px) {
     /* Small thumbnail beside the details, category buttons across the full width */
     .rv-item {

@@ -109,21 +109,6 @@
 </div>
 {% endif %}
 
-{# Confirmation popup, shared by keep / not a duplicate / clean-up / re-evaluate #}
-<dialog class="ui-dialog" id="dp-confirm" aria-labelledby="dp-confirm-title" aria-describedby="dp-confirm-text">
-    <form method="dialog" class="ui-dialog-shell">
-        <div class="ui-dialog-head">
-            <div class="ui-dialog-head-text"><h2 class="ui-dialog-title" id="dp-confirm-title"></h2></div>
-            <button type="submit" value="cancel" class="ui-icon-btn" aria-label="{{ d.close }}" title="{{ d.close }}">{{ icon('x', 18) }}</button>
-        </div>
-        <div class="ui-dialog-body"><p class="dp-confirm-text" id="dp-confirm-text"></p></div>
-        <div class="ui-dialog-foot">
-            <button type="submit" value="cancel" class="ui-btn ui-btn-secondary" id="dp-confirm-cancel">{{ d.cancel }}</button>
-            <button type="submit" value="ok" class="ui-btn ui-btn-primary" id="dp-confirm-ok"></button>
-        </div>
-    </form>
-</dialog>
-
 <template id="dp-no-preview"><span class="ui-thumb-placeholder">{{ icon('image', 24) }}{{ d.no_preview }}</span></template>
 
 <script>
@@ -136,26 +121,10 @@ const DP_TEXT = {
     batchRunning: {{ d.batch_running | tojson }},
 };
 
-// Confirmation popup. Resolves true when the user confirms.
-function dpAsk(opts) {
-    const dlg = document.getElementById('dp-confirm');
-    document.getElementById('dp-confirm-title').textContent = opts.title || '';
-    document.getElementById('dp-confirm-text').textContent = opts.text || '';
-    const ok = document.getElementById('dp-confirm-ok');
-    ok.textContent = opts.ok || 'OK';
-    ok.className = 'ui-btn ' + (opts.danger ? 'ui-btn-danger-solid' : 'ui-btn-primary');
-    dlg.returnValue = '';
-    return new Promise(resolve => {
-        dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
-        dlg.showModal();
-        // Destructive actions start on "Cancel", harmless ones on the action itself
-        (opts.danger ? document.getElementById('dp-confirm-cancel') : ok).focus();
-    });
-}
-
+// Confirmation popup (app.js), unless the settings switch it off
 function dupConfirm(opts) {
     if (SKIP_CONFIRM) return Promise.resolve(true);
-    return dpAsk(opts);
+    return MA.confirm(opts);
 }
 
 function dpBusy(button) {
@@ -175,40 +144,11 @@ document.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (form.dataset.sending) return;
     const button = e.submitter || form.querySelector('[type=submit]');
-    closeMenus();
-    const yes = await dupConfirm({
-        title: form.dataset.confirmTitle, text: form.dataset.confirmText,
-        ok: form.dataset.confirmOk, danger: !!form.dataset.confirmDanger,
-    });
+    const yes = await dupConfirm(MA.confirmOptions(form));
     if (!yes) return;
     form.dataset.sending = '1';
     dpBusy(button);
     form.submit();
-});
-
-// ── Menus (page head) ──
-function closeMenus(except) {
-    document.querySelectorAll('.ui-menu-wrap > [aria-haspopup="menu"][aria-expanded="true"]').forEach(btn => {
-        if (btn === except) return;
-        btn.setAttribute('aria-expanded', 'false');
-        document.getElementById(btn.getAttribute('aria-controls')).hidden = true;
-    });
-}
-document.querySelectorAll('.ui-menu-wrap > [aria-haspopup="menu"]').forEach(btn => {
-    const menu = document.getElementById(btn.getAttribute('aria-controls'));
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const open = btn.getAttribute('aria-expanded') !== 'true';
-        closeMenus(btn);
-        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-        menu.hidden = !open;
-    });
-});
-document.addEventListener('click', (e) => { if (!e.target.closest('.ui-menu')) closeMenus(); });
-document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    const open = document.querySelector('.ui-menu-wrap > [aria-expanded="true"]');
-    if (open) { closeMenus(); open.focus(); }
 });
 
 // ── Batch clean ──
@@ -261,7 +201,6 @@ function startBatchClean(page) {
 
 document.querySelectorAll('[data-batch-page]').forEach(item => {
     item.addEventListener('click', async () => {
-        closeMenus();
         const yes = await dupConfirm({
             title: DP_TEXT.cleanTitle, text: item.dataset.confirmText, ok: DP_TEXT.cleanOk, danger: true,
         });

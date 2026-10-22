@@ -141,7 +141,9 @@
     "stuck_requeued": "{n} queued again (file present).",
     "stuck_marked": "{n} marked as \"done\" (file verified).",
     "stuck_skipped": "⚠️ {n} skipped — no \"done\" counterpart.",
-    "stuck_raced": "ℹ️ {n} picked up by the pipeline in the meantime."
+    "stuck_raced": "ℹ️ {n} picked up by the pipeline in the meantime.",
+    "task_sidecar_tags": "Tag cleanup",
+    "task_tag_merge": "Merge spelling variants"
   },
   "job_detail": {
     "back": "Back",
@@ -287,8 +289,6 @@
     "prev": "Previous page",
     "next": "Next page",
     "page_select": "Go to page",
-    "cancel": "Cancel",
-    "close": "Close",
     "fact_exposure": "Exposure"
   },
   "settings": {
@@ -612,8 +612,6 @@
     "preview": "Enlarge preview: {name}",
     "job_details": "Job details",
     "empty_title": "Nothing to review",
-    "cancel": "Cancel",
-    "close": "Close",
     "no_preview": "No preview"
   },
   "dryrun": {
@@ -632,7 +630,10 @@
   },
   "common": {
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "cancel": "Cancel",
+    "close": "Close",
+    "ok": "OK"
   },
   "tools": {
     "title": "Tools",

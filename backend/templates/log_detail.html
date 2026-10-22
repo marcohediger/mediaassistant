@@ -28,9 +28,9 @@
        The user is the source of truth for "this needs redoing" — even
        jobs that look fine in the UI may have stale internal step_result
        (live: MA-2026-28115/28121 had error_message=None but stale IA-07/
-       IA-08 tags). Only hide for jobs currently being processed. #}
-    {% if job.status not in ('queued', 'processing') %}
-    <div class="ui-page-actions">
+       IA-08 tags). Only hide for jobs currently being processed; app.js
+       (updateJobDetail) shows and hides them as the status changes. #}
+    <div class="ui-page-actions" data-section="actions"{% if job.status in ('queued', 'processing') %} hidden{% endif %}>
         <form method="post" action="/api/job/{{ job.debug_key }}/retry">
             <button type="submit" class="ui-btn ui-btn-primary">{{ icon('retry') }}{{ t.job_detail.retry }}</button>
         </form>
@@ -40,7 +40,6 @@
             <button type="submit" class="ui-btn ui-btn-danger">{{ icon('trash') }}{{ t.job_detail.delete }}</button>
         </form>
     </div>
-    {% endif %}
 </div>
 
 {% set filepath = job.target_path or job.original_path %}

@@ -28,19 +28,10 @@
     color: var(--primary);
 }
 
-.stat-card,
-.module-card,
-.detail-card,
-.settings-section,
-.dup-group,
-.dup-card {
+.settings-section {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-
-.log-table tbody tr:hover {
-    background: #f0f1f5;
-}
 
 .status-badge {
     font-weight: 600;
@@ -60,11 +51,6 @@
     border: 1px solid #bbf7d0;
 }
 
-.step-data {
-    background: #f0f1f5;
-    color: var(--text);
-}
-
 .tab {
     color: var(--text-muted);
 }
@@ -74,10 +60,6 @@
     border-bottom-color: var(--primary);
 }
 
-.match-badge {
-    font-weight: 600;
-}
-
 
 .switch-slider {
     background: #d1d5db;
@@ -85,20 +67,5 @@
 
 .section-header {
     border-bottom-color: var(--border);
-}
-
-/* Review Page — light mode */
-.review-card {
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.review-badge-type {
-    background: #4f46e5;
-    color: #fff;
-}
-
-.review-badge-confidence {
-    background: #059669;
-    color: #fff;
 }
 
