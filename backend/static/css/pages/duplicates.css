@@ -82,9 +82,6 @@
 .dp-page-gap { padding: 0 0.25rem; color: var(--text-muted); }
 .dp-page-select { width: auto; height: var(--ui-ctl-h-xs); margin-left: 0.5rem; font-size: var(--ui-fs-sm); }
 
-/* Confirmation popup */
-.dp-confirm-text { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
-
 @media (max-width: 600px) {
     /* Two tiles side by side, like the other thumbnail grids */
     .dp-thumbs { --ui-thumb-min: 9.5rem; }

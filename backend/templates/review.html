@@ -118,40 +118,9 @@
 </div>
 {% endif %}
 
-{# Confirmation popup for delete and "file all as sourceless" #}
-<dialog class="ui-dialog" id="rv-confirm" aria-labelledby="rv-confirm-title" aria-describedby="rv-confirm-text">
-    <form method="dialog" class="ui-dialog-shell">
-        <div class="ui-dialog-head">
-            <div class="ui-dialog-head-text"><h2 class="ui-dialog-title" id="rv-confirm-title"></h2></div>
-            <button type="submit" value="cancel" class="ui-icon-btn" aria-label="{{ r.close }}" title="{{ r.close }}">{{ icon('x', 18) }}</button>
-        </div>
-        <div class="ui-dialog-body"><p class="rv-confirm-text" id="rv-confirm-text"></p></div>
-        <div class="ui-dialog-foot">
-            <button type="submit" value="cancel" class="ui-btn ui-btn-secondary" id="rv-confirm-cancel">{{ r.cancel }}</button>
-            <button type="submit" value="ok" class="ui-btn ui-btn-primary" id="rv-confirm-ok"></button>
-        </div>
-    </form>
-</dialog>
-
 <template id="rv-no-preview"><span class="ui-thumb-placeholder">{{ icon('image', 22) }}{{ r.no_preview }}</span></template>
 
 <script>
-// Confirmation popup. Resolves true when the user confirms.
-function rvAsk(opts) {
-    const dlg = document.getElementById('rv-confirm');
-    document.getElementById('rv-confirm-title').textContent = opts.title || '';
-    document.getElementById('rv-confirm-text').textContent = opts.text || '';
-    const ok = document.getElementById('rv-confirm-ok');
-    ok.textContent = opts.ok || 'OK';
-    ok.className = 'ui-btn ' + (opts.danger ? 'ui-btn-danger-solid' : 'ui-btn-primary');
-    dlg.returnValue = '';
-    return new Promise(resolve => {
-        dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
-        dlg.showModal();
-        (opts.danger ? document.getElementById('rv-confirm-cancel') : ok).focus();
-    });
-}
-
 // A form is sent once; its item is locked meanwhile so a second click cannot
 // classify the same file twice.
 function rvSend(form, button) {
@@ -168,13 +137,8 @@ document.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (form.dataset.sending) return;
     const button = e.submitter || form.querySelector('[type=submit]');
-    if (form.dataset.confirmText) {
-        const yes = await rvAsk({
-            title: form.dataset.confirmTitle, text: form.dataset.confirmText,
-            ok: form.dataset.confirmOk, danger: !!form.dataset.confirmDanger,
-        });
-        if (!yes) return;
-    }
+    // Delete and "file all" always ask (popup in app.js), whatever the settings say
+    if (form.dataset.confirmText && !await MA.confirm(MA.confirmOptions(form))) return;
     rvSend(form, button);
 });
 

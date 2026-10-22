@@ -86,47 +86,6 @@ function _t(key, vars) {
     return s;
 }
 
-// ─── Maintenance menu: open/close, keyboard, one item runs per click ───
-(function () {
-    const wrap = document.getElementById('cleanup-buttons');
-    const btn = document.getElementById('logs-menu-btn');
-    const menu = document.getElementById('logs-menu');
-    const items = () => Array.from(menu.querySelectorAll('.ui-menu-item:not(:disabled)'));
-    function setOpen(open, focusFirst) {
-        menu.hidden = !open;
-        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-        if (open && focusFirst && items()[0]) items()[0].focus();
-    }
-    btn.addEventListener('click', () => setOpen(menu.hidden, false));
-    btn.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true, true); }
-    });
-    // Capture phase: the menu closes before an item's own handler asks to confirm.
-    menu.addEventListener('click', (e) => {
-        if (e.target.closest('.ui-menu-item')) setOpen(false);
-    }, true);
-    menu.addEventListener('keydown', (e) => {
-        const list = items();
-        const i = list.indexOf(document.activeElement);
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            e.preventDefault();
-            const n = list.length;
-            if (n) list[(i + (e.key === 'ArrowDown' ? 1 : -1) + n) % n].focus();
-        } else if (e.key === 'Home' || e.key === 'End') {
-            e.preventDefault();
-            if (list.length) list[e.key === 'Home' ? 0 : list.length - 1].focus();
-        } else if (e.key === 'Tab') {
-            setOpen(false);
-        }
-    });
-    document.addEventListener('click', (e) => {
-        if (!menu.hidden && !wrap.contains(e.target)) setOpen(false);
-    });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); }
-    });
-})();
-
 // The menu button shows a busy marker while any action runs.
 function _setMenuBusy(busy) {
     const btn = document.getElementById('logs-menu-btn');
@@ -196,10 +155,13 @@ async function retryAllWarnings(ev) {
 }
 
 // ─── Shared cleanup-progress UI ─────────────────────────────────────
+// The Werkzeuge page runs its tasks in the same slot, so they show up here too
 const TASK_TITLES = {
     orphans: LOGS_L.cleanup_orphans,
     stale_errors: LOGS_L.cleanup_stale_errors,
     stuck_duplicates: LOGS_L.cleanup_stuck_duplicates,
+    sidecar_tags: LOGS_L.task_sidecar_tags,
+    tag_merge: LOGS_L.task_tag_merge,
 };
 let _cleanupPollInterval = null;
 
@@ -286,6 +248,8 @@ async function _pollCleanup(task) {
         _updateProgress(data);
         if (data.done) {
             _hideProgress();
+            // A Werkzeuge task reports its result on the Werkzeuge page
+            if (!(task in TASK_REDIRECT)) return;
             if (data.error) {
                 alert(_t('cleanup_failed', {error: data.error}));
                 return;
