@@ -1,0 +1,286 @@
+/* Settings lists (processing sets, AI backends, Immich accesses,
+ * diagnostics tokens) and the bits of the AI backend popup editor.css
+ * does not cover.
+ *
+ * One look for all three: the table sits in its own card, airy rows with thin
+ * separators, an icon in front of the name, muted secondary columns, coloured
+ * status and feature icons, borderless icon buttons on the right. Only theme
+ * variables from style.css / light.css are used, so dark and light both work.
+ */
+
+/* ── Tokens ───────────────────────────────────────────────────────── */
+.lst-card,
+.lst-new,
+#dlg-ai {
+    --lst-line: color-mix(in srgb, var(--border) 72%, transparent);
+    --lst-hover: color-mix(in srgb, var(--bg-input) 80%, var(--bg-card));
+    --lst-c-tags: var(--primary);
+    --lst-c-ocr: #a78bfa;
+    --lst-c-poll: #2dd4bf;
+    --lst-c-dry: var(--warning);
+    --lst-warn-text: var(--warning);
+    --lst-ok-text: var(--success);
+}
+body[data-theme="light"] .lst-card,
+body[data-theme="light"] .lst-new,
+body[data-theme="light"] #dlg-ai {
+    --lst-line: #e5e7eb;
+    --lst-hover: #f9fafb;
+    --lst-c-ocr: #7c3aed;
+    --lst-c-poll: #0d9488;
+    /* Darker text tones so small coloured labels keep 4.5:1 on white */
+    --lst-warn-text: #b45309;
+    --lst-ok-text: #047857;
+}
+
+/* ── Icons ────────────────────────────────────────────────────────── */
+.lst-i { flex: none; display: inline-block; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 2; }
+.lst-spin { animation: lst-spin 0.9s linear infinite; }
+@keyframes lst-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lst-spin { animation: none; } }
+
+/* ── "New" button in the section heads ────────────────────────────── */
+.lst-new {
+    display: inline-flex; align-items: center; gap: 0.4rem; flex: none;
+    height: 2.1rem; padding: 0 0.8rem 0 0.65rem;
+    font: inherit; font-size: 0.85rem; font-weight: 600; line-height: 1; white-space: nowrap;
+    color: var(--text); background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 7px; cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.lst-new .lst-i { width: 16px; height: 16px; color: var(--primary); stroke-width: 2.25; }
+.lst-new:hover { background: var(--bg-input); border-color: color-mix(in srgb, var(--text-muted) 60%, transparent); }
+.lst-new:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Heading + description on the left, "new" button on the right (Immich section) */
+.lst-subhead {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem;
+    margin: 1.75rem 0 0.85rem;
+}
+.lst-subhead:first-child { margin-top: 0; }
+.lst-subhead h3 { margin: 0 0 0.15rem; font-size: 0.95rem; color: var(--text); }
+.lst-subhead .section-note { font-size: 0.8rem; }
+
+/* ── Card + table ─────────────────────────────────────────────────── */
+.lst-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: thin;
+}
+body[data-theme="light"] .lst-card { border-color: #e2e5ea; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
+
+.lst-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.875rem; line-height: 1.45; }
+.lst-table thead th {
+    text-align: left; white-space: nowrap;
+    font-size: 0.875rem; font-weight: 600; color: var(--text);
+    padding: 0.75rem 0.9rem;
+    border-bottom: 1px solid var(--lst-line);
+}
+/* tbody th = the name cell, a row header for screen readers */
+.lst-table td,
+.lst-table tbody th {
+    height: 3.5rem;
+    text-align: left; font-weight: normal;
+    padding: 0.6rem 0.9rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--lst-line);
+    transition: background 0.12s;
+}
+.lst-table tbody tr:last-child > * { border-bottom: none; }
+.lst-table tbody tr:hover > * { background: var(--lst-hover); }
+.lst-table tr > :first-child { padding-left: 1.1rem; }
+.lst-table tr > :last-child { padding-right: 0.75rem; }
+.lst-table .lst-num { font-variant-numeric: tabular-nums; }
+.lst-table .lst-actions-head,
+.lst-table .lst-actions-cell { text-align: right; width: 1%; }
+.lst-table .lst-actions-cell { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+
+/* First column: type icon + bold name (+ badge) */
+.lst-name { display: flex; align-items: center; gap: 0.65rem; }
+.lst-name strong { font-weight: 600; color: var(--text); white-space: normal; min-width: 6rem; }
+/* Sets: name and badge may wrap when the table runs out of room */
+.lst-name-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; }
+.lst-type { color: var(--text-muted); }
+.is-inactive .lst-name strong { color: var(--text-muted); }
+
+/* Secondary values with a small leading icon */
+/* Block-level flex boxes: inline-flex would sit on the text baseline and
+   end up a pixel or two off the vertical centre of the row. */
+.lst-meta { display: flex; align-items: center; gap: 0.45rem; }
+.lst-meta > .lst-i { opacity: 0.85; }
+.lst-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3rem; }
+.lst-sub { color: var(--text-muted); }
+.lst-none { color: var(--text-muted); }
+.lst-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem; color: var(--text);
+    background: var(--bg-input); padding: 0.1rem 0.4rem; border-radius: 4px;
+}
+/* Long URLs / model ids: cut with an ellipsis, full value in the title */
+.lst-clip {
+    display: inline-block; max-width: 17rem; vertical-align: middle;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Badges */
+.lst-badge {
+    display: inline-flex; align-items: center;
+    padding: 0.05rem 0.45rem; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 600; line-height: 1.5; letter-spacing: 0.01em;
+    color: var(--text-muted); border: 1px solid var(--border); background: transparent;
+}
+.lst-badge-warn {
+    color: var(--lst-warn-text);
+    border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.lst-badge-info {
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 40%, transparent);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+/* Feature flags at a glance */
+.lst-feats { display: flex; align-items: center; gap: 0.6rem; }
+.lst-feat { display: inline-flex; line-height: 0; }
+.lst-feat-tags { color: var(--lst-c-tags); }
+.lst-feat-ocr { color: var(--lst-c-ocr); }
+.lst-feat-poll { color: var(--lst-c-poll); }
+.lst-feat-dry { color: var(--lst-c-dry); }
+
+/* Status */
+.lst-status { display: flex; align-items: center; gap: 0.45rem; font-weight: 500; }
+.lst-status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.6rem; }
+.lst-status.is-ok { color: var(--lst-ok-text); }
+.lst-status.is-fail { color: var(--error); cursor: help; }
+.lst-status.is-warn { color: var(--lst-warn-text); }
+.lst-status.is-off,
+.lst-status.is-wait { color: var(--text-muted); }
+/* Status with a reason line underneath (AI backends) */
+.lst-status-stack { display: flex; flex-direction: column; gap: 0.1rem; }
+.lst-status-stack .lst-status.is-fail { cursor: default; }
+.lst-reason {
+    max-width: 14rem; padding-left: calc(16px + 0.45rem);
+    font-size: 0.78rem; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Action buttons: borderless, icon only */
+.lst-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.15rem; }
+.lst-btn {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 2rem; height: 2rem; padding: 0;
+    color: color-mix(in srgb, var(--text) 82%, transparent);
+    background: transparent; border: none; border-radius: 6px; cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+}
+.lst-btn .lst-i { stroke-width: 1.85; }
+.lst-btn:hover { color: var(--text); background: var(--bg-input); }
+.lst-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; color: var(--text); }
+.lst-btn-danger:hover { color: var(--error); background: color-mix(in srgb, var(--error) 12%, transparent); }
+.lst-btn[aria-disabled="true"],
+.lst-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.lst-btn[aria-disabled="true"]:hover,
+.lst-btn:disabled:hover { color: color-mix(in srgb, var(--text) 82%, transparent); background: transparent; }
+.lst-btn[aria-busy="true"] { cursor: progress; }
+/* Keeps the icons of rows with fewer actions in the same columns */
+.lst-btn-spacer, .lst-btn-spacer:hover { visibility: hidden; cursor: default; }
+
+/* Empty list */
+.lst-empty {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 1.1rem 1rem; color: var(--text-muted); font-size: 0.875rem;
+    border-style: dashed;
+}
+
+/* ── AI section: global options below the backend list ──────────── */
+.ai-divider { border-top: 1px solid var(--border); margin: 1.75rem -1.25rem 1.5rem; }
+.ai-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; line-height: 1.4; }
+.ai-option-title { font-size: 0.9rem; font-weight: 500; margin-bottom: 0.25rem; }
+.ai-option-desc { display: block; color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem; }
+.ai-resize-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.ai-resize-row .switch-inline { margin: 0; }
+.ai-resize-row input[type="number"] {
+    width: 6rem; height: 2.25rem; padding: 0 0.6rem;
+    font: inherit; font-size: 0.9rem; color: var(--text);
+    background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
+}
+.ai-resize-row input[type="number"]:focus { outline: none; border-color: var(--primary); }
+.ai-resize-row input[type="number"]:disabled { opacity: 0.55; }
+.ai-resize-row small { margin: 0 0 0 -0.5rem; color: var(--text-muted); }
+
+/* ── AI backend popup (base look from editor.css) ─────────────────── */
+/* Fixed height: the model list appears and vanishes as the URL changes; a
+   dialog that grows and shrinks around its centre would move the footer
+   away from under the pointer between mousedown and click. */
+#dlg-ai { height: min(52rem, 90vh, calc(100dvh - 2rem)); }
+#dlg-ai .modal-shell { height: 100%; }
+#dlg-ai .ai-inline { display: flex; align-items: center; gap: 0.85rem; }
+#dlg-ai .ai-inline input { width: 5.5rem; flex: none; }
+#dlg-ai .status-text:empty { display: none; }
+#dlg-ai .status-text .lst-i { flex: none; }
+#dlg-ai .field-note.warn { color: var(--lst-warn-text); }
+#dlg-ai .ai-model-chips {
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
+    max-height: 7.6rem; overflow-y: auto; padding: 0.1rem;
+}
+#dlg-ai .ai-chip {
+    display: inline-flex; align-items: center; max-width: 100%;
+    height: 1.85rem; padding: 0 0.7rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.78rem;
+    color: var(--text-muted); background: transparent;
+    border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+#dlg-ai .ai-chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--text-muted) 60%, var(--border)); }
+#dlg-ai .ai-chip[aria-pressed="true"] {
+    color: var(--primary); font-weight: 600;
+    border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+#dlg-ai .ai-chip:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 30%, transparent); }
+
+/* ── Toast for quick-action results ───────────────────────────────── */
+.lst-toast {
+    position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 60;
+    display: flex; align-items: flex-start; gap: 0.6rem;
+    max-width: min(28rem, calc(100vw - 2rem));
+    padding: 0.75rem 1rem; font-size: 0.875rem; line-height: 1.45;
+    color: var(--text); background: var(--bg-card);
+    border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    opacity: 0; transform: translateY(0.5rem); pointer-events: none;
+    transition: opacity 0.18s, transform 0.18s;
+}
+.lst-toast.is-shown { opacity: 1; transform: none; pointer-events: auto; }
+.lst-toast.is-ok { border-left-color: var(--success); }
+.lst-toast.is-ok .lst-i { color: var(--success); }
+.lst-toast.is-fail { border-left-color: var(--error); }
+.lst-toast.is-fail .lst-i { color: var(--error); }
+.lst-toast .lst-i { margin-top: 0.1rem; }
+body[data-theme="light"] .lst-toast { box-shadow: 0 10px 30px rgba(16, 24, 40, 0.14); }
+
+/* ── Phone ──────────────────────────────────────────────────────────
+   The table keeps its natural width and scrolls inside its card. */
+@media (max-width: 600px) {
+    #section-sets .section-header,
+    #section-diagnostics .section-header { flex-direction: column; align-items: stretch; gap: 0.85rem; }
+    #section-sets .section-header-actions { justify-content: space-between; }
+    #section-diagnostics .section-header-actions { justify-content: flex-start; }
+    .lst-subhead { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+
+    .lst-table { width: max-content; min-width: 100%; }
+    .lst-table tr > * { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .lst-table tr > :first-child { padding-left: 0.85rem; }
+    .lst-name strong { white-space: nowrap; min-width: 0; }
+    .lst-name-wrap, .lst-status-line { flex-wrap: nowrap; }
+
+    .lst-toast { left: 1rem; right: 1rem; bottom: 1rem; max-width: none; }
+}

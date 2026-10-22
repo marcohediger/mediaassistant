@@ -1,0 +1,90 @@
+<!-- Immich -->
+{# The list icons (#lst-i-*) come from the sprite in _sets_list.html. #}
+<div class="settings-section" id="section-immich">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.immich }}</h2>
+            <span class="section-desc">{{ t.settings.immich_desc }}</span>
+        </div>
+        <label class="switch">
+            <input type="checkbox" name="mod_immich" value="1" {{ 'checked' if modules.immich else '' }}>
+            <span class="switch-slider"></span>
+        </label>
+    </div>
+    <div class="section-body">
+        <div class="form-group">
+            <label for="immich_url">{{ t.settings.immich_url }}</label>
+            <input type="url" id="immich_url" name="immich_url" value="{{ cfg.immich_url }}" placeholder="http://immich_server:2283">
+        </div>
+
+        <div class="lst-subhead">
+            <div>
+                <h3 id="accesses-title">{{ t.sets.accesses }}</h3>
+                <p class="section-note">{{ t.sets.accesses_desc }}</p>
+            </div>
+            <button type="button" class="lst-new" data-action="access-new" title="{{ t.sets.access_new }}">
+                <svg class="lst-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-plus"/></svg>
+                <span>{{ t.sets.access_new }}</span>
+            </button>
+        </div>
+        {% if accesses %}
+        <div class="lst-card">
+        <table class="lst-table" id="access-table" aria-labelledby="accesses-title">
+            <thead>
+                <tr>
+                    <th scope="col">{{ t.sets.col_name }}</th>
+                    <th scope="col">{{ t.sets.col_account }}</th>
+                    <th scope="col">{{ t.sets.col_used_by }}</th>
+                    <th scope="col">{{ t.sets.col_status }}</th>
+                    <th scope="col" class="lst-actions-head">{{ t.sets.col_actions | default('Aktionen') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for a in accesses %}
+                {% set name = t.sets.global_user if a.global else a.label %}
+                <tr data-access="{{ a.id }}" data-active="{{ '1' if a.active else '0' }}" class="{{ '' if a.active else 'is-inactive' }}">
+                    <th scope="row">
+                        <div class="lst-name">
+                            <svg class="lst-i lst-type" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-{{ 'globe' if a.global else 'user' }}"/></svg>
+                            <strong>{{ name }}</strong>
+                        </div>
+                    </th>
+                    <td class="access-account"><span class="lst-none">…</span></td>
+                    <td>
+                        {% if a.used_by %}<span class="lst-meta"><svg class="lst-i" width="15" height="15" aria-hidden="true" focusable="false"><use href="#lst-i-layers"/></svg>{{ a.used_by | join(', ') }}</span>
+                        {% else %}<span class="lst-none">—</span>{% endif %}
+                    </td>
+                    <td class="access-state">
+                        {% if a.active %}<span class="lst-status is-wait"><svg class="lst-i lst-spin" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-loader"/></svg>{{ t.sets.status_checking | default('Prüfe …') }}</span>
+                        {% else %}<span class="lst-status is-off"><svg class="lst-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-wifi-off"/></svg>{{ t.sets.status_inactive | default('Inaktiv') }}</span>{% endif %}
+                    </td>
+                    <td class="lst-actions-cell">
+                        <div class="lst-actions">
+                            <button type="button" class="lst-btn" data-list-action="access-test" data-id="{{ a.id }}"
+                                    title="{{ t.settings.immich_test }}" aria-label="{{ t.settings.immich_test }}: {{ name }}">
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-wifi"/></svg>
+                            </button>
+                            <button type="button" class="lst-btn" data-action="access-edit" data-id="{{ a.id }}"
+                                    title="{{ t.sets.edit }}" aria-label="{{ t.sets.edit }}: {{ name }}">
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-pencil"/></svg>
+                            </button>
+                            <button type="button" class="lst-btn lst-btn-danger" data-list-action="access-delete" data-id="{{ a.id }}"
+                                    title="{{ t.sets.access_in_use_hint if a.used_by else t.settings.delete }}" aria-label="{{ t.settings.delete }}: {{ name }}"
+                                    {% if a.used_by %}aria-disabled="true" data-blocked="{{ t.sets.access_in_use_hint }}"{% endif %}>
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-trash"/></svg>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="lst-card lst-empty">
+            <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-user"/></svg>
+            <span>{{ t.sets.no_accesses }}</span>
+        </div>
+        {% endif %}
+    </div>
+</div>

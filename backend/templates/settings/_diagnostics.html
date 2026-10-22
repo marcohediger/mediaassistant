@@ -1,0 +1,78 @@
+<!-- Diagnostics -->
+{# The list icons (#lst-i-*) come from the sprite in _sets_list.html. #}
+<div class="settings-section" id="section-diagnostics">
+    <div class="section-header">
+        <div class="section-title">
+            <h2 id="diagnostics-title">{{ t.settings.diagnostics }}</h2>
+            <span class="section-desc">{{ t.settings.diagnostics_desc }}</span>
+        </div>
+        <div class="section-header-actions">
+            <button type="button" class="lst-new" data-action="token-new" title="{{ t.settings.diagnostics_add }}">
+                <svg class="lst-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-plus"/></svg>
+                <span>{{ t.settings.diagnostics_add }}</span>
+            </button>
+        </div>
+    </div>
+    <div class="section-body">
+        {% if cfg.diagnostics_tokens %}
+        <div class="lst-card">
+        <table class="lst-table" aria-labelledby="diagnostics-title">
+            <thead>
+                <tr>
+                    <th scope="col">{{ t.settings.diagnostics_label }}</th>
+                    <th scope="col">{{ t.settings.diagnostics_created }}</th>
+                    <th scope="col">{{ t.sets.col_status }}</th>
+                    <th scope="col" class="lst-actions-head">{{ t.sets.col_actions | default('Aktionen') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for tk in cfg.diagnostics_tokens %}
+                {% set c = tk.created or '' %}
+                <tr class="{{ '' if tk.active else 'is-inactive' }}">
+                    <th scope="row">
+                        <div class="lst-name">
+                            <svg class="lst-i lst-type" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-key"/></svg>
+                            <strong>{{ tk.label }}</strong>
+                        </div>
+                    </th>
+                    <td>
+                        <span class="lst-meta"><svg class="lst-i" width="15" height="15" aria-hidden="true" focusable="false"><use href="#lst-i-calendar"/></svg>
+                        {%- if c | length >= 16 %}<time datetime="{{ c }}">{{ c[8:10] }}.{{ c[5:7] }}.{{ c[0:4] }} {{ c[11:16] }}</time>
+                        {%- else %}{{ c }}{% endif -%}
+                        </span>
+                    </td>
+                    <td>
+                        {% if tk.active %}<span class="lst-status is-ok"><svg class="lst-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-check"/></svg>{{ t.sets.active }}</span>
+                        {% else %}<span class="lst-status is-off"><svg class="lst-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-pause"/></svg>{{ t.sets.status_inactive | default('Inaktiv') }}</span>{% endif %}
+                    </td>
+                    <td class="lst-actions-cell">
+                        <div class="lst-actions">
+                            {% set toggle_label = (t.sets.deactivate | default('Deaktivieren')) if tk.active else (t.sets.activate | default('Aktivieren')) %}
+                            <button type="button" class="lst-btn" data-list-action="token-toggle" data-id="{{ tk.id }}"
+                                    title="{{ toggle_label }}" aria-label="{{ toggle_label }}: {{ tk.label }}">
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-power"/></svg>
+                            </button>
+                            <button type="button" class="lst-btn" data-action="token-edit" data-id="{{ tk.id }}"
+                                    data-label="{{ tk.label }}" data-active="{{ '1' if tk.active else '0' }}"
+                                    title="{{ t.sets.edit }}" aria-label="{{ t.sets.edit }}: {{ tk.label }}">
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-pencil"/></svg>
+                            </button>
+                            <button type="button" class="lst-btn lst-btn-danger" data-list-action="token-delete" data-id="{{ tk.id }}"
+                                    title="{{ t.settings.delete }}" aria-label="{{ t.settings.delete }}: {{ tk.label }}">
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-trash"/></svg>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="lst-card lst-empty">
+            <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-key"/></svg>
+            <span>{{ t.settings.diagnostics_none }}</span>
+        </div>
+        {% endif %}
+    </div>
+</div>

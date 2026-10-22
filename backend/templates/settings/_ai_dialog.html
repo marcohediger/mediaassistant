@@ -1,0 +1,86 @@
+{#- AI backend popup — outside the settings form, so none of its fields is
+    ever submitted with "Alles speichern". Saved by static/js/ai_backends.js
+    through PUT /settings/ai-backends/{n}. Look from static/css/editor.css
+    (dialog.modal), the model chips from lists.css. -#}
+<script id="ai-backends-data" type="application/json">{{ ai_backends | tojson }}</script>
+
+<dialog id="dlg-ai" class="modal" aria-labelledby="dlg-ai-title" aria-describedby="dlg-ai-sub">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <div class="modal-title-wrap">
+                <h2 id="dlg-ai-title" class="modal-title">{{ t.settings.ai_analysis }}</h2>
+                <p class="modal-sub" id="dlg-ai-sub">{{ t.settings.ai_dialog_sub | default('OpenAI-kompatibler Endpunkt, z. B. LM Studio. Gebraucht wird ein Modell, das Bilder versteht.') }}</p>
+            </div>
+            <button type="button" class="icon-btn modal-close" data-close aria-label="{{ t.sets.close }}" title="{{ t.sets.close }}">
+                <svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </header>
+        <div class="modal-body">
+            <div class="option-list">
+                <label class="option-row">
+                    <span class="option-text">
+                        <span class="option-title" id="ai-enabled-lbl">{{ t.settings.active }}</span>
+                        <span class="option-desc" id="ai-enabled-desc">{{ t.settings.ai_enabled_desc | default('Aus = dieses Backend bekommt keine Bilder.') }}</span>
+                    </span>
+                    <span class="sw"><input type="checkbox" id="ai-enabled" aria-labelledby="ai-enabled-lbl" aria-describedby="ai-enabled-desc"><span class="sw-track" aria-hidden="true"></span></span>
+                </label>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="ai-url">{{ t.settings.backend_url }}</label>
+                <input type="url" id="ai-url" placeholder="http://192.168.1.10:1234/v1" autocomplete="off" spellcheck="false" aria-describedby="ai-url-hint">
+                <p class="field-hint" id="ai-url-hint">{{ t.settings.ai_url_hint | default('Adresse des Endpunkts, meist mit /v1 am Ende.') }}</p>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="ai-model">{{ t.settings.model }}</label>
+                <input type="text" id="ai-model" list="ai-model-list" autocomplete="off" spellcheck="false" aria-describedby="ai-model-warn ai-model-status">
+                <datalist id="ai-model-list"></datalist>
+                <p class="field-note warn" id="ai-model-warn" hidden>{{ t.settings.ai_model_not_offered | default('Dieses Modell bietet das Backend nicht an.') }}</p>
+                <p class="status-text" id="ai-model-status" role="status"></p>
+                <div class="ai-model-chips" id="ai-model-chips" role="group" aria-label="{{ t.settings.ai_models_pick | default('Verfügbare Modelle') }}" hidden></div>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="ai-slots">{{ t.settings.slots }}</label>
+                <div class="ai-inline">
+                    <input type="number" id="ai-slots" min="1" max="16" step="1" inputmode="numeric" aria-describedby="ai-slots-hint">
+                    <p class="field-hint" id="ai-slots-hint">{{ t.settings.ai_slots_hint | default('Gleichzeitige Anfragen an dieses Backend (1–16).') }}</p>
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="ai-key">{{ t.settings.api_key }}</label>
+                <input type="password" id="ai-key" autocomplete="new-password" spellcheck="false" aria-describedby="ai-key-hint">
+                {#- Filled by ai_backends.js from the stored key length ({n}). -#}
+                <p class="field-hint" id="ai-key-hint"
+                   data-stored="{{ t.settings.ai_key_stored | default('Schlüssel gespeichert ({n} Zeichen). Leer lassen, um ihn zu behalten.') }}"
+                   data-none="{{ t.settings.ai_key_none | default('Kein Schlüssel gespeichert. Nur nötig, wenn das Backend einen verlangt (LM Studio und Ollama brauchen meist keinen).') }}"></p>
+            </div>
+
+            <div class="test-row">
+                <button type="button" class="btn btn-secondary btn-sm" id="ai-test">
+                    <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 22v-5M9 8V2M15 8V2M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+                    <span>{{ t.settings.immich_test }}</span>
+                </button>
+                <span class="status-text" id="ai-test-result" role="status"></span>
+            </div>
+
+            <div class="modal-error" role="alert" hidden>
+                <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span class="modal-error-text"></span>
+            </div>
+        </div>
+        <footer class="modal-foot">
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost btn-ghost-danger" id="ai-delete" hidden>
+                    <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></svg>
+                    <span class="btn-label">{{ t.sets.remove }}</span>
+                </button>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-secondary" data-close>{{ t.sets.cancel }}</button>
+                <button type="button" class="btn btn-primary" id="ai-save">{{ t.settings.save }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>

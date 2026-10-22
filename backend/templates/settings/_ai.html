@@ -1,0 +1,104 @@
+<!-- AI Analysis -->
+{#- The backends are a list with a popup (_ai_dialog.html, outside the form)
+    and save through /settings/ai-backends — static/js/ai_backends.js. Only the
+    global options below the list (ai_prompt, ai_image_*) belong to the big
+    settings form. List icons (#lst-i-*) come from the sprite in _sets_list.html. -#}
+{% set b2 = ai_backends | selectattr('id', 'equalto', 2) | first %}
+<div class="settings-section" id="section-ai">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.ai_analysis }}</h2>
+            <span class="section-desc">{{ t.settings.ai_desc }}</span>
+        </div>
+    </div>
+    <div class="section-body">
+        <div class="lst-subhead">
+            <div>
+                <h3 id="ai-backends-title">{{ t.settings.ai_backends_title | default('KI-Backends') }}</h3>
+                <p class="section-note">{{ t.settings.ai_backends_desc | default('Ein zweites Backend arbeitet parallel mit — das gerade freie bekommt das nächste Bild.') }}</p>
+            </div>
+            {% if b2 and not b2.configured %}
+            <button type="button" class="lst-new" data-ai-action="edit" data-id="2">
+                <svg class="lst-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-plus"/></svg>
+                <span>{{ t.settings.ai_backend_add | default('Backend hinzufügen') }}</span>
+            </button>
+            {% endif %}
+        </div>
+
+        <div class="lst-card">
+        <table class="lst-table" id="ai-table" aria-labelledby="ai-backends-title">
+            <thead>
+                <tr>
+                    <th scope="col">{{ t.sets.col_name }}</th>
+                    <th scope="col">{{ t.settings.backend_url }}</th>
+                    <th scope="col">{{ t.settings.model }}</th>
+                    <th scope="col">{{ t.settings.slots }}</th>
+                    <th scope="col">{{ t.sets.col_status }}</th>
+                    <th scope="col" class="lst-actions-head">{{ t.sets.col_actions | default('Aktionen') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for b in ai_backends if b.id == 1 or b.configured %}
+                {% set name = (t.settings.ai_backend_name | default('KI-Backend {n}')) | replace('{n}', b.id | string) %}
+                <tr data-ai="{{ b.id }}" data-name="{{ name }}" class="{{ '' if b.enabled and b.configured else 'is-inactive' }}">
+                    <th scope="row">
+                        <div class="lst-name">
+                            <svg class="lst-i lst-type" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-cpu"/></svg>
+                            <strong>{{ name }}</strong>
+                        </div>
+                    </th>
+                    <td>{% if b.url %}<code class="lst-path lst-clip" title="{{ b.url }}">{{ b.url }}</code>{% else %}<span class="lst-none">—</span>{% endif %}</td>
+                    <td>{% if b.model %}<span class="lst-clip" title="{{ b.model }}">{{ b.model }}</span>{% else %}<span class="lst-none">—</span>{% endif %}</td>
+                    <td class="lst-num">{{ b.slots }}</td>
+                    <td class="ai-state">
+                        {% if not b.configured %}<span class="lst-status is-off"><svg class="lst-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-pause"/></svg>{{ t.settings.ai_status_unconfigured | default('Nicht eingerichtet') }}</span>
+                        {% elif not b.enabled %}<span class="lst-status is-off"><svg class="lst-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-pause"/></svg>{{ t.sets.status_inactive | default('Inaktiv') }}</span>
+                        {% else %}<span class="lst-status is-wait"><svg class="lst-i lst-spin" width="16" height="16" aria-hidden="true" focusable="false"><use href="#lst-i-loader"/></svg>{{ t.sets.status_checking | default('Prüfe …') }}</span>{% endif %}
+                    </td>
+                    <td class="lst-actions-cell">
+                        <div class="lst-actions">
+                            <button type="button" class="lst-btn" data-ai-action="test" data-id="{{ b.id }}"
+                                    title="{{ t.settings.immich_test }}" aria-label="{{ t.settings.immich_test }}: {{ name }}"
+                                    {% if not b.configured %}aria-disabled="true"{% endif %}>
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-wifi"/></svg>
+                            </button>
+                            <button type="button" class="lst-btn" data-ai-action="edit" data-id="{{ b.id }}"
+                                    title="{{ t.sets.edit }}" aria-label="{{ t.sets.edit }}: {{ name }}">
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-pencil"/></svg>
+                            </button>
+                            {% if b.id != 2 and b2 and b2.configured %}<span class="lst-btn lst-btn-spacer" aria-hidden="true"></span>{% endif %}
+                            {% if b.id == 2 %}
+                            <button type="button" class="lst-btn lst-btn-danger" data-ai-action="delete" data-id="{{ b.id }}"
+                                    title="{{ t.sets.remove }}" aria-label="{{ t.sets.remove }}: {{ name }}">
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-trash"/></svg>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+
+        <div class="ai-divider"></div>
+        <div class="form-group">
+            <label for="ai_prompt">{{ t.settings.system_prompt }}</label>
+            <textarea id="ai_prompt" name="ai_prompt" rows="16" class="ai-prompt">{{ cfg.ai_prompt }}</textarea>
+            <small>{{ t.settings.prompt_hint }}
+            <br>{{ t.settings.prompt_hint2 }}</small>
+        </div>
+        <div class="ai-divider"></div>
+        <div class="ai-option-title">{{ t.settings.ai_image_resize }}</div>
+        <small class="ai-option-desc">{{ t.settings.ai_image_resize_desc }}</small>
+        <div class="ai-resize-row">
+            <label class="switch-inline">
+                <input type="checkbox" name="ai_image_resize" value="1" {{ 'checked' if cfg.ai_image_resize else '' }} onchange="document.getElementById('ai_image_max_px').disabled = !this.checked">
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.settings.ai_image_resize_enabled }}</span>
+            </label>
+            <input type="number" id="ai_image_max_px" name="ai_image_max_px" value="{{ cfg.ai_image_max_px }}" min="256" max="4096" step="128" {{ 'disabled' if not cfg.ai_image_resize else '' }} aria-label="{{ t.settings.ai_image_max_px }}">
+            <small>px</small>
+        </div>
+    </div>
+</div>
