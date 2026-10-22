@@ -1,58 +1,93 @@
 {% extends "base.html" %}
-{% block title %}Setup — KI Backend{% endblock %}
+{% block title %}{{ t.setup.title }} — {{ t.setup.step_ai }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/setup.css?v={{ version }}">{% endblock %}
 {% block content %}
-<div class="setup-container">
-    <div class="setup-progress">
-        <span class="step active">1. KI Backend</span>
-        <span class="step">2. SMTP</span>
-        <span class="step">3. Pfade</span>
-        <span class="step">4. Fertig</span>
+{%- macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro -%}
+<div class="su-wrap">
+    {% include "setup/_stepper.html" %}
+
+    <div class="su-head">
+        <p class="su-kicker">{{ t.setup.step_of | replace('{n}', '1') | replace('{total}', '4') }}</p>
+        <h1 class="ui-page-title">{{ t.setup.ai_title }}</h1>
+        <p class="ui-page-sub">{{ t.setup.ai_sub }}</p>
     </div>
 
-    <h1>KI Backend konfigurieren</h1>
-    <p>Verbindung zu LM Studio oder einem OpenAI-kompatiblen Endpunkt.</p>
-
     {% if error %}
-    <div class="alert alert-error">{{ error }}</div>
+    <div class="ui-alert is-error su-alert" role="alert">
+        {{ icon('alert-circle', 18) }}
+        <div class="ui-alert-body"><p class="ui-alert-text">{{ error }}</p></div>
+    </div>
     {% endif %}
     {% if success %}
-    <div class="alert alert-success">{{ success }}</div>
+    <div class="ui-alert is-success su-alert" role="status">
+        {{ icon('check-circle', 18) }}
+        <div class="ui-alert-body"><p class="ui-alert-text">{{ success }}</p></div>
+    </div>
     {% endif %}
 
-    <form method="post" action="/setup/step/1" class="setup-form">
-        <div class="form-group">
-            <label for="ai_url">Backend URL</label>
-            <input type="url" id="ai_url" name="ai_url" value="{{ ai_url or 'http://localhost:1234/v1' }}" required>
-            <small>z.B. http://<ai-host>:1234/v1 (LM Studio)</small>
+    <form method="post" action="/setup/step/1" class="ui-card su-card">
+        <div class="ui-card-head">
+            <div class="ui-card-head-text">
+                <h2 class="ui-card-title"><span class="ui-icon-tile ui-icon-tile-sm">{{ icon('cpu') }}</span>{{ (t.settings.ai_backend_name | default('KI-Backend {n}')) | replace('{n}', '1') }}</h2>
+                <p class="ui-card-desc">{{ t.settings.ai_dialog_sub }}</p>
+            </div>
         </div>
-        <div class="form-group">
-            <label for="ai_api_key">API Key (optional)</label>
-            <input type="password" id="ai_api_key" name="ai_api_key" value="{{ ai_api_key or '' }}">
+        <div class="ui-card-body ui-form">
+            <div class="ui-fields">
+                <div class="ui-field ui-span-all">
+                    <label class="ui-label" for="ai_url">{{ t.settings.backend_url }} <span class="ui-req" aria-hidden="true">*</span></label>
+                    <input class="ui-input" type="url" id="ai_url" name="ai_url" value="{{ ai_url or 'http://localhost:1234/v1' }}" required
+                           spellcheck="false" autocomplete="off" aria-describedby="ai_url_hint">
+                    <p class="ui-hint" id="ai_url_hint">{{ t.setup.ai_url_hint }}</p>
+                </div>
+                <div class="ui-field">
+                    <label class="ui-label" for="ai_api_key">{{ t.setup.api_key }} <span class="ui-opt">({{ t.setup.optional }})</span></label>
+                    <input class="ui-input" type="password" id="ai_api_key" name="ai_api_key" value="{{ ai_api_key or '' }}" autocomplete="new-password">
+                </div>
+                <div class="ui-field">
+                    <label class="ui-label" for="ai_model">{{ t.settings.model }} <span class="ui-req" aria-hidden="true">*</span></label>
+                    <input class="ui-input" type="text" id="ai_model" name="ai_model" value="{{ ai_model or '' }}" required
+                           spellcheck="false" autocomplete="off" aria-describedby="ai_model_hint">
+                    <p class="ui-hint" id="ai_model_hint">{{ t.setup.model_hint }}</p>
+                </div>
+            </div>
+
+            <details class="su-more"{% if ai2_url or ai2_model %} open{% endif %}>
+                <summary class="su-more-head">
+                    <span class="ui-icon-tile ui-icon-tile-sm">{{ icon('cpu') }}</span>
+                    <span class="su-more-text">
+                        <span class="su-more-title">{{ t.setup.ai2_title }} <span class="ui-badge">{{ t.setup.optional }}</span></span>
+                        <span class="su-more-desc">{{ t.settings.ai_backends_desc }}</span>
+                    </span>
+                    <svg class="ui-i su-more-chev" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-down"/></svg>
+                </summary>
+                <div class="su-more-body">
+                    <div class="ui-fields">
+                        <div class="ui-field ui-span-all">
+                            <label class="ui-label" for="ai2_url">{{ t.settings.backend_url }}</label>
+                            <input class="ui-input" type="url" id="ai2_url" name="ai2_url" value="{{ ai2_url or '' }}"
+                                   placeholder="http://<ai-host>:1234/v1" spellcheck="false" autocomplete="off">
+                        </div>
+                        <div class="ui-field">
+                            <label class="ui-label" for="ai2_api_key">{{ t.setup.api_key }} <span class="ui-opt">({{ t.setup.optional }})</span></label>
+                            <input class="ui-input" type="password" id="ai2_api_key" name="ai2_api_key" value="{{ ai2_api_key or '' }}" autocomplete="new-password">
+                        </div>
+                        <div class="ui-field">
+                            <label class="ui-label" for="ai2_model">{{ t.settings.model }}</label>
+                            <input class="ui-input" type="text" id="ai2_model" name="ai2_model" value="{{ ai2_model or '' }}"
+                                   spellcheck="false" autocomplete="off">
+                        </div>
+                    </div>
+                </div>
+            </details>
         </div>
-        <div class="form-group">
-            <label for="ai_model">Modell</label>
-            <input type="text" id="ai_model" name="ai_model" value="{{ ai_model or '' }}" required>
-            <small>z.B. qwen2-vl, llava, gpt-4o</small>
-        </div>
-        <div style="border-top: 1px solid var(--border); margin: 1.5rem 0; padding-top: 1rem;">
-            <h3 style="margin: 0 0 0.25rem;">2. KI Backend (optional)</h3>
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0 0 1rem;">Zweites Backend für parallele Verarbeitung — es wird automatisch das gerade freie Backend verwendet.</p>
-        </div>
-        <div class="form-group">
-            <label for="ai2_url">Backend URL 2</label>
-            <input type="url" id="ai2_url" name="ai2_url" value="{{ ai2_url or '' }}">
-        </div>
-        <div class="form-group">
-            <label for="ai2_api_key">API Key 2 (optional)</label>
-            <input type="password" id="ai2_api_key" name="ai2_api_key" value="{{ ai2_api_key or '' }}">
-        </div>
-        <div class="form-group">
-            <label for="ai2_model">Modell 2</label>
-            <input type="text" id="ai2_model" name="ai2_model" value="{{ ai2_model or '' }}">
-        </div>
-        <div class="form-actions">
-            <button type="submit" formaction="/setup/step/1/test" class="btn btn-secondary">Verbindung testen</button>
-            <button type="submit" class="btn btn-primary">Weiter</button>
+        <div class="ui-card-foot su-foot">
+            {#- The test button comes first on purpose: Enter in a field tests, as before. #}
+            <button type="submit" formaction="/setup/step/1/test" class="ui-btn ui-btn-secondary">{{ icon('wifi') }}{{ t.setup.test }}</button>
+            <span class="ui-spacer"></span>
+            <button type="submit" class="ui-btn ui-btn-primary su-next">{{ t.setup.next }}{{ icon('arrow-right') }}</button>
         </div>
     </form>
 </div>

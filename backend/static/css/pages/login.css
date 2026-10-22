@@ -1,0 +1,30 @@
+/* Login page (login.html, standalone — loads style.css + ui.css itself).
+ * One centred card under the logo. Colours only from theme variables
+ * and --ui-* tokens. */
+
+.lg-body {
+    min-height: 100vh; min-height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem var(--ui-gutter);
+    background:
+        radial-gradient(60rem 30rem at 50% -10%, var(--ui-accent-soft), transparent 70%),
+        var(--bg);
+}
+.lg-wrap { width: 100%; max-width: 26rem; display: flex; flex-direction: column; align-items: center; }
+.lg-logo { display: block; width: auto; max-width: 15rem; height: auto; max-height: 4.5rem; margin: 0 0 2rem; }
+.lg-card {
+    width: 100%; display: flex; flex-direction: column; align-items: center;
+    padding: 2rem 1.75rem 1.75rem; text-align: center;
+    box-shadow: var(--ui-shadow);
+}
+.lg-icon { margin-bottom: 1rem; }
+.lg-title { margin: 0; font-size: var(--ui-fs-xl); font-weight: 650; line-height: 1.25; letter-spacing: -0.01em; color: var(--text); }
+.lg-text { margin: 0.45rem 0 0; max-width: 34ch; font-size: var(--ui-fs-base); line-height: 1.55; color: var(--text-muted); }
+.lg-alert { width: 100%; margin-top: 1.25rem; text-align: left; }
+.lg-btn { margin-top: 1.5rem; }
+.lg-foot { margin: 1.5rem 0 0; font-size: var(--ui-fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 600px) {
+    .lg-body { align-items: flex-start; padding-top: 3.5rem; }
+    .lg-card { padding: 1.75rem 1.25rem 1.25rem; }
+}

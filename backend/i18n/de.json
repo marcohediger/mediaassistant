@@ -288,7 +288,8 @@
     "next": "Nächste Seite",
     "page_select": "Seite wählen",
     "cancel": "Abbrechen",
-    "close": "Schliessen"
+    "close": "Schliessen",
+    "fact_exposure": "Belichtung"
   },
   "settings": {
     "title": "Einstellungen",
@@ -518,7 +519,7 @@
     "ai_status_no_model": "Kein Modell",
     "ai_status_no_model_hint": "Ohne Modell bekommt dieses Backend keine Bilder.",
     "ai_status_model_missing": "Modell fehlt",
-    "ai_status_model_missing_hint": "Das Backend bietet „{model}\" nicht an.",
+    "ai_status_model_missing_hint": "Das Backend bietet „{model}“ nicht an.",
     "ai_status_unconfigured": "Nicht eingerichtet",
     "ai_delete_confirm": "KI-Backend 2 entfernen? URL, Modell und API-Key werden gelöscht.",
     "ai_dialog_sub": "OpenAI-kompatibler Endpunkt, z. B. LM Studio. Gebraucht wird ein Modell, das Bilder versteht.",
@@ -612,7 +613,8 @@
     "job_details": "Job-Details",
     "empty_title": "Nichts zu prüfen",
     "cancel": "Abbrechen",
-    "close": "Schliessen"
+    "close": "Schliessen",
+    "no_preview": "Keine Vorschau"
   },
   "dryrun": {
     "title": "Dry-Run Report",
@@ -902,7 +904,7 @@
     "unsaved": "Nicht gespeicherte Änderungen"
   },
   "setup": {
-    "set_hint": "Beide Pfade gehören zum Verarbeitungs-Set „{name}\". Weitere Sets mit eigenen Verzeichnissen, Regeln und Ablagen lassen sich später in den Einstellungen anlegen.",
+    "set_hint": "Beide Pfade gehören zum Verarbeitungs-Set «{name}». Weitere Sets mit eigenen Verzeichnissen, Regeln und Ablagen lassen sich später in den Einstellungen anlegen.",
     "title": "Einrichtung",
     "steps_label": "Einrichtungsschritte",
     "step_of": "Schritt {n} von {total}",
@@ -933,7 +935,11 @@
     "done_title": "Einrichtung abgeschlossen",
     "done_text": "MediaAssistant ist bereit. Alle Einstellungen lassen sich später unter «Einstellungen» anpassen.",
     "to_dashboard": "Zum Dashboard",
-    "step_completed": "erledigt"
+    "step_completed": "erledigt",
+    "test_ok": "{name}: OK",
+    "test_failed": "{name} fehlgeschlagen: {error}",
+    "test_ai1": "KI 1",
+    "test_ai2": "KI 2"
   },
   "status": {
     "done": "Fertig",
@@ -950,6 +956,7 @@
     "title": "Anmeldung",
     "text": "Melde dich mit deinem SSO-Konto an, um auf MediaAssistant zuzugreifen.",
     "logged_out": "Du wurdest erfolgreich abgemeldet.",
-    "button": "Mit SSO anmelden"
+    "button": "Mit SSO anmelden",
+    "denied": "Zugriff verweigert. Dein Konto ist nicht berechtigt."
   }
 }

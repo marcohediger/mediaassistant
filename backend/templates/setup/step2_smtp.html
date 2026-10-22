@@ -1,47 +1,68 @@
 {% extends "base.html" %}
-{% block title %}Setup — SMTP{% endblock %}
+{% block title %}{{ t.setup.title }} — {{ t.setup.step_smtp }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/setup.css?v={{ version }}">{% endblock %}
 {% block content %}
-<div class="setup-container">
-    <div class="setup-progress">
-        <span class="step done">1. KI Backend</span>
-        <span class="step active">2. SMTP</span>
-        <span class="step">3. Pfade</span>
-        <span class="step">4. Fertig</span>
+{%- macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro -%}
+<div class="su-wrap">
+    {% include "setup/_stepper.html" %}
+
+    <div class="su-head">
+        <p class="su-kicker">{{ t.setup.step_of | replace('{n}', '2') | replace('{total}', '4') }}</p>
+        <h1 class="ui-page-title">{{ t.setup.smtp_title }}</h1>
+        <p class="ui-page-sub">{{ t.setup.smtp_sub }}</p>
     </div>
 
-    <h1>SMTP konfigurieren</h1>
-    <p>Fehlerbenachrichtigungen per E-Mail (optional, kann später eingerichtet werden).</p>
-
-    <form method="post" action="/setup/step/2" class="setup-form">
-        <div class="form-group">
-            <label for="smtp_server">SMTP Server</label>
-            <input type="text" id="smtp_server" name="smtp_server" value="{{ smtp_server or '' }}">
+    <form method="post" action="/setup/step/2" class="ui-card su-card">
+        <div class="ui-card-head">
+            <div class="ui-card-head-text">
+                <h2 class="ui-card-title"><span class="ui-icon-tile ui-icon-tile-sm">{{ icon('mail') }}</span>{{ t.setup.smtp_card }}</h2>
+                <p class="ui-card-desc">{{ t.setup.smtp_card_desc }}</p>
+            </div>
         </div>
-        <div class="form-group">
-            <label for="smtp_port">Port</label>
-            <input type="number" id="smtp_port" name="smtp_port" value="{{ smtp_port or 587 }}">
+        <div class="ui-card-body ui-form">
+            <div class="ui-fields su-fields-server">
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_server">{{ t.settings.server }}</label>
+                    <input class="ui-input" type="text" id="smtp_server" name="smtp_server" value="{{ smtp_server or '' }}"
+                           placeholder="smtp.example.com" spellcheck="false" autocomplete="off">
+                </div>
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_port">{{ t.settings.port }}</label>
+                    <input class="ui-input" type="number" id="smtp_port" name="smtp_port" value="{{ smtp_port or 587 }}" min="1" max="65535">
+                </div>
+            </div>
+            <div class="ui-fields">
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_user">{{ t.settings.username }}</label>
+                    <input class="ui-input" type="text" id="smtp_user" name="smtp_user" value="{{ smtp_user or '' }}"
+                           spellcheck="false" autocomplete="off">
+                </div>
+                <div class="ui-field">
+                    <label class="ui-label" for="smtp_password">{{ t.settings.password }}</label>
+                    <input class="ui-input" type="password" id="smtp_password" name="smtp_password" autocomplete="new-password">
+                </div>
+                <div class="ui-field ui-span-all">
+                    <label class="ui-label" for="smtp_recipient">{{ t.settings.recipient }}</label>
+                    <input class="ui-input" type="email" id="smtp_recipient" name="smtp_recipient" value="{{ smtp_recipient or '' }}"
+                           spellcheck="false" autocomplete="off">
+                </div>
+            </div>
+            <div class="ui-option-list">
+                <label class="ui-option">
+                    <span class="ui-option-text">
+                        <span class="ui-option-title">{{ t.settings.ssl }}</span>
+                        <span class="ui-option-desc">{{ t.settings.smtp_ssl_desc }}</span>
+                    </span>
+                    <span class="ui-switch"><input type="checkbox" role="switch" id="smtp_ssl" name="smtp_ssl" value="true" {{ 'checked' if smtp_ssl else '' }}><span class="ui-switch-track"></span></span>
+                </label>
+            </div>
         </div>
-        <div class="form-group">
-            <label for="smtp_ssl">
-                <input type="checkbox" id="smtp_ssl" name="smtp_ssl" value="true" {{ 'checked' if smtp_ssl else '' }}>
-                SSL/TLS verwenden
-            </label>
-        </div>
-        <div class="form-group">
-            <label for="smtp_user">Benutzername</label>
-            <input type="text" id="smtp_user" name="smtp_user" value="{{ smtp_user or '' }}">
-        </div>
-        <div class="form-group">
-            <label for="smtp_password">Passwort</label>
-            <input type="password" id="smtp_password" name="smtp_password">
-        </div>
-        <div class="form-group">
-            <label for="smtp_recipient">Empfänger</label>
-            <input type="email" id="smtp_recipient" name="smtp_recipient" value="{{ smtp_recipient or '' }}">
-        </div>
-        <div class="form-actions">
-            <a href="/setup/step/1" class="btn btn-secondary">Zurück</a>
-            <button type="submit" class="btn btn-primary">Weiter</button>
+        <div class="ui-card-foot su-foot">
+            <a href="/setup/step/1" class="ui-btn ui-btn-ghost su-back">{{ icon('arrow-left') }}{{ t.setup.back }}</a>
+            <span class="ui-spacer"></span>
+            <button type="submit" class="ui-btn ui-btn-primary su-next">{{ t.setup.next }}{{ icon('arrow-right') }}</button>
         </div>
     </form>
 </div>

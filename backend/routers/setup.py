@@ -7,6 +7,7 @@ from database import async_session
 from models import InboxDirectory
 from sets import get_set
 from template_engine import render
+from i18n import load_lang, DEFAULT_LANGUAGE
 
 router = APIRouter(prefix="/setup")
 
@@ -104,6 +105,7 @@ async def setup_step1_test(
         "error": None,
         "success": None,
     }
+    st = load_lang(await config_manager.get("ui.language", DEFAULT_LANGUAGE)).get("setup", {})
     results = []
     # Test primary backend
     try:
@@ -113,9 +115,9 @@ async def setup_step1_test(
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(f"{ai_url.rstrip('/')}/models", headers=headers)
             resp.raise_for_status()
-        results.append("KI 1: OK")
+        results.append(st["test_ok"].format(name=st["test_ai1"]))
     except Exception as e:
-        context["error"] = f"KI 1 fehlgeschlagen: {e}"
+        context["error"] = st["test_failed"].format(name=st["test_ai1"], error=e)
         return await render(request, "setup/step1_ai.html", context)
 
     # Test secondary backend (if configured)
@@ -127,12 +129,12 @@ async def setup_step1_test(
             async with httpx.AsyncClient(timeout=10) as client:
                 resp2 = await client.get(f"{ai2_url.rstrip('/')}/models", headers=headers2)
                 resp2.raise_for_status()
-            results.append("KI 2: OK")
+            results.append(st["test_ok"].format(name=st["test_ai2"]))
         except Exception as e:
-            context["error"] = f"KI 2 fehlgeschlagen: {e}"
+            context["error"] = st["test_failed"].format(name=st["test_ai2"], error=e)
             return await render(request, "setup/step1_ai.html", context)
 
-    context["success"] = " — ".join(results) if results else "Verbindung erfolgreich!"
+    context["success"] = " — ".join(results)
     return await render(request, "setup/step1_ai.html", context)
 
 

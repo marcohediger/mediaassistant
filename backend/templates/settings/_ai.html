@@ -82,11 +82,13 @@
         </div>
 
         <div class="ai-divider"></div>
-        <div class="form-group">
-            <label for="ai_prompt">{{ t.settings.system_prompt }}</label>
-            <textarea id="ai_prompt" name="ai_prompt" rows="16" class="ai-prompt">{{ cfg.ai_prompt }}</textarea>
-            <small>{{ t.settings.prompt_hint }}
-            <br>{{ t.settings.prompt_hint2 }}</small>
+        <div class="st-group">
+            <div class="st-group-head">
+                <h3 class="st-group-title"><label for="ai_prompt">{{ t.settings.system_prompt }}</label></h3>
+                <p class="st-group-desc" id="ai_prompt_hint">{{ t.settings.prompt_hint }} {{ t.settings.prompt_hint2 }}</p>
+            </div>
+            <textarea class="ui-textarea ui-input-mono st-prompt" id="ai_prompt" name="ai_prompt" rows="16"
+                      spellcheck="false" aria-describedby="ai_prompt_hint">{{ cfg.ai_prompt }}</textarea>
         </div>
     </div>
 </div>
@@ -101,19 +103,23 @@
         <label class="switch" title="{{ t.settings.ai_image_resize_enabled }}">
             <input type="checkbox" name="ai_image_resize" value="1" {{ 'checked' if cfg.ai_image_resize else '' }}
                    aria-label="{{ t.settings.ai_image_resize }}"
-                   onchange="document.getElementById('ai_image_max_px').closest('.form-group').classList.toggle('is-off', !this.checked)">
+                   onchange="document.getElementById('ai_image_max_px').closest('.ui-option').classList.toggle('is-off', !this.checked)">
             <span class="switch-slider"></span>
         </label>
     </div>
     <div class="section-body">
-        <div class="form-group resize-size{{ '' if cfg.ai_image_resize else ' is-off' }}">
-            <label for="ai_image_max_px">{{ t.settings.ai_image_max_px | default('Maximale Kantenlänge') }}</label>
-            <div class="input-with-unit">
-                <input type="number" id="ai_image_max_px" name="ai_image_max_px" value="{{ cfg.ai_image_max_px }}" min="256" max="4096" step="128">
-                <span class="unit">px</span>
+        <div class="ui-option-list">
+            <div class="ui-option st-resize-size{{ '' if cfg.ai_image_resize else ' is-off' }}">
+                <span class="ui-option-text">
+                    <label class="ui-option-title" for="ai_image_max_px">{{ t.settings.ai_image_max_px | default('Maximale Kantenlänge') }}</label>
+                    <span class="ui-option-desc" id="ai_image_max_px_hint">{{ t.settings.ai_image_max_px_hint | default('Längere Bildseite in Pixeln, 256–4096. 1024 ist ein guter Ausgangswert.') }}</span>
+                </span>
+                <div class="ui-option-control ui-inline">
+                    <input class="ui-input ui-input-narrow" type="number" id="ai_image_max_px" name="ai_image_max_px"
+                           value="{{ cfg.ai_image_max_px }}" min="256" max="4096" step="128" aria-describedby="ai_image_max_px_hint">
+                    <span class="ui-muted">px</span>
+                </div>
             </div>
-            <small>{{ t.settings.ai_image_max_px_hint | default('Längere Bildseite in Pixeln, 256–4096. 1024 ist ein guter Ausgangswert.') }}</small>
         </div>
     </div>
 </div>
-
