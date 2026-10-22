@@ -449,7 +449,6 @@ async def dashboard(request: Request):
 
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
     i18n = load_lang(lang)
-    modules = await _get_module_status(i18n)
     sets = await _get_set_overview(i18n)
 
     return await render(request, "dashboard.html", {
@@ -462,7 +461,6 @@ async def dashboard(request: Request):
             "duplicates": counts.get("duplicate", 0),
         },
         "throughput": throughput,
-        "modules": modules,
         "sets": sets,
         "recent_jobs": recent_jobs,
     })
@@ -488,7 +486,6 @@ async def dashboard_json():
 
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
     i18n = load_lang(lang)
-    modules = await _get_module_status(i18n)
     sets = await _get_set_overview(i18n)
 
     return {
@@ -501,15 +498,6 @@ async def dashboard_json():
             "duplicates": counts.get("duplicate", 0),
         },
         "throughput": throughput,
-        "modules": [
-            {
-                "name": m["name"],
-                "label": m["label"],
-                "status": m["status"],
-                "detail": m["detail"],
-            }
-            for m in modules
-        ],
         "sets": sets,
         "recent_jobs": [
             {
@@ -521,5 +509,44 @@ async def dashboard_json():
                 "updated_at": j.updated_at.strftime("%d.%m. %H:%M") if j.updated_at else "—",
             }
             for j in recent_jobs
+        ],
+    }
+
+
+# Where each module is configured; the status menu links its rows there.
+_MODULE_SECTIONS = {
+    "ki_analyse": "section-ai",
+    "geocoding": "section-geocoding",
+    "duplikat_erkennung": "section-duplicates",
+    "smtp": "section-smtp",
+    "filewatcher": "section-sets",
+    "immich": "section-immich",
+}
+
+
+@router.get("/api/modules")
+async def modules_json():
+    """Module health for the status menu in the navbar, polled on every page."""
+    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+    modules = await _get_module_status(load_lang(lang))
+    states = {m["status"] for m in modules}
+    if "error" in states:
+        overall = "error"
+    elif "misconfigured" in states:
+        overall = "warn"
+    elif "ready" in states:
+        overall = "ok"
+    else:
+        overall = "off"
+    return {
+        "overall": overall,
+        "modules": [
+            {
+                "label": m["label"],
+                "status": m["status"],
+                "detail": m["detail"],
+                "href": f"/settings#{_MODULE_SECTIONS[m['name']]}" if m["name"] in _MODULE_SECTIONS else None,
+            }
+            for m in modules
         ],
     }

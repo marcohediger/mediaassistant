@@ -6,7 +6,13 @@
     "logs": "Logs",
     "settings": "Einstellungen",
     "tools": "Werkzeuge",
-    "appearance": "Darstellung"
+    "appearance": "Darstellung",
+    "status": "Systemstatus",
+    "status_loading": "Wird geprüft …",
+    "status_ok": "Alles bereit",
+    "status_warn": "{n} nicht konfiguriert",
+    "status_error": "{n} mit Fehler",
+    "status_off": "Alle deaktiviert"
   },
   "dashboard": {
     "title": "Dashboard",

@@ -144,31 +144,6 @@ setInterval(refreshPipelineStatus, 5000);
     <span class="throughput-value" data-throughput="files_24h">{{ throughput.files_24h }}</span> {{ t.dashboard.files_24h }}
 </div>
 
-<h2>{{ t.dashboard.modules }}</h2>
-<div class="modules-grid" id="modules-grid">
-    {% for module in modules %}
-    <div class="module-card module-{{ module.status }}">
-        <div class="module-top">
-            <span class="module-status">
-                {% if module.status == 'ready' %}●
-                {% elif module.status == 'error' %}●
-                {% elif module.status == 'misconfigured' %}●
-                {% else %}○
-                {% endif %}
-            </span>
-            <span class="module-name">{{ module.label }}</span>
-        </div>
-        <div class="module-detail">{{ module.detail }}</div>
-    </div>
-    {% endfor %}
-</div>
-<div class="module-legend">
-    <span><span class="legend-dot legend-ready">●</span> {{ t.dashboard.active }}</span>
-    <span><span class="legend-dot legend-error">●</span> {{ t.dashboard.error }}</span>
-    <span><span class="legend-dot legend-misconfig">●</span> {{ t.dashboard.misconfigured }}</span>
-    <span><span class="legend-dot legend-disabled">○</span> {{ t.dashboard.disabled }}</span>
-</div>
-
 <h2 style="margin-top: 2rem;">{{ t.dashboard.sets | default('Verarbeitungs-Sets') }}</h2>
 <div class="modules-grid" id="sets-grid">
     {% for s in sets %}
