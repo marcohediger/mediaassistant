@@ -1593,3 +1593,52 @@ dialog.modal::backdrop { background: rgba(0, 0, 0, 0.55); }
     .nav-links::-webkit-scrollbar { display: none; }
     .nav-links a { margin-left: 0; white-space: nowrap; font-size: 0.95rem; }
 }
+
+/* ── Status menu (navbar) ── */
+/* Module health next to the appearance menu. The marker on the toggle
+   sums it up: green all ready, amber something not configured, red an
+   error. Before, this lived only as cards on the dashboard. */
+.status-menu .quick-menu-toggle { position: relative; }
+.status-marker {
+    position: absolute; top: 0.2rem; right: 0.2rem; width: 0.6rem; height: 0.6rem;
+    border-radius: 50%; background: var(--text-muted); box-shadow: 0 0 0 2px var(--bg-card);
+    transition: background 0.2s;
+}
+.status-menu[data-state="ok"] .status-marker { background: var(--success); }
+.status-menu[data-state="warn"] .status-marker { background: var(--warning); }
+.status-menu[data-state="error"] .status-marker { background: var(--error); }
+.status-menu[data-state="off"] .status-marker,
+.status-menu[data-state="loading"] .status-marker { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-muted), 0 0 0 2px var(--bg-card); }
+.status-menu[data-state="error"] .quick-menu-toggle { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, var(--border)); }
+
+.status-menu-panel { width: 19rem; max-width: calc(100vw - 2rem); padding: 0.5rem; }
+.status-menu-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem;
+    padding: 0.35rem 0.5rem 0.5rem; border-bottom: 1px solid var(--border); margin-bottom: 0.35rem;
+}
+.status-menu-head .quick-menu-label { margin-bottom: 0; }
+.status-menu-summary { font-size: var(--ui-fs-xs); color: var(--text-muted); text-align: right; }
+.status-menu[data-state="ok"] .status-menu-summary { color: var(--success); }
+.status-menu[data-state="warn"] .status-menu-summary { color: var(--warning); }
+.status-menu[data-state="error"] .status-menu-summary { color: var(--error); }
+.status-menu-list { display: flex; flex-direction: column; }
+.sm-row {
+    display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem; border-radius: var(--ui-radius);
+    color: var(--text); text-decoration: none;
+}
+a.sm-row:hover { background: var(--ui-hover); }
+a.sm-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.sm-dot {
+    flex: none; width: 0.55rem; height: 0.55rem; margin-top: 0.4rem; border-radius: 50%;
+    background: var(--text-muted);
+}
+.sm-ready .sm-dot { background: var(--success); }
+.sm-misconfigured .sm-dot { background: var(--warning); }
+.sm-error .sm-dot { background: var(--error); }
+.sm-disabled .sm-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-muted); }
+.sm-text { display: flex; flex-direction: column; min-width: 0; }
+.sm-name { font-size: var(--ui-fs-base); font-weight: 500; }
+.sm-disabled .sm-name { color: var(--text-muted); }
+.sm-detail { font-size: var(--ui-fs-xs); color: var(--text-muted); overflow-wrap: anywhere; }
+.sm-error .sm-detail { color: var(--error); }
+/* ── end status menu ── */

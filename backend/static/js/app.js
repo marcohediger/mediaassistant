@@ -15,7 +15,6 @@
         const data = await resp.json();
         updateStats(data.stats);
         updateThroughput(data.throughput);
-        updateModules(data.modules);
         updateSets(data.sets);
         updateRecentJobs(data.recent_jobs);
       } catch (_) {}
@@ -45,10 +44,6 @@
         etaEl.style.display = "none";
       }
     }
-  }
-
-  function updateModules(modules) {
-    renderCards("modules-grid", modules);
   }
 
   // Processing sets come shaped like module cards (status/label/detail).
@@ -222,27 +217,35 @@
     });
   }
 
-  // ── Quick menu: language and theme, applied at once ──
-  function initQuickMenu() {
-    const toggle = document.querySelector(".quick-menu-toggle");
-    const panel = document.getElementById("quick-menu-panel");
-    if (!toggle || !panel) return;
+  // ── Navbar dropdowns: one open at a time, closed by a click elsewhere or Escape ──
+  function initDropdown(root, onOpen) {
+    const toggle = root.querySelector(".quick-menu-toggle");
+    const panel = root.querySelector(".quick-menu-panel");
 
     function setOpen(open) {
       panel.hidden = !open;
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open && onOpen) onOpen();
     }
-    toggle.addEventListener("click", function (e) {
-      e.stopPropagation();
+    toggle.addEventListener("click", function () {
       setOpen(panel.hidden);
     });
+    // No stopPropagation on the toggle: the click must reach the other
+    // dropdowns' handlers so they close.
     document.addEventListener("click", function (e) {
-      if (!panel.hidden && !e.target.closest(".quick-menu")) setOpen(false);
+      if (!panel.hidden && !root.contains(e.target)) setOpen(false);
     });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && !panel.hidden) { setOpen(false); toggle.focus(); }
     });
-    panel.addEventListener("click", function (e) {
+    return panel;
+  }
+
+  // ── Quick menu: language and theme, applied at once ──
+  function initQuickMenu() {
+    const root = document.getElementById("appearance-menu");
+    if (!root) return;
+    initDropdown(root).addEventListener("click", function (e) {
       const btn = e.target.closest("[data-appearance]");
       if (!btn || btn.classList.contains("active")) return;
       const body = {};
@@ -255,9 +258,55 @@
     });
   }
 
+  // ── Status menu: module health, marker green / amber / red ──
+  function initStatusMenu() {
+    const root = document.getElementById("status-menu");
+    if (!root) return;
+    const labels = JSON.parse(root.dataset.labels);
+    const toggle = root.querySelector(".quick-menu-toggle");
+    const srText = root.querySelector(".status-menu-sr");
+    const summary = document.getElementById("status-menu-summary");
+    const list = document.getElementById("status-menu-list");
+
+    function render(data) {
+      const counted = data.overall === "error" ? "error" : "misconfigured";
+      const n = data.modules.filter(function (m) { return m.status === counted; }).length;
+      const text = labels[data.overall].replace("{n}", n);
+      root.dataset.state = data.overall;
+      summary.textContent = text;
+      toggle.title = labels.title + ": " + text;
+      srText.textContent = toggle.title;
+      list.innerHTML = data.modules
+        .map(function (m) {
+          const tag = m.href ? "a" : "div";
+          const href = m.href ? ` href="${esc(m.href)}"` : "";
+          return `<${tag} class="sm-row sm-${esc(m.status)}"${href}>
+            <span class="sm-dot" aria-hidden="true"></span>
+            <span class="sm-text">
+              <span class="sm-name">${esc(m.label)}</span>
+              <span class="sm-detail">${esc(m.detail)}</span>
+            </span>
+          </${tag}>`;
+        })
+        .join("");
+    }
+
+    async function refresh() {
+      try {
+        const resp = await fetch("/api/modules");
+        if (resp.ok) render(await resp.json());
+      } catch (_) {}
+    }
+
+    initDropdown(root, refresh);
+    refresh();
+    setInterval(refresh, 30000);
+  }
+
   // ── Init ──
   initDashboard();
   initJobDetail();
   initLightbox();
   initQuickMenu();
+  initStatusMenu();
 })();

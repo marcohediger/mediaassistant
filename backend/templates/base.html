@@ -40,13 +40,35 @@
             {% endif %}
         </div>
         {% endif %}
-        <div class="quick-menu">
+        <div class="quick-menu status-menu" id="status-menu" data-state="loading"
+             data-labels='{{ {"title": t.nav.status, "loading": t.nav.status_loading, "ok": t.nav.status_ok, "warn": t.nav.status_warn, "error": t.nav.status_error, "off": t.nav.status_off} | tojson }}'>
+            <button type="button" class="quick-menu-toggle" aria-haspopup="true" aria-expanded="false"
+                    aria-controls="status-menu-panel" title="{{ t.nav.status }}">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                </svg>
+                <span class="status-marker" aria-hidden="true"></span>
+                <span class="sr-only status-menu-sr">{{ t.nav.status }}</span>
+            </button>
+            <div class="quick-menu-panel status-menu-panel" id="status-menu-panel" hidden>
+                <div class="status-menu-head">
+                    <span class="quick-menu-label">{{ t.dashboard.modules }}</span>
+                    <span class="status-menu-summary" id="status-menu-summary">{{ t.nav.status_loading }}</span>
+                </div>
+                <div class="status-menu-list" id="status-menu-list"></div>
+            </div>
+        </div>
+        <div class="quick-menu" id="appearance-menu">
             <button type="button" class="quick-menu-toggle" aria-haspopup="true" aria-expanded="false"
                     aria-controls="quick-menu-panel" title="{{ t.nav.appearance }}">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    <path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4.5-4.6 4.5h-2.2a1.8 1.8 0 0 0-1.3 3.1 1.5 1.5 0 0 1-1 2.4z"/>
+                    <circle cx="7.5" cy="10.5" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="10.5" cy="6.5" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="15" cy="7" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="17.5" cy="11" r="1" fill="currentColor" stroke="none"/>
                 </svg>
                 <span class="sr-only">{{ t.nav.appearance }}</span>
             </button>
