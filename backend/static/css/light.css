@@ -78,12 +78,6 @@
     font-weight: 600;
 }
 
-.dup-tag {
-    background: #e0e7ff;
-    color: #3730a3;
-    border-color: #c7d2fe;
-}
-
 
 .switch-slider {
     background: #d1d5db;
@@ -108,23 +102,3 @@
     color: #fff;
 }
 
-.review-tag {
-    background: #e0e7ff;
-    color: #3730a3;
-    border-color: #c7d2fe;
-}
-
-.review-actions .btn-success {
-    background: #059669;
-    color: #fff;
-}
-
-.review-actions .btn-warning {
-    background: #d97706;
-    color: #fff;
-}
-
-.review-actions .btn-danger {
-    background: #dc2626;
-    color: #fff;
-}

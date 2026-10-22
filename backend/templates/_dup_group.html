@@ -1,195 +1,173 @@
-<div class="dup-group">
-    <div class="dup-group-header">
-        <span class="dup-group-title">{{ group.original_key }}</span>
-        {% if group.is_immich_duplicate %}
-            <span class="match-badge match-immich">Immich</span>
-        {% elif group.all_exact %}
-            <span class="match-badge match-exact">{{ t.duplicates.sha256_exact }}</span>
-        {% else %}
-            <span class="match-badge match-similar">pHash</span>
-        {% endif %}
-        <span class="dup-group-count">{{ group.count }} {{ t.duplicates.files }}</span>
+{# One duplicate group: a card with one comparison tile per file.
+   Presentation facts (ext, size_label, date_label, is_top_*, meta_*) come
+   from routers/duplicates._annotate_for_display. #}
+{% macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
+{% set d = t.duplicates %}
+{% set orig = (group.members | selectattr('is_original') | first) or group.members[0] %}
+{% set others_n = group.members | length - 1 %}
+{# Exposure row only when at least one file has exposure data, so the rows of all tiles line up #}
+{% set ns_group = namespace(shot=false) %}
+{% for m in group.members %}{% if m.exif_iso or m.exif_aperture or m.exif_shutter or m.exif_focal %}{% set ns_group.shot = true %}{% endif %}{% endfor %}
+<section class="ui-card dp-group" aria-labelledby="dp-g-{{ group.original_key }}">
+    <div class="ui-card-head dp-group-head">
+        <div class="ui-card-head-text">
+            <h2 class="ui-card-title dp-group-title" id="dp-g-{{ group.original_key }}">
+                <span class="ui-icon-tile ui-icon-tile-sm" aria-hidden="true">{{ icon('copy', 15) }}</span>
+                <span class="ui-truncate" title="{{ orig.filename }}">{{ orig.filename }}</span>
+            </h2>
+            <p class="ui-card-desc dp-group-sub">
+                <a class="ui-link ui-mono" href="/logs/job/{{ group.original_key }}" title="{{ d.job_details }}">{{ group.original_key }}</a>
+                <span aria-hidden="true">·</span>
+                <span>{{ group.count }} {{ d.files }}</span>
+            </p>
+        </div>
+        <div class="ui-card-actions dp-group-kind">
+            {% if group.all_exact %}
+            <span class="ui-badge is-info" title="{{ d.kind_exact_title }}">{{ icon('check', 12) }}{{ d.kind_exact }}</span>
+            {% else %}
+            <span class="ui-badge is-warning" title="{{ d.kind_similar_title }}">{{ icon('image', 12) }}{{ d.kind_similar }}</span>
+            {% endif %}
+            {% if group.is_immich_duplicate %}
+            <span class="ui-badge is-violet" title="{{ d.kind_immich_title }}">{{ icon('cloud', 12) }}{{ d.kind_immich }}</span>
+            {% endif %}
+        </div>
     </div>
 
-    <div class="dup-compare">
+    <div class="ui-card-body dp-group-body">
+        <div class="ui-thumbs dp-thumbs">
         {% for member in group.members %}
-        {# Compute metadata advantage: does this member have data that others lack? #}
-        {% set ns = namespace(has_extra_gps=false, has_extra_date=false, has_extra_camera=false, has_extra_desc=false, has_extra_kw=false, extra_count=0) %}
-        {% for other in group.members %}
-            {% if other.debug_key != member.debug_key %}
-                {% if member.exif_has_gps and not other.exif_has_gps %}{% set ns.has_extra_gps = true %}{% endif %}
-                {% if member.exif_date and not other.exif_date %}{% set ns.has_extra_date = true %}{% endif %}
-                {% if member.exif_camera and not other.exif_camera %}{% set ns.has_extra_camera = true %}{% endif %}
-                {% if member.exif_description and not other.exif_description %}{% set ns.has_extra_desc = true %}{% endif %}
-                {% if member.exif_keywords and not other.exif_keywords %}{% set ns.has_extra_kw = true %}{% endif %}
+        <article class="ui-thumb dp-thumb{{ ' is-success' if member.is_quality_best }}" aria-label="{{ member.filename }}">
+            {% if member.immich_asset_id %}
+            <button type="button" class="ui-thumb-media lightbox-trigger" data-fullsize="/api/original/immich/{{ member.immich_asset_id }}"
+                    aria-label="{{ d.preview | replace('{name}', member.filename) }}">
+                <img src="/api/thumbnail/immich/{{ member.immich_asset_id }}" alt="" loading="lazy">
+            </button>
+            {% elif member.exists %}
+            <button type="button" class="ui-thumb-media lightbox-trigger" data-fullsize="/api/original/local/{{ member.job_id }}"
+                    aria-label="{{ d.preview | replace('{name}', member.filename) }}">
+                <img src="/api/thumbnail/{{ member.job_id }}" alt="" loading="lazy">
+            </button>
+            {% else %}
+            <div class="ui-thumb-media"><span class="ui-thumb-placeholder">{{ icon('alert-triangle', 24) }}{{ d.not_found }}</span></div>
             {% endif %}
-        {% endfor %}
-        {% set ns.extra_count = ns.has_extra_gps|int + ns.has_extra_date|int + ns.has_extra_camera|int + ns.has_extra_desc|int + ns.has_extra_kw|int %}
 
-        <div class="dup-card {{ 'dup-card-original' if member.is_original }}">
-            <div class="dup-thumb">
-                {% if member.immich_asset_id %}
-                <img src="/api/thumbnail/immich/{{ member.immich_asset_id }}" alt="{{ member.filename }}" loading="lazy"
-                     class="lightbox-trigger" data-fullsize="/api/original/immich/{{ member.immich_asset_id }}">
-                {% elif member.exists %}
-                <img src="/api/thumbnail/{{ member.job_id }}" alt="{{ member.filename }}" loading="lazy"
-                     class="lightbox-trigger" data-fullsize="/api/original/local/{{ member.job_id }}">
+            <div class="ui-thumb-overlay">
+                {% if member.is_quality_best %}
+                <span class="ui-badge is-success dp-recommended" title="{{ d.recommended_title }}">{{ icon('star', 12) }}<span class="dp-badge-text">{{ d.recommended }}</span></span>
+                {% endif %}
+                {% if member.match_type == 'immich' %}
+                <span class="ui-badge is-violet" title="{{ d.kind_immich_title }}">{{ icon('cloud', 12) }}{{ d.immich_exists }}</span>
+                {% elif member.is_original %}
+                <span class="ui-badge is-info" title="{{ d.original_title }}">{{ d.original }}</span>
+                {% elif member.match_type == 'exact' %}
+                <span class="ui-badge" title="{{ d.exact_title }}">{{ d.kind_exact }}</span>
+                {% elif member.match_type == 'raw_jpg_pair' %}
+                <span class="ui-badge" title="{{ d.raw_pair_title }}">JPG+RAW</span>
                 {% else %}
-                <div class="dup-thumb-missing">{{ t.duplicates.not_found }}</div>
+                <span class="ui-badge is-warning" title="{{ d.similar_title }}">{{ d.similar | replace('{p}', (((64 - member.phash_distance) / 64 * 100) | round(0) | int) | string) }}</span>
                 {% endif %}
             </div>
 
-            <div class="dup-card-body">
-                <div class="dup-filename" title="{{ member.filename }}">{{ member.filename }}</div>
+            {% if member.immich_link or member.exists %}
+            <div class="ui-thumb-corner dp-corner">
+                {% if member.immich_link %}
+                <a class="ui-icon-btn ui-icon-btn-sm" href="{{ member.immich_link }}" target="_blank" rel="noopener"
+                   aria-label="{{ d.open_immich }}: {{ member.filename }}" title="{{ d.open_immich }}">{{ icon('external-link', 15) }}</a>
+                {% endif %}
+                {% if member.exists %}
+                <a class="ui-icon-btn ui-icon-btn-sm" href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}"
+                   aria-label="{{ d.download }}: {{ member.filename }}" title="{{ d.download }}">{{ icon('download', 15) }}</a>
+                {% endif %}
+            </div>
+            {% endif %}
 
-                <div class="dup-badges">
-                    {% if member.match_type == 'immich' %}
-                        {% if member.immich_link %}
-                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-immich dup-badge-link">{{ t.duplicates.immich_exists }}</a>
-                        {% else %}
-                        <span class="match-badge match-immich">{{ t.duplicates.immich_exists }}</span>
-                        {% endif %}
-                    {% elif member.is_original %}
-                        {% if member.immich_link %}
-                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-original dup-badge-link">{{ t.duplicates.original }}</a>
-                        {% elif member.exists %}
-                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-original dup-badge-link">{{ t.duplicates.original }}</a>
-                        {% else %}
-                        <span class="match-badge match-original">{{ t.duplicates.original }}</span>
-                        {% endif %}
-                    {% elif member.match_type == 'exact' %}
-                        {% if member.immich_link %}
-                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-exact dup-badge-link">{{ t.duplicates.exact | title }}</a>
-                        {% elif member.exists %}
-                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-exact dup-badge-link">{{ t.duplicates.exact | title }}</a>
-                        {% else %}
-                        <span class="match-badge match-exact">{{ t.duplicates.exact | title }}</span>
-                        {% endif %}
-                    {% elif member.match_type == 'raw_jpg_pair' %}
-                        {% if member.immich_link %}
-                        <a href="{{ member.immich_link }}" target="_blank" class="match-badge match-exact dup-badge-link">JPG+RAW</a>
-                        {% elif member.exists %}
-                        <a href="/api/original/local/{{ member.job_id }}" download="{{ member.filename }}" class="match-badge match-exact dup-badge-link">JPG+RAW</a>
-                        {% else %}
-                        <span class="match-badge match-exact">JPG+RAW</span>
-                        {% endif %}
-                    {% else %}
-                        <span class="match-badge match-similar">{{ ((64 - member.phash_distance) / 64 * 100) | round(0) | int }}%</span>
-                    {% endif %}
+            <div class="ui-thumb-body">
+                <p class="ui-thumb-title" title="{{ member.filename }}">{{ member.filename }}</p>
 
-                    {% if ns.extra_count > 0 %}
-                        <span class="match-badge match-meta-extra" title="{{ t.duplicates.has_more_metadata }}">+{{ t.duplicates.has_more_metadata }}</span>
-                    {% endif %}
-                    {% if member.is_quality_best %}
-                        <span class="match-badge match-quality-best" title="Beste Qualitaet — wird beim Batch-Clean bevorzugt">⭐ Beste Qualitaet</span>
-                    {% endif %}
-                    {% if member.folder_album %}
-                        <span class="match-badge match-folder-album" title="{{ t.duplicates.folder_album_title }}">📁 {{ member.folder_album }}</span>
-                    {% endif %}
-                </div>
-
-                <div class="dup-props">
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.size }}</span>
-                        <span>{% if member.file_size %}{{ (member.file_size / 1024 / 1024) | round(1) }} MB{% else %}—{% endif %}</span>
+                <dl class="dp-facts">
+                    <div class="dp-fact">
+                        <dt title="{{ d.fact_file }}">{{ icon('file', 14) }}<span class="dp-fact-label">{{ d.fact_file }}</span></dt>
+                        <dd>{{ member.ext or '—' }}{% if member.size_label %} · <span class="{{ 'dp-top' if member.is_top_size }}"{% if member.is_top_size %} title="{{ d.top_title }}"{% endif %}>{{ member.size_label }}</span>{% endif %}</dd>
                     </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.resolution }}</span>
-                        <span>{% if member.width %}{{ member.width }}x{{ member.height }}{% else %}—{% endif %}</span>
+                    <div class="dp-fact">
+                        <dt title="{{ d.resolution }}">{{ icon('image', 14) }}<span class="dp-fact-label">{{ d.resolution }}</span></dt>
+                        <dd{% if member.width %} title="{{ member.width }} × {{ member.height }} · {{ member.megapixel }} MP"{% endif %}>{% if member.width %}<span class="{{ 'dp-top' if member.is_top_px }}"{% if member.is_top_px %} title="{{ d.top_title }}"{% endif %}>{{ member.width }} × {{ member.height }}</span> · {{ member.megapixel }} MP{% else %}—{% endif %}</dd>
                     </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.megapixel }}</span>
-                        <span>{% if member.megapixel %}{{ member.megapixel }} MP{% else %}—{% endif %}</span>
+                    <div class="dp-fact">
+                        <dt title="{{ d.date }}">{{ icon('calendar', 14) }}<span class="dp-fact-label">{{ d.date }}</span></dt>
+                        <dd{% if member.exif_date %} title="{{ member.exif_date }}"{% endif %}>{{ member.date_label or '—' }}</dd>
                     </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.date }}</span>
-                        <span class="{{ 'dup-prop-extra' if ns.has_extra_date }}">{{ member.exif_date or '—' }}</span>
+                    <div class="dp-fact">
+                        <dt title="{{ d.camera }}">{{ icon('camera', 14) }}<span class="dp-fact-label">{{ d.camera }}</span></dt>
+                        <dd{% if member.exif_camera %} title="{{ member.exif_camera }}"{% endif %}>{{ member.exif_camera or '—' }}</dd>
                     </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.camera }}</span>
-                        <span class="{{ 'dup-prop-extra' if ns.has_extra_camera }}">{{ member.exif_camera or '—' }}</span>
-                    </div>
-                    {% if member.exif_iso or member.exif_aperture or member.exif_shutter %}
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.settings_label }}</span>
-                        <span>{% if member.exif_iso %}ISO {{ member.exif_iso }}{% endif %}{% if member.exif_aperture %} f/{{ member.exif_aperture }}{% endif %}{% if member.exif_shutter %} {{ member.exif_shutter }}s{% endif %}</span>
+                    {% if ns_group.shot %}
+                    {% set shot = [('ISO ' ~ member.exif_iso) if member.exif_iso else '', ('f/' ~ member.exif_aperture) if member.exif_aperture else '', (member.exif_shutter ~ ' s') if member.exif_shutter else '', member.exif_focal or ''] | select | join(' · ') %}
+                    <div class="dp-fact">
+                        <dt title="{{ d.fact_exposure }}">{{ icon('sliders', 14) }}<span class="dp-fact-label">{{ d.fact_exposure }}</span></dt>
+                        <dd{% if shot %} title="{{ shot }}"{% endif %}>{{ shot or '—' }}</dd>
                     </div>
                     {% endif %}
-                    {% if member.exif_focal %}
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.focal_length }}</span>
-                        <span>{{ member.exif_focal }}</span>
+                    <div class="dp-fact">
+                        <dt title="{{ d.fact_metadata }}">{{ icon('tag', 14) }}<span class="dp-fact-label">{{ d.fact_metadata }}</span></dt>
+                        <dd class="dp-meta">
+                            {% set chips = [('gps', 'map-pin', d.meta_gps), ('exif', 'info', d.exif), ('description', 'file-text', d.meta_description), ('keywords', 'tag', (member.exif_keywords | length) ~ ' ' ~ d.meta_keywords)] %}
+                            {% set ns_chip = namespace(any=false) %}
+                            {% for key, ic, label in chips %}{% if key in member.meta_have %}{% set ns_chip.any = true %}
+                            <span class="ui-tag{{ ' is-success' if key in member.meta_extra }}"{% if key in member.meta_extra %} title="{{ d.meta_extra_title }}"{% endif %}>{{ icon(ic, 12) }}{{ label }}</span>
+                            {% endif %}{% endfor %}
+                            {% if member.folder_album %}{% set ns_chip.any = true %}
+                            <span class="ui-tag" title="{{ d.folder_album_title }}">{{ icon('folder', 12) }}<span class="ui-truncate">{{ member.folder_album }}</span></span>
+                            {% endif %}
+                            {% if not ns_chip.any %}—{% endif %}
+                        </dd>
                     </div>
-                    {% endif %}
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.exif }}</span>
-                        <span>{% if member.exif_has_exif %}{{ t.duplicates.yes }}{% else %}{{ t.duplicates.no }}{% endif %}</span>
-                    </div>
-                    <div class="dup-prop">
-                        <span class="dup-prop-label">{{ t.duplicates.gps }}</span>
-                        <span class="{{ 'dup-prop-extra' if ns.has_extra_gps }}">{% if member.exif_has_gps %}{{ t.duplicates.yes }}{% else %}{{ t.duplicates.no }}{% endif %}</span>
-                    </div>
-                </div>
+                </dl>
 
                 {% if member.exif_keywords %}
-                <div class="dup-tags {{ 'dup-tags-extra' if ns.has_extra_kw }}">
-                    {% for tag in member.exif_keywords %}
-                    <span class="dup-tag">{{ tag }}</span>
-                    {% endfor %}
+                <div class="ui-tags dp-keywords">
+                    {% for tag in member.exif_keywords[:8] %}<span class="ui-tag">{{ tag }}</span>{% endfor %}
+                    {% if member.exif_keywords | length > 8 %}<span class="ui-tag" title="{{ member.exif_keywords[8:] | join(', ') }}">+{{ member.exif_keywords | length - 8 }}</span>{% endif %}
                 </div>
                 {% endif %}
 
                 {% if member.exif_description %}
-                <div class="dup-description {{ 'dup-desc-extra' if ns.has_extra_desc }}">{{ member.exif_description }}</div>
+                <p class="dp-desc" title="{{ member.exif_description }}">{{ member.exif_description }}</p>
                 {% endif %}
 
-                <div class="dup-path" title="{{ member.filepath }}">{{ member.filepath }}</div>
-                <div class="dup-key"><code>{{ member.debug_key }}</code></div>
+                <div class="dp-where">
+                    <span class="dp-path" title="{{ member.filepath }}">{{ member.filepath }}</span>
+                    <a class="ui-link ui-mono dp-key" href="/logs/job/{{ member.debug_key }}" title="{{ d.job_details }}">{{ member.debug_key }}</a>
+                </div>
             </div>
 
-            <div class="dup-card-actions">
+            <div class="ui-thumb-actions dp-actions">
                 {% if group.members | length > 1 %}
-                <form method="post" action="/api/duplicates/keep" class="inline-form"
-                      onsubmit="return dupConfirm('{{ t.duplicates.keep_confirm | replace('{name}', member.filename) }}')">
+                <form method="post" action="/api/duplicates/keep" class="dp-action-form"
+                      data-confirm-title="{{ d.keep_title }}"
+                      data-confirm-text="{{ d.keep_text | replace('{name}', member.filename) | replace('{n}', others_n | string) }}"
+                      data-confirm-ok="{{ d.keep_ok }}" data-confirm-danger="1">
                     <input type="hidden" name="keep_key" value="{{ member.debug_key }}">
                     <input type="hidden" name="group_key" value="{{ group.original_key }}">
-                    <button type="submit" class="btn btn-small btn-primary">{{ t.duplicates.keep_this }}</button>
+                    <button type="submit" class="ui-btn ui-btn-sm {{ 'ui-btn-primary' if member.is_quality_best else 'ui-btn-secondary' }}"
+                            aria-label="{{ d.keep_short }}: {{ member.filename }}">{{ icon('check', 14) }}{{ d.keep_short }}</button>
                 </form>
-
-                {# Merge metadata: collect all sources that have data this member lacks.
-                   Target must exist locally (we write via ExifTool).
-                   Sources can be local OR have EXIF data loaded from Immich. #}
-                {% set merge_ns = namespace(source_keys=[], source_names=[], any_can_merge=false) %}
-                {% if member.exists %}
-                {% for other in group.members %}
-                    {% if other.debug_key != member.debug_key and (other.exists or other.exif_has_exif or other.exif_keywords) %}
-                        {% set ons = namespace(can_merge=false) %}
-                        {% if other.exif_has_gps and not member.exif_has_gps %}{% set ons.can_merge = true %}{% endif %}
-                        {% if other.exif_date and not member.exif_date %}{% set ons.can_merge = true %}{% endif %}
-                        {% if other.exif_camera and not member.exif_camera %}{% set ons.can_merge = true %}{% endif %}
-                        {% if other.exif_description and not member.exif_description %}{% set ons.can_merge = true %}{% endif %}
-                        {% if other.exif_keywords and (other.exif_keywords | length > member.exif_keywords | length) %}{% set ons.can_merge = true %}{% endif %}
-                        {% if ons.can_merge %}
-                            {% set merge_ns.source_keys = merge_ns.source_keys + [other.debug_key] %}
-                            {% set merge_ns.source_names = merge_ns.source_names + [other.filename] %}
-                            {% set merge_ns.any_can_merge = true %}
-                        {% endif %}
-                    {% endif %}
-                {% endfor %}
-                {% endif %}
-
-                {# merge-metadata buttons removed in v2.30 — merge happens automatically via keep/batch-clean #}
-
                 {% if member.match_type != 'original' %}
-                <form method="post" action="/api/duplicates/not-duplicate" class="inline-form"
-                      onsubmit="return dupConfirm('{{ t.duplicates.not_duplicate_confirm | replace('{name}', member.filename) }}')">
+                <form method="post" action="/api/duplicates/not-duplicate" class="dp-action-form"
+                      data-confirm-title="{{ d.not_duplicate_title }}"
+                      data-confirm-text="{{ d.not_duplicate_text | replace('{name}', member.filename) }}"
+                      data-confirm-ok="{{ d.not_duplicate_ok }}">
                     <input type="hidden" name="debug_key" value="{{ member.debug_key }}">
-                    <button type="submit" class="btn btn-small btn-secondary">{{ t.duplicates.not_duplicate }}</button>
+                    <button type="submit" class="ui-btn ui-btn-ghost ui-btn-sm"
+                            aria-label="{{ d.not_duplicate }}: {{ member.filename }}">{{ d.not_duplicate }}</button>
                 </form>
                 {% endif %}
                 {% endif %}
             </div>
-        </div>
+        </article>
         {% endfor %}
+        </div>
     </div>
-</div>
+</section>
