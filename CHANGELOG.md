@@ -1,5 +1,37 @@
 # Changelog
 
+## v2.32.25 — 2026-10-22
+
+### Fix: v2.32.24 startete nicht — Abhängigkeiten festgenagelt
+
+Das Image von v2.32.24 enthielt **SQLAlchemy 2.1.6** statt 2.0.52 und
+kam nicht hoch:
+
+    ImportError: The SQLAlchemy asyncio module requires that the Python
+    'greenlet' library is installed.
+
+Am Code lag es nicht — v2.32.24 änderte nur den Setup-Router.
+`requirements.txt` gab ausschliesslich Untergrenzen vor
+(`sqlalchemy>=2.0`), jeder Build zog also die jeweils neuesten
+Versionen. SQLAlchemy 2.1 installiert `greenlet` nicht mehr von selbst;
+FastAPI sprang im selben Build von 0.141 auf 0.160, ungetestet.
+
+Neu gibt es `backend/constraints.txt` mit den exakten Versionen aller
+40 Pakete aus dem erprobten Image v2.32.23; das Dockerfile installiert
+mit `-c constraints.txt`. `requirements.txt` verlangt zusätzlich
+`sqlalchemy[asyncio]`, damit `greenlet` auch bei einem späteren,
+bewussten Upgrade nicht fehlt. Ein Build zieht damit nie mehr
+unbemerkt andere Versionen.
+
+Geprüft am lokal gebauten Image: Startpfad 4/4, alle Pakete identisch mit
+v2.32.23, die Sperre des Einrichtungs-Assistenten aus v2.32.24 wirkt
+(10/10). Aufgefallen ist der Fehler durch den Startpfad-Test am
+veröffentlichten Image — dem Release-Gate, das nach v2.32.22 eingeführt
+wurde.
+
+**v2.32.24 nicht verwenden.** Diese Version enthält den Sicherheits-Fix
+aus v2.32.24 und startet.
+
 ## v2.32.24 — 2026-10-22
 
 ### Sicherheit: Einrichtungs-Assistent nach der Einrichtung gesperrt
