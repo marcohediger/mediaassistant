@@ -248,6 +248,7 @@ async def diagnostics(request: Request):
                      "exists": os.path.isdir(d.path)}
                     for d in directories if d.set_id == ps.id
                 ],
+                "immich_input": bool(ps.immich_input),
                 "immich_poll": bool(ps.immich_poll),
                 "immich_poll_user_id": ps.immich_poll_user_id,
                 "immich_last_poll": ps.immich_last_poll,

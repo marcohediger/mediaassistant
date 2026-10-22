@@ -69,6 +69,8 @@ async def _migrate_columns(conn):
          "ALTER TABLE processing_sets ADD COLUMN metadata_write_mode TEXT DEFAULT 'direct'"),
         ("processing_sets", "google_json",
          "ALTER TABLE processing_sets ADD COLUMN google_json BOOLEAN DEFAULT 0"),
+        ("processing_sets", "immich_input",
+         "ALTER TABLE processing_sets ADD COLUMN immich_input BOOLEAN DEFAULT 0"),
     ]
     added = set()
     for table, column, sql in migrations:
@@ -84,6 +86,13 @@ async def _migrate_columns(conn):
             "UPDATE processing_sets SET metadata_write_mode = COALESCE("
             "(SELECT json_extract(value, '$') FROM config WHERE key = 'metadata.write_mode' "
             "AND json_extract(value, '$') IN ('direct', 'sidecar')), 'direct')"))
+    # Before immich_input existed, switching the Immich input off cleared
+    # immich_poll but kept the chosen access — so a set with an access still
+    # set had an input that was merely off.
+    if ("processing_sets", "immich_input") in added:
+        await conn.execute(sqlalchemy.text(
+            "UPDATE processing_sets SET immich_input = CASE WHEN immich_poll = 1 "
+            "OR immich_poll_user_id IS NOT NULL THEN 1 ELSE 0 END"))
     if ("processing_sets", "google_json") in added:
         await conn.execute(sqlalchemy.text(
             "UPDATE processing_sets SET google_json = COALESCE("

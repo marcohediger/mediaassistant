@@ -284,3 +284,13 @@ body[data-theme="light"] .lst-toast { box-shadow: 0 10px 30px rgba(16, 24, 40, 0
 
     .lst-toast { left: 1rem; right: 1rem; bottom: 1rem; max-width: none; }
 }
+
+/* An Immich input that exists but is switched off. */
+.lst-meta.lst-off { color: var(--text-muted); opacity: 0.7; }
+
+/* Image resize card */
+#section-ai-resize .resize-size { max-width: 18rem; }
+#section-ai-resize .resize-size.is-off { opacity: 0.5; }
+.input-with-unit { display: flex; align-items: center; gap: 0.5rem; }
+.input-with-unit input { flex: 1; min-width: 0; }
+.input-with-unit .unit { color: var(--text-muted); font-size: 0.85rem; }

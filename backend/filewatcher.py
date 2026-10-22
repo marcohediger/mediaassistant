@@ -57,7 +57,7 @@ async def _run_set(ps: ProcessingSet) -> None:
         await log_error("filewatcher", f"Scan error in set „{ps.name}\": {e}")
         logger.error(f"Scan error in set {ps.name}: {e}")
     try:
-        if ps.immich_poll and await config_manager.is_module_enabled("immich") \
+        if ps.immich_input and ps.immich_poll and await config_manager.is_module_enabled("immich") \
                 and not await config_manager.get("pipeline.paused", False):
             await poll_set(ps)
     except Exception as e:

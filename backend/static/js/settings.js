@@ -742,7 +742,7 @@
     dirs = s.directories.map(function (d) {
       return {id: d.id, path: d.path, label: d.label, active: !!d.active, exists: !!d.exists, origPath: d.path};
     });
-    immich = s.immich_poll ? {active: true, user_id: s.immich_poll_user_id} : null;
+    immich = s.immich_input ? {active: !!s.immich_poll, user_id: s.immich_poll_user_id} : null;
     pollUserId = s.immich_poll_user_id;
     rules = s.rules.map(function (r) {
       return {condition: r.condition, value: r.value, target: r.target, media_type: r.media_type || null, active: !!r.active};
@@ -763,6 +763,7 @@
     });
     setDlg.querySelectorAll("[data-radio-field]:checked").forEach(function (r) { out[r.dataset.radioField] = r.value; });
     out.immich_user_id = out.immich_user_id ? parseInt(out.immich_user_id, 10) : null;
+    out.immich_input = !!immich;
     out.immich_poll = !!immich && immich.active;
     out.immich_poll_user_id = immich ? immich.user_id : pollUserId;
     out.scheduled_days = Array.from(document.querySelectorAll("#set-days input:checked")).map(function (cb) { return cb.value; }).join(",");

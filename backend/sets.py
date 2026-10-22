@@ -51,7 +51,7 @@ COPIED_FIELDS = (
     "description", "schedule_mode", "interval_s", "window_start", "window_end",
     "scheduled_days", "scheduled_time", "folder_tags", "dry_run", "ocr_enabled", "ocr_mode",
     "metadata_write_mode", "google_json",
-    "target_mode", "library_base_path", "immich_user_id", "immich_poll",
+    "target_mode", "library_base_path", "immich_user_id", "immich_input", "immich_poll",
     "immich_poll_user_id",
 )
 
@@ -247,12 +247,13 @@ async def migrate_to_sets() -> None:
                     position=len(sets) + 1, **schedule, folder_tags=False, dry_run=False,
                     ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, **meta, target_mode="immich",
                     library_base_path=base_path, immich_user_id=None,
-                    immich_poll=True, immich_poll_user_id=None, immich_last_poll=last_poll,
+                    immich_input=True, immich_poll=True, immich_poll_user_id=None, immich_last_poll=last_poll,
                 )
                 session.add(global_poll)
                 await session.flush()
             else:
                 global_poll = first
+                first.immich_input = True
                 first.immich_poll = True
                 first.immich_last_poll = last_poll
             poll_sets[None] = global_poll
@@ -265,7 +266,7 @@ async def migrate_to_sets() -> None:
                     position=len(sets) + len(poll_sets) + 1, **schedule,
                     folder_tags=False, dry_run=False, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, **meta,
                     target_mode="immich", library_base_path=base_path, immich_user_id=u.id,
-                    immich_poll=True, immich_poll_user_id=u.id, immich_last_poll=last_poll,
+                    immich_input=True, immich_poll=True, immich_poll_user_id=u.id, immich_last_poll=last_poll,
                 )
                 session.add(ps)
                 poll_sets[u.id] = ps
