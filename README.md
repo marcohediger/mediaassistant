@@ -1,4 +1,7 @@
-![MediaAssistant](logos/mediaassistant_logo_dark.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logos/mediaassistant_logo_dark.svg">
+  <img alt="MediaAssistant" src="logos/mediaassistant_logo_light.svg" height="64">
+</picture>
 
 Drop your photos and videos into a folder. MediaAssistant takes care of the rest: metadata extraction, AI-powered tagging, duplicate detection, geocoding, and automatic sorting into your library or Immich.
 
