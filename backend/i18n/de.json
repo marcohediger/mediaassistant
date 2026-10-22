@@ -97,7 +97,8 @@
     "no_entries": "Keine Einträge gefunden.",
     "prev": "Zurück",
     "next": "Weiter",
-    "page": "Seite"
+    "page": "Seite",
+    "dryrun_tab": "Probelauf"
   },
   "job_detail": {
     "back": "Zurück",
@@ -120,7 +121,8 @@
     "completed": "Abgeschlossen",
     "duration": "Verarbeitungszeit",
     "hashes": "Hashes",
-    "not_found": "Nicht gefunden"
+    "not_found": "Nicht gefunden",
+    "note": "Hinweis"
   },
   "steps": {
     "IA-01": "EXIF auslesen",
@@ -474,7 +476,7 @@
   },
   "dryrun": {
     "title": "Dry-Run Report",
-    "subtitle": "Vorschau aller Dateien im Dry-Run Modus",
+    "subtitle": "Alle Dateien aus Sets im Probelauf — es wurde nichts verschoben, hochgeladen oder geschrieben",
     "generated": "Erstellt",
     "by_category": "Nach Kategorie",
     "by_inbox": "Nach Eingangsverzeichnis",
@@ -483,9 +485,7 @@
     "count": "Anzahl",
     "target_path": "Zielpfad",
     "errors": "Fehler",
-    "error_message": "Fehlermeldung",
-    "back_to_logs": "Zurück zu Logs",
-    "report_button": "Dry-Run Report"
+    "error_message": "Fehlermeldung"
   },
   "common": {
     "yes": "Ja",

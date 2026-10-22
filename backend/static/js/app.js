@@ -87,7 +87,7 @@
         <td>${esc(j.filename)}</td>
         <td><span class="status-badge status-${j.status}">${esc(j.status)}</span></td>
         <td>${esc(j.current_step || "—")}</td>
-        <td class="cell-error">${esc(j.error_message || "")}</td>
+        <td class="cell-msg${j.status === "error" ? " is-error" : ""}">${esc(j.error_message || "")}</td>
         <td>${esc(j.updated_at)}</td>
       </tr>`
       )
@@ -139,13 +139,17 @@
     const completedEl = document.querySelector("[data-field='completed_at']");
     if (completedEl) completedEl.textContent = job.completed_at || "—";
 
-    // Error section — show/hide
-    const errorSection = document.querySelector(".alert-error");
-    if (errorSection) {
-      errorSection.textContent = job.error_message || "";
-      errorSection.closest(".detail-section").style.display = job.error_message
-        ? ""
-        : "none";
+    // Message section: red "error" only when the job failed, else a note
+    const msgEl = document.querySelector("[data-field='error_message']");
+    if (msgEl) {
+      const failed = job.status === "error";
+      const section = msgEl.closest(".detail-section");
+      const heading = section.querySelector("h2");
+      msgEl.textContent = job.error_message || "";
+      msgEl.classList.toggle("alert-error", failed);
+      msgEl.classList.toggle("alert-info", !failed);
+      heading.textContent = failed ? heading.dataset.labelError : heading.dataset.labelNote;
+      section.style.display = job.error_message ? "" : "none";
     }
 
     // Step results

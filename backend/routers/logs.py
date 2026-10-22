@@ -36,6 +36,7 @@ async def logs_page(request: Request):
 
     jobs = []
     system_logs = []
+    report = None
     total = 0
     total_pages = 1
 
@@ -61,6 +62,8 @@ async def logs_page(request: Request):
             query = query.order_by(Job.updated_at.desc()).offset((page - 1) * ITEMS_PER_PAGE).limit(ITEMS_PER_PAGE)
             result = await session.execute(query)
             jobs = result.scalars().all()
+    elif tab == "dryrun":
+        report = await _dryrun_report()
     else:
         async with async_session() as session:
             query = select(SystemLog)
@@ -103,6 +106,7 @@ async def logs_page(request: Request):
         "tab": tab,
         "jobs": jobs,
         "system_logs": system_logs,
+        "report": report,
         "page": page,
         "total_pages": total_pages,
         "total": total,
@@ -138,12 +142,8 @@ async def log_detail(request: Request, debug_key: str):
     return await render(request, "log_detail.html", {"job": job, "back_url": back_url})
 
 
-@router.get("/dryrun-report")
-async def dryrun_report(request: Request):
-    """HTML report summarizing all dry-run jobs."""
-    if not await config_manager.is_setup_complete():
-        return RedirectResponse(url="/setup", status_code=302)
-
+async def _dryrun_report() -> dict:
+    """Summary of all dry-run jobs, shown as the third tab of the logs page."""
     async with async_session() as session:
         result = await session.execute(
             select(Job).where(Job.dry_run == True).order_by(Job.created_at.desc())
@@ -181,7 +181,7 @@ async def dryrun_report(request: Request):
     from datetime import datetime
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M")
 
-    return await render(request, "dryrun_report.html", {
+    return {
         "jobs": all_jobs,
         "stats": {
             "total": total,
@@ -194,7 +194,13 @@ async def dryrun_report(request: Request):
         "by_inbox": by_inbox,
         "errors": error_jobs,
         "generated_at": generated_at,
-    })
+    }
+
+
+@router.get("/dryrun-report")
+async def dryrun_report():
+    """Old address of the report; it lives in the logs page now."""
+    return RedirectResponse(url="/logs?tab=dryrun", status_code=302)
 
 
 @router.get("/job/{debug_key}/json")
