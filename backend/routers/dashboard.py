@@ -335,32 +335,28 @@ async def _get_module_status(i18n: dict, *, record: bool = True) -> list[dict]:
     return statuses
 
 
-async def _get_set_overview(i18n: dict) -> list[dict]:
-    """One card per processing set: active, directories, Immich poll, queue.
+async def _get_set_overview() -> list[dict]:
+    """One row per processing set: active, inputs, Immich poll, queue.
 
-    Shaped like a module card (status/label/detail), so the template and the
-    live refresh render both the same way.
+    Raw facts only; the template and the live refresh in app.js both build the
+    same row from them with the labels of the page.
     """
-    text = i18n.get("dashboard", {})
-    cards = []
-    for s in await set_summaries():
-        poll = text.get("set_poll_on", "Immich-Poll an") if s["immich_poll"] \
-            else text.get("set_poll_off", "Immich-Poll aus")
-        detail = " · ".join((
-            text.get("set_directories", "{n} Verzeichnis(se)").replace("{n}", str(len(s["directories"]))),
-            poll,
-            text.get("set_queue", "{n} in Warteschlange").replace("{n}", str(s["queue"])),
-        ))
-        cards.append({
+    return [
+        {
             "id": s["id"],
-            "label": s["name"],
-            "status": "ready" if s["active"] else "disabled",
-            "detail": detail,
-        })
-    return cards
+            "name": s["name"],
+            "active": s["active"],
+            "dry_run": s["dry_run"],
+            "directories": s["directories"],
+            "immich_input": s["immich_input"],
+            "immich_poll": s["immich_poll"],
+            "queue": s["queue"],
+        }
+        for s in await set_summaries()
+    ]
 
 
-async def _get_throughput(session) -> dict:
+async def _get_throughput(session, i18n: dict) -> dict:
     """Calculate throughput stats for completed jobs."""
     now = datetime.now()
     completed_statuses = ("done", "duplicate")
@@ -405,25 +401,59 @@ async def _get_throughput(session) -> dict:
     queued_count = rq.scalar() or 0
 
     # Estimate remaining time based on current throughput
+    text = i18n.get("dashboard", {})
     eta_text = ""
     if queued_count > 0 and files_per_min > 0:
         eta_minutes = queued_count / files_per_min
         if eta_minutes < 1:
-            eta_text = "< 1 Min"
+            eta_text = text.get("eta_lt_min", "< 1 Min")
         elif eta_minutes < 60:
-            eta_text = f"~{int(eta_minutes)} Min"
+            eta_text = text.get("eta_min", "~{n} Min").replace("{n}", str(int(eta_minutes)))
         elif eta_minutes < 1440:
-            hours = eta_minutes / 60
-            eta_text = f"~{hours:.1f} Std"
+            eta_text = text.get("eta_hours", "~{n} Std").replace("{n}", f"{eta_minutes / 60:.1f}")
         else:
-            days = eta_minutes / 1440
-            eta_text = f"~{days:.1f} Tage"
+            eta_text = text.get("eta_days", "~{n} Tage").replace("{n}", f"{eta_minutes / 1440:.1f}")
 
     return {
         "files_per_min": files_per_min,
         "files_per_hour": files_per_hour,
         "files_24h": files_24h,
         "eta": eta_text,
+        # Sub line of the "queued" tile; empty hides it.
+        "eta_label": text.get("eta", "noch {eta}").replace("{eta}", eta_text) if eta_text else "",
+    }
+
+
+async def _overview() -> dict:
+    """Everything the dashboard shows; the page and its live refresh share it."""
+    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+    i18n = load_lang(lang)
+    async with async_session() as session:
+        # Single GROUP BY query instead of 6 separate COUNT queries
+        count_result = await session.execute(
+            select(Job.status, func.count(Job.id)).group_by(Job.status)
+        )
+        counts = {row[0] or "unknown": row[1] for row in count_result.all()}
+
+        recent_result = await session.execute(
+            select(Job).order_by(Job.updated_at.desc()).limit(20)
+        )
+        recent_jobs = recent_result.scalars().all()
+
+        throughput = await _get_throughput(session, i18n)
+
+    return {
+        "stats": {
+            "total": sum(counts.values()),
+            "done": counts.get("done", 0),
+            "errors": counts.get("error", 0),
+            "queued": counts.get("queued", 0),
+            "processing": counts.get("processing", 0),
+            "duplicates": counts.get("duplicate", 0),
+        },
+        "throughput": throughput,
+        "sets": await _get_set_overview(),
+        "recent_jobs": recent_jobs,
     }
 
 
@@ -432,85 +462,29 @@ async def dashboard(request: Request):
     if not await config_manager.is_setup_complete():
         return RedirectResponse(url="/setup", status_code=302)
 
-    async with async_session() as session:
-        # Single GROUP BY query instead of 6 separate COUNT queries
-        count_result = await session.execute(
-            select(Job.status, func.count(Job.id)).group_by(Job.status)
-        )
-        counts = {row[0] or "unknown": row[1] for row in count_result.all()}
-        total = sum(counts.values())
-
-        recent_result = await session.execute(
-            select(Job).order_by(Job.updated_at.desc()).limit(20)
-        )
-        recent_jobs = recent_result.scalars().all()
-
-        throughput = await _get_throughput(session)
-
-    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
-    i18n = load_lang(lang)
-    sets = await _get_set_overview(i18n)
-
-    return await render(request, "dashboard.html", {
-        "stats": {
-            "total": total,
-            "done": counts.get("done", 0),
-            "errors": counts.get("error", 0),
-            "queued": counts.get("queued", 0),
-            "processing": counts.get("processing", 0),
-            "duplicates": counts.get("duplicate", 0),
-        },
-        "throughput": throughput,
-        "sets": sets,
-        "recent_jobs": recent_jobs,
-    })
+    data = await _overview()
+    # Rendered in the right state at once; the page polls it afterwards.
+    data["pipeline_paused"] = bool(await config_manager.get("pipeline.paused", False))
+    return await render(request, "dashboard.html", data)
 
 
 @router.get("/api/dashboard")
 async def dashboard_json():
     """JSON endpoint for live-updating the dashboard."""
-    async with async_session() as session:
-        # Single GROUP BY query instead of 6 separate COUNT queries
-        count_result = await session.execute(
-            select(Job.status, func.count(Job.id)).group_by(Job.status)
-        )
-        counts = {row[0] or "unknown": row[1] for row in count_result.all()}
-        total = sum(counts.values())
-
-        recent_result = await session.execute(
-            select(Job).order_by(Job.updated_at.desc()).limit(20)
-        )
-        recent_jobs = recent_result.scalars().all()
-
-        throughput = await _get_throughput(session)
-
-    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
-    i18n = load_lang(lang)
-    sets = await _get_set_overview(i18n)
-
-    return {
-        "stats": {
-            "total": total,
-            "done": counts.get("done", 0),
-            "errors": counts.get("error", 0),
-            "queued": counts.get("queued", 0),
-            "processing": counts.get("processing", 0),
-            "duplicates": counts.get("duplicate", 0),
-        },
-        "throughput": throughput,
-        "sets": sets,
-        "recent_jobs": [
-            {
-                "debug_key": j.debug_key,
-                "filename": j.filename,
-                "status": j.status,
-                "current_step": j.current_step,
-                "error_message": j.error_message,
-                "updated_at": j.updated_at.strftime("%d.%m. %H:%M") if j.updated_at else "—",
-            }
-            for j in recent_jobs
-        ],
-    }
+    data = await _overview()
+    data["recent_jobs"] = [
+        {
+            "debug_key": j.debug_key,
+            "filename": j.filename,
+            "status": j.status,
+            "current_step": j.current_step,
+            "error_message": j.error_message,
+            # Same format as the server-rendered table
+            "updated_at": j.updated_at.strftime("%d.%m. %H:%M:%S") if j.updated_at else "—",
+        }
+        for j in data["recent_jobs"]
+    ]
+    return data
 
 
 # Where each module is configured; the status menu links its rows there.

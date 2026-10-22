@@ -1,195 +1,260 @@
 {% extends "base.html" %}
 {% block title %}{{ t.dashboard.title }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/dashboard.css?v={{ version }}">{% endblock %}
 {% block content %}
 {% from "_status.html" import status_badge with context %}
-<div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.5rem;">
-    <h1 style="margin: 0;">{{ t.dashboard.title }}</h1>
-    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-        <a href="#" id="pipeline-toggle-btn" class="btn btn-small btn-secondary"
-           onclick="togglePipeline(event)" data-state="running">⏸ {{ t.dashboard.pause_pipeline }}</a>
-        <a href="#" class="btn btn-small btn-primary"
-           onclick="triggerScan(event)">{{ t.dashboard.trigger_scan }}</a>
+{% set d = t.dashboard %}
+{# Sprite icon; app.js (dashIcon) writes the same markup on live refresh. #}
+{% macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
+
+{# One processing set; app.js (dashSetRow) renders the same row from /api/dashboard. #}
+{% macro set_row(s) -%}
+<tr{% if not s.active %} class="is-inactive"{% endif %}>
+<th scope="row"><div class="ui-cell-name"><span class="ui-dot {{ 'is-success' if s.active else 'is-hollow' }}" role="img" title="{{ t.sets.active if s.active else t.sets.status_inactive }}" aria-label="{{ t.sets.active if s.active else t.sets.status_inactive }}"></span><span class="dash-set-name"><strong>{{ s.name }}</strong>{% if s.dry_run %}<span class="ui-badge is-warning">{{ t.sets.dry_run_short }}</span>{% endif %}</span></div></th>
+<td class="dash-col-inputs"><div class="dash-set-inputs">
+{%- for p in s.directories %}<span class="ui-cell-meta">{{ icon('folder-input', 15) }}<code class="ui-code">{{ p }}</code></span>{% endfor %}
+{%- if s.immich_input or s.immich_poll %}<span class="ui-cell-meta{{ ' is-on' if s.immich_poll else '' }}">{{ icon('cloud-down', 15) }}{{ d.set_poll_on if s.immich_poll else d.set_poll_off }}</span>{% endif %}
+{%- if not s.directories and not s.immich_input and not s.immich_poll %}<span>{{ t.sets.no_inputs }}</span>{% endif -%}
+</div></td>
+<td class="dash-set-queue">{% set waiting = t.sets.queue_waiting | replace('{n}', s.queue | string) %}{% if s.queue %}<span class="ui-badge is-info">{{ waiting }}</span>{% else %}{{ waiting }}{% endif %}</td>
+<td class="ui-col-actions"><div class="ui-actions"><a class="ui-icon-btn" href="/settings?edit={{ s.id }}#section-sets" title="{{ t.sets.edit }}" aria-label="{{ t.sets.edit }}: {{ s.name }}">{{ icon('pencil', 18) }}</a></div></td>
+</tr>
+{%- endmacro %}
+
+{# One recent job; app.js (updateRecentJobs) renders the same row from /api/dashboard. #}
+{% macro job_row(job) -%}
+{% set msg = job.error_message or '' %}
+<tr>
+<td class="ui-col-icon">{{ status_badge(job.status, icon_only=True) }}</td>
+<th scope="row"><div class="dash-job"><a class="dash-job-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename or '' }}">{{ job.filename or '—' }}</a><span class="dash-job-key">{{ job.debug_key or '—' }}</span></div></th>
+<td class="dash-col-step">{{ job.current_step or '—' }}</td>
+<td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }}" title="{{ msg }}">{{ msg }}</td>
+<td class="ui-num dash-col-time">{{ job.updated_at.strftime('%d.%m. %H:%M:%S') if job.updated_at else '—' }}</td>
+</tr>
+{%- endmacro %}
+
+<div class="ui-page-head">
+    <div class="ui-page-head-text">
+        <h1 class="ui-page-title">{{ d.title }}</h1>
+    </div>
+    <div class="ui-page-actions">
+        <button type="button" id="pipeline-toggle-btn" class="ui-btn ui-btn-secondary"
+                data-state="{{ 'paused' if pipeline_paused else 'running' }}">
+            {{- icon('play' if pipeline_paused else 'pause') -}}
+            <span class="dash-btn-label">{{ d.resume_pipeline if pipeline_paused else d.pause_pipeline }}</span>
+        </button>
+        <button type="button" id="scan-btn" class="ui-btn ui-btn-primary">
+            {{- icon('refresh') -}}
+            <span>{{ d.trigger_scan }}</span>
+        </button>
     </div>
 </div>
 
-<div id="pipeline-paused-banner" style="display: none; margin: 0.5rem 0; padding: 0.75rem 1rem; background: rgba(255, 165, 0, 0.15); border: 1px solid rgba(255, 165, 0, 0.5); border-radius: 6px; color: var(--text);">
-    ⏸ <strong>{{ t.dashboard.pipeline_paused_title }}</strong> —
-    <span id="pipeline-paused-detail">{{ t.dashboard.pipeline_paused_drain }}</span>
+<div class="ui-alert is-warning dash-paused" id="pipeline-paused-banner" role="status"{% if not pipeline_paused %} hidden{% endif %}>
+    {{ icon('pause-circle', 18) }}
+    <div class="ui-alert-body">
+        <p class="ui-alert-title">{{ d.pipeline_paused_title }}</p>
+        <p class="ui-alert-text" id="pipeline-paused-detail">
+            {%- if stats.processing -%}
+            {{ d.pipeline_paused_drain }} ({{ d.paused_counts_drain | replace('{active}', stats.processing | string) | replace('{queued}', stats.queued | string) }})
+            {%- else -%}
+            {{ d.pipeline_paused_idle }} ({{ d.paused_counts_idle | replace('{queued}', stats.queued | string) }})
+            {%- endif -%}
+        </p>
+    </div>
 </div>
+
+<div class="ui-stats dash-stats" id="stats-grid">
+    <a class="ui-stat" href="/logs?tab=jobs">
+        <span class="ui-stat-label">{{ icon('layers') }}{{ d.total }}</span>
+        <span class="ui-stat-value" data-stat="total">{{ stats.total }}</span>
+    </a>
+    <a class="ui-stat is-success" href="/logs?tab=jobs&amp;status=done">
+        <span class="ui-stat-label">{{ icon('check-circle') }}{{ d.done }}</span>
+        <span class="ui-stat-value" data-stat="done">{{ stats.done }}</span>
+    </a>
+    <a class="ui-stat is-warning" href="/logs?tab=jobs&amp;status=queued">
+        <span class="ui-stat-label">{{ icon('clock') }}{{ d.queued }}</span>
+        <span class="ui-stat-value" data-stat="queued">{{ stats.queued }}</span>
+        <span class="ui-stat-sub" data-throughput="eta_label"{% if not throughput.eta_label %} hidden{% endif %}>{{ throughput.eta_label }}</span>
+    </a>
+    <a class="ui-stat is-info" href="/logs?tab=jobs&amp;status=processing">
+        <span class="ui-stat-label"><svg class="ui-i{{ ' ui-spin' if stats.processing else '' }}" width="16" height="16" aria-hidden="true" focusable="false" data-stat-icon="processing"><use href="#ui-i-loader"/></svg>{{ d.processing }}</span>
+        <span class="ui-stat-value" data-stat="processing">{{ stats.processing }}</span>
+    </a>
+    {# Red only while there is something to look at #}
+    <a class="ui-stat{{ ' is-error' if stats.errors else '' }}" href="/logs?tab=jobs&amp;status=error">
+        <span class="ui-stat-label">{{ icon('alert-circle') }}{{ d.errors }}</span>
+        <span class="ui-stat-value" data-stat="errors">{{ stats.errors }}</span>
+    </a>
+    <a class="ui-stat is-warning" href="/duplicates"{% if not stats.duplicates %} hidden{% endif %}>
+        <span class="ui-stat-label">{{ icon('copy') }}{{ d.duplicates }}</span>
+        <span class="ui-stat-value" data-stat="duplicates">{{ stats.duplicates }}</span>
+    </a>
+    <div class="ui-stat dash-throughput" id="throughput-bar">
+        <span class="ui-stat-label">{{ icon('trending-up') }}{{ d.throughput }}</span>
+        <span class="ui-stat-value" title="{{ d.files_per_hour }}"><span data-throughput="files_per_hour">{{ throughput.files_per_hour }}</span><span class="ui-stat-unit">{{ d.per_hour }}</span></span>
+        <span class="ui-stat-sub">
+            <span title="{{ d.files_per_min }}"><span data-throughput="files_per_min">{{ throughput.files_per_min }}</span>{{ d.per_min }}</span>
+            <span aria-hidden="true">·</span>
+            <span title="{{ d.files_24h }}"><span data-throughput="files_24h">{{ throughput.files_24h }}</span> {{ d.in_24h }}</span>
+        </span>
+    </div>
+</div>
+
+<section class="ui-section dash-section">
+    <div class="ui-section-head">
+        <div class="ui-section-head-text">
+            <h2 class="ui-section-title" id="sets-title">{{ d.sets }}</h2>
+        </div>
+    </div>
+    {% set set_labels = {
+        "active": t.sets.active, "inactive": t.sets.status_inactive, "dry_run": t.sets.dry_run_short,
+        "poll_on": d.set_poll_on, "poll_off": d.set_poll_off, "no_inputs": t.sets.no_inputs,
+        "queue": t.sets.queue_waiting, "edit": t.sets.edit,
+    } %}
+    <div class="ui-table-card">
+        <table class="ui-table dash-sets" aria-labelledby="sets-title">
+            <thead>
+                <tr>
+                    <th scope="col">{{ t.sets.col_name }}</th>
+                    <th scope="col">{{ t.sets.col_inputs }}</th>
+                    <th scope="col">{{ t.sets.col_queue }}</th>
+                    <th scope="col" class="ui-col-actions">{{ t.sets.col_actions }}</th>
+                </tr>
+            </thead>
+            <tbody id="sets-grid" data-labels='{{ set_labels | tojson }}'>
+            {%- for s in sets %}{{ set_row(s) }}{% endfor -%}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="ui-section">
+    <div class="ui-section-head dash-head-link">
+        <div class="ui-section-head-text">
+            <h2 class="ui-section-title" id="recent-title">{{ d.recent }}</h2>
+        </div>
+        <a class="ui-btn ui-btn-ghost ui-btn-sm dash-all-logs" href="/logs?tab=jobs">{{ d.show_all_logs }}{{ icon('chevron-right', 14) }}</a>
+    </div>
+    <div class="ui-table-card" id="recent-jobs-card"{% if not recent_jobs %} hidden{% endif %}>
+        <table class="ui-table dash-jobs" aria-labelledby="recent-title">
+            <thead>
+                <tr>
+                    <th scope="col" class="ui-col-icon"><span class="ui-sr-only">{{ d.status }}</span></th>
+                    <th scope="col">{{ d.file }}</th>
+                    <th scope="col" class="dash-col-step">{{ d.step }}</th>
+                    <th scope="col">{{ d.message }}</th>
+                    <th scope="col" class="ui-num">{{ d.time }}</th>
+                </tr>
+            </thead>
+            <tbody id="recent-jobs">
+            {%- for job in recent_jobs %}{{ job_row(job) }}{% endfor -%}
+            </tbody>
+        </table>
+    </div>
+    <div class="ui-empty-inline" id="recent-jobs-empty"{% if recent_jobs %} hidden{% endif %}>
+        {{ icon('inbox', 18) }}<span>{{ d.no_jobs }}</span>
+    </div>
+</section>
+
+<div class="ui-toast-region" id="dash-toasts" aria-live="polite"></div>
 
 <script>
-async function refreshPipelineStatus() {
-    try {
-        const r = await fetch('/api/pipeline/status', {
-            credentials: 'same-origin',
-            headers: {'Accept': 'application/json'}
-        });
-        if (!r.ok) return;
-        const data = await r.json();
-        const btn = document.getElementById('pipeline-toggle-btn');
-        const banner = document.getElementById('pipeline-paused-banner');
-        const detail = document.getElementById('pipeline-paused-detail');
-        if (!btn || !banner) return;
-        if (data.paused) {
-            btn.textContent = '▶ {{ t.dashboard.resume_pipeline }}';
-            btn.dataset.state = 'paused';
-            banner.style.display = '';
-            if (data.in_flight > 0) {
-                detail.textContent = '{{ t.dashboard.pipeline_paused_drain }} (' + data.in_flight + ' aktiv, ' + data.queued + ' wartend)';
-            } else {
-                detail.textContent = '{{ t.dashboard.pipeline_paused_idle }} (' + data.queued + ' wartend)';
-            }
-        } else {
-            btn.textContent = '⏸ {{ t.dashboard.pause_pipeline }}';
-            btn.dataset.state = 'running';
-            banner.style.display = 'none';
-        }
-    } catch (e) { /* silent */ }
-}
+(function () {
+    const T = {{ {
+        "pause": d.pause_pipeline, "resume": d.resume_pipeline,
+        "pause_confirm": d.pause_pipeline_confirm, "resume_confirm": d.resume_pipeline_confirm,
+        "drain": d.pipeline_paused_drain, "idle": d.pipeline_paused_idle,
+        "counts_drain": d.paused_counts_drain, "counts_idle": d.paused_counts_idle,
+        "scan_started": d.scan_started, "scan_failed": d.scan_failed,
+        "toggle_failed": d.pipeline_toggle_failed,
+    } | tojson }};
+    const toggleBtn = document.getElementById("pipeline-toggle-btn");
+    const scanBtn = document.getElementById("scan-btn");
+    const banner = document.getElementById("pipeline-paused-banner");
+    const detail = document.getElementById("pipeline-paused-detail");
 
-async function triggerScan(ev) {
-    ev.preventDefault();
-    const btn = ev.currentTarget;
-    const origText = btn.textContent;
-    btn.textContent = '⏳ ...';
-    btn.style.pointerEvents = 'none';
-    try {
-        const resp = await fetch('/api/trigger-scan', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {'Accept': 'application/json'}
-        });
-        if (!resp.ok && resp.status !== 303) {
-            alert('Scan-Trigger fehlgeschlagen: HTTP ' + resp.status);
-            btn.textContent = origText;
-            btn.style.pointerEvents = '';
-            return;
-        }
-        // Endpoint returns 303 redirect to / — just refresh state via API.
-        btn.textContent = origText;
-        btn.style.pointerEvents = '';
-    } catch (e) {
-        alert('Scan-Trigger fehlgeschlagen: ' + e.message);
-        btn.textContent = origText;
-        btn.style.pointerEvents = '';
+    function toast(text, tone) {
+        const icons = {success: "check-circle", error: "alert-circle"};
+        const el = document.createElement("div");
+        el.className = "ui-toast is-" + tone;
+        el.setAttribute("role", tone === "error" ? "alert" : "status");
+        el.innerHTML = '<svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-'
+            + icons[tone] + '"/></svg>';
+        const msg = document.createElement("span");
+        msg.className = "ui-toast-text";
+        msg.textContent = text;
+        el.appendChild(msg);
+        document.getElementById("dash-toasts").appendChild(el);
+        requestAnimationFrame(() => el.classList.add("is-shown"));
+        setTimeout(() => { el.classList.remove("is-shown"); setTimeout(() => el.remove(), 250); }, tone === "error" ? 8000 : 4000);
     }
-}
 
-async function togglePipeline(ev) {
-    ev.preventDefault();
-    const btn = ev.currentTarget;
-    const action = btn.dataset.state === 'paused' ? 'resume' : 'pause';
-    const confirmMsg = action === 'pause'
-        ? {{ t.dashboard.pause_pipeline_confirm | tojson }}
-        : {{ t.dashboard.resume_pipeline_confirm | tojson }};
-    if (!confirm(confirmMsg)) return;
-    try {
-        const r = await fetch('/api/pipeline/' + action, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {'Accept': 'application/json'}
-        });
-        if (!r.ok) {
-            alert('Fehler: HTTP ' + r.status);
-            return;
-        }
-        await refreshPipelineStatus();
-    } catch (e) {
-        alert('Pipeline-Toggle fehlgeschlagen: ' + e.message);
+    function setBusy(btn, busy) {
+        btn.disabled = busy;
+        btn.setAttribute("aria-busy", busy ? "true" : "false");
     }
-}
 
-// Initial + auto-refresh every 5s
-refreshPipelineStatus();
-setInterval(refreshPipelineStatus, 5000);
+    function renderPipeline(data) {
+        const paused = !!data.paused;
+        toggleBtn.dataset.state = paused ? "paused" : "running";
+        toggleBtn.querySelector("use").setAttribute("href", paused ? "#ui-i-play" : "#ui-i-pause");
+        toggleBtn.querySelector(".dash-btn-label").textContent = paused ? T.resume : T.pause;
+        banner.hidden = !paused;
+        if (!paused) return;
+        const queued = String(data.queued);
+        detail.textContent = data.in_flight > 0
+            ? T.drain + " (" + T.counts_drain.replace("{active}", data.in_flight).replace("{queued}", queued) + ")"
+            : T.idle + " (" + T.counts_idle.replace("{queued}", queued) + ")";
+    }
+
+    async function refreshPipelineStatus() {
+        try {
+            const r = await fetch("/api/pipeline/status", {credentials: "same-origin", headers: {"Accept": "application/json"}});
+            if (r.ok) renderPipeline(await r.json());
+        } catch (e) { /* next poll retries */ }
+    }
+
+    toggleBtn.addEventListener("click", async function () {
+        const action = toggleBtn.dataset.state === "paused" ? "resume" : "pause";
+        if (!confirm(action === "pause" ? T.pause_confirm : T.resume_confirm)) return;
+        setBusy(toggleBtn, true);
+        try {
+            const r = await fetch("/api/pipeline/" + action, {method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}});
+            if (!r.ok) toast(T.toggle_failed + " (HTTP " + r.status + ")", "error");
+            await refreshPipelineStatus();
+        } catch (e) {
+            toast(T.toggle_failed + ": " + e.message, "error");
+        } finally {
+            setBusy(toggleBtn, false);
+        }
+    });
+
+    scanBtn.addEventListener("click", async function () {
+        const use = scanBtn.querySelector("use");
+        const svg = scanBtn.querySelector("svg");
+        setBusy(scanBtn, true);
+        use.setAttribute("href", "#ui-i-loader");
+        svg.classList.add("ui-spin");
+        try {
+            // The endpoint answers with a 303 to "/"; fetch follows it.
+            const r = await fetch("/api/trigger-scan", {method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}});
+            if (r.ok) toast(T.scan_started, "success");
+            else toast(T.scan_failed + " (HTTP " + r.status + ")", "error");
+        } catch (e) {
+            toast(T.scan_failed + ": " + e.message, "error");
+        } finally {
+            use.setAttribute("href", "#ui-i-refresh");
+            svg.classList.remove("ui-spin");
+            setBusy(scanBtn, false);
+        }
+    });
+
+    refreshPipelineStatus();
+    setInterval(refreshPipelineStatus, 5000);
+})();
 </script>
-
-<div class="stats-grid" id="stats-grid">
-    <div class="stat-card">
-        <div class="stat-value" data-stat="total">{{ stats.total }}</div>
-        <div class="stat-label">{{ t.dashboard.total }}</div>
-    </div>
-    <div class="stat-card stat-success">
-        <div class="stat-value" data-stat="done">{{ stats.done }}</div>
-        <div class="stat-label">{{ t.dashboard.done }}</div>
-    </div>
-    <div class="stat-card stat-warning">
-        <div class="stat-value" data-stat="queued">{{ stats.queued }}</div>
-        <div class="stat-label">{{ t.dashboard.queued }}</div>
-        {% if throughput.eta %}
-        <div class="stat-eta" data-stat="eta">{{ throughput.eta }}</div>
-        {% endif %}
-    </div>
-    <div class="stat-card stat-info">
-        <div class="stat-value" data-stat="processing">{{ stats.processing }}</div>
-        <div class="stat-label">{{ t.dashboard.processing }}</div>
-    </div>
-    <div class="stat-card stat-error">
-        <div class="stat-value" data-stat="errors">{{ stats.errors }}</div>
-        <div class="stat-label">{{ t.dashboard.errors }}</div>
-    </div>
-    {% if stats.duplicates > 0 %}
-    <a href="/duplicates" class="stat-card stat-duplicate" style="text-decoration:none">
-        <div class="stat-value" data-stat="duplicates">{{ stats.duplicates }}</div>
-        <div class="stat-label">{{ t.dashboard.duplicates }}</div>
-    </a>
-    {% endif %}
-</div>
-
-<div class="throughput-bar" id="throughput-bar">
-    <span class="throughput-label">{{ t.dashboard.throughput }}:</span>
-    <span class="throughput-value" data-throughput="files_per_min">{{ throughput.files_per_min }}</span> {{ t.dashboard.files_per_min }}
-    <span class="throughput-sep">&middot;</span>
-    <span class="throughput-value" data-throughput="files_per_hour">{{ throughput.files_per_hour }}</span> {{ t.dashboard.files_per_hour }}
-    <span class="throughput-sep">&middot;</span>
-    <span class="throughput-value" data-throughput="files_24h">{{ throughput.files_24h }}</span> {{ t.dashboard.files_24h }}
-</div>
-
-<h2 style="margin-top: 2rem;">{{ t.dashboard.sets | default('Verarbeitungs-Sets') }}</h2>
-<div class="modules-grid" id="sets-grid">
-    {% for s in sets %}
-    <div class="module-card module-{{ s.status }}">
-        <div class="module-top">
-            <span class="module-status">{{ '●' if s.status == 'ready' else '○' }}</span>
-            <span class="module-name">{{ s.label }}</span>
-        </div>
-        <div class="module-detail">{{ s.detail }}</div>
-    </div>
-    {% endfor %}
-</div>
-
-<h2 style="margin-top: 2rem;">{{ t.dashboard.recent }}</h2>
-{% if recent_jobs %}
-<div class="log-table-wrap">
-    <table class="log-table">
-        <thead>
-            <tr>
-                <th>{{ t.dashboard.debug_key }}</th>
-                <th>{{ t.dashboard.file }}</th>
-                <th>{{ t.dashboard.status }}</th>
-                <th>{{ t.dashboard.step }}</th>
-                <th>{{ t.dashboard.errors }}</th>
-                <th>{{ t.dashboard.time }}</th>
-            </tr>
-        </thead>
-        <tbody id="recent-jobs">
-            {% for job in recent_jobs %}
-            <tr class="log-row log-{{ job.status }}">
-                <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
-                <td>{{ job.filename }}</td>
-                <td>{{ status_badge(job.status, icon_only=True) }}</td>
-                <td>{{ job.current_step or '—' }}</td>
-                <td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }}">{{ job.error_message or '' }}</td>
-                <td>{{ job.updated_at.strftime('%d.%m. %H:%M:%S') if job.updated_at else '—' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-<div class="log-link">
-    <a href="/logs" class="btn btn-small btn-secondary">{{ t.dashboard.show_all_logs }}</a>
-</div>
-{% else %}
-<p class="section-note">{{ t.dashboard.no_jobs }}</p>
-{% endif %}
 {% endblock %}

@@ -1,0 +1,104 @@
+/* Dashboard (/) — page layout on top of the ui-* components (docs/DESIGN.md).
+ * Only theme variables and --ui-* tokens, so dark and light both work. */
+
+/* ── Paused banner, stat tiles ──────────────────────────────────────── */
+.dash-paused { margin: 0 0 1rem; }
+
+/* Seven tiles (with duplicates and throughput) fit in one row on a wide screen */
+.dash-stats { grid-template-columns: repeat(auto-fit, minmax(min(9.25rem, 100%), 1fr)); }
+.dash-throughput .ui-stat-sub { gap: 0.2rem 0.35rem; }
+
+.dash-section { margin-top: 2.25rem; }
+/* Title and "all logs" link stay on one line, also on a phone */
+.dash-head-link { flex-wrap: nowrap; align-items: center; }
+.dash-head-link .ui-section-head-text { flex: 1 1 auto; }
+.dash-all-logs { margin-right: -0.5rem; }
+
+/* Headers only for screen readers: the rows read like a list */
+.dash-sets thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap;
+}
+
+/* ── Processing sets: one row per set ───────────────────────────────── */
+.dash-sets tbody th { width: 30%; }
+/* Name and dry-run badge: the badge drops below a long name */
+.dash-set-name { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; min-width: 0; }
+.dash-sets .ui-cell-name strong { overflow-wrap: anywhere; }
+.dash-set-inputs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 1.25rem; min-width: 0; }
+.dash-set-inputs .ui-code { overflow-wrap: anywhere; }
+.dash-set-inputs .is-on { color: var(--text); }
+.dash-sets .dash-set-queue { width: 1%; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Recent jobs ────────────────────────────────────────────────────── */
+.dash-job { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; max-width: 24rem; }
+.dash-job-name {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 500; color: var(--text); text-decoration: none; border-radius: 3px;
+}
+.dash-job-name:hover { text-decoration: underline; text-underline-offset: 2px; }
+.dash-job-name:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.dash-job-key {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--ui-mono); font-size: var(--ui-fs-xs); color: var(--text-muted);
+}
+.dash-jobs .dash-col-step,
+.dash-jobs .dash-col-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dash-jobs .cell-msg { max-width: 24rem; font-size: var(--ui-fs-sm); }
+
+/* ── Phone ──────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+    /* Three tiles per row, throughput across the full width */
+    .dash-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+    .dash-stats .ui-stat { gap: 0.2rem; padding: 0.7rem 0.75rem 0.75rem; }
+    .dash-stats .ui-stat-label { gap: 0.35rem; font-size: var(--ui-fs-xs); }
+    .dash-stats .ui-stat-value { font-size: 1.375rem; }
+    .dash-stats .dash-throughput { grid-column: 1 / -1; }
+
+    /* Both tables become lists: cells placed on a small grid per row */
+    .dash-sets, .dash-sets tbody,
+    .dash-jobs, .dash-jobs tbody { display: block; }
+    .dash-sets tr, .dash-jobs tr {
+        display: grid; column-gap: 0.6rem; row-gap: 0.3rem; align-items: center;
+        border-bottom: 1px solid var(--ui-line);
+    }
+    .dash-sets tbody tr:last-child, .dash-jobs tbody tr:last-child { border-bottom: 0; }
+    .dash-sets td, .dash-sets tbody th,
+    .dash-jobs td, .dash-jobs tbody th {
+        display: block; height: auto; min-width: 0; padding: 0 !important; border: 0;
+    }
+    /* The 1 % column widths of the desktop table would squeeze the grid cells */
+    .dash-sets tr > *, .dash-jobs tr > * { width: auto !important; }
+    .dash-sets tbody tr:hover > *, .dash-jobs tbody tr:hover > * { background: none; }
+
+    /* Set: name, queue, pencil — inputs below the name */
+    .dash-sets tr { grid-template-columns: minmax(0, 1fr) auto auto; padding: 0.6rem 0.5rem 0.7rem 0.9rem; }
+    .dash-sets tbody th { grid-column: 1; grid-row: 1; }
+    .dash-sets .dash-set-queue { grid-column: 2; grid-row: 1; }
+    .dash-sets .ui-col-actions { grid-column: 3; grid-row: 1; }
+    .dash-sets .dash-col-inputs {
+        grid-column: 1 / -1; grid-row: 2;
+        padding: 0 0.4rem 0 calc(0.5rem + 0.65rem) !important;
+    }
+    .dash-set-inputs { gap: 0.3rem 1rem; }
+    /* An empty queue is not worth the room next to the name */
+    .dash-sets .dash-set-queue:not(:has(.ui-badge)) { display: none; }
+
+    /* Job: status, file, time — the message below the file, step hidden */
+    .dash-jobs thead {
+        position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip: rect(0, 0, 0, 0); white-space: nowrap;
+    }
+    .dash-jobs tr { grid-template-columns: auto minmax(0, 1fr) auto; padding: 0.6rem 0.9rem; }
+    .dash-jobs .ui-col-icon { grid-column: 1; grid-row: 1; }
+    .dash-jobs tbody th { grid-column: 2; grid-row: 1; }
+    .dash-jobs .dash-col-time { grid-column: 3; grid-row: 1; align-self: start; font-size: var(--ui-fs-xs); line-height: 1.6; }
+    .dash-jobs .dash-col-step { display: none; }
+    .dash-jobs .cell-msg {
+        grid-column: 2 / -1; grid-row: 2; max-width: none;
+        white-space: normal; overflow-wrap: anywhere;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .dash-jobs .cell-msg:empty { display: none; }
+    .dash-job { max-width: none; }
+}
