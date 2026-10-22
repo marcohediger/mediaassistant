@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.33.0 — 2026-10-22
+## v3.0.0 — in Arbeit (Branch umbau/dateieingabe-verarbeitung, kommt zusammen mit dem Umbau Module & Datensicherheit)
 
 ### Neu: Verarbeitungs-Sets
 
@@ -144,6 +144,64 @@ tat seit jeher nichts. Er wird jetzt pro Datei zu `sourceless_foto` oder
 „Kein Duplikat" startete die Pipeline als eigenen Task, bevor die
 Rückstellung des Jobs committet war. Lief der Task zuerst, sah er den
 alten Status, und nichts passierte. Der Job wird jetzt nur eingereiht.
+## v2.32.25 — 2026-10-22
+
+### Fix: v2.32.24 startete nicht — Abhängigkeiten festgenagelt
+
+Das Image von v2.32.24 enthielt **SQLAlchemy 2.1.6** statt 2.0.52 und
+kam nicht hoch:
+
+    ImportError: The SQLAlchemy asyncio module requires that the Python
+    'greenlet' library is installed.
+
+Am Code lag es nicht — v2.32.24 änderte nur den Setup-Router.
+`requirements.txt` gab ausschliesslich Untergrenzen vor
+(`sqlalchemy>=2.0`), jeder Build zog also die jeweils neuesten
+Versionen. SQLAlchemy 2.1 installiert `greenlet` nicht mehr von selbst;
+FastAPI sprang im selben Build von 0.141 auf 0.160, ungetestet.
+
+Neu gibt es `backend/constraints.txt` mit den exakten Versionen aller
+40 Pakete aus dem erprobten Image v2.32.23; das Dockerfile installiert
+mit `-c constraints.txt`. `requirements.txt` verlangt zusätzlich
+`sqlalchemy[asyncio]`, damit `greenlet` auch bei einem späteren,
+bewussten Upgrade nicht fehlt. Ein Build zieht damit nie mehr
+unbemerkt andere Versionen.
+
+Geprüft am lokal gebauten Image: Startpfad 4/4, alle Pakete identisch mit
+v2.32.23, die Sperre des Einrichtungs-Assistenten aus v2.32.24 wirkt
+(10/10). Aufgefallen ist der Fehler durch den Startpfad-Test am
+veröffentlichten Image — dem Release-Gate, das nach v2.32.22 eingeführt
+wurde.
+
+**v2.32.24 nicht verwenden.** Diese Version enthält den Sicherheits-Fix
+aus v2.32.24 und startet.
+
+## v2.32.24 — 2026-10-22
+
+### Sicherheit: Einrichtungs-Assistent nach der Einrichtung gesperrt
+
+`/setup` ist von der Anmeldung ausgenommen — das muss so sein, der
+Assistent läuft, bevor es überhaupt einen Benutzer gibt. Nach
+abgeschlossener Einrichtung leiteten aber nur die Seitenaufrufe (GET)
+weiter. Die Formular-Schritte (POST) nahmen weiterhin Änderungen an,
+**ohne Anmeldung**: KI-Backend-URL und -Schlüssel, SMTP-Einstellungen,
+Ablagepfad. Über die KI-Backend-URL hätte sich bestimmen lassen, wohin
+MediaAssistant jedes neue Foto zur Analyse schickt.
+
+Der ganze Assistent ist jetzt nach der Einrichtung gesperrt, über eine
+Abhängigkeit am Router statt einer Prüfung je Handler — damit ist auch
+jeder später hinzugefügte Schritt automatisch geschützt.
+
+Geprüft auf einer Kopie der Live-Datenbank: alle fünf Formular-Schritte
+werden nach der Einrichtung abgewiesen, die KI-Backend-URL bleibt
+unverändert; eine Neuinstallation durchläuft den Assistenten weiterhin
+und ist unmittelbar nach dem Abschluss gesperrt. Gegenprobe mit dem
+alten Code: die Schritte nahmen die Änderung an.
+
+**Empfehlung:** prüfen, ob KI-Backend-URL, SMTP-Server und Ablagepfad
+noch die erwarteten Werte haben.
+
+Gefunden beim Umbau auf Verarbeitungs-Sets.
 
 ## v2.32.23 — 2026-09-02
 

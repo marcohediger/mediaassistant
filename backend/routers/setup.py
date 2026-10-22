@@ -1,5 +1,5 @@
 import httpx
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from config import config_manager
@@ -9,7 +9,21 @@ from sets import get_set
 from template_engine import render
 from i18n import load_lang, DEFAULT_LANGUAGE
 
-router = APIRouter(prefix="/setup")
+async def _only_before_setup_complete():
+    """Close the whole wizard once setup is complete.
+
+    /setup is exempt from login — it has to be, it runs before any user
+    exists. Only the GET pages checked for a finished setup; the POST
+    handlers did not. Anyone who could reach the instance could therefore
+    rewrite the AI backend URL (and with it, where every photo is sent for
+    analysis), the SMTP settings or the library path without logging in.
+    A router-wide dependency also covers every step added later.
+    """
+    if await config_manager.is_setup_complete():
+        raise HTTPException(status_code=303, headers={"Location": "/"})
+
+
+router = APIRouter(prefix="/setup", dependencies=[Depends(_only_before_setup_complete)])
 
 
 @router.get("")
