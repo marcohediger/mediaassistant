@@ -7,6 +7,8 @@
     <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg">
     <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
     <link rel="stylesheet" href="/static/css/ui.css?v={{ version }}">
+    {# Page-specific stylesheets (static/css/pages/*.css) go here, before light.css #}
+    {% block head %}{% endblock %}
     {% if theme | default('dark') == 'light' %}
     <link rel="stylesheet" href="/static/css/light.css?v={{ version }}">
     {% endif %}
