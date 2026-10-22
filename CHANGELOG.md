@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.32.24 — 2026-10-22
+
+### Sicherheit: Einrichtungs-Assistent nach der Einrichtung gesperrt
+
+`/setup` ist von der Anmeldung ausgenommen — das muss so sein, der
+Assistent läuft, bevor es überhaupt einen Benutzer gibt. Nach
+abgeschlossener Einrichtung leiteten aber nur die Seitenaufrufe (GET)
+weiter. Die Formular-Schritte (POST) nahmen weiterhin Änderungen an,
+**ohne Anmeldung**: KI-Backend-URL und -Schlüssel, SMTP-Einstellungen,
+Ablagepfad. Über die KI-Backend-URL hätte sich bestimmen lassen, wohin
+MediaAssistant jedes neue Foto zur Analyse schickt.
+
+Der ganze Assistent ist jetzt nach der Einrichtung gesperrt, über eine
+Abhängigkeit am Router statt einer Prüfung je Handler — damit ist auch
+jeder später hinzugefügte Schritt automatisch geschützt.
+
+Geprüft auf einer Kopie der Live-Datenbank: alle fünf Formular-Schritte
+werden nach der Einrichtung abgewiesen, die KI-Backend-URL bleibt
+unverändert; eine Neuinstallation durchläuft den Assistenten weiterhin
+und ist unmittelbar nach dem Abschluss gesperrt. Gegenprobe mit dem
+alten Code: die Schritte nahmen die Änderung an.
+
+**Empfehlung:** prüfen, ob KI-Backend-URL, SMTP-Server und Ablagepfad
+noch die erwarteten Werte haben.
+
+Gefunden beim Umbau auf Verarbeitungs-Sets.
+
 ## v2.32.23 — 2026-09-02
 
 ### Fix: v2.32.22 startete nicht — `version.py` war leer
