@@ -252,6 +252,21 @@ In beiden Fällen waren **sämtliche Unit-Tests grün**, weil kein
 einziger den Startpfad importiert. Ein Test, der nur `import main`
 macht, hätte beide in einer Sekunde gefunden.
 
+### Abhängigkeiten: nur bewusst anheben
+
+`backend/constraints.txt` hält die exakten Versionen **aller** Pakete im
+Image fest; das Dockerfile installiert mit `-c constraints.txt`.
+`requirements.txt` sagt, *was* die App braucht, `constraints.txt`, *welche
+Versionen* sie bekommt.
+
+Ohne diese Datei zog jeder Build die neuesten Releases. v2.32.24 bekam so
+SQLAlchemy 2.1, das `greenlet` nicht mehr mitinstalliert — das Image
+startete nicht, obwohl der Code nur im Setup-Router geändert war.
+
+**Upgrade:** Version in `constraints.txt` ändern, Image bauen, am gebauten
+Image `test_startup_imports.py` und die E2E-Suite laufen lassen, dann
+releasen. Nie `constraints.txt` weglassen, um „schnell" zu bauen.
+
 ### Pflicht-E2E-Test: Release-Gate
 
 > **Kein Release ohne grünen E2E-Test.** Unit-Tests allein reichen
