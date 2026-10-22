@@ -5,6 +5,7 @@ from sqlalchemy import select
 from config import config_manager
 from database import async_session
 from models import InboxDirectory
+from sets import get_set
 from template_engine import render
 
 router = APIRouter(prefix="/setup")
@@ -42,6 +43,9 @@ async def setup_step(request: Request, step: int):
     elif step == 3:
         context["inbox_path"] = config_manager.get_env("INBOX_PATH", "/inbox")
         context["library_path"] = config_manager.get_env("LIBRARY_PATH", "/library")
+        # The sets migration runs at startup, so the first set already exists.
+        async with async_session() as session:
+            context["set_name"] = (await get_set(session, None)).name
         return await render(request, "setup/step3_paths.html", context)
     elif step == 4:
         return await render(request, "setup/step4_done.html", context)
@@ -59,6 +63,8 @@ async def setup_step1_save(
     ai2_api_key: str = Form(""),
     ai2_model: str = Form(""),
 ):
+    if await config_manager.is_setup_complete():
+        return RedirectResponse(url="/", status_code=302)
     await config_manager.set("ai.backend_url", ai_url)
     if ai_api_key:
         await config_manager.set("ai.api_key", ai_api_key, encrypted=True)
@@ -81,6 +87,8 @@ async def setup_step1_test(
     ai2_api_key: str = Form(""),
     ai2_model: str = Form(""),
 ):
+    if await config_manager.is_setup_complete():
+        return RedirectResponse(url="/", status_code=302)
     context = {
         "step": 1,
         "ai_url": ai_url,
@@ -134,6 +142,8 @@ async def setup_step2_save(
     smtp_password: str = Form(""),
     smtp_recipient: str = Form(""),
 ):
+    if await config_manager.is_setup_complete():
+        return RedirectResponse(url="/", status_code=302)
     await config_manager.set("smtp.server", smtp_server)
     await config_manager.set("smtp.port", smtp_port)
     await config_manager.set("smtp.ssl", smtp_ssl)
@@ -150,16 +160,26 @@ async def setup_step3_save(
     library_path: str = Form(...),
     inbox_path: str = Form(...),
 ):
+    if await config_manager.is_setup_complete():
+        return RedirectResponse(url="/", status_code=302)
+    # Still the default base path for sets created later.
     await config_manager.set("library.base_path", library_path)
 
+    # Inbox and library belong to a set. The sets migration has already run
+    # at startup, so a fresh install has its first set ("Standard") by now;
+    # the wizard fills that one.
     async with async_session() as session:
+        processing_set = await get_set(session, None)
+        processing_set.library_base_path = library_path
         existing = await session.execute(select(InboxDirectory))
         if not existing.scalar():
             session.add(InboxDirectory(
                 path=inbox_path,
                 label="Default Inbox",
+                set_id=processing_set.id,
+                active=True,
             ))
-            await session.commit()
+        await session.commit()
 
     return RedirectResponse(url="/setup/step/4", status_code=302)
 
