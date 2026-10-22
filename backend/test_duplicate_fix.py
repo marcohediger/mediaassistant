@@ -490,8 +490,16 @@ async def test_retry_job_blocks_parallel_run_pipeline():
         result = await s.execute(
             select(SystemLog).where(SystemLog.message.like("%RACE-C-1%"))
         )
-        n = len(result.scalars().all())
-        report("only 1-2 system_logs entries (no duplicate processing)", n <= 2, f"got {n}")
+        messages = [l.message for l in result.scalars().all()]
+        # One pipeline run = one IA-01 error and at most one "processed" log.
+        # The reprocess move before the run logs itself before and after
+        # (logging rule for destructive actions) — once per run as well.
+        n_err = sum("Error at IA-01" in m for m in messages)
+        n_done = sum(m.endswith(" processed") for m in messages)
+        n_move = sum("safe_move → reprocess wird ausgeführt" in m for m in messages)
+        report("one pipeline run only (1 IA-01 error, <=1 processed, <=1 reprocess move)",
+               n_err == 1 and n_done <= 1 and n_move <= 1,
+               f"errors={n_err} processed={n_done} moves={n_move} of {len(messages)} logs")
 
     await _cleanup_keys("RACE-C-")
     try:

@@ -1007,28 +1007,41 @@ async def test_get_folder_album_names_none():
               albums is None,
               f"albums={albums}")
 
-    # Job with inbox that has folder_tags disabled → None
-    # _get_folder_album_names checks InboxDirectory.folder_tags (not Job.folder_tags),
-    # so we use a non-existent inbox path that won't be found in the DB.
+    # Job whose set has folder tags switched off → None, even with a
+    # subfolder. _get_folder_album_names checks the switch of the job's
+    # processing set (not Job.folder_tags); a job without set_id belongs to
+    # the first set, whose switch is turned off for this check and restored.
+    from sets import get_set
     async with async_session() as session:
-        job_no_ft = Job(
-            filename=f"__v29_gfan_nomod_{ts}.jpg",
-            original_path=f"/fake_inbox_disabled/SubFolder/__v29_gfan_nomod_{ts}.jpg",
-            source_inbox_path="/fake_inbox_disabled", status="queued",
-            debug_key=f"V29-GFAN-NOMOD-{ts}",
-            folder_tags=False,
-            step_result={
-                "IA-01": {"file_type": "JPEG"},
-                "IA-02": {"status": "ok"},
-            },
-        )
-        session.add(job_no_ft)
+        first_set = await get_set(session, None)
+        saved_ft = first_set.folder_tags
+        first_set.folder_tags = False
         await session.commit()
+    try:
+        async with async_session() as session:
+            job_no_ft = Job(
+                filename=f"__v29_gfan_nomod_{ts}.jpg",
+                original_path=f"/fake_inbox_disabled/SubFolder/__v29_gfan_nomod_{ts}.jpg",
+                source_inbox_path="/fake_inbox_disabled", status="queued",
+                debug_key=f"V29-GFAN-NOMOD-{ts}",
+                folder_tags=False,
+                step_result={
+                    "IA-01": {"file_type": "JPEG"},
+                    "IA-02": {"status": "ok"},
+                },
+            )
+            session.add(job_no_ft)
+            await session.commit()
 
-        albums2 = await _get_folder_album_names(job_no_ft)
-        check("FTAG-50b folder_tags inactive inbox → None",
-              albums2 is None,
-              f"albums={albums2}")
+            albums2 = await _get_folder_album_names(job_no_ft)
+            check("FTAG-50b folder_tags inactive set → None",
+                  albums2 is None,
+                  f"albums={albums2}")
+    finally:
+        async with async_session() as session:
+            first_set = await get_set(session, None)
+            first_set.folder_tags = saved_ft
+            await session.commit()
 
 
 # ══════════════════════════════════════════════════════════════

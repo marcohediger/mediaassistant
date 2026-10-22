@@ -44,6 +44,22 @@ from models import Job
 from pipeline import run_pipeline, reset_job_for_retry
 from immich_client import delete_asset
 
+
+# The write mode belongs to the processing set now (IA-07 reads
+# set.metadata_write_mode). The jobs of this test carry no set_id, so they run
+# under the first set ("Standard") — that is the one to switch and restore.
+async def _get_write_mode() -> str:
+    from sets import get_set
+    async with async_session() as session:
+        return (await get_set(session, None)).metadata_write_mode or "direct"
+
+
+async def _set_write_mode(mode: str) -> None:
+    from sets import get_set
+    async with async_session() as session:
+        (await get_set(session, None)).metadata_write_mode = mode
+        await session.commit()
+
 # Quelldatei auf dem Host. Im Dev-Container ist /home/marcohediger nicht
 # gemountet — die Datei muss vor dem Test ins Inbox kopiert werden. Wir
 # verwenden eine Datei, die schon im Container-Inbox-Mount verfügbar ist
@@ -123,7 +139,7 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
     print(f"\n── Test: retry file lifecycle [{mode} mode] ──")
 
     # 1. Configure write_mode for this run
-    await config_manager.set("metadata.write_mode", mode)
+    await _set_write_mode(mode)
 
     test_name = f"__retry_lifecycle_{mode}_{int(datetime.now().timestamp())}.HEIC"
     inbox_path = os.path.join(INBOX, test_name)
@@ -335,7 +351,7 @@ async def _run_filestorage_test(source_heic: str, *, mode: str = "direct"):
     back into /library/.
     """
     print(f"\n── Test: retry file lifecycle [file-storage / use_immich=False / {mode}] ──")
-    await config_manager.set("metadata.write_mode", mode)
+    await _set_write_mode(mode)
 
     test_name = f"__retry_lifecycle_filestore_{mode}_{int(datetime.now().timestamp())}.HEIC"
     inbox_path = os.path.join(INBOX, test_name)
@@ -495,7 +511,7 @@ async def _run_error_retry_test(source_heic: str, *, mode: str = "direct",
     target_path to that location, status='error'. User clicks Retry.
 
     Parameterized on the two axes that mattered for the v2.28.28/29 fix:
-      - `mode`: 'direct' or 'sidecar' (`metadata.write_mode`)
+      - `mode`: 'direct' or 'sidecar' (the set's `metadata_write_mode`)
       - `use_immich`: True (Immich upload branch) or False (file-storage)
 
     Covers Sektion-14 matrix scenarios:
@@ -506,7 +522,7 @@ async def _run_error_retry_test(source_heic: str, *, mode: str = "direct",
     """
     label = f"{scenario_id}: {'Immich' if use_immich else 'File-Storage'} + {mode}"
     print(f"\n── Test: error-retry [{label}] ──")
-    await config_manager.set("metadata.write_mode", mode)
+    await _set_write_mode(mode)
 
     test_name = f"__retry_err_{scenario_id}_{int(datetime.now().timestamp())}.HEIC"
     inbox_path = os.path.join(INBOX, test_name)
@@ -702,7 +718,7 @@ async def _run_immich_only_retry_test(source_heic: str):
 
     try:
         source_heic = _make_unique_source(source_heic)
-        await config_manager.set("metadata.write_mode", "sidecar")
+        await _set_write_mode("sidecar")
         _stage_inbox_file(source_heic, test_name)
 
         # First run: file goes through pipeline, IA-08 uploads to
@@ -825,7 +841,7 @@ async def _run_stuck_state_retry_test(source_heic: str):
 
     try:
         source_heic = _make_unique_source(source_heic)
-        await config_manager.set("metadata.write_mode", "sidecar")
+        await _set_write_mode("sidecar")
         _stage_inbox_file(source_heic, test_name)
 
         # First run via real pipeline so we have a real Immich asset
@@ -999,7 +1015,7 @@ async def _run_stale_warning_state_retry_test(source_heic: str):
 
     try:
         source_heic = _make_unique_source(source_heic)
-        await config_manager.set("metadata.write_mode", "sidecar")
+        await _set_write_mode("sidecar")
         _stage_inbox_file(source_heic, test_name)
 
         # First run via normal pipeline so we have real IA-05/07/08
@@ -1297,7 +1313,7 @@ async def main():
     #   - duplikat_erkennung uses pHash which sees identical visual content
     #     across test runs (appending random bytes only changes SHA256, not
     #     pHash), so the second run onwards would be flagged as duplicate
-    saved_write_mode = await config_manager.get("metadata.write_mode", "direct")
+    saved_write_mode = await _get_write_mode()
     saved_filewatcher = await config_manager.is_module_enabled("filewatcher")
     saved_dupdet = await config_manager.is_module_enabled("duplikat_erkennung")
 
@@ -1333,7 +1349,7 @@ async def main():
         await _run_immich_tag_wait_skip_test(source_heic=source)
         await _run_truly_missing_test()
     finally:
-        await config_manager.set("metadata.write_mode", saved_write_mode)
+        await _set_write_mode(saved_write_mode)
         async with async_session() as session:
             from models import Module
             for mod_name, saved in (
@@ -1345,7 +1361,7 @@ async def main():
                     mod.enabled = bool(saved)
             await session.commit()
         print(
-            f"\nRestored metadata.write_mode = {saved_write_mode!r}, "
+            f"\nRestored write mode of the first set = {saved_write_mode!r}, "
             f"filewatcher = {saved_filewatcher!r}, "
             f"duplikat_erkennung = {saved_dupdet!r}"
         )
