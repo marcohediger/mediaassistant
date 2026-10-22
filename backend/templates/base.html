@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}MediaAssistant{% endblock %}</title>
-    <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg">
+    <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg?v=3">
     <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
     <link rel="stylesheet" href="/static/css/ui.css?v={{ version }}">
     {# Page-specific stylesheets (static/css/pages/*.css) go here, before light.css #}
@@ -16,12 +16,16 @@
 <body data-theme="{{ theme | default('dark') }}">
     {% include "_icons.html" %}
     <nav class="navbar">
-        <a href="/" class="nav-brand">
-            {% if theme | default('dark') == 'light' %}
-            <img src="/static/img/logo_light.svg?v=2" alt="MediaAssistant" class="nav-logo">
-            {% else %}
-            <img src="/static/img/logo_dark.svg?v=2" alt="MediaAssistant" class="nav-logo">
-            {% endif %}
+        {# Mark (peaks forming an "M", dot = sun/assistant) on its own tile, so one
+           version works in both themes; the wordmark is text, not part of the image. #}
+        <a href="/" class="nav-brand" aria-label="MediaAssistant">
+            <svg class="nav-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                <defs><linearGradient id="ma-mark-bg" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4f8ff7"/><stop offset="1" stop-color="#5b4ff2"/></linearGradient></defs>
+                <rect width="32" height="32" rx="9" fill="url(#ma-mark-bg)"/>
+                <path d="M6.5 23.5 12 13l4 6.5 4-6.5 5.5 10.5" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="24.5" cy="7.5" r="2.5" fill="#fff"/>
+            </svg>
+            <span class="nav-word" aria-hidden="true"><span class="nav-word-1">Media</span>Assistant</span>
         </a>
         {% set path = request.url.path %}
         <div class="nav-links">

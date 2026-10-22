@@ -11,7 +11,9 @@
         var(--bg);
 }
 .lg-wrap { width: 100%; max-width: 26rem; display: flex; flex-direction: column; align-items: center; }
-.lg-logo { display: block; width: auto; max-width: 15rem; height: auto; max-height: 4.5rem; margin: 0 0 2rem; }
+.lg-logo { margin: 0 0 2rem; }
+.lg-logo .nav-mark { width: 40px; height: 40px; }
+.lg-logo .nav-word { font-size: 1.375rem; }
 .lg-card {
     width: 100%; display: flex; flex-direction: column; align-items: center;
     padding: 2rem 1.75rem 1.75rem; text-align: center;

@@ -8,7 +8,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ L.title | default('Anmeldung') }} – MediaAssistant</title>
-    <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg">
+    <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg?v=3">
     <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
     <link rel="stylesheet" href="/static/css/ui.css?v={{ version }}">
     <link rel="stylesheet" href="/static/css/pages/login.css?v={{ version }}">
@@ -19,7 +19,15 @@
 <body data-theme="{{ 'dark' if dark else 'light' }}" class="lg-body">
     {% include "_icons.html" %}
     <main class="lg-wrap">
-        <img src="/static/img/{{ 'logo_dark' if dark else 'logo_light' }}.svg?v=2" alt="MediaAssistant" class="lg-logo">
+        <div class="nav-brand lg-logo" role="img" aria-label="MediaAssistant">
+            <svg class="nav-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <defs><linearGradient id="ma-mark-bg" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4f8ff7"/><stop offset="1" stop-color="#5b4ff2"/></linearGradient></defs>
+            <rect width="32" height="32" rx="9" fill="url(#ma-mark-bg)"/>
+            <path d="M6.5 23.5 12 13l4 6.5 4-6.5 5.5 10.5" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="24.5" cy="7.5" r="2.5" fill="#fff"/>
+        </svg>
+            <span class="nav-word" aria-hidden="true"><span class="nav-word-1">Media</span>Assistant</span>
+        </div>
         <div class="ui-card lg-card">
             <span class="ui-icon-tile ui-icon-tile-lg lg-icon">
                 <svg class="ui-i" width="22" height="22" aria-hidden="true" focusable="false"><use href="#ui-i-lock"/></svg>
