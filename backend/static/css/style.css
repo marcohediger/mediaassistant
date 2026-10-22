@@ -1,5 +1,10 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* The hidden attribute must always win. Without this, any class that sets
+   display (.form-row is a grid) silently overrides it — that is how the
+   window "von/bis" fields stayed visible in continuous and manual mode. */
+[hidden] { display: none !important; }
+
 :root {
     --bg: #0f1117;
     --bg-card: #1a1d27;
@@ -1564,3 +1569,27 @@ dialog.modal::backdrop { background: rgba(0, 0, 0, 0.55); }
 .segmented-btn:hover { color: var(--text); background: var(--bg-input); }
 .segmented-btn.active { background: var(--primary); color: #fff; }
 .segmented-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+.choice-stack { display: flex; flex-direction: column; gap: 0.75rem; }
+.choice-block { display: flex; align-items: flex-start; gap: 0.6rem; cursor: pointer; }
+.choice-block input { margin-top: 0.3rem; }
+.choice-block small { display: block; color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; margin-top: 0.15rem; }
+
+/* ── Navigation on narrow screens ───────────────────────────────────
+   Row 1: logo left, user + quick menu right. Row 2: the page links as a
+   swipeable strip. Before, the links ran off the right edge and pushed
+   the quick menu out of reach entirely. */
+@media (max-width: 760px) {
+    .navbar { flex-wrap: wrap; padding: 0.75rem 1rem; gap: 0.5rem 1rem; }
+    .nav-brand { order: 0; }
+    .nav-logo { height: 46px; }
+    .nav-right { order: 1; margin-left: auto; }
+    .nav-user span { display: none; }
+    .nav-links {
+        order: 2; flex-basis: 100%; display: flex; gap: 1.25rem;
+        overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+        padding: 0.25rem 0 0.1rem; margin: 0 -1rem; padding-left: 1rem; padding-right: 1rem;
+    }
+    .nav-links::-webkit-scrollbar { display: none; }
+    .nav-links a { margin-left: 0; white-space: nowrap; font-size: 0.95rem; }
+}
