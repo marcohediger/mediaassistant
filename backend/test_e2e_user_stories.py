@@ -56,23 +56,20 @@ def make_unique_jpg(path, w=640, h=480):
     img = Image.new("RGB", (w, h), bg)
     draw = ImageDraw.Draw(img)
 
-    # Large geometric shapes that differ structurally per image
-    # This creates distinct 8x8 pHash patterns
+    # Random block layout and colours. A pure counter repeats the same
+    # sequence in every run, so a later run produced images with pHash
+    # distance 0 to files of earlier runs still in the dev DB/Immich.
+    rng = random.Random()
     block_w, block_h = w // 4, h // 4
     for i in range(4):
         for j in range(4):
-            if (i + j + _IMG_COUNTER) % 3 == 0:
-                c = ((i * 70 + _IMG_COUNTER * 40) % 256,
-                     (j * 90 + _IMG_COUNTER * 60) % 256,
-                     ((i + j) * 50 + _IMG_COUNTER * 80) % 256)
+            if rng.random() < 0.5:
+                c = (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
                 draw.rectangle([i * block_w, j * block_h,
                                 (i + 1) * block_w, (j + 1) * block_h], fill=c)
-
-    # Diagonal pattern unique per counter
-    for k in range(_IMG_COUNTER % 5 + 1):
-        offset = k * 40 + _IMG_COUNTER * 20
-        c = ((offset + 100) % 256, (offset + 50) % 256, (offset + 180) % 256)
-        draw.line([(offset % w, 0), (w, (offset + 200) % h)], fill=c, width=15)
+    for _ in range(rng.randint(1, 5)):
+        c = (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
+        draw.line([(rng.randint(0, w), 0), (w, rng.randint(0, h))], fill=c, width=15)
 
     # Large unique text (affects pHash significantly)
     draw.text((20, 20), f"E2E-{_IMG_COUNTER}\n{os.path.basename(path)}\n{time.time()}",
@@ -936,6 +933,7 @@ async def test_us14_batch_clean_page():
     from routers.duplicates import _build_group_index, _run_batch_clean, _batch_progress
 
     # 2 Duplikat-Paare erstellen
+    dup_ids = []
     for i in range(2):
         path_a = f"/inbox/__e2e_us14_{i}a_{TS}.jpg"
         path_b = f"/inbox/__e2e_us14_{i}b_{TS}.jpg"
@@ -948,6 +946,7 @@ async def test_us14_batch_clean_page():
         j1 = await get_job(j1_id)
         if j1.immich_asset_id:
             CLEANUP_ASSETS.append(j1.immich_asset_id)
+        dup_ids.append(j2_id)
 
     # Count duplicates before
     from database import async_session
@@ -957,16 +956,22 @@ async def test_us14_batch_clean_page():
         r = await s.execute(select(func.count()).where(Job.status == "duplicate"))
         before = r.scalar()
 
-    # Run batch-clean for page 1 (max 10 groups)
-    await _run_batch_clean(1)
+    # Batch-clean the page (10 groups) holding this test's groups. Page 1
+    # alone depended on whatever else the dev DB holds: with many older
+    # groups, the new pairs were elsewhere and nothing got cleaned.
+    group_index, _ = await _build_group_index()
+    own_keys = {(await get_job(i)).debug_key for i in dup_ids}
+    pos = next((n for n, g in enumerate(group_index) if own_keys & set(g["member_keys"])), 0)
+    await _run_batch_clean(pos // 10 + 1)
 
     async with async_session() as s:
         r = await s.execute(select(func.count()).where(Job.status == "duplicate"))
         after = r.scalar()
 
     cleaned = before - after
+    still_dup = [i for i in dup_ids if (await get_job(i)).status == "duplicate"]
     check("US14-01 Batch-Clean Page hat Duplikate aufgeloest",
-          cleaned > 0, f"before={before} after={after} cleaned={cleaned}")
+          cleaned > 0 and not still_dup, f"before={before} after={after} cleaned={cleaned} own_left={len(still_dup)}")
     check("US14-02 Progress done",
           _batch_progress["done"] is True, f"progress={_batch_progress}")
 
