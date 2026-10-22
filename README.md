@@ -6,6 +6,7 @@ Drop your photos and videos into a folder. MediaAssistant takes care of the rest
 
 ## What it does
 
+- **Processing sets** — Any number of independent setups, each with its own inputs, schedule, rules, folder tags, OCR, metadata mode and target storage
 - **Automatic processing** — New files are detected and run through an 11-step pipeline
 - **AI-powered tagging** — Every photo and video gets descriptive keywords, a category, and a description
 - **Duplicate detection** — SHA256 (exact) and perceptual hash (similar) matching across images and videos
@@ -107,6 +108,51 @@ to a self-hosted Gitea registry; if you run your own, the workflow's
 `GITEA_REGISTRY_USER` and `GITEA_REGISTRY_TOKEN` are set on the repository.
 
 On first start, a setup wizard guides you through the configuration.
+
+## Processing Sets
+
+Everything that decides *how* a file is processed belongs to a **processing
+set** — and you can have as many as you like. Each set bundles:
+
+| Area | Per set |
+|---|---|
+| Inputs | Any number of inbox directories and/or Immich auto-tagging with its own access |
+| Schedule | Continuous, time window, scheduled or manual, with its own interval |
+| Sorting rules | Its own rule list |
+| Folder tags | On or off |
+| OCR | On or off, and the mode (screenshots/documents only, or every image) |
+| Metadata | Write directly into the file or into an XMP sidecar; read Google Takeout JSON |
+| Target storage | Library folder or upload to Immich, its own base path and categories |
+
+AI backends, geocoding, duplicate detection, video thumbnails, the Immich
+server and its accesses, SMTP and diagnostics stay global. Duplicates are
+detected across all sets. A directory belongs to exactly one set.
+
+In **Settings → Processing sets** each set is one row with the essentials;
+the pencil opens it in a popup with one tab per area. Saving validates the
+whole set first and then writes it in one transaction — a rule pointing to a
+category the set does not have, an invalid pattern, or a directory already
+owned by another set is rejected and nothing changes.
+
+**Upgrading changes nothing.** On the first start after the update the
+existing configuration becomes a set called "Standard" that behaves exactly
+as before; directories with different switches are split into separate sets,
+and every named Immich user that was polled gets a set of its own.
+
+### How files move through the system
+
+```
+ Set A ─┬─ directories ──┐
+        └─ Immich poll ──┤                     ┌────────────────┐
+ Set B ─── directories ──┼──► enqueue only ──► │ jobs (queued)  │ ──► one worker ──► pipeline
+ CSV retry ──────────────┤                     └────────────────┘     (slots, pause,
+ Retry / duplicate UI ───┘                                             hang detection)
+```
+
+Inputs only put jobs into the queue; the worker is the only place that runs
+the pipeline, so slot limits, pause and hang detection apply to every job.
+Immich originals are downloaded when the worker starts the job — a restart in
+between simply downloads again.
 
 ## Immich Integration
 
@@ -218,7 +264,7 @@ existence.
 
 ## Folder Tags
 
-Inbox subdirectory names become EXIF keywords and Immich albums:
+When a processing set has folder tags switched on, the subdirectory names below its inbox become EXIF keywords and Immich albums:
 
 ```
 /inbox/vacation/italy/photo.jpg
@@ -228,7 +274,7 @@ Inbox subdirectory names become EXIF keywords and Immich albums:
 
 ## Sorting Rules
 
-Configurable rules evaluated before AI classification:
+Every processing set has its own rules, evaluated before AI classification:
 
 | Condition | Example |
 |-----------|---------|
@@ -237,11 +283,11 @@ Configurable rules evaluated before AI classification:
 | EXIF expression | `make != "" & date != ""` |
 | File extension | `.png` |
 
-Each rule maps to a category and has a media type filter (All / Images / Videos).
+Each rule maps to a category of its set (or skips the file) and has a media type filter (All / Images / Videos). First match wins.
 
 ## Library Structure
 
-Target paths with placeholders, configurable per category:
+Each processing set has its own base path and categories; target paths use placeholders:
 
 ```
 /library/
@@ -285,6 +331,13 @@ Set `AUTH_MODE=disabled` (default) for no authentication.
 ## Environment Variables
 
 Settings are imported into the database on first start. After that, use the web interface.
+
+Variables that describe processing — `FILEWATCHER_INTERVAL`,
+`FILEWATCHER_SCHEDULE_MODE`, `OCR_MODE`, `METADATA_WRITE_MODE`,
+`METADATA_GOOGLE_JSON`, `LIBRARY_BASE_PATH` — only take effect on the very
+first start, when they flow into the "Standard" processing set. Change them
+per set in the settings afterwards; `LIBRARY_BASE_PATH` additionally serves
+as the default base path for new sets.
 
 | Variable | Description |
 |----------|-------------|

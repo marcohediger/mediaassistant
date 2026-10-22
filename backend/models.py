@@ -145,6 +145,8 @@ class ProcessingSet(Base):
     dry_run = Column(Boolean, default=False)
     ocr_enabled = Column(Boolean, default=False)
     ocr_mode = Column(Text, default="smart")  # smart = screenshots/documents only, always = every image
+    metadata_write_mode = Column(Text, default="direct")  # direct = into the file, sidecar = .xmp next to it
+    google_json = Column(Boolean, default=False)  # read Google Takeout JSON sidecars
 
     # Target storage
     target_mode = Column(Text, default="library")  # library / immich

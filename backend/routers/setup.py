@@ -42,7 +42,11 @@ async def setup_step(request: Request, step: int):
         return await render(request, "setup/step2_smtp.html", context)
     elif step == 3:
         context["inbox_path"] = config_manager.get_env("INBOX_PATH", "/inbox")
-        context["library_path"] = config_manager.get_env("LIBRARY_PATH", "/library")
+        # Config first (seeded from LIBRARY_BASE_PATH on first start), then
+        # the older LIBRARY_PATH. Showing only LIBRARY_PATH made the wizard
+        # offer /library — and saving it overwrote a LIBRARY_BASE_PATH setup.
+        context["library_path"] = (await config_manager.get("library.base_path", "")
+                                   or config_manager.get_env("LIBRARY_PATH", "/library"))
         # The sets migration runs at startup, so the first set already exists.
         async with async_session() as session:
             context["set_name"] = (await get_set(session, None)).name

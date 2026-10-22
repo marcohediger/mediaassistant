@@ -20,7 +20,7 @@ All of these share the same three-step dance:
    `error_message`, and commit. The pipeline worker / `run_pipeline()`
    takes over from here.
 
-IA-07 (`step_ia07_exif_write`) honours the global `metadata.write_mode`
+IA-07 (`step_ia07_exif_write`) honours the `metadata_write_mode` of the job's set
 setting at runtime, so as long as that setting hasn't changed between the
 original processing and the reprocess, the data will land in EXIF or sidecar
 exactly as it did the first time around. This helper deliberately preserves

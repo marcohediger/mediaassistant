@@ -40,7 +40,12 @@
     "file": "File",
     "status": "Status",
     "step": "Step",
-    "time": "Time"
+    "time": "Time",
+    "sets": "Processing sets",
+    "set_directories": "{n} folder(s)",
+    "set_poll_on": "Immich poll on",
+    "set_poll_off": "Immich poll off",
+    "set_queue": "{n} queued"
   },
   "logs": {
     "title": "Logs",
@@ -535,7 +540,7 @@
   },
   "sets": {
     "title": "Processing sets",
-    "desc": "Each set bundles inputs, schedule, sorting rules, folder tags, OCR and target storage.",
+    "desc": "Each set bundles inputs, schedule, sorting rules, folder tags, OCR, metadata and target storage.",
     "watch": "Watching",
     "watch_hint": "Main switch for scanning all input directories. Off = no set scans its directories.",
     "new": "New set",
@@ -641,6 +646,10 @@
     "err_category_in_use": "This category is still used by a rule.",
     "err_rule": "Every rule needs a valid condition and a value.",
     "err_rule_target": "The rule \"{value}\" points to a category that does not exist in this set.",
-    "err_rule_regex": "Invalid pattern in rule \"{value}\"."
+    "err_rule_regex": "Invalid pattern in rule \"{value}\".",
+    "tab_metadata": "Metadata"
+  },
+  "setup": {
+    "set_hint": "Both paths belong to the processing set \"{name}\". Further sets with their own folders, rules and storage can be added later in the settings."
   }
 }

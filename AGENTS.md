@@ -35,7 +35,16 @@ MediaAssistant/
 │   ├── config.py               # ConfigManager (DB-backed key/value)
 │   ├── database.py             # SQLAlchemy async session, pool tuning
 │   ├── models.py               # ORM-Definitionen (Job, Config, Module, …)
-│   ├── filewatcher.py          # Inbox-Scanner + Immich-Poller + Worker
+│   ├── sets.py                 # Verarbeitungs-Sets: Migration, Standardwerte, get_set & Co.
+│   ├── filewatcher.py          # Taktgeber: geht über die aktiven Sets, ruft fällige Eingänge auf
+│   ├── inputs/                 # Eingänge — reihen NUR ein, verarbeiten nie selbst
+│   │   ├── inbox.py            # Verzeichnisse eines Sets scannen (Hash-Cache)
+│   │   ├── immich.py           # Immich Auto-Tagging eines Sets (ohne Download)
+│   │   ├── csv_retry.py        # CSV-Bulk-Retry
+│   │   ├── schedule.py         # Zeitplan eines Sets
+│   │   └── common.py           # create_job_safe, scan_directory, IMMICH_PENDING
+│   ├── worker.py               # DER Pipeline-Worker — einziger Ort, der run_pipeline startet
+│   ├── recovery.py             # Einmaliges beim Start: Wiederaufnahme, Einmal-Migrationen
 │   ├── safe_file.py            # safe_move(): copy → verify hash → delete
 │   ├── ai_backends.py          # Loadbalancer für mehrere OpenAI-kompat. Endpunkte
 │   ├── immich_client.py        # REST-Client für Immich
@@ -55,6 +64,7 @@ MediaAssistant/
 │   │   ├── settings.py
 │   │   ├── setup.py
 │   │   ├── review.py           # "Unknown" review queue
+│   │   ├── processing_sets.py  # JSON-API für Set-Liste und Set-Editor (Popup)
 │   │   ├── tools.py            # Register "Werkzeuge": Tag-Aufräumen + Schreibweisen
 │   │   ├── diagnostics.py      # Nur-lesende Diagnose-API (Token aus Einstellungen)
 │   │   └── auth_oidc.py
@@ -86,16 +96,27 @@ MediaAssistant/
 
 ## Architektur in einem Absatz
 
-FastAPI-App startet beim Boot 3 Hintergrund-Tasks: **Filewatcher**
-(scannt Inbox-Verzeichnisse + pollt optional Immich), **Pipeline-Worker**
-(zieht Jobs aus der DB-Queue), **Health-Watcher** (überwacht
-AI-Backend + Geocoding und auto-pausiert die Pipeline bei Ausfall).
-Jede neue Datei wird zu einer Zeile in `jobs` (`status='queued'`).
-`run_pipeline(job_id)` läuft die 11 Steps sequentiell, jeder Step
-schreibt sein Ergebnis als JSON in `job.step_result`. Failures unter
-IA-02..IA-06 sind weich (Warning), IA-01/IA-07/IA-08 sind kritisch
-(Job → `status='error'`, Datei wandert nach `/library/error/`).
-Finalizer IA-09/10/11 laufen IMMER, auch nach Critical-Failure.
+Alles, was festlegt, *wie* eine Datei verarbeitet wird, gehört zu einem
+**Verarbeitungs-Set** (`ProcessingSet`): Eingänge (Verzeichnisse,
+Immich Auto-Tagging), Zeitplan, Sortier-Regeln, Kategorien, Ordner-Tags,
+OCR, Metadaten-Schreibmodus, Ziel-Ablage. Jeder Job trägt `set_id`;
+Pipeline-Steps holen Regeln, Kategorien, Basis-Pfad usw. über
+`sets.get_set(session, job.set_id)` — nie aus der globalen Config.
+Die App startet drei Hintergrund-Tasks: **Filewatcher** (Taktgeber über
+die aktiven Sets; deren Eingänge reihen nur Jobs ein), **Pipeline-Worker**
+(der einzige Ort, der `run_pipeline` startet; zieht `queued`-Jobs in
+freie Slots, lädt Immich-Originale erst beim Start eines Jobs),
+**Health-Watcher** (überwacht AI-Backend + Geocoding und auto-pausiert
+die Pipeline bei Ausfall). `run_pipeline(job_id)` läuft die 11 Steps
+sequentiell, jeder Step schreibt sein Ergebnis als JSON in
+`job.step_result`. Failures unter IA-02..IA-06 sind weich (Warning),
+IA-01/IA-07/IA-08 sind kritisch (Job → `status='error'`, Datei wandert
+nach `<Basis-Pfad des Sets>/error/`). Finalizer IA-09/10/11 laufen
+IMMER, auch nach Critical-Failure.
+
+**Regel:** Neue Eingänge, Retry-Knöpfe oder Reparaturen setzen einen Job
+auf `queued` — sie rufen nie selbst `run_pipeline`. Vor dem Umbau taten
+das fünf Stellen, und nur eine hielt die Slot-Grenze.
 
 ## Konventionen
 
@@ -221,6 +242,7 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_testplan_final.py` | 68 Asserts: API/UI Smoke-Tests | `docker exec mediaassistant-dev python /app/test_testplan_final.py` |
 | `backend/test_ai_backends.py` | AI-Backend-Loadbalancer | `docker exec mediaassistant-dev python /app/test_ai_backends.py` |
 | `backend/test_startup_imports.py` | Startpfad importierbar (Release-Vorstufe) | `docker exec mediaassistant-dev python /app/test_startup_imports.py` |
+| `backend/test_sets_migration.py` | Migration in Sets auf Kopien (Dev, Live-Kopie, `neu`, `mehrfach:<db>`) | `docker exec mediaassistant-dev python /app/test_sets_migration.py [quelle]` |
 
 ### Pflicht-Vorstufe: startet die App überhaupt?
 
@@ -412,6 +434,16 @@ Stromausfall und Filesystem-Glitches. Niemals durch `shutil.move()` oder
 und resumed automatisch. Wenn du einen Test schreibst, der absichtlich
 das AI-Backend ausfallen lässt, wirst du die ganze Pipeline pausieren —
 restaurieren im finally.
+
+### Dev-Container und gleichzeitige Testläufe
+
+Der Dev-Container lädt bei jeder gespeicherten `.py`-Datei neu, und jeder
+Neustart läuft durch `init_db` (ALTER TABLE braucht die Schreibsperre).
+Hält ein Testskript zur selben Zeit eine Schreibtransaktion offen und
+wartet dabei auf die App oder den Worker, blockieren sich beide, bis
+SQLites `busy_timeout` (600 s) abläuft — erlebt beim Sets-Umbau.
+**In Tests nie eine DB-Session offen halten, während auf die App oder
+den Worker gewartet wird** — erst committen/schliessen.
 
 ## Immich-Stolperfallen
 

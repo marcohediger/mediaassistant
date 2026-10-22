@@ -1,5 +1,123 @@
 # Changelog
 
+## v2.33.0 — 2026-10-22
+
+### Neu: Verarbeitungs-Sets
+
+Was bisher global eingestellt war, gehört jetzt zu einem **Set** — und
+davon gibt es beliebig viele. Jedes Set bündelt:
+
+| Bereich | im Set |
+|---|---|
+| Eingänge | beliebig viele Verzeichnisse und/oder Immich Auto-Tagging mit eigenem Zugang |
+| Zeitplan | durchgehend, Zeitfenster, geplant oder manuell, eigenes Intervall |
+| Sortier-Regeln | eigene Liste |
+| Ordner-Tags | an/aus |
+| OCR | an/aus und Modus |
+| Metadaten | Schreibmodus (direkt/XMP-Sidecar) und Google-Takeout-JSON |
+| Ziel-Ablage | Library-Ordner oder Upload zu Immich, eigener Basis-Pfad, eigene Kategorien |
+
+Global bleiben KI-Backends, Geocoding, Duplikat-Erkennung,
+Video-Vorschauen, Immich-Server und -Zugänge, SMTP und Diagnose.
+
+**Nach dem Update ändert sich nichts.** Die bisherige Konfiguration wird
+beim ersten Start automatisch zu einem Set „Standard", das sich exakt so
+verhält wie vorher. Verzeichnisse mit unterschiedlichen Schaltern
+werden auf mehrere Sets verteilt; jeder benannte Immich-Zugang, der
+bisher gepollt wurde, bekommt ein eigenes Set. Alle bestehenden Jobs
+werden ihrem Set zugeordnet. Die Migration läuft in einer Transaktion
+und setzt ihr Erledigt-Flag erst am Schluss — ein Absturz mittendrin
+lässt die Datenbank, wie sie war.
+
+Geprüft an einer Kopie der Live-Datenbank mit 65'982 Jobs: ein Set
+„Standard", alle 10 Regeln und 8 Kategorien unverändert, Immich-Poll
+mit unverändertem Cursor, kein Job ohne Set.
+
+### Einstellungen neu gegliedert
+
+- **Verarbeitungs-Sets** als Liste — eine Zeile pro Set mit den
+  wichtigsten Angaben, Bearbeiten im Popup mit einem Reiter je Bereich.
+- **Immich-Zugänge** als Liste: „Globaler User" und benannte User, beim
+  Anlegen wählbar. Die Liste zeigt live, zu welchem Immich-Konto ein
+  Schlüssel gehört und welche Sets ihn verwenden; Löschen ist gesperrt,
+  solange ein Set den Zugang braucht.
+- **Diagnose-Tokens** als Liste mit Popup zum Anlegen, Umbenennen,
+  Ein-/Ausschalten und Löschen.
+- **Sprache und Theme** im Schnellmenü oben rechts — umschalten ohne
+  Speichern-Knopf.
+- Entfallen sind die globalen Abschnitte Eingangsverzeichnisse,
+  Filewatcher, Sortier-Regeln, Ziel-Ablage, Ordner-Tags, OCR,
+  Metadaten-Schreibmodus und Darstellung samt der Module
+  `ordner_tags` und `ocr`. Ihr bisheriger Zustand steckt in den Sets.
+
+Speichern im Set-Editor prüft alles, bevor etwas geschrieben wird, und
+schreibt dann in einer Transaktion. Abgelehnt werden unter anderem
+Regeln auf Kategorien, die es im Set nicht gibt, ungültige Muster, und
+ein Verzeichnis, das schon einem anderen Set gehört — sonst würde eine
+Datei doppelt verarbeitet. Ein abgelehntes Speichern ändert nichts.
+
+Kategorie-Schlüssel bleiben nach dem Anlegen fest. Bisher änderte eine
+Umbenennung auch den internen Schlüssel, auf den bereits verarbeitete
+Jobs verweisen.
+
+### Umbau: Eingänge reihen nur ein, ein Worker verarbeitet
+
+Bisher führten fünf Wege in die Pipeline, und nur einer hielt sich an
+die Slot-Grenze: der Inbox-Scanner. Immich-Poller, Neustart-
+Wiederaufnahme, Retry-Knopf und Duplikat-Review starteten die Pipeline
+selbst. Jetzt reihen alle Eingänge nur noch ein; verarbeitet wird
+ausschliesslich im Worker — mit Slots, Pause und Hänger-Erkennung für
+jeden Job, egal woher er kommt.
+
+`filewatcher.py` (987 Zeilen) ist dafür zerlegt in `inputs/` (Inbox,
+Immich, CSV-Retry, Zeitplan, gemeinsame Bausteine), `worker.py` und
+`recovery.py`. `filewatcher.py` ist nur noch der Taktgeber über die
+aktiven Sets.
+
+### Fix: Immich-Poller blockierte den Inbox-Scan
+
+Der Poller lud jedes neue Asset herunter und verarbeitete es sofort,
+eines nach dem anderen, innerhalb der Scan-Schleife. Solange wurde keine
+Inbox gescannt (KNOWN_RISKS H-2). Er reiht jetzt nur noch Jobs mit der
+Asset-ID ein; der Worker lädt das Original, wenn er den Job startet.
+
+### Fix: Neustart verlor Immich-Dateien
+
+Der Download lag in `/tmp`; ein Neustart des Containers löschte ihn, und
+der Job lief auf eine fehlende Datei. Jetzt lädt der Worker ein Original,
+das nicht (mehr) auf der Platte liegt, einfach erneut. Die Hänger-
+Erkennung behandelt eine fehlende Temp-Datei bei Immich-Jobs als Grund
+zum Neuladen statt als Fehler. Der bisherige Inhaltsabgleich per SHA-256
+pro Zugang ist erhalten: ein Asset, dessen Bytes schon verarbeitet
+wurden, wird übersprungen.
+
+### Fix: Neustart-Wiederaufnahme hielt den Start auf
+
+Unterbrochene Jobs wurden beim Start einzeln zu Ende verarbeitet, bevor
+der Worker überhaupt anlief. Sie werden jetzt nur neu eingereiht.
+
+### Performance: Inbox-Scan
+
+- Der Scan fragt nur noch nach den Dateien, die gerade im Verzeichnis
+  liegen. Vorher lud er bei jedem Durchlauf alle Jobs, die je aus dem
+  Verzeichnis kamen — live rund 60'000 Zeilen pro Minute.
+- Dateien, die in der Inbox liegen bleiben (übersprungen, Probelauf),
+  werden nicht mehr bei jedem Durchlauf neu gehasht; gleiche Grösse und
+  Änderungszeit heisst gleicher Inhalt.
+
+### Fix: „Alle als sourceless" tat nichts
+
+Der Sammelknopf in der Review-Ansicht schickte den Schlüssel
+`sourceless`, den es nie gab. Die Prüfung schlug fehl, und der Knopf
+tat seit jeher nichts. Er wird jetzt pro Datei zu `sourceless_foto` oder
+`sourceless_video` aufgelöst — im Set der Datei.
+
+### Fix: Wettlauf im Duplikat-Review
+
+„Kein Duplikat" startete die Pipeline als eigenen Task, bevor die
+Rückstellung des Jobs committet war. Lief der Task zuerst, sah er den
+alten Status, und nichts passierte. Der Job wird jetzt nur eingereiht.
+
 ## v2.32.23 — 2026-09-02
 
 ### Fix: v2.32.22 startete nicht — `version.py` war leer
