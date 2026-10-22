@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ t.logs.title }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/logs.css?v={{ version }}">{% endblock %}
 {% block content %}
 {% from "_status.html" import status_badge with context %}
+{% macro icon(name, size=16, cls='') -%}
+<svg class="ui-i{{ ' ' ~ cls if cls else '' }}" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
 {# Long or multi-line text: first line as a summary, the rest on demand.
    A single 10 000-character entry used to stretch the table to 90 000 px. #}
 {% macro long_text(text, limit=160) -%}
@@ -10,43 +14,135 @@
 <details class="log-more"><summary>{{ first[:limit] }}{{ '…' if first | length > limit else '' }}</summary><pre>{{ text }}</pre></details>
 {%- else -%}{{ text }}{%- endif -%}
 {%- endmacro %}
-<div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.5rem;">
-    <h1 style="margin: 0;">{{ t.logs.title }}</h1>
-    <div id="cleanup-buttons" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-        <a href="#" class="btn btn-small btn-secondary"
-           onclick="retryAllErrors(event)">{{ t.logs.retry_all_errors }}</a>
-        <a href="#" class="btn btn-small btn-secondary"
-           onclick="retryAllWarnings(event)">{{ t.logs.retry_all_warnings }}</a>
-        <a href="#" class="btn btn-small btn-secondary cleanup-btn" data-task="orphans"
-           onclick="cleanupOrphans(event)">{{ t.logs.cleanup_orphans }}</a>
-        <a href="#" class="btn btn-small btn-secondary cleanup-btn" data-task="stale_errors"
-           onclick="cleanupStaleErrors(event)">{{ t.logs.cleanup_stale_errors }}</a>
-        <a href="#" class="btn btn-small btn-secondary cleanup-btn" data-task="stuck_duplicates"
-           onclick="cleanupStuckDuplicates(event)">{{ t.logs.cleanup_stuck_duplicates }}</a>
+{# Level of a system log entry as a round icon, like the job status icons.
+   Only ERROR is red; INFO stays muted so real problems stand out. #}
+{% macro level_icon(level) -%}
+{%- set lv = (level or '') | lower -%}
+{%- set meta = {'error': ('is-error', 'alert-circle', t.logs.error),
+                'warning': ('is-warning', 'alert-triangle', t.logs.warning),
+                'info': ('is-neutral', 'info', t.logs.info)} -%}
+{%- set m = meta.get(lv, ('is-neutral', 'info', level or '—')) -%}
+<span class="log-level {{ m[0] }}" title="{{ m[2] }}">{{ icon(m[1], 13) }}<span class="ui-sr-only">{{ m[2] }}</span></span>
+{%- endmacro %}
+{% macro dry_mark() -%}
+<span class="dry-run-mark" title="{{ t.sets.dry_run_short }} — {{ t.sets.dry_run_hint }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="sr-only">{{ t.sets.dry_run_short }}</span></span>
+{%- endmacro %}
+
+<div class="ui-page-head logs-head">
+    <div class="ui-page-head-text">
+        <h1 class="ui-page-title">{{ t.logs.title }}</h1>
+        <p class="ui-page-sub">{{ t.logs.subtitle }}</p>
     </div>
 </div>
 
-<div id="cleanup-progress" style="display: none; margin: 1rem 0; padding: 0.75rem 1rem; background: var(--card-bg, #f5f5f5); border: 1px solid var(--border-color, #ddd); border-radius: 4px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-        <strong id="cleanup-progress-title">Cleanup läuft …</strong>
-        <span id="cleanup-progress-counter" style="font-family: monospace; font-size: 0.85rem; color: var(--text-muted, #666);"></span>
+{# Tabs on the left, the maintenance actions in a menu at the far right of
+   the same row. The five buttons used to take a whole row of their own. #}
+<div class="logs-tabbar">
+    <nav class="ui-tabs" aria-label="{{ t.logs.title }}">
+        {# Tab links preserve all current filters except tab itself #}
+        <a class="ui-tab" href="/logs?tab=system{% if non_tab_query %}&amp;{{ non_tab_query }}{% endif %}"{% if tab == 'system' %} aria-current="page"{% endif %}>{{ icon('scroll') }}{{ t.logs.system_log }}</a>
+        <a class="ui-tab" href="/logs?tab=jobs{% if non_tab_query %}&amp;{{ non_tab_query }}{% endif %}"{% if tab == 'jobs' %} aria-current="page"{% endif %}>{{ icon('list') }}{{ t.logs.job_log }}</a>
+        <a class="ui-tab" href="/logs?tab=dryrun"{% if tab == 'dryrun' %} aria-current="page"{% endif %}>{{ icon('eye') }}{{ t.logs.dryrun_tab }}</a>
+    </nav>
+    <div class="ui-menu-wrap logs-menu" id="cleanup-buttons">
+        <button type="button" class="ui-icon-btn logs-menu-btn" id="logs-menu-btn"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="logs-menu"
+                aria-label="{{ t.logs.maintenance }}" title="{{ t.logs.maintenance }}">{{ icon('menu', 20) }}</button>
+        <div class="ui-menu" id="logs-menu" role="menu" aria-label="{{ t.logs.maintenance }}" hidden>
+            <button type="button" class="ui-menu-item" role="menuitem"
+                    onclick="retryAllErrors(event)">{{ icon('retry') }}{{ t.logs.retry_all_errors }}</button>
+            <button type="button" class="ui-menu-item" role="menuitem"
+                    onclick="retryAllWarnings(event)">{{ icon('retry') }}{{ t.logs.retry_all_warnings }}</button>
+            <div class="ui-menu-sep" role="separator"></div>
+            <button type="button" class="ui-menu-item cleanup-btn" role="menuitem" data-task="orphans"
+                    onclick="cleanupOrphans(event)">{{ icon('link') }}{{ t.logs.cleanup_orphans }}</button>
+            <button type="button" class="ui-menu-item cleanup-btn" role="menuitem" data-task="stuck_duplicates"
+                    onclick="cleanupStuckDuplicates(event)">{{ icon('copy') }}{{ t.logs.cleanup_stuck_duplicates }}</button>
+            <div class="ui-menu-sep" role="separator"></div>
+            <button type="button" class="ui-menu-item cleanup-btn is-danger" role="menuitem" data-task="stale_errors"
+                    onclick="cleanupStaleErrors(event)">{{ icon('trash') }}{{ t.logs.cleanup_stale_errors }}</button>
+        </div>
     </div>
-    <div style="height: 10px; background: var(--border-color, #ddd); border-radius: 5px; overflow: hidden;">
-        <div id="cleanup-progress-bar" style="height: 100%; width: 0%; background: var(--accent-blue, #0078d4); transition: width 0.3s ease;"></div>
+</div>
+
+{# Progress of a running maintenance task; filled by the script below. #}
+<div id="cleanup-progress" class="ui-card logs-progress" role="status" aria-live="polite" hidden>
+    <div class="ui-progress-meta">
+        <strong class="logs-progress-title">{{ icon('loader', 16, 'ui-spin') }}<span id="cleanup-progress-title"></span></strong>
+        <span id="cleanup-progress-counter" class="ui-tabular"></span>
     </div>
-    <div id="cleanup-progress-phase" style="margin-top: 0.4rem; font-size: 0.85rem; color: var(--text-muted, #666);"></div>
+    <div class="ui-progress" id="cleanup-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+         aria-valuenow="0" aria-labelledby="cleanup-progress-title">
+        <div class="ui-progress-bar" id="cleanup-progress-bar"></div>
+    </div>
+    <p id="cleanup-progress-phase" class="logs-progress-phase"></p>
 </div>
 
 <script>
+const LOGS_L = {{ t.logs | tojson }};
+function _t(key, vars) {
+    let s = LOGS_L[key] || key;
+    for (const [k, v] of Object.entries(vars || {})) s = s.split('{' + k + '}').join(String(v));
+    return s;
+}
+
+// ─── Maintenance menu: open/close, keyboard, one item runs per click ───
+(function () {
+    const wrap = document.getElementById('cleanup-buttons');
+    const btn = document.getElementById('logs-menu-btn');
+    const menu = document.getElementById('logs-menu');
+    const items = () => Array.from(menu.querySelectorAll('.ui-menu-item:not(:disabled)'));
+    function setOpen(open, focusFirst) {
+        menu.hidden = !open;
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open && focusFirst && items()[0]) items()[0].focus();
+    }
+    btn.addEventListener('click', () => setOpen(menu.hidden, false));
+    btn.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true, true); }
+    });
+    // Capture phase: the menu closes before an item's own handler asks to confirm.
+    menu.addEventListener('click', (e) => {
+        if (e.target.closest('.ui-menu-item')) setOpen(false);
+    }, true);
+    menu.addEventListener('keydown', (e) => {
+        const list = items();
+        const i = list.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const n = list.length;
+            if (n) list[(i + (e.key === 'ArrowDown' ? 1 : -1) + n) % n].focus();
+        } else if (e.key === 'Home' || e.key === 'End') {
+            e.preventDefault();
+            if (list.length) list[e.key === 'Home' ? 0 : list.length - 1].focus();
+        } else if (e.key === 'Tab') {
+            setOpen(false);
+        }
+    });
+    document.addEventListener('click', (e) => {
+        if (!menu.hidden && !wrap.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); }
+    });
+})();
+
+// The menu button shows a busy marker while any action runs.
+function _setMenuBusy(busy) {
+    const btn = document.getElementById('logs-menu-btn');
+    if (busy) btn.setAttribute('aria-busy', 'true');
+    else btn.removeAttribute('aria-busy');
+}
+
 async function _bulkRetry(ev, endpoint, confirmMsg, emptyMsg) {
     ev.preventDefault();
     const returnUrl = {{ ('/logs?' + current_query) | tojson }};
     if (!confirm(confirmMsg)) return;
 
     const btn = ev.currentTarget;
-    const origText = btn.textContent;
-    btn.textContent = '⏳ ...';
-    btn.style.pointerEvents = 'none';
+    btn.disabled = true;
+    _setMenuBusy(true);
+    const restore = () => { btn.disabled = false; _setMenuBusy(false); };
 
     try {
         const resp = await fetch(endpoint, {
@@ -58,9 +154,8 @@ async function _bulkRetry(ev, endpoint, confirmMsg, emptyMsg) {
             credentials: 'same-origin'
         });
         if (!resp.ok) {
-            alert('Retry-All fehlgeschlagen: HTTP ' + resp.status);
-            btn.textContent = origText;
-            btn.style.pointerEvents = '';
+            alert(_t('retry_failed_http', {status: resp.status}));
+            restore();
             return;
         }
         const data = await resp.json();
@@ -69,19 +164,16 @@ async function _bulkRetry(ev, endpoint, confirmMsg, emptyMsg) {
         const more = data.truncated ? ' …' : '';
         if (count === 0) {
             alert(emptyMsg);
-            btn.textContent = origText;
-            btn.style.pointerEvents = '';
+            restore();
             return;
         }
-        alert('✅ ' + count + ' Job' + (count === 1 ? '' : 's') +
-              ' für Retry vorgemerkt.\n\n' +
-              'Erste IDs: ' + sample + more +
-              '\n\nSeite wird neu geladen.');
+        alert(_t(count === 1 ? 'retry_queued_one' : 'retry_queued_many', {n: count}) + '\n\n' +
+              _t('first_ids', {ids: sample + more}) +
+              '\n\n' + _t('reloading'));
         window.location.href = returnUrl;
     } catch (e) {
-        alert('Retry-All Fehler: ' + e.message);
-        btn.textContent = origText;
-        btn.style.pointerEvents = '';
+        alert(_t('retry_error', {error: e.message}));
+        restore();
     }
 }
 
@@ -89,8 +181,8 @@ async function retryAllErrors(ev) {
     return _bulkRetry(
         ev,
         '/api/jobs/retry-all-errors',
-        {{ t.logs.retry_all_confirm | tojson }},
-        'Keine Jobs im Status "error" gefunden — nichts zu tun.'
+        LOGS_L.retry_all_confirm,
+        _t('retry_none_errors')
     );
 }
 
@@ -98,39 +190,38 @@ async function retryAllWarnings(ev) {
     return _bulkRetry(
         ev,
         '/api/jobs/retry-all-warnings',
-        {{ t.logs.retry_all_warnings_confirm | tojson }},
-        'Keine Jobs mit Warnungen gefunden — nichts zu tun.'
+        LOGS_L.retry_all_warnings_confirm,
+        _t('retry_none_warnings')
     );
 }
 
 // ─── Shared cleanup-progress UI ─────────────────────────────────────
 const TASK_TITLES = {
-    orphans: 'Verwaiste aufräumen',
-    stale_errors: 'Veraltete Fehler löschen',
-    stuck_duplicates: 'Hängende Duplikate bereinigen',
+    orphans: LOGS_L.cleanup_orphans,
+    stale_errors: LOGS_L.cleanup_stale_errors,
+    stuck_duplicates: LOGS_L.cleanup_stuck_duplicates,
 };
 let _cleanupPollInterval = null;
 
 function _setButtonsDisabled(disabled) {
-    document.querySelectorAll('.cleanup-btn').forEach(btn => {
-        btn.style.pointerEvents = disabled ? 'none' : '';
-        btn.style.opacity = disabled ? '0.5' : '';
-    });
+    document.querySelectorAll('.cleanup-btn').forEach(btn => { btn.disabled = disabled; });
+    _setMenuBusy(disabled);
 }
 
 function _showProgress(task) {
     const box = document.getElementById('cleanup-progress');
     document.getElementById('cleanup-progress-title').textContent =
-        (TASK_TITLES[task] || task) + ' läuft …';
+        _t('task_running', {task: TASK_TITLES[task] || task});
     document.getElementById('cleanup-progress-counter').textContent = '0 / ?';
     document.getElementById('cleanup-progress-bar').style.width = '0%';
-    document.getElementById('cleanup-progress-phase').textContent = 'Wird gestartet …';
-    box.style.display = 'block';
+    document.getElementById('cleanup-progress-track').setAttribute('aria-valuenow', '0');
+    document.getElementById('cleanup-progress-phase').textContent = _t('task_starting');
+    box.hidden = false;
     _setButtonsDisabled(true);
 }
 
 function _hideProgress() {
-    document.getElementById('cleanup-progress').style.display = 'none';
+    document.getElementById('cleanup-progress').hidden = true;
     _setButtonsDisabled(false);
     if (_cleanupPollInterval) {
         clearInterval(_cleanupPollInterval);
@@ -145,33 +236,37 @@ function _updateProgress(data) {
     document.getElementById('cleanup-progress-counter').textContent =
         cur + ' / ' + (total || '?') + ' (' + pct + '%)';
     document.getElementById('cleanup-progress-bar').style.width = pct + '%';
+    document.getElementById('cleanup-progress-track').setAttribute('aria-valuenow', String(pct));
     document.getElementById('cleanup-progress-phase').textContent =
         data.phase || '';
 }
 
 function _formatResult(task, result) {
-    if (!result) return 'Cleanup abgeschlossen.';
+    if (!result) return _t('cleanup_done');
     if (task === 'orphans') {
-        return '✅ Orphan-Scan fertig.\n  ' + (result.orphaned || 0) + ' Jobs als verwaist markiert.\n  ' +
-               (result.checked || 0) + ' geprüft, ' + (result.immich_skipped || 0) + ' Immich übersprungen.';
+        return _t('orphans_result', {
+            orphaned: result.orphaned || 0,
+            checked: result.checked || 0,
+            skipped: result.immich_skipped || 0,
+        });
     }
     if (task === 'stale_errors') {
         const d = result.deleted || 0, s = result.skipped || 0;
         let msg = d === 0
-            ? 'Keine veralteten Fehler-Jobs mit verifiziertem Ziel gefunden.'
-            : '✅ ' + d + ' veraltete Fehler-Job' + (d === 1 ? '' : 's') + ' gelöscht.';
-        if (s > 0) msg += '\n  ' + s + ' übersprungen (Ziel nicht erreichbar).';
+            ? _t('stale_none')
+            : _t(d === 1 ? 'stale_deleted_one' : 'stale_deleted_many', {n: d});
+        if (s > 0) msg += '\n  ' + _t('stale_skipped', {n: s});
         return msg;
     }
     if (task === 'stuck_duplicates') {
         const t = result.total || 0, r = result.requeued || 0, m = result.marked_done || 0,
               s = result.skipped || 0, raced = result.raced || 0;
-        if (t === 0 && s === 0 && raced === 0) return 'Keine hängenden Duplikat-Gewinner gefunden.';
-        let msg = '✅ ' + t + ' Job' + (t === 1 ? '' : 's') + ' bereinigt.';
-        if (r > 0) msg += '\n  ' + r + ' neu eingereiht (Datei vorhanden).';
-        if (m > 0) msg += '\n  ' + m + ' als "done" markiert (Datei verifiziert).';
-        if (s > 0) msg += '\n\n⚠️ ' + s + ' übersprungen — kein "done"-Gegenstück.';
-        if (raced > 0) msg += '\nℹ️ ' + raced + ' inzwischen von Pipeline aufgegriffen.';
+        if (t === 0 && s === 0 && raced === 0) return _t('stuck_none');
+        let msg = _t(t === 1 ? 'stuck_done_one' : 'stuck_done_many', {n: t});
+        if (r > 0) msg += '\n  ' + _t('stuck_requeued', {n: r});
+        if (m > 0) msg += '\n  ' + _t('stuck_marked', {n: m});
+        if (s > 0) msg += '\n\n' + _t('stuck_skipped', {n: s});
+        if (raced > 0) msg += '\n' + _t('stuck_raced', {n: raced});
         return msg;
     }
     return JSON.stringify(result);
@@ -192,12 +287,12 @@ async function _pollCleanup(task) {
         if (data.done) {
             _hideProgress();
             if (data.error) {
-                alert('Cleanup fehlgeschlagen: ' + data.error);
+                alert(_t('cleanup_failed', {error: data.error}));
                 return;
             }
             const msg = _formatResult(task, data.result);
             const hasWork = data.result && (data.result.total > 0 || data.result.deleted > 0 || data.result.orphaned > 0);
-            alert(msg + (hasWork ? '\n\nSeite wird neu geladen.' : ''));
+            alert(msg + (hasWork ? '\n\n' + _t('reloading') : ''));
             if (hasWork) {
                 window.location.href = TASK_REDIRECT[task] || '/logs';
             }
@@ -216,11 +311,11 @@ async function _startCleanup(task, endpoint) {
         });
         if (resp.status === 409) {
             const data = await resp.json();
-            alert('Ein anderer Cleanup läuft bereits: ' + (TASK_TITLES[data.task] || data.task) + '\nBitte warten bis dieser fertig ist.');
+            alert(_t('cleanup_busy', {task: TASK_TITLES[data.task] || data.task}));
             return;
         }
         if (!resp.ok) {
-            alert('Cleanup fehlgeschlagen: HTTP ' + resp.status);
+            alert(_t('cleanup_failed_http', {status: resp.status}));
             return;
         }
         _showProgress(task);
@@ -228,26 +323,26 @@ async function _startCleanup(task, endpoint) {
         // Immediate poll for fast feedback
         _pollCleanup(task);
     } catch (e) {
-        alert('Cleanup-Start fehlgeschlagen: ' + e.message);
+        alert(_t('cleanup_start_failed', {error: e.message}));
     }
 }
 
 async function cleanupStaleErrors(ev) {
     ev.preventDefault();
-    if (!confirm({{ t.logs.cleanup_stale_errors_confirm | tojson }})) return;
+    if (!confirm(LOGS_L.cleanup_stale_errors_confirm)) return;
     await _startCleanup('stale_errors', '/api/jobs/cleanup-stale-errors');
 }
 
 async function cleanupStuckDuplicates(ev) {
     ev.preventDefault();
-    if (!confirm({{ t.logs.cleanup_stuck_duplicates_confirm | tojson }})) return;
+    if (!confirm(LOGS_L.cleanup_stuck_duplicates_confirm)) return;
     await _startCleanup('stuck_duplicates', '/api/jobs/cleanup-stuck-duplicate-winners');
 }
 
 async function cleanupOrphans(ev) {
     ev.preventDefault();
-    if (!confirm({{ t.logs.cleanup_orphans_confirm | tojson }})) return;
-    const checkImmich = confirm({{ t.logs.cleanup_orphans_immich | tojson }});
+    if (!confirm(LOGS_L.cleanup_orphans_confirm)) return;
+    const checkImmich = confirm(LOGS_L.cleanup_orphans_immich);
     const url = '/api/jobs/cleanup-orphans' + (checkImmich ? '?check_immich=1' : '');
     await _startCleanup('orphans', url);
 }
@@ -267,61 +362,56 @@ async function cleanupOrphans(ev) {
 })();
 </script>
 
-<div class="tabs">
-    {# Tab links preserve all current filters except tab itself #}
-    <a href="/logs?tab=system{% if non_tab_query %}&{{ non_tab_query }}{% endif %}" class="tab {{ 'tab-active' if tab == 'system' else '' }}">{{ t.logs.system_log }}</a>
-    <a href="/logs?tab=jobs{% if non_tab_query %}&{{ non_tab_query }}{% endif %}" class="tab {{ 'tab-active' if tab == 'jobs' else '' }}">{{ t.logs.job_log }}</a>
-    <a href="/logs?tab=dryrun" class="tab {{ 'tab-active' if tab == 'dryrun' else '' }}">{{ t.logs.dryrun_tab }}</a>
-</div>
-
 {% if tab == 'system' %}
 <!-- System Logs -->
-<div class="log-filters">
-    <form method="get" action="/logs" class="filter-form">
-        <input type="hidden" name="tab" value="system">
-        <div class="form-group">
-            <input type="text" name="q" value="{{ search }}" placeholder="{{ t.logs.search_message }}">
-        </div>
-        <div class="form-group">
-            <select name="level">
-                <option value="">{{ t.logs.all_levels }}</option>
-                <option value="INFO" {{ 'selected' if level_filter == 'INFO' else '' }}>{{ t.logs.info }}</option>
-                <option value="WARNING" {{ 'selected' if level_filter == 'WARNING' else '' }}>{{ t.logs.warning }}</option>
-                <option value="ERROR" {{ 'selected' if level_filter == 'ERROR' else '' }}>{{ t.logs.error }}</option>
-            </select>
-        </div>
-        <button type="submit" class="btn btn-small btn-secondary">{{ t.logs.filter }}</button>
-    </form>
-    <span class="log-count">{{ total }} {{ t.logs.entries }}</span>
-</div>
+<form method="get" action="/logs" class="ui-toolbar logs-toolbar" role="search">
+    <input type="hidden" name="tab" value="system">
+    <label class="ui-search">
+        <span class="ui-sr-only">{{ t.logs.search_message }}</span>{{ icon('search') }}
+        <input class="ui-input" type="search" name="q" value="{{ search }}" placeholder="{{ t.logs.search_message }}">
+    </label>
+    <select class="ui-select" name="level" aria-label="{{ t.logs.level }}">
+        <option value="">{{ t.logs.all_levels }}</option>
+        <option value="INFO" {{ 'selected' if level_filter == 'INFO' else '' }}>{{ t.logs.info }}</option>
+        <option value="WARNING" {{ 'selected' if level_filter == 'WARNING' else '' }}>{{ t.logs.warning }}</option>
+        <option value="ERROR" {{ 'selected' if level_filter == 'ERROR' else '' }}>{{ t.logs.error }}</option>
+    </select>
+    <button type="submit" class="ui-btn ui-btn-secondary">{{ icon('filter') }}{{ t.logs.filter }}</button>
+    <span class="ui-toolbar-meta">{{ total }} {{ t.logs.entries }}</span>
+</form>
 
 {% if system_logs %}
-<div class="log-table-wrap">
-    <table class="log-table">
+<div class="ui-table-card">
+    <table class="ui-table ui-table-compact logs-table logs-table-system" aria-label="{{ t.logs.system_log }}">
         <thead>
             <tr>
-                <th>{{ t.logs.time }}</th>
-                <th>{{ t.logs.level }}</th>
-                <th>{{ t.logs.source }}</th>
-                <th>{{ t.logs.message }}</th>
-                <th>{{ t.logs.detail }}</th>
+                <th scope="col" class="ui-col-icon">{{ t.logs.level }}</th>
+                <th scope="col">{{ t.logs.time }}</th>
+                <th scope="col">{{ t.logs.source }}</th>
+                <th scope="col">{{ t.logs.message }}</th>
+                <th scope="col">{{ t.logs.detail }}</th>
             </tr>
         </thead>
         <tbody>
             {% for log in system_logs %}
             <tr class="log-row">
-                <td class="cell-nowrap">{{ log.created_at.strftime('%d.%m.%Y %H:%M:%S') if log.created_at else '—' }}</td>
-                <td><span class="level-badge level-{{ log.level | lower }}">{{ log.level }}</span></td>
-                <td>{{ log.source }}</td>
-                <td class="cell-text">{{ long_text(log.message or '') }}</td>
-                <td class="cell-detail{{ ' is-error' if log.level | lower == 'error' else '' }}">{{ long_text(log.detail or '') }}</td>
+                <td class="ui-col-icon lc-level">{{ level_icon(log.level) }}</td>
+                <td class="ui-nowrap ui-tabular lc-time">{{ log.created_at.strftime('%d.%m.%Y %H:%M:%S') if log.created_at else '—' }}</td>
+                <td class="lc-source">{% if log.source %}<span class="ui-badge">{{ log.source }}</span>{% endif %}</td>
+                <td class="cell-text lc-msg">{{ long_text(log.message or '') }}</td>
+                <td class="cell-detail{{ ' is-error' if log.level | lower == 'error' else '' }} lc-detail">{{ long_text(log.detail or '') }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 {% else %}
-<p class="section-note">{{ t.logs.no_system_logs }}</p>
+<div class="ui-card">
+    <div class="ui-empty">
+        <span class="ui-empty-icon">{{ icon('scroll', 22) }}</span>
+        <p class="ui-empty-title">{{ t.logs.no_system_logs }}</p>
+    </div>
+</div>
 {% endif %}
 
 {% elif tab == 'dryrun' %}
@@ -329,83 +419,90 @@ async function cleanupOrphans(ev) {
 
 {% else %}
 <!-- Job Logs -->
-<div class="log-filters">
-    <form method="get" action="/logs" class="filter-form">
-        <input type="hidden" name="tab" value="jobs">
-        <div class="form-group">
-            <input type="text" name="q" value="{{ search }}" placeholder="{{ t.logs.search_file }}">
-        </div>
-        <div class="form-group">
-            <select name="status">
-                <option value="">{{ t.logs.all_status }}</option>
-                <option value="queued" {{ 'selected' if status_filter == 'queued' else '' }}>{{ t.logs.queued }}</option>
-                <option value="processing" {{ 'selected' if status_filter == 'processing' else '' }}>{{ t.logs.processing }}</option>
-                <option value="done" {{ 'selected' if status_filter == 'done' else '' }}>{{ t.logs.done }}</option>
-                <option value="error" {{ 'selected' if status_filter == 'error' else '' }}>{{ t.logs.error }}</option>
-                <option value="warning" {{ 'selected' if status_filter == 'warning' else '' }}>{{ t.logs.warning }}</option>
-                <option value="duplicate" {{ 'selected' if status_filter == 'duplicate' else '' }}>{{ t.logs.duplicate }}</option>
-                <option value="review" {{ 'selected' if status_filter == 'review' else '' }}>{{ t.logs.review }}</option>
-                <option value="orphan" {{ 'selected' if status_filter == 'orphan' else '' }}>{{ t.logs.orphan }}</option>
-            </select>
-        </div>
-        <button type="submit" class="btn btn-small btn-secondary">{{ t.logs.filter }}</button>
-    </form>
-    <span class="log-count">{{ total }} {{ t.logs.entries }}</span>
-</div>
+<form method="get" action="/logs" class="ui-toolbar logs-toolbar" role="search">
+    <input type="hidden" name="tab" value="jobs">
+    <label class="ui-search">
+        <span class="ui-sr-only">{{ t.logs.search_file }}</span>{{ icon('search') }}
+        <input class="ui-input" type="search" name="q" value="{{ search }}" placeholder="{{ t.logs.search_file }}">
+    </label>
+    <select class="ui-select" name="status" aria-label="{{ t.logs.status }}">
+        <option value="">{{ t.logs.all_status }}</option>
+        <option value="queued" {{ 'selected' if status_filter == 'queued' else '' }}>{{ t.logs.queued }}</option>
+        <option value="processing" {{ 'selected' if status_filter == 'processing' else '' }}>{{ t.logs.processing }}</option>
+        <option value="done" {{ 'selected' if status_filter == 'done' else '' }}>{{ t.logs.done }}</option>
+        <option value="error" {{ 'selected' if status_filter == 'error' else '' }}>{{ t.logs.error }}</option>
+        <option value="warning" {{ 'selected' if status_filter == 'warning' else '' }}>{{ t.logs.warning }}</option>
+        <option value="duplicate" {{ 'selected' if status_filter == 'duplicate' else '' }}>{{ t.logs.duplicate }}</option>
+        <option value="review" {{ 'selected' if status_filter == 'review' else '' }}>{{ t.logs.review }}</option>
+        <option value="orphan" {{ 'selected' if status_filter == 'orphan' else '' }}>{{ t.logs.orphan }}</option>
+    </select>
+    <button type="submit" class="ui-btn ui-btn-secondary">{{ icon('filter') }}{{ t.logs.filter }}</button>
+    <span class="ui-toolbar-meta">{{ total }} {{ t.logs.entries }}</span>
+</form>
 
 {% if jobs %}
-<div class="log-table-wrap">
-    <table class="log-table">
+<div class="ui-table-card">
+    <table class="ui-table ui-table-compact logs-table logs-table-jobs" aria-label="{{ t.logs.job_log }}">
         <thead>
             <tr>
-                <th style="white-space: nowrap;">{{ t.logs.debug_key }}</th>
-                <th style="white-space: nowrap;">{{ t.logs.time }}</th>
-                <th style="white-space: nowrap;">{{ t.logs.file }}</th>
-                <th>{{ t.logs.source }}</th>
-                <th>{{ t.logs.status }}</th>
-                <th>{{ t.logs.step }}</th>
-                <th>{{ t.logs.error }}</th>
-                <th>{{ t.logs.target }}</th>
+                <th scope="col" class="ui-col-icon">{{ t.logs.status }}</th>
+                <th scope="col">{{ t.logs.file }}</th>
+                <th scope="col">{{ t.logs.time }}</th>
+                <th scope="col" class="lc-source">{{ t.logs.source }}</th>
+                <th scope="col" class="lc-step">{{ t.logs.step }}</th>
+                <th scope="col">{{ t.logs.message }}</th>
+                <th scope="col" class="lc-target">{{ t.logs.target }}</th>
             </tr>
         </thead>
         <tbody>
             {% for job in jobs %}
             <tr class="log-row log-{{ job.status }}">
-                <td style="white-space: nowrap;"><a href="/logs/job/{{ job.debug_key }}{% if filter_query %}?{{ filter_query }}{% endif %}" class="log-link-key"><code>{{ job.debug_key or '—' }}</code></a></td>
-                <td style="white-space: nowrap; line-height: 1.4;">
-                    {{ job.updated_at.strftime('%d.%m.%Y %H:%M:%S') if job.updated_at else '—' }}
-                    {% set start = job.started_at or job.created_at %}
-                    {% if start and (job.completed_at or job.updated_at) %}
-                    {% set end = job.completed_at or job.updated_at %}
-                    {% set dur = (end - start).total_seconds()|int %}
-                    <br><span style="color: var(--text-muted, #888); font-size: 0.8rem;">{% if dur >= 60 %}{{ (dur // 60) }}m {{ dur % 60 }}s{% else %}{{ dur }}s{% endif %}</span>
-                    {% endif %}
+                <td class="cell-status lc-status">{{ status_badge(job.status, icon_only=True) }}{% if job.dry_run %}{{ dry_mark() }}{% endif %}</td>
+                <th scope="row" class="lc-file">
+                    <div class="ui-cell-stack">
+                        <a class="logs-name" href="/logs/job/{{ job.debug_key }}{% if filter_query %}?{{ filter_query }}{% endif %}" title="{{ job.filename }}">{{ job.filename }}</a>
+                        <span class="logs-key">{{ job.debug_key or '—' }}</span>
+                    </div>
+                </th>
+                <td class="lc-time">
+                    <div class="ui-cell-stack">
+                        <span class="ui-nowrap ui-tabular">{{ job.updated_at.strftime('%d.%m.%Y %H:%M:%S') if job.updated_at else '—' }}</span>
+                        {%- set start = job.started_at or job.created_at %}
+                        {%- if start and (job.completed_at or job.updated_at) %}
+                        {%- set end = job.completed_at or job.updated_at %}
+                        {%- set dur = (end - start).total_seconds()|int %}
+                        <span class="ui-cell-sub ui-tabular lc-dur">{% if dur >= 60 %}{{ (dur // 60) }}m {{ dur % 60 }}s{% else %}{{ dur }}s{% endif %}</span>
+                        {%- endif %}
+                    </div>
                 </td>
-                <td style="max-width: 200px; word-break: break-all; line-height: 1.3;">{{ job.filename }}</td>
-                <td>{{ job.source_label or '—' }}</td>
-                <td class="cell-status">{{ status_badge(job.status, icon_only=True) }}{% if job.dry_run %}<span class="dry-run-mark" title="{{ t.sets.dry_run_short }} — {{ t.sets.dry_run_hint }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="sr-only">{{ t.sets.dry_run_short }}</span></span>{% endif %}</td>
-                <td>{{ job.current_step or '—' }}</td>
-                <td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }}" title="{{ job.error_message or '' }}">{{ job.error_message.split('\n')[0] if job.error_message else '' }}</td>
-                <td style="max-width: 250px; word-break: break-all; line-height: 1.3;" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</td>
+                <td class="ui-nowrap lc-source">{{ job.source_label or '—' }}</td>
+                <td class="ui-nowrap lc-step"><span class="logs-step">{{ job.current_step or '—' }}</span></td>
+                <td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }} lc-msg" title="{{ job.error_message or '' }}">{{ job.error_message.split('\n')[0] if job.error_message else '' }}</td>
+                <td class="lc-target"><span class="logs-path" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</span></td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 {% else %}
-<p class="section-note">{{ t.logs.no_entries }}</p>
+<div class="ui-card">
+    <div class="ui-empty">
+        <span class="ui-empty-icon">{{ icon('list', 22) }}</span>
+        <p class="ui-empty-title">{{ t.logs.no_entries }}</p>
+    </div>
+</div>
 {% endif %}
 {% endif %}
 
 {% if total_pages > 1 %}
-<div class="pagination">
+<nav class="ui-pagination" aria-label="{{ t.logs.page }}">
     {% if page > 1 %}
-    <a href="/logs?tab={{ tab }}&page={{ page - 1 }}&status={{ status_filter }}&level={{ level_filter }}&q={{ search }}" class="btn btn-small btn-secondary">{{ t.logs.prev }}</a>
+    <a href="/logs?tab={{ tab }}&amp;page={{ page - 1 }}&amp;status={{ status_filter | urlencode }}&amp;level={{ level_filter | urlencode }}&amp;q={{ search | urlencode }}" class="ui-btn ui-btn-secondary ui-btn-sm">{{ icon('chevron-left') }}{{ t.logs.prev }}</a>
     {% endif %}
-    <span class="page-info">{{ t.logs.page }} {{ page }} / {{ total_pages }}</span>
+    <span class="ui-pagination-info">{{ t.logs.page }} {{ page }} / {{ total_pages }}</span>
     {% if page < total_pages %}
-    <a href="/logs?tab={{ tab }}&page={{ page + 1 }}&status={{ status_filter }}&level={{ level_filter }}&q={{ search }}" class="btn btn-small btn-secondary">{{ t.logs.next }}</a>
+    <a href="/logs?tab={{ tab }}&amp;page={{ page + 1 }}&amp;status={{ status_filter | urlencode }}&amp;level={{ level_filter | urlencode }}&amp;q={{ search | urlencode }}" class="ui-btn ui-btn-secondary ui-btn-sm logs-next">{{ t.logs.next }}{{ icon('chevron-right') }}</a>
     {% endif %}
-</div>
+</nav>
 {% endif %}
 {% endblock %}

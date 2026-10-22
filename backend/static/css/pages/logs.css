@@ -1,0 +1,238 @@
+/* Logs page (three tabs) and job detail page.
+ * Loaded by logs.html and log_detail.html after style.css and ui.css.
+ * Builds on the ui-* components; the "Log tables: …" and "Status badges: …"
+ * blocks in style.css (red only for errors, long text collapses, status
+ * icons) stay where they are and are only extended here. */
+
+/* ═══ Logs: head, tab row with the maintenance menu ═══════════════════ */
+.logs-head { margin-bottom: 1.25rem; }
+
+/* Tabs left, menu button right, on one row at every width. The tab strip
+   scrolls sideways (no visible scrollbar) when it does not fit; the button
+   never wraps. Both parts draw the bottom line, so it stays continuous and
+   the active tab's underline still sits on it. */
+.logs-tabbar {
+    display: flex; flex-wrap: nowrap; align-items: stretch;
+    margin: 0 0 1.25rem; min-width: 0;
+}
+.logs-tabbar > .ui-tabs { flex: 1 1 auto; min-width: 0; margin: 0; }
+.logs-menu {
+    flex: none; display: flex; align-items: center;
+    padding-left: 0.5rem; border-bottom: 1px solid var(--border);
+}
+/* The panel hangs from the button's right edge and grows to the left, so it
+   stays inside the viewport; above the table and the sticky bits. */
+.logs-menu > .ui-menu {
+    right: 0; left: auto; z-index: 60;
+    width: max-content; min-width: 15rem; max-width: min(22rem, calc(100vw - 2rem));
+}
+.logs-menu .ui-menu-item { white-space: normal; line-height: 1.35; }
+.logs-menu .ui-menu-item > .ui-i { flex: none; }
+.logs-menu-btn { position: relative; }
+.logs-menu-btn[aria-expanded="true"] { color: var(--text); background: var(--bg-input); }
+/* A task is running: small pulsing dot on the button */
+.logs-menu-btn[aria-busy="true"]::after {
+    content: ""; position: absolute; top: 0.25rem; right: 0.25rem;
+    width: 0.45rem; height: 0.45rem; border-radius: 50%;
+    background: var(--primary); box-shadow: 0 0 0 2px var(--bg);
+    animation: ui-pulse 1.4s ease-in-out infinite;
+}
+
+/* Progress of a running maintenance task, under the tab row */
+.logs-progress { margin: 0 0 1.25rem; padding: 0.9rem 1.1rem; }
+.logs-progress-title { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.logs-progress-title > .ui-i { flex: none; color: var(--primary); }
+.logs-progress-phase { margin: 0.5rem 0 0; font-size: var(--ui-fs-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.logs-progress-phase:empty { display: none; }
+
+/* Phone: smaller tabs so all three fit next to the menu button; below
+   that the strip scrolls (scrollbar hidden by ui.css) */
+@media (max-width: 600px) {
+    .logs-tabbar .ui-tab { padding-left: 0.6rem; padding-right: 0.6rem; gap: 0.4rem; font-size: var(--ui-fs-sm); }
+}
+@media (max-width: 420px) {
+    .logs-tabbar .ui-tab > .ui-i { display: none; }
+}
+
+/* Trailing chevron on "Weiter" */
+.logs-next > .ui-i { margin-left: 0; margin-right: -0.15rem; }
+
+/* ═══ Log tables ═════════════════════════════════════════════════════ */
+.logs-table .cell-text { color: var(--text); }
+.logs-table .lc-time { color: var(--text-muted); }
+.logs-table .lc-time .ui-cell-stack { gap: 0.05rem; }
+.logs-table .lc-dur { font-size: var(--ui-fs-xs); }
+.logs-table .lc-status { width: 1%; }
+.logs-table thead .ui-col-icon { color: var(--text); }
+/* System log: the message gets most of the room, the detail the rest */
+.logs-table-system .lc-msg { width: 55%; }
+
+/* File name (link to the job) with the debug key under it */
+.logs-name {
+    display: inline-block; max-width: 15rem; vertical-align: middle;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 600; color: var(--text); text-decoration: none; border-radius: 3px;
+}
+.logs-name:hover { text-decoration: underline; text-underline-offset: 2px; }
+.logs-name:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.logs-key { font-family: var(--ui-mono); font-size: var(--ui-fs-xs); color: var(--text-muted); white-space: nowrap; }
+.logs-step { font-family: var(--ui-mono); font-size: var(--ui-fs-xs); }
+/* Long paths: one line with an ellipsis, full value in the tooltip */
+.logs-path {
+    display: inline-block; max-width: 12rem; vertical-align: middle;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--ui-fs-sm);
+}
+
+/* System log level: round icon like the job status icons. Only ERROR is red. */
+.log-level {
+    --tone: var(--text-muted); --tone-text: var(--text-muted);
+    display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;
+    width: 1.375rem; height: 1.375rem; border-radius: 50%;
+    color: var(--tone-text);
+    background: color-mix(in srgb, var(--tone) 12%, transparent);
+    border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+}
+.log-level > .ui-i { stroke-width: 2.25; }
+.log-level.is-error { --tone: var(--error); --tone-text: var(--ui-err-text); }
+.log-level.is-warning { --tone: var(--warning); --tone-text: var(--ui-warn-text); }
+
+/* Narrower screens: secondary job columns go first, so the table fits its
+   card instead of scrolling sideways (the full row is on the detail page). */
+@media (max-width: 1100px) {
+    .logs-table-jobs :is(.lc-step, .lc-source) { display: none; }
+    .logs-table-jobs .cell-msg { max-width: 200px; }
+}
+@media (max-width: 1000px) {
+    .logs-table-jobs .lc-target { display: none; }
+}
+@media (max-width: 900px) {
+    .logs-table-system .cell-detail { min-width: 9rem; }
+    .logs-table-system .cell-text { min-width: 11rem; }
+}
+
+/* Phone: every row becomes a small card. Main line (icon, name, time),
+   then the message across the full width; secondary columns go. */
+@media (max-width: 600px) {
+    .logs-table thead {
+        position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip: rect(0, 0, 0, 0); white-space: nowrap;
+    }
+    .logs-table, .logs-table tbody { display: block; width: 100%; }
+    .logs-table tr {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem;
+        padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--ui-line);
+    }
+    .logs-table tbody tr:last-child { border-bottom: 0; }
+    .logs-table tbody tr:hover > * { background: none; }
+    .logs-table td, .logs-table tbody th {
+        display: block; width: auto; height: auto; min-width: 0; padding: 0 !important; border: 0;
+    }
+    .logs-table .ui-col-icon, .logs-table .lc-status { width: auto; }
+    .logs-table td.cell-status { display: flex; align-items: center; gap: 0.3rem; width: auto; }
+    .logs-table td.cell-status > * + * { margin-left: 0; }
+    .logs-table .lc-file { flex: 1 1 0; }
+    .logs-table .logs-name { max-width: 100%; }
+    .logs-table .logs-path { max-width: 100%; }
+    .logs-table .lc-msg {
+        flex: 1 1 100%; min-width: 0; max-width: none;
+        white-space: normal; overflow-wrap: anywhere;
+    }
+    .logs-table .lc-msg:empty, .logs-table .lc-detail:empty { display: none; }
+
+    /* System log: level, time, source right / message / detail */
+    .logs-table-system .lc-level { order: 1; }
+    .logs-table-system .lc-time { order: 2; font-size: var(--ui-fs-sm); }
+    .logs-table-system .lc-source { order: 3; margin-left: auto; }
+    .logs-table-system .lc-msg { order: 4; }
+    .logs-table-system .lc-detail { order: 5; flex: 1 1 100%; min-width: 0; max-width: none; }
+
+    /* Jobs: status, name + key, time right / message (two lines at most) */
+    .logs-table-jobs .lc-time { text-align: right; font-size: var(--ui-fs-xs); }
+    .logs-table-jobs .lc-time .ui-cell-stack { align-items: flex-end; }
+    .logs-table-jobs .lc-msg {
+        order: 5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+        overflow: hidden; font-size: var(--ui-fs-xs);
+    }
+    .logs-table-jobs :is(.lc-source, .lc-step, .lc-target) { display: none; }
+
+    /* Dry-run file list: status, name + key, category right / target */
+    .logs-table-dry .lc-cat { font-size: var(--ui-fs-sm); }
+    .logs-table-dry .lc-target { flex: 1 1 100%; min-width: 0; }
+    /* Dry-run errors: name / message */
+    .logs-table-dryerr .lc-file { flex-basis: 100%; }
+}
+
+/* ═══ Dry-run tab ════════════════════════════════════════════════════ */
+.logs-dry-sub { margin: 0 0 1rem; max-width: 80ch; font-size: var(--ui-fs-sm); line-height: 1.5; color: var(--text-muted); }
+.logs-dry-stats { margin: 0 0 1.5rem; }
+.logs-dry-grid { --ui-min: 18rem; align-items: start; }
+.logs-dry-grid .ui-card-head { padding: 0.8rem 1.1rem; }
+.logs-dry-section { margin-top: 2rem; }
+
+/* ═══ Job detail ═════════════════════════════════════════════════════ */
+.job-key { font-family: var(--ui-mono); font-size: 0.92em; letter-spacing: -0.02em; }
+.job-file { overflow-wrap: anywhere; }
+.job-head .ui-page-actions form { margin: 0; }
+
+/* Preview next to the four facts (2 × 2 beside the image) */
+.job-summary { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; margin: 0 0 1.25rem; }
+.job-summary.has-preview { grid-template-columns: 13rem minmax(0, 1fr); }
+.job-summary.has-preview .job-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.job-facts .ui-fact { justify-content: center; }
+.job-preview {
+    position: relative; display: grid; place-items: center;
+    width: 100%; aspect-ratio: 4 / 3; padding: 0; margin: 0; overflow: hidden;
+    color: var(--text-muted); background: var(--bg-input);
+    border: 1px solid var(--ui-card-border); border-radius: var(--ui-radius-lg);
+    cursor: zoom-in; font: inherit;
+}
+.job-preview > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.job-preview:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.job-preview-ph { display: none; }
+.job-preview.is-broken { cursor: default; }
+.job-preview.is-broken > img { display: none; }
+.job-preview.is-broken > .job-preview-ph { display: block; opacity: 0.7; }
+
+.job-alert { margin: 0 0 1.5rem; }
+.job-alert .ui-alert-title { font-size: var(--ui-fs-base); line-height: 1.55; }
+.job-alert .job-message { margin-top: 0.3rem; max-height: 26rem; overflow: auto; scrollbar-width: thin; }
+
+/* Steps left, paths / times / hashes right; one column on small screens
+   with the facts first */
+.job-layout { display: grid; grid-template-columns: minmax(0, 1fr) 24rem; gap: 1.5rem; align-items: start; }
+.job-main { min-width: 0; }
+.job-aside { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.job-aside .ui-card-head { padding: 0.8rem 1.25rem; }
+.job-kv-stack .ui-kv-row { grid-template-columns: minmax(0, 1fr); gap: 0.3rem; }
+.job-kv-times { --ui-kv-key: 10.5rem; }
+.job-kv-note { font-weight: 400; }
+/* No value yet: a plain dash instead of an empty code chip */
+.job-path.is-empty { padding: 0; border-color: transparent; background: none; font-family: inherit; color: var(--text-muted); }
+
+.step-reason {
+    flex: 0 1 auto; min-width: 0; max-width: 45%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--ui-fs-xs); color: var(--text-muted);
+}
+.step-ai-meta { margin: 0; font-size: var(--ui-fs-sm); color: var(--text-muted); }
+.step-ai-meta strong { color: var(--text); font-weight: 600; }
+.step-ai-label {
+    margin: 0.85rem 0 0.35rem !important;
+    font-size: var(--ui-fs-xs); font-weight: 600; color: var(--text-muted);
+}
+.step-ai-context { color: var(--text-muted); }
+.ui-step-body > .ui-pre { max-height: 32rem; }
+.ui-step-body > .step-ai-label + .ui-pre { margin-top: 0 !important; }
+
+@media (max-width: 960px) {
+    .job-layout { grid-template-columns: minmax(0, 1fr); }
+    .job-aside { order: -1; }
+}
+@media (max-width: 600px) {
+    .job-summary.has-preview { grid-template-columns: minmax(0, 1fr); }
+    .job-preview { aspect-ratio: 16 / 9; }
+    .job-preview.is-broken { aspect-ratio: auto; height: 4.5rem; }
+    .step-reason { display: none; }
+    .job-kv-times .ui-kv-row { grid-template-columns: minmax(0, 1fr) auto; }
+}
