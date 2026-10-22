@@ -1,0 +1,25 @@
+{# Job status as a badge: icon + translated label, one look everywhere.
+   Import with context, it needs `t`:
+       {% from "_status.html" import status_badge with context %}
+   base.html also renders every badge once into <template id="status-badges">
+   so app.js can swap a badge on live refresh without its own copy. #}
+{% set STATUS_ICONS = {
+    "done": '<path d="M20 6 9 17l-5-5"/>',
+    "queued": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "processing": '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
+    "error": '<circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/>',
+    "duplicate": '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
+    "review": '<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+    "orphan": '<path d="m18.8 12.3 1.8-1.8a5 5 0 0 0-7.1-7.1l-1.8 1.8"/><path d="m5.2 11.7-1.8 1.8a5 5 0 0 0 7.1 7.1l1.8-1.8"/><path d="M8 2v3M2 8h3M16 22v-3M22 16h-3"/>',
+    "deleted": '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+    "skipped": '<path d="m5 4 10 8-10 8z"/><path d="M19 5v14"/>',
+} %}
+{% set STATUSES = STATUS_ICONS.keys() | list %}
+
+{% macro status_badge(status, field=False) -%}
+<span class="status-badge status-{{ status }}"{% if field %} data-field="status"{% endif %} data-status="{{ status }}">
+{%- if status in STATUS_ICONS -%}
+<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ STATUS_ICONS[status] | safe }}</svg>
+{%- endif -%}
+{{ t.status[status] if t.status and status in t.status else status }}</span>
+{%- endmacro %}

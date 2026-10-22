@@ -85,7 +85,7 @@
         (j) => `<tr class="log-row log-${j.status}">
         <td><a href="/logs/job/${esc(j.debug_key)}" class="log-link-key"><code>${esc(j.debug_key || "—")}</code></a></td>
         <td>${esc(j.filename)}</td>
-        <td><span class="status-badge status-${j.status}">${esc(j.status)}</span></td>
+        <td>${statusBadge(j.status)}</td>
         <td>${esc(j.current_step || "—")}</td>
         <td class="cell-msg${j.status === "error" ? " is-error" : ""}">${esc(j.error_message || "")}</td>
         <td>${esc(j.updated_at)}</td>
@@ -116,10 +116,13 @@
     // Other .status-badge elements (e.g. the dry_run "Preview" badge)
     // must NOT be overwritten or the user sees them flipping to the
     // job status text on each poll cycle.
-    const statusBadge = document.querySelector("[data-field='status']");
-    if (statusBadge) {
-      statusBadge.className = `status-badge status-${job.status}`;
-      statusBadge.textContent = job.status;
+    const current = document.querySelector("[data-field='status']");
+    if (current && current.dataset.status !== job.status) {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = statusBadge(job.status);
+      const fresh = tpl.content.firstElementChild;
+      fresh.dataset.field = "status";
+      current.replaceWith(fresh);
     }
 
     // Current step (use data-field attribute)
@@ -194,6 +197,15 @@
   }
 
   // ── Helpers ──
+  // Status badge (icon + label) cloned from the copies base.html renders,
+  // so the icons and translations live in one place (_status.html).
+  function statusBadge(status) {
+    const tpl = document.getElementById("status-badges");
+    const badge = tpl && tpl.content.querySelector(`[data-status="${CSS.escape(status || "")}"]`);
+    if (badge) return badge.outerHTML;
+    return `<span class="status-badge status-${esc(status)}" data-status="${esc(status)}">${esc(status)}</span>`;
+  }
+
   function esc(str) {
     if (str == null) return "";
     const div = document.createElement("div");

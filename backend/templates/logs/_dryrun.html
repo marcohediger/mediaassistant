@@ -89,7 +89,7 @@
                 <td>{{ job.filename }}</td>
                 <td>{{ job.step_result.get('IA-08', {}).get('category', '—') if job.step_result else '—' }}</td>
                 <td style="font-size: 0.85rem; word-break: break-all;">{{ job.target_path or '—' }}</td>
-                <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
+                <td>{{ status_badge(job.status) }}</td>
             </tr>
             {% endfor %}
         </tbody>
