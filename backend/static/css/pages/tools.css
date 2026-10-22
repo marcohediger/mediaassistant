@@ -1,0 +1,53 @@
+/* Werkzeuge (tag cleanup, spelling-variant merge).
+ * Loaded by tools.html after style.css and ui.css; builds on ui-card,
+ * ui-option, ui-alert, ui-tag, ui-progress. */
+
+.tools-card .ui-card-head { justify-content: flex-start; gap: 0.85rem; }
+.tools-card .ui-icon-tile { align-self: flex-start; margin-top: 0.1rem; }
+.tools-text { margin: 0; max-width: 80ch; font-size: var(--ui-fs-sm); line-height: 1.55; color: var(--text-muted); }
+
+/* Pattern presets: a row of small buttons under the pattern field */
+.tools-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.35rem; }
+.tools-presets-label { margin-right: 0.25rem; font-size: var(--ui-fs-xs); font-weight: 600; color: var(--text-muted); }
+
+/* Immich sub-options sit indented under "Tags in Immich löschen" */
+.tools-sub { padding-left: 2.6rem; }
+.tools-sub-2 { padding-left: 4.1rem; }
+.tools-sub .ui-option-title { font-size: var(--ui-fs-sm); }
+.tools-sub.is-disabled { opacity: 0.5; }
+@media (max-width: 600px) {
+    .tools-sub { padding-left: 1.9rem; }
+    .tools-sub-2 { padding-left: 2.9rem; }
+}
+
+/* Footer: buttons, state text, progress across the full width */
+.tools-actions { gap: 0.5rem 0.6rem; }
+.tools-state { min-width: 0; font-size: var(--ui-fs-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.tools-state.is-error { color: var(--ui-err-text); }
+.tools-progress { flex: 1 1 100%; }
+
+/* Result of a preview or a run, under the footer */
+.tools-result {
+    display: flex; flex-direction: column; gap: 0.75rem;
+    padding: 1.1rem 1.25rem 1.25rem; border-top: 1px solid var(--ui-line);
+}
+.tools-result:empty { display: none; }
+.tools-line { margin: 0; font-size: var(--ui-fs-base); color: var(--text); }
+.tools-line strong { font-weight: 650; font-variant-numeric: tabular-nums; }
+.tools-result .ui-hint { max-width: none; }
+.tools-result .ui-alert-body > .ui-tags { margin-top: 0.5rem; }
+.tools-table { max-height: 26rem; overflow: auto; }
+.tools-table .ui-table thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-card); }
+.tools-merge-table td { white-space: normal; }
+.tools-tag-n {
+    margin-left: 0.15rem; padding-left: 0.35rem; border-left: 1px solid var(--ui-line);
+    font-variant-numeric: tabular-nums; color: var(--text-muted);
+}
+.tools-sample { display: flex; flex-direction: column; align-items: flex-start; gap: 0.35rem; min-width: 0; }
+.tools-sample-title { margin: 0; max-width: 80ch; font-size: var(--ui-fs-xs); font-weight: 500; line-height: 1.5; color: var(--text-muted); }
+.tools-sample > .ui-path { max-width: 100%; }
+
+@media (max-width: 600px) {
+    .tools-result { padding: 1rem; }
+    .tools-actions .ui-btn { flex: 1 1 auto; }
+}

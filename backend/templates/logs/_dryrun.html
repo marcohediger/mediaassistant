@@ -1,121 +1,142 @@
 {# Third tab of the logs page: summary of every job from a set in dry-run
-   mode. Before, this was a page of its own behind a button. #}
-<p class="section-note">{{ t.dryrun.subtitle }} — {{ t.dryrun.generated }}: {{ report.generated_at }}</p>
+   mode. Before, this was a page of its own behind a button.
+   Uses the icon, long_text and dry-run macros of logs.html. #}
+<p class="logs-dry-sub">{{ t.dryrun.subtitle }} · {{ t.dryrun.generated }}: <span class="ui-tabular">{{ report.generated_at }}</span></p>
 
-<div class="stats-grid" style="margin-bottom: 2rem;">
-    <div class="stat-card">
-        <div class="stat-value">{{ report.stats.total }}</div>
-        <div class="stat-label">{{ t.dashboard.total }}</div>
+{% set s = report.stats %}
+<div class="ui-stats logs-dry-stats">
+    <div class="ui-stat is-compact">
+        <span class="ui-stat-label">{{ icon('layers') }}{{ t.dashboard.total }}</span>
+        <span class="ui-stat-value">{{ s.total }}</span>
     </div>
-    <div class="stat-card stat-success">
-        <div class="stat-value">{{ report.stats.done }}</div>
-        <div class="stat-label">{{ t.dashboard.done }}</div>
+    <div class="ui-stat is-compact{{ ' is-success' if s.done else '' }}">
+        <span class="ui-stat-label">{{ icon('check-circle') }}{{ t.dashboard.done }}</span>
+        <span class="ui-stat-value">{{ s.done }}</span>
     </div>
-    <div class="stat-card stat-error">
-        <div class="stat-value">{{ report.stats.errors }}</div>
-        <div class="stat-label">{{ t.dashboard.errors }}</div>
+    <div class="ui-stat is-compact{{ ' is-error' if s.errors else '' }}">
+        <span class="ui-stat-label">{{ icon('alert-circle') }}{{ t.dashboard.errors }}</span>
+        <span class="ui-stat-value">{{ s.errors }}</span>
     </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ report.stats.duplicates }}</div>
-        <div class="stat-label">{{ t.dashboard.duplicates }}</div>
+    <div class="ui-stat is-compact{{ ' is-warning' if s.duplicates else '' }}">
+        <span class="ui-stat-label">{{ icon('copy') }}{{ t.dashboard.duplicates }}</span>
+        <span class="ui-stat-value">{{ s.duplicates }}</span>
     </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ report.stats.review }}</div>
-        <div class="stat-label">Review</div>
+    <div class="ui-stat is-compact{{ ' is-violet' if s.review else '' }}">
+        <span class="ui-stat-label">{{ icon('help') }}{{ t.status.review }}</span>
+        <span class="ui-stat-value">{{ s.review }}</span>
     </div>
 </div>
 
-<h2>{{ t.dryrun.by_category }}</h2>
-<div class="log-table-wrap">
-    <table class="log-table">
-        <thead>
-            <tr>
-                <th>{{ t.dryrun.category }}</th>
-                <th>{{ t.dryrun.count }}</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for cat, count in report.categories.items() %}
-            <tr>
-                <td>{{ cat }}</td>
-                <td>{{ count }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-{% if report.by_inbox %}
-<h2>{{ t.dryrun.by_inbox }}</h2>
-{% for inbox_label, inbox_stats in report.by_inbox.items() %}
-<h3>{{ inbox_label }} ({{ inbox_stats.total }})</h3>
-<div class="log-table-wrap">
-    <table class="log-table">
-        <thead>
-            <tr>
-                <th>{{ t.dryrun.category }}</th>
-                <th>{{ t.dryrun.count }}</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for cat, count in inbox_stats.categories.items() %}
-            <tr>
-                <td>{{ cat }}</td>
-                <td>{{ count }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endfor %}
-{% endif %}
-
-<h2>{{ t.dryrun.file_list }}</h2>
-<div class="log-table-wrap">
-    <table class="log-table">
-        <thead>
-            <tr>
-                <th>{{ t.dashboard.debug_key }}</th>
-                <th>{{ t.dashboard.file }}</th>
-                <th>{{ t.dryrun.category }}</th>
-                <th>{{ t.dryrun.target_path }}</th>
-                <th>{{ t.dashboard.status }}</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for job in report.jobs %}
-            <tr class="log-row log-{{ job.status }}">
-                <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key }}</code></a></td>
-                <td>{{ job.filename }}</td>
-                <td>{{ job.step_result.get('IA-08', {}).get('category', '—') if job.step_result else '—' }}</td>
-                <td style="font-size: 0.85rem; word-break: break-all;">{{ job.target_path or '—' }}</td>
-                <td>{{ status_badge(job.status, icon_only=True) }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+{% if report.jobs %}
+{# Category counts, overall and per input, side by side #}
+<div class="ui-grid logs-dry-grid">
+    <section class="ui-card">
+        <div class="ui-card-head">
+            <h2 class="ui-card-title">{{ icon('layers') }}{{ t.dryrun.by_category }}</h2>
+            <span class="ui-count">{{ s.total }}</span>
+        </div>
+        <div class="ui-table-scroll">
+            <table class="ui-table ui-table-compact" aria-label="{{ t.dryrun.by_category }}">
+                <thead><tr><th scope="col">{{ t.dryrun.category }}</th><th scope="col" class="ui-num">{{ t.dryrun.count }}</th></tr></thead>
+                <tbody>
+                    {% for cat, count in report.categories.items() %}
+                    <tr><td class="ui-cell-text">{{ cat }}</td><td class="ui-num">{{ count }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% for inbox_label, inbox_stats in report.by_inbox.items() %}
+    <section class="ui-card">
+        <div class="ui-card-head">
+            <div class="ui-card-head-text">
+                <h2 class="ui-card-title">{{ icon('folder-input') }}<span class="ui-truncate">{{ inbox_label }}</span></h2>
+                <p class="ui-card-desc">{{ t.dryrun.by_inbox }}</p>
+            </div>
+            <span class="ui-count">{{ inbox_stats.total }}</span>
+        </div>
+        <div class="ui-table-scroll">
+            <table class="ui-table ui-table-compact" aria-label="{{ t.dryrun.by_inbox }}: {{ inbox_label }}">
+                <thead><tr><th scope="col">{{ t.dryrun.category }}</th><th scope="col" class="ui-num">{{ t.dryrun.count }}</th></tr></thead>
+                <tbody>
+                    {% for cat, count in inbox_stats.categories.items() %}
+                    <tr><td class="ui-cell-text">{{ cat }}</td><td class="ui-num">{{ count }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endfor %}
 </div>
 
 {% if report.errors %}
-<h2>{{ t.dryrun.errors }}</h2>
-<div class="log-table-wrap">
-    <table class="log-table">
-        <thead>
-            <tr>
-                <th>{{ t.dashboard.debug_key }}</th>
-                <th>{{ t.dashboard.file }}</th>
-                <th>{{ t.dryrun.error_message }}</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for job in report.errors %}
-            <tr class="log-row log-error">
-                <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key }}</code></a></td>
-                <td>{{ job.filename }}</td>
-                <td>{{ job.error_message or '—' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<section class="ui-section logs-dry-section">
+    <div class="ui-section-head">
+        <h2 class="ui-section-title">{{ t.dryrun.errors }} <span class="ui-count">{{ report.errors | length }}</span></h2>
+    </div>
+    <div class="ui-table-card">
+        <table class="ui-table ui-table-compact logs-table logs-table-dryerr" aria-label="{{ t.dryrun.errors }}">
+            <thead>
+                <tr>
+                    <th scope="col">{{ t.dashboard.file }}</th>
+                    <th scope="col">{{ t.dryrun.error_message }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in report.errors %}
+                <tr class="log-row log-error">
+                    <th scope="row" class="lc-file">
+                        <div class="ui-cell-stack">
+                            <a class="logs-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename }}">{{ job.filename }}</a>
+                            <span class="logs-key">{{ job.debug_key }}</span>
+                        </div>
+                    </th>
+                    <td class="cell-detail is-error lc-msg">{{ long_text(job.error_message or '—') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+
+<section class="ui-section logs-dry-section">
+    <div class="ui-section-head">
+        <h2 class="ui-section-title">{{ t.dryrun.file_list }} <span class="ui-count">{{ report.jobs | length }}</span></h2>
+    </div>
+    <div class="ui-table-card">
+        <table class="ui-table ui-table-compact logs-table logs-table-dry" aria-label="{{ t.dryrun.file_list }}">
+            <thead>
+                <tr>
+                    <th scope="col" class="ui-col-icon">{{ t.dashboard.status }}</th>
+                    <th scope="col">{{ t.dashboard.file }}</th>
+                    <th scope="col">{{ t.dryrun.category }}</th>
+                    <th scope="col">{{ t.dryrun.target_path }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in report.jobs %}
+                <tr class="log-row log-{{ job.status }}">
+                    <td class="cell-status lc-status">{{ status_badge(job.status, icon_only=True) }}</td>
+                    <th scope="row" class="lc-file">
+                        <div class="ui-cell-stack">
+                            <a class="logs-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename }}">{{ job.filename }}</a>
+                            <span class="logs-key">{{ job.debug_key }}</span>
+                        </div>
+                    </th>
+                    <td class="ui-nowrap lc-cat">{{ job.step_result.get('IA-08', {}).get('category', '—') if job.step_result else '—' }}</td>
+                    <td class="lc-target"><span class="logs-path" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% else %}
+<div class="ui-card logs-dry-section">
+    <div class="ui-empty">
+        <span class="ui-empty-icon">{{ icon('eye', 22) }}</span>
+        <p class="ui-empty-title">{{ t.dryrun.empty }}</p>
+    </div>
 </div>
 {% endif %}

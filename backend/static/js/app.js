@@ -123,6 +123,29 @@
     if (!header) return;
     const debugKey = header.dataset.debugKey;
 
+    // "Expand all" / "Collapse all" for the step results
+    const toggle = document.getElementById("steps-toggle");
+    const steps = document.getElementById("step-results");
+    if (toggle && steps) {
+      const sync = () => {
+        const all = Array.from(steps.querySelectorAll("details.ui-step"));
+        const allOpen = all.length > 0 && all.every((d) => d.open);
+        toggle.textContent = allOpen ? toggle.dataset.collapse : toggle.dataset.expand;
+        toggle.setAttribute("aria-expanded", allOpen ? "true" : "false");
+        toggle.hidden = all.length === 0;
+      };
+      toggle.addEventListener("click", () => {
+        const all = Array.from(steps.querySelectorAll("details.ui-step"));
+        const open = !all.every((d) => d.open);
+        all.forEach((d) => { d.open = open; });
+        sync();
+      });
+      // "toggle" does not bubble: listen in the capture phase
+      steps.addEventListener("toggle", sync, true);
+      steps.addEventListener("ma:steps-rendered", sync);
+      sync();
+    }
+
     setInterval(async () => {
       try {
         const resp = await fetch(`/logs/job/${debugKey}/json`);
@@ -157,7 +180,10 @@
 
     // Target path (use data-field attribute)
     const targetEl = document.querySelector("[data-field='target_path']");
-    if (targetEl) targetEl.textContent = job.target_path || "—";
+    if (targetEl) {
+      targetEl.textContent = job.target_path || "—";
+      targetEl.classList.toggle("is-empty", !job.target_path);
+    }
 
     // Timestamps (use data-field attributes)
     const updatedEl = document.querySelector("[data-field='updated_at']");
@@ -165,58 +191,105 @@
     const completedEl = document.querySelector("[data-field='completed_at']");
     if (completedEl) completedEl.textContent = job.completed_at || "—";
 
-    // Message section: red "error" only when the job failed, else a note
+    // Message: red "Fehler" only when the job failed, else a blue "Hinweis".
+    // The alert is always in the page (hidden when empty).
     const msgEl = document.querySelector("[data-field='error_message']");
     if (msgEl) {
       const failed = job.status === "error";
-      const section = msgEl.closest(".detail-section");
-      const heading = section.querySelector("h2");
+      const box = msgEl.closest("[data-section='message']");
+      const title = box.querySelector("[data-field='message_title']");
+      const iconUse = box.querySelector("[data-field='message_icon']");
       msgEl.textContent = job.error_message || "";
-      msgEl.classList.toggle("alert-error", failed);
-      msgEl.classList.toggle("alert-info", !failed);
-      heading.textContent = failed ? heading.dataset.labelError : heading.dataset.labelNote;
-      section.style.display = job.error_message ? "" : "none";
+      box.classList.toggle("is-error", failed);
+      box.classList.toggle("is-info", !failed);
+      if (title) title.textContent = failed ? title.dataset.labelError : title.dataset.labelNote;
+      if (iconUse) iconUse.setAttribute("href", "#ui-i-" + (failed ? "alert-circle" : "info"));
+      box.hidden = !job.error_message;
     }
 
-    // Step results
-    if (job.step_result) {
-      let section = document.querySelector(".step-results");
-      if (section) {
-        section.innerHTML = Object.entries(job.step_result)
-          .map(
-            ([step, result]) => {
-              const label = esc(job.step_labels && job.step_labels[step] || step);
-              if (step === "IA-05" && result && result._context) {
-                const displayResult = {};
-                for (const [k, v] of Object.entries(result)) {
-                  if (!k.startsWith("_")) displayResult[k] = v;
-                }
-                return `<div class="step-item">
-                  <span class="step-code">${esc(step)}</span>
-                  <span class="step-label">${label}</span>
-                  <div class="step-ai-detail">
-                    <div style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85rem;">
-                      <strong>Modell:</strong> ${esc(result._model)} — <strong>${result._images}</strong> Bild${result._images > 1 ? "er" : ""}
-                    </div>
-                    <div style="margin-bottom:0.5rem;">
-                      <strong>Kontext an KI:</strong>
-                      <pre class="step-data" style="margin-top:0.25rem;color:var(--text-muted);">${esc(result._context)}</pre>
-                    </div>
-                    <strong>KI-Antwort:</strong>
-                    <pre class="step-data" style="margin-top:0.25rem;">${esc(JSON.stringify(displayResult, null, 2))}</pre>
-                  </div>
-                </div>`;
-              }
-              return `<div class="step-item">
-                <span class="step-code">${esc(step)}</span>
-                <span class="step-label">${label}</span>
-                <pre class="step-data">${esc(JSON.stringify(result, null, 2))}</pre>
-              </div>`;
-            }
-          )
-          .join("");
-      }
+    // Step results: rebuilt only when they changed; open steps stay open.
+    // Mirrors the markup and the tone table of log_detail.html.
+    const steps = document.getElementById("step-results");
+    if (!steps) return;
+    const sig = JSON.stringify(job.step_result || {});
+    if (steps.dataset.sig === sig) return;
+    steps.dataset.sig = sig;
+
+    const L = JSON.parse(steps.dataset.labels || "{}");
+    const labels = job.step_labels || {};
+    const TONES = {
+      error: ["is-error", "alert-circle"],
+      warning: ["is-warning", "alert-triangle"],
+      skipped: ["is-neutral", "pause-circle"],
+      duplicate: ["is-warning", "copy"],
+      dry_run: ["is-info", "eye"],
+    };
+    const icon = (name) =>
+      `<svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-${name}"/></svg>`;
+    const el = (tag, cls, text) => {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    };
+    const pre = (text, extra) => el("pre", "ui-pre ui-pre-wrap" + (extra ? " " + extra : ""), text);
+
+    const wasOpen = {};
+    steps.querySelectorAll("details.ui-step").forEach((d) => { wasOpen[d.dataset.step] = d.open; });
+    const entries = Object.entries(job.step_result || {});
+    steps.replaceChildren();
+    if (!entries.length) {
+      const empty = el("div", "ui-empty-inline job-steps-empty");
+      empty.innerHTML = icon("clock");
+      empty.appendChild(el("span", "", L.none || ""));
+      steps.appendChild(empty);
     }
+    for (const [step, result] of entries) {
+      const isMap = result !== null && typeof result === "object" && !Array.isArray(result);
+      const st = isMap ? result.status : undefined;
+      const tone = !isMap ? ["is-neutral", "info"] : TONES[st] || ["is-success", "check-circle"];
+      const toneLabel = !isMap ? "" : TONES[st] ? L[st] : L.ok;
+
+      const d = el("details", "ui-step");
+      d.dataset.step = step;
+      d.open = step in wasOpen ? wasOpen[step] : st === "error";
+
+      const sum = el("summary");
+      const status = el("span", "ui-status " + tone[0]);
+      status.innerHTML = icon(tone[1]);
+      if (toneLabel) {
+        status.title = toneLabel;
+        status.appendChild(el("span", "ui-sr-only", toneLabel));
+      }
+      sum.append(status, el("span", "ui-step-code", step), el("span", "ui-step-label", labels[step] || step));
+      const reason = isMap && typeof result.reason === "string" ? result.reason : "";
+      if (reason) {
+        const r = el("span", "step-reason", reason);
+        r.title = reason;
+        sum.appendChild(r);
+      }
+      sum.insertAdjacentHTML("beforeend",
+        '<svg class="ui-i ui-step-chev" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-down"/></svg>');
+
+      const body = el("div", "ui-step-body");
+      if (step === "IA-05" && isMap && result._context) {
+        const images = result._images || 0;
+        const meta = el("p", "step-ai-meta", (L.model || "") + ": ");
+        meta.appendChild(el("strong", "", result._model));
+        meta.appendChild(document.createTextNode(
+          " · " + String(images !== 1 ? L.image_many : L.image_one).replace("{n}", images)));
+        const shown = {};
+        for (const [k, v] of Object.entries(result)) if (!k.startsWith("_")) shown[k] = v;
+        body.append(meta,
+          el("p", "step-ai-label", L.context), pre(result._context, "step-ai-context"),
+          el("p", "step-ai-label", L.answer), pre(JSON.stringify(shown, null, 2)));
+      } else {
+        body.appendChild(pre(JSON.stringify(result, null, 2)));
+      }
+      d.append(sum, body);
+      steps.appendChild(d);
+    }
+    steps.dispatchEvent(new Event("ma:steps-rendered"));
   }
 
   // ── Helpers ──

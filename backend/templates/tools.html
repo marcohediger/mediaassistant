@@ -1,113 +1,169 @@
 {% extends "base.html" %}
+{% block title %}{{ t.tools.title }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v={{ version }}">{% endblock %}
 {% block content %}
-<h1>{{ t.tools.title }}</h1>
+{% macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
+{% macro switch(id, checked=False, onchange='') -%}
+<span class="ui-switch"><input type="checkbox" role="switch" id="{{ id }}"{{ ' checked' if checked else '' }} onchange="{{ onchange }}"><span class="ui-switch-track"></span></span>
+{%- endmacro %}
 
-<div class="settings-section" id="section-sidecar-tags">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.tools.tags_title }}</h2>
-            <span class="section-desc">{{ t.tools.tags_desc }}</span>
-        </div>
-    </div>
-    <div class="section-body">
-        <p class="section-note" style="margin-bottom: 1rem;">
-            {{ t.tools.tags_hint }} <code>{{ library_path }}</code>
-        </p>
-
-        <div class="form-group">
-            <label for="tag_pattern">{{ t.tools.pattern }}</label>
-            <input type="text" id="tag_pattern" value="^\d{4}-\d{2}-\d{2}$" spellcheck="false" oninput="sidecarInvalidate()">
-            <small>{{ t.tools.pattern_hint }}</small>
-        </div>
-
-        <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; margin-bottom: 0.5rem;">
-            <label class="switch-inline">
-                <input type="checkbox" id="do_sidecars" checked onchange="sidecarInvalidate()">
-                <span class="switch-slider-sm"></span>
-                <span>{{ t.tools.scope_sidecars }}</span>
-            </label>
-            <label class="switch-inline">
-                <input type="checkbox" id="do_immich" onchange="sidecarInvalidate()">
-                <span class="switch-slider-sm"></span>
-                <span>{{ t.tools.scope_immich }}</span>
-            </label>
-        </div>
-        <label class="switch-inline" id="per_asset_row" style="margin-left: 2.5rem;">
-            <input type="checkbox" id="do_per_asset" onchange="sidecarInvalidate()">
-            <span class="switch-slider-sm"></span>
-            <span>{{ t.tools.per_asset }}</span>
-        </label>
-        <label class="switch-inline" id="also_delete_row" style="margin-left: 5rem; margin-bottom: 0.5rem;">
-            <input type="checkbox" id="do_also_delete" onchange="sidecarInvalidate()">
-            <span class="switch-slider-sm"></span>
-            <span>{{ t.tools.also_delete }}</span>
-        </label>
-        <p class="section-note" style="margin-bottom: 1rem;">{{ t.tools.scope_hint }}</p>
-
-        <div class="inbox-actions" style="align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^\\d{4}-\\d{2}-\\d{2}$')">{{ t.tools.preset_date }}</button>
-            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^\\d{2}\\.\\d{2}\\.\\d{4}$')">{{ t.tools.preset_date_dots }}</button>
-            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^\\d{4}$')">{{ t.tools.preset_year }}</button>
-            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^(\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4}|\\d{4})$')">{{ t.tools.preset_all_dates }}</button>
-            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^(\\d+|\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4})$')">{{ t.tools.preset_numeric }}</button>
-            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('(?=.*[A-Za-z])(?=.*[\\u4e00-\\u9fff])|(?=.*[\\u0370-\\u03ff])(?=.*[\\u0400-\\u04ff])')">{{ t.tools.preset_mixed }}</button>
-            <button type="button" class="btn btn-small btn-secondary" onclick="sidecarPreset('^[\\W\\d_]+$')">{{ t.tools.preset_noletters }}</button>
-        </div>
-
-        <div class="inbox-actions" style="align-items: center; gap: 0.75rem;">
-            <button type="button" class="btn btn-small btn-primary" id="btn_scan" onclick="sidecarRun('scan')">{{ t.tools.scan }}</button>
-            <button type="button" class="btn btn-small btn-danger" id="btn_remove" disabled onclick="sidecarRemove()"
-                    data-sidecars="{{ t.tools.remove_sidecars }}"
-                    data-immich="{{ t.tools.remove_immich }}"
-                    data-both="{{ t.tools.remove_both }}"
-                    data-confirm-sidecars="{{ t.tools.confirm_sidecars }}"
-                    data-confirm-immich="{{ t.tools.confirm_immich }}"
-                    data-confirm-both="{{ t.tools.confirm_both }}">{{ t.tools.remove_sidecars }}</button>
-            <button type="button" class="btn btn-small btn-secondary" id="btn_cancel" style="display: none;" onclick="sidecarCancel()">{{ t.tools.cancel }}</button>
-            <span id="sidecar_state" class="test-result"></span>
-        </div>
-
-        <div id="sidecar_result" style="margin-top: 1rem;"></div>
+<div class="ui-page-head">
+    <div class="ui-page-head-text">
+        <h1 class="ui-page-title">{{ t.tools.title }}</h1>
+        <p class="ui-page-sub">{{ t.tools.subtitle }}</p>
     </div>
 </div>
 
-<div class="settings-section" id="section-tag-merge">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.tools.merge_title }}</h2>
-            <span class="section-desc">{{ t.tools.merge_desc }}</span>
+<div class="ui-stack ui-stack-lg">
+
+<section class="ui-card tools-card" id="section-sidecar-tags" aria-labelledby="tags-title">
+    <div class="ui-card-head">
+        <span class="ui-icon-tile is-accent">{{ icon('tag', 18) }}</span>
+        <div class="ui-card-head-text">
+            <h2 class="ui-card-title" id="tags-title">{{ t.tools.tags_title }}</h2>
+            <p class="ui-card-desc">{{ t.tools.tags_desc }}</p>
         </div>
     </div>
-    <div class="section-body">
-        <p class="section-note" style="margin-bottom: 1rem;">{{ t.tools.merge_hint }}</p>
-
-        <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; margin-bottom: 0.5rem;">
-            <label class="switch-inline">
-                <input type="checkbox" id="merge_sidecars" checked onchange="mergeInvalidate()">
-                <span class="switch-slider-sm"></span>
-                <span>{{ t.tools.scope_sidecars }}</span>
-            </label>
-            <label class="switch-inline">
-                <input type="checkbox" id="merge_immich" checked onchange="mergeInvalidate()">
-                <span class="switch-slider-sm"></span>
-                <span>{{ t.tools.scope_immich }}</span>
-            </label>
+    <div class="ui-card-body ui-form">
+        <div class="ui-field">
+            <label class="ui-label" for="tag_pattern">{{ t.tools.pattern }}</label>
+            <input class="ui-input ui-input-mono" type="text" id="tag_pattern" value="^\d{4}-\d{2}-\d{2}$"
+                   spellcheck="false" autocomplete="off" aria-describedby="tag_pattern_hint" oninput="sidecarInvalidate()">
+            <p class="ui-hint" id="tag_pattern_hint">{{ t.tools.pattern_hint }}</p>
+            <div class="tools-presets" role="group" aria-labelledby="tools-presets-label">
+                <span class="tools-presets-label" id="tools-presets-label">{{ t.tools.presets }}</span>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" onclick="sidecarPreset('^\\d{4}-\\d{2}-\\d{2}$')">{{ t.tools.preset_date }}</button>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" onclick="sidecarPreset('^\\d{2}\\.\\d{2}\\.\\d{4}$')">{{ t.tools.preset_date_dots }}</button>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" onclick="sidecarPreset('^\\d{4}$')">{{ t.tools.preset_year }}</button>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" onclick="sidecarPreset('^(\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4}|\\d{4})$')">{{ t.tools.preset_all_dates }}</button>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" onclick="sidecarPreset('^(\\d+|\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4})$')">{{ t.tools.preset_numeric }}</button>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" onclick="sidecarPreset('(?=.*[A-Za-z])(?=.*[\\u4e00-\\u9fff])|(?=.*[\\u0370-\\u03ff])(?=.*[\\u0400-\\u04ff])')">{{ t.tools.preset_mixed }}</button>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" onclick="sidecarPreset('^[\\W\\d_]+$')">{{ t.tools.preset_noletters }}</button>
+            </div>
         </div>
-        <p class="section-note" style="margin-bottom: 1rem;">{{ t.tools.merge_scope_hint }}</p>
 
-        <div class="inbox-actions" style="align-items: center; gap: 0.75rem;">
-            <button type="button" class="btn btn-small btn-primary" id="btn_merge_scan" onclick="mergeRun('scan')">{{ t.tools.merge_scan }}</button>
-            <button type="button" class="btn btn-small btn-danger" id="btn_merge_apply" disabled onclick="mergeApply()">{{ t.tools.merge_apply }}</button>
-            <button type="button" class="btn btn-small btn-secondary" id="btn_merge_cancel" style="display: none;" onclick="sidecarCancel()">{{ t.tools.cancel }}</button>
-            <span id="merge_state" class="test-result"></span>
+        <div class="ui-field">
+            <div class="ui-option-list">
+                <label class="ui-option">
+                    <span class="ui-option-text">
+                        <span class="ui-option-title">{{ t.tools.scope_sidecars }}</span>
+                        <span class="ui-option-desc">{{ t.tools.tags_hint }} <code class="ui-code">{{ library_path }}</code></span>
+                    </span>
+                    {{ switch('do_sidecars', True, 'sidecarInvalidate()') }}
+                </label>
+                <label class="ui-option">
+                    <span class="ui-option-text"><span class="ui-option-title">{{ t.tools.scope_immich }}</span></span>
+                    {{ switch('do_immich', False, 'sidecarInvalidate()') }}
+                </label>
+                {# Sub-options of the Immich half; greyed out while they do not apply #}
+                <label class="ui-option tools-sub" id="per_asset_row">
+                    <span class="ui-option-text"><span class="ui-option-title">{{ t.tools.per_asset }}</span></span>
+                    {{ switch('do_per_asset', False, 'sidecarInvalidate()') }}
+                </label>
+                <label class="ui-option tools-sub tools-sub-2" id="also_delete_row">
+                    <span class="ui-option-text"><span class="ui-option-title">{{ t.tools.also_delete }}</span></span>
+                    {{ switch('do_also_delete', False, 'sidecarInvalidate()') }}
+                </label>
+            </div>
+            <p class="ui-hint">{{ t.tools.scope_hint }}</p>
         </div>
-        <div id="merge_result" style="margin-top: 1rem;"></div>
     </div>
+    <div class="ui-card-foot tools-actions">
+        <button type="button" class="ui-btn ui-btn-primary" id="btn_scan" onclick="sidecarRun('scan')">{{ icon('search') }}{{ t.tools.scan }}</button>
+        <button type="button" class="ui-btn ui-btn-danger" id="btn_remove" disabled onclick="sidecarRemove()"
+                data-sidecars="{{ t.tools.remove_sidecars }}"
+                data-immich="{{ t.tools.remove_immich }}"
+                data-both="{{ t.tools.remove_both }}"
+                data-confirm-sidecars="{{ t.tools.confirm_sidecars }}"
+                data-confirm-immich="{{ t.tools.confirm_immich }}"
+                data-confirm-both="{{ t.tools.confirm_both }}">{{ icon('trash') }}<span class="tools-btn-text">{{ t.tools.remove_sidecars }}</span></button>
+        <button type="button" class="ui-btn ui-btn-secondary" id="btn_cancel" style="display: none;" onclick="sidecarCancel()">{{ icon('x') }}{{ t.tools.cancel }}</button>
+        <span id="sidecar_state" class="tools-state" role="status" aria-live="polite"></span>
+        <div class="ui-progress ui-progress-sm tools-progress" id="sidecar_progress" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-labelledby="tags-title" hidden><div class="ui-progress-bar"></div></div>
+    </div>
+    <div id="sidecar_result" class="tools-result"></div>
+</section>
+
+<section class="ui-card tools-card" id="section-tag-merge" aria-labelledby="merge-title">
+    <div class="ui-card-head">
+        <span class="ui-icon-tile is-violet">{{ icon('merge', 18) }}</span>
+        <div class="ui-card-head-text">
+            <h2 class="ui-card-title" id="merge-title">{{ t.tools.merge_title }}</h2>
+            <p class="ui-card-desc">{{ t.tools.merge_desc }}</p>
+        </div>
+    </div>
+    <div class="ui-card-body ui-form">
+        <p class="tools-text">{{ t.tools.merge_hint }}</p>
+        <div class="ui-field">
+            <div class="ui-option-list">
+                <label class="ui-option">
+                    <span class="ui-option-text"><span class="ui-option-title">{{ t.tools.scope_sidecars }}</span></span>
+                    {{ switch('merge_sidecars', True, 'mergeInvalidate()') }}
+                </label>
+                <label class="ui-option">
+                    <span class="ui-option-text"><span class="ui-option-title">{{ t.tools.scope_immich }}</span></span>
+                    {{ switch('merge_immich', True, 'mergeInvalidate()') }}
+                </label>
+            </div>
+            <p class="ui-hint">{{ t.tools.merge_scope_hint }}</p>
+        </div>
+    </div>
+    <div class="ui-card-foot tools-actions">
+        <button type="button" class="ui-btn ui-btn-primary" id="btn_merge_scan" onclick="mergeRun('scan')">{{ icon('search') }}{{ t.tools.merge_scan }}</button>
+        <button type="button" class="ui-btn ui-btn-danger" id="btn_merge_apply" disabled onclick="mergeApply()">{{ icon('merge') }}{{ t.tools.merge_apply }}</button>
+        <button type="button" class="ui-btn ui-btn-secondary" id="btn_merge_cancel" style="display: none;" onclick="sidecarCancel()">{{ icon('x') }}{{ t.tools.cancel }}</button>
+        <span id="merge_state" class="tools-state" role="status" aria-live="polite"></span>
+        <div class="ui-progress ui-progress-sm tools-progress" id="merge_progress" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-labelledby="merge-title" hidden><div class="ui-progress-bar"></div></div>
+    </div>
+    <div id="merge_result" class="tools-result"></div>
+</section>
+
 </div>
 
 <script>
+var L = {{ t.tools | tojson }};
 var LAST_SCAN_PATTERN = null;
 var MERGE_READY = false;
+
+// Tag names, file paths and error texts come from outside: always escaped.
+function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    });
+}
+// Fixed snippets for the result areas (only escaped values go in)
+function note(text, tone, extra) {
+    var icons = {error: 'alert-circle', success: 'check-circle', info: 'info', warning: 'alert-triangle'};
+    return '<div class="ui-alert ui-alert-sm is-' + tone + '"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-' +
+           icons[tone] + '"/></svg><div class="ui-alert-body"><p class="ui-alert-text">' + text + '</p>' + (extra || '') + '</div></div>';
+}
+function hint(text) { return '<p class="ui-hint">' + text + '</p>'; }
+function tag(name, n) {
+    return '<span class="ui-tag" title="' + esc(name) + '">' + esc(name) +
+           (typeof n === 'number' ? '<span class="tools-tag-n">' + n + '</span>' : '') + '</span>';
+}
+function tags(list) { return '<div class="ui-tags">' + list.join('') + '</div>'; }
+function line(html) { return '<p class="tools-line">' + html + '</p>'; }
+// Progress bar of a running task: exact when the total is known
+function showProgress(id, p) {
+    var bar = document.getElementById(id);
+    if (!p) { bar.hidden = true; return; }
+    bar.hidden = false;
+    var known = p.total > 0;
+    var pct = known ? Math.min(100, Math.round(p.current / p.total * 100)) : 0;
+    bar.classList.toggle('is-indeterminate', !known);
+    bar.firstElementChild.style.width = known ? pct + '%' : '';
+    if (known) { bar.setAttribute('aria-valuenow', String(pct)); } else { bar.removeAttribute('aria-valuenow'); }
+}
+function setState(id, text, isError) {
+    var state = document.getElementById(id);
+    state.textContent = text;
+    state.classList.toggle('is-error', !!isError);
+}
 
 function sidecarScope() {
     return {
@@ -121,7 +177,7 @@ function sidecarLabel() {
     var sc = sidecarScope();
     var btn = document.getElementById('btn_remove');
     var key = sc.sidecars && sc.immich ? 'both' : (sc.immich ? 'immich' : 'sidecars');
-    btn.textContent = btn.dataset[key];
+    btn.querySelector('.tools-btn-text').textContent = btn.dataset[key];
     btn.dataset.activeConfirm = btn.dataset['confirm' + key.charAt(0).toUpperCase() + key.slice(1)];
 }
 function sidecarSubSwitch() {
@@ -131,13 +187,13 @@ function sidecarSubSwitch() {
     var box = document.getElementById('do_per_asset');
     box.disabled = !on;
     if (!on) { box.checked = false; }
-    document.getElementById('per_asset_row').style.opacity = on ? '' : '0.45';
+    document.getElementById('per_asset_row').classList.toggle('is-disabled', !on);
 
     // Deleting the emptied tag only applies to the per-asset path.
     var sub = document.getElementById('do_also_delete');
     sub.disabled = !box.checked;
     if (!box.checked) { sub.checked = false; }
-    document.getElementById('also_delete_row').style.opacity = box.checked ? '' : '0.45';
+    document.getElementById('also_delete_row').classList.toggle('is-disabled', !box.checked);
 }
 function sidecarInvalidate() {
     sidecarSubSwitch();
@@ -155,15 +211,13 @@ function sidecarPreset(p) {
 
 function sidecarRun(mode) {
     var pattern = document.getElementById('tag_pattern').value;
-    var state = document.getElementById('sidecar_state');
     var body = new URLSearchParams();
     body.append('pattern', pattern);
     if (document.getElementById('do_sidecars').checked) { body.append('sidecars', '1'); }
     if (document.getElementById('do_immich').checked) { body.append('immich', '1'); }
     if (document.getElementById('do_per_asset').checked) { body.append('per_asset', '1'); }
     if (document.getElementById('do_also_delete').checked) { body.append('also_delete', '1'); }
-    state.textContent = '{{ t.tools.running }}';
-    state.style.color = '';
+    setState('sidecar_state', L.running);
     sidecarBusy(true);
     fetch('/tools/tags/' + mode, {
         method: 'POST',
@@ -206,7 +260,7 @@ function sidecarResume() {
                 if (p.task === 'sidecar_tags') {
                     pollSidecar();
                 } else {
-                    document.getElementById('sidecar_state').textContent = '{{ t.tools.other_task }}';
+                    setState('sidecar_state', L.other_task);
                 }
                 return;
             }
@@ -219,7 +273,7 @@ function sidecarResume() {
                 if (p.result.mode === 'scan') { sidecarRestore(p.result); }
                 renderSidecar(p.result);
             }
-        }).catch(function () { /* Anzeige bleibt wie sie ist */ });
+        }).catch(function () { /* the display stays as it is */ });
 }
 document.addEventListener('DOMContentLoaded', function () {
     sidecarSubSwitch();
@@ -237,102 +291,97 @@ function sidecarBusy(on) {
     var c = document.getElementById('btn_cancel');
     c.style.display = on ? '' : 'none';
     c.disabled = false;
+    if (!on) { showProgress('sidecar_progress', null); }
 }
 function sidecarFail(msg) {
-    var state = document.getElementById('sidecar_state');
-    state.textContent = msg;
-    state.style.color = 'var(--error)';
+    setState('sidecar_state', msg, true);
     sidecarBusy(false);
 }
 
 function pollSidecar() {
     fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
       .then(function (p) {
-          var state = document.getElementById('sidecar_state');
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
-              state.textContent = (p.phase || '') + n;
+              setState('sidecar_state', (p.phase || '') + n);
+              showProgress('sidecar_progress', p);
               setTimeout(pollSidecar, 1000);
               return;
           }
           sidecarBusy(false);
           if (p.error) { sidecarFail(p.error); return; }
-          state.textContent = '';
+          setState('sidecar_state', '');
           renderSidecar(p.result);
       }).catch(function (e) { sidecarFail(String(e)); });
 }
 
 function renderImmichPreview(im) {
-    if (!im || !im.enabled) { return '<p class="section-note">{{ t.tools.immich_off }}</p>'; }
+    if (!im || !im.enabled) { return hint(esc(L.immich_off)); }
     if (!im.available) {
-        return '<p class="section-note" style="color: var(--error);">{{ t.tools.immich_unavailable }} ' + im.error + '</p>';
+        return note(esc(L.immich_unavailable) + ' ' + esc(im.error), 'error');
     }
-    var h = '<p><strong>' + im.tags.length + '</strong> {{ t.tools.of }} ' + im.total +
-            ' {{ t.tools.immich_matched }}</p>';
+    var h = line('<strong>' + im.tags.length + '</strong> ' + esc(L.of) + ' ' + im.total +
+                 ' ' + esc(L.immich_matched));
     if (im.tags.length) {
-        h += '<p class="section-note">' + im.tags.map(function (t) {
-            // t.assets is the exact count from Immich's search total.
-            return '<code>' + t.name + '</code>' +
-                   (typeof t.assets === 'number' ? ' <small>(' + t.assets + ')</small>' : '');
-        }).join(' ') + '</p>';
+        // t.assets is the exact count from Immich's search total.
+        h += tags(im.tags.map(function (t) { return tag(t.name, t.assets); }));
         if (im.per_asset) {
             var total = im.tags.reduce(function (n, t) {
                 return n + (typeof t.assets === 'number' ? t.assets : 0);
             }, 0);
-            h += '<p class="section-note">' + '{{ t.tools.per_asset_total }}'.replace('{n}', total) + '</p>';
+            h += hint(esc(L.per_asset_total.replace('{n}', total)));
         }
     }
     if (im.collateral.length) {
-        h += '<p class="section-note" style="color: var(--error);">{{ t.tools.cascade_warning }}<br>' +
-             im.collateral.map(function (n) { return '<code>' + n + '</code>'; }).join(' ') + '</p>';
+        h += note(esc(L.cascade_warning), 'error',
+                  tags(im.collateral.map(function (n) { return tag(n); })));
     }
     return h;
 }
 function renderSidecar(res) {
     var box = document.getElementById('sidecar_result');
     if (!res) { box.innerHTML = ''; return; }
-    var h = res.cancelled
-        ? '<p class="section-note" style="color: var(--error);">{{ t.tools.cancelled }}</p>' : '';
+    var h = res.cancelled ? note(esc(L.cancelled), 'warning') : '';
     if (res.mode === 'scan') {
         h += res.sidecars_enabled
-            ? '<p><strong>' + res.sidecars_matched + '</strong> {{ t.tools.of }} ' +
-              res.sidecars_total + ' {{ t.tools.sidecars_scanned }}</p>'
-            : '<p class="section-note">{{ t.tools.sidecars_off }}</p>';
+            ? line('<strong>' + res.sidecars_matched + '</strong> ' + esc(L.of) + ' ' +
+                   res.sidecars_total + ' ' + esc(L.sidecars_scanned))
+            : hint(esc(L.sidecars_off));
         h += renderImmichPreview(res.immich);
         if (res.tags.length || (res.immich && res.immich.tags.length)) {
             if (res.tags.length) {
-                h += '<table class="data-table"><thead><tr><th>{{ t.tools.tag }}</th><th>{{ t.tools.count }}</th></tr></thead><tbody>';
+                h += '<div class="ui-table-card tools-table"><table class="ui-table ui-table-compact">' +
+                     '<thead><tr><th scope="col">' + esc(L.tag) + '</th><th scope="col" class="ui-num">' + esc(L.count) +
+                     '</th></tr></thead><tbody>';
                 res.tags.forEach(function (t) {
-                    h += '<tr><td><code>' + t[0] + '</code></td><td>' + t[1] + '</td></tr>';
+                    h += '<tr><td class="ui-cell-text"><code class="ui-code">' + esc(t[0]) + '</code></td><td class="ui-num">' +
+                         esc(t[1]) + '</td></tr>';
                 });
-                h += '</tbody></table>';
-                h += '<p class="section-note">{{ t.tools.sample }}<br>' +
-                     res.sample.map(function (f) { return '<code>' + f + '</code>'; }).join('<br>') + '</p>';
+                h += '</tbody></table></div>';
+                h += '<div class="tools-sample"><p class="tools-sample-title">' + esc(L.sample) + '</p>' +
+                     res.sample.map(function (f) { return '<code class="ui-path">' + esc(f) + '</code>'; }).join('') + '</div>';
             }
-            h += '<p class="section-note" style="color: var(--success);">{{ t.tools.preview_note }}</p>';
+            h += note(esc(L.preview_note), 'info');
             document.getElementById('btn_remove').disabled = false;
             LAST_SCAN_PATTERN = res.pattern;
         } else {
-            h += '<p class="section-note">{{ t.tools.no_match }}</p>';
+            h += hint(esc(L.no_match));
         }
     } else {
-        h += res.sidecars_enabled
-            ? '<p><strong>' + res.sidecars_changed + '</strong> {{ t.tools.sidecars_changed }}, ' +
-              res.tags_removed + ' {{ t.tools.tags_removed }}'
-            : '<p class="section-note">{{ t.tools.sidecars_off }}';
-        if (res.sidecars_failed) { h += ' — ' + res.sidecars_failed + ' {{ t.tools.failed }}'; }
-        h += '</p>';
-        h += '<p><strong>' + (res.immich_deleted || 0) + '</strong> ' +
-             (res.immich_per_asset ? '{{ t.tools.immich_untagged }}' : '{{ t.tools.immich_deleted }}');
+        var s = res.sidecars_enabled
+            ? '<strong>' + res.sidecars_changed + '</strong> ' + esc(L.sidecars_changed) + ', ' +
+              res.tags_removed + ' ' + esc(L.tags_removed)
+            : esc(L.sidecars_off);
+        if (res.sidecars_failed) { s += ' — ' + res.sidecars_failed + ' ' + esc(L.failed); }
+        h += res.sidecars_enabled ? line(s) : hint(s);
+        var i = '<strong>' + (res.immich_deleted || 0) + '</strong> ' +
+                esc(res.immich_per_asset ? L.immich_untagged : L.immich_deleted);
         if (res.immich_per_asset && res.immich_tags_deleted) {
-            h += ', ' + res.immich_tags_deleted + ' {{ t.tools.immich_deleted }}';
+            i += ', ' + res.immich_tags_deleted + ' ' + esc(L.immich_deleted);
         }
-
-        if (res.immich_failed) { h += ' — ' + res.immich_failed + ' {{ t.tools.failed }}'; }
-        h += '</p>';
-        if (res.immich_error) {
-            h += '<p class="section-note" style="color: var(--error);">' + res.immich_error + '</p>';
-        }
+        if (res.immich_failed) { i += ' — ' + res.immich_failed + ' ' + esc(L.failed); }
+        h += line(i);
+        if (res.immich_error) { h += note(esc(res.immich_error), 'error'); }
     }
     box.innerHTML = h;
 }
@@ -353,17 +402,14 @@ function mergeBusy(on) {
     var c = document.getElementById('btn_merge_cancel');
     c.style.display = on ? '' : 'none';
     c.disabled = false;
+    if (!on) { showProgress('merge_progress', null); }
 }
 function mergeFail(msg) {
-    var state = document.getElementById('merge_state');
-    state.textContent = msg;
-    state.style.color = 'var(--error)';
+    setState('merge_state', msg, true);
     mergeBusy(false);
 }
 function mergeRun(mode) {
-    var state = document.getElementById('merge_state');
-    state.textContent = '{{ t.tools.running }}';
-    state.style.color = '';
+    setState('merge_state', L.running);
     if (mode === 'scan') { MERGE_READY = false; document.getElementById('merge_result').innerHTML = ''; }
     mergeBusy(true);
     var body = new URLSearchParams();
@@ -381,94 +427,89 @@ function mergeRun(mode) {
         }).catch(function (e) { mergeFail(String(e)); });
 }
 function mergeApply() {
-    if (!confirm('{{ t.tools.merge_confirm }}')) { return; }
+    if (!confirm(L.merge_confirm)) { return; }
     mergeRun('apply');
 }
 function pollMerge() {
     fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
       .then(function (p) {
-          var state = document.getElementById('merge_state');
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
-              state.textContent = (p.phase || '') + n;
+              setState('merge_state', (p.phase || '') + n);
+              showProgress('merge_progress', p);
               setTimeout(pollMerge, 1000);
               return;
           }
           mergeBusy(false);
           if (p.error) { mergeFail(p.error); return; }
-          state.textContent = '';
+          setState('merge_state', '');
           renderMerge(p.result);
       }).catch(function (e) { mergeFail(String(e)); });
 }
 function renderMerge(res) {
     var box = document.getElementById('merge_result');
     if (!res) { box.innerHTML = ''; return; }
-    var h = res.cancelled
-        ? '<p class="section-note" style="color: var(--error);">{{ t.tools.cancelled }}</p>' : '';
+    var h = res.cancelled ? note(esc(L.cancelled), 'warning') : '';
+    var orphans = function () {
+        var more = res.orphan_count > res.orphans.length
+            ? '<span class="ui-muted ui-text-xs">' + esc(L.more.replace('{n}', res.orphan_count - res.orphans.length)) + '</span>' : '';
+        return '<div class="tools-sample"><p class="tools-sample-title">' + esc(L.merge_orphans) + '</p>' +
+               tags(res.orphans.map(function (n) { return tag(n); }).concat(more ? [more] : [])) + '</div>';
+    };
     if (res.mode === 'merge_scan') {
         if (!res.group_count) {
-            h += '<p class="section-note">{{ t.tools.merge_none }}</p>';
-            if (res.orphan_count) {
-                h += '<p class="section-note">{{ t.tools.merge_orphans }}<br>' +
-                     res.orphans.map(function (n) { return '<code>' + n + '</code>'; }).join(' ') + '</p>';
-            }
+            h += hint(esc(L.merge_none));
+            if (res.orphan_count) { h += orphans(); }
             box.innerHTML = h;
             return;
         }
-        h += '<p><strong>' + res.group_count + '</strong> {{ t.tools.merge_groups }}';
-        if (res.immich_enabled) { h += ', ' + res.moves + ' {{ t.tools.merge_moves }}'; }
-        if (res.sidecars_enabled) { h += ', ' + res.files + ' {{ t.tools.merge_files }}'; }
-        h += '</p>';
-        if (res.immich_error) {
-            h += '<p class="section-note" style="color: var(--error);">' + res.immich_error + '</p>';
-        }
-        h += '<table class="data-table"><thead><tr><th>{{ t.tools.merge_winner }}</th><th>{{ t.tools.tag }}</th></tr></thead><tbody>';
+        var s = '<strong>' + res.group_count + '</strong> ' + esc(L.merge_groups);
+        if (res.immich_enabled) { s += ', ' + res.moves + ' ' + esc(L.merge_moves); }
+        if (res.sidecars_enabled) { s += ', ' + res.files + ' ' + esc(L.merge_files); }
+        h += line(s);
+        if (res.immich_error) { h += note(esc(res.immich_error), 'error'); }
+        var num = function (m) {
+            var parts = [];
+            if (res.immich_enabled) { parts.push(m.assets + ' B'); }
+            if (res.sidecars_enabled) { parts.push(m.files + ' D'); }
+            return parts.join(', ');
+        };
+        var chip = function (m, cls) {
+            return '<span class="ui-tag' + (cls ? ' ' + cls : '') + '" title="' + esc(m.name) + '">' + esc(m.name) +
+                   '<span class="tools-tag-n">' + esc(num(m)) + '</span></span>';
+        };
+        h += '<div class="ui-table-card tools-table"><table class="ui-table ui-table-compact tools-merge-table">' +
+             '<thead><tr><th scope="col">' + esc(L.merge_winner) + '</th><th scope="col">' + esc(L.tag) +
+             '</th></tr></thead><tbody>';
         res.groups.forEach(function (g) {
-            var num = function (m) {
-                var parts = [];
-                if (res.immich_enabled) { parts.push(m.assets + '\u2009B'); }
-                if (res.sidecars_enabled) { parts.push(m.files + '\u2009D'); }
-                return ' <small>(' + parts.join(', ') + ')</small>';
-            };
-            h += '<tr><td><code>' + g.winner.name + '</code>' + num(g.winner) + '</td><td>' +
-                 g.losers.map(function (l) {
-                     return '<code>' + l.name + '</code>' + num(l);
-                 }).join(' ') + '</td></tr>';
+            h += '<tr><td>' + chip(g.winner, 'is-success') + '</td><td>' +
+                 tags(g.losers.map(function (l) { return chip(l); })) + '</td></tr>';
         });
-        h += '</tbody></table>';
+        h += '</tbody></table></div>';
         if (res.group_count > res.groups.length) {
-            h += '<p class="section-note">' + '{{ t.tools.merge_shown }}'.replace('{n}', res.groups.length) + '</p>';
+            h += hint(esc(L.merge_shown.replace('{n}', res.groups.length)));
         }
-        if (res.orphan_count) {
-            h += '<p class="section-note">{{ t.tools.merge_orphans }}<br>' +
-                 res.orphans.map(function (n) { return '<code>' + n + '</code>'; }).join(' ') +
-                 (res.orphan_count > res.orphans.length
-                    ? ' <small>… ' + (res.orphan_count - res.orphans.length) + ' weitere</small>' : '') +
-                 '</p>';
-        }
-        h += '<p class="section-note" style="color: var(--success);">{{ t.tools.merge_preview_note }}</p>';
+        if (res.orphan_count) { h += orphans(); }
+        h += note(esc(L.merge_preview_note), 'info');
         MERGE_READY = true;
         document.getElementById('btn_merge_apply').disabled = false;
     } else {
         if (res.sidecars_enabled) {
-            h += '<p><strong>' + res.files_changed + '</strong> {{ t.tools.merge_files_done }}';
-            if (res.files_failed) { h += ' — ' + res.files_failed + ' {{ t.tools.failed }}'; }
-            h += '</p>';
+            var f = '<strong>' + res.files_changed + '</strong> ' + esc(L.merge_files_done);
+            if (res.files_failed) { f += ' — ' + res.files_failed + ' ' + esc(L.failed); }
+            h += line(f);
         }
         if (res.immich_enabled) {
-            h += '<p><strong>' + res.merged + '</strong> {{ t.tools.merge_done }}, ' +
-                 res.moved + ' {{ t.tools.merge_moved }}';
-            if (res.failed) { h += ' — ' + res.failed + ' {{ t.tools.failed }}'; }
-            h += '</p>';
+            var m = '<strong>' + res.merged + '</strong> ' + esc(L.merge_done) + ', ' +
+                    res.moved + ' ' + esc(L.merge_moved);
+            if (res.failed) { m += ' — ' + res.failed + ' ' + esc(L.failed); }
+            h += line(m);
             if (res.failed_names && res.failed_names.length) {
-                h += '<p class="section-note">{{ t.tools.merge_failed_names }}<br>' +
-                     res.failed_names.map(function (n) { return '<code>' + n + '</code>'; }).join(' ') +
-                     '</p>';
+                h += '<div class="tools-sample"><p class="tools-sample-title">' + esc(L.merge_failed_names) + '</p>' +
+                     tags(res.failed_names.map(function (n) { return tag(n); })) + '</div>';
             }
         }
-        if (res.error) {
-            h += '<p class="section-note" style="color: var(--error);">' + res.error + '</p>';
-        }
+        if (res.error) { h += note(esc(res.error), 'error'); }
         MERGE_READY = false;
     }
     box.innerHTML = h;

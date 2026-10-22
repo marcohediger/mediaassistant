@@ -1,139 +1,187 @@
 {% extends "base.html" %}
 {% block title %}{{ job.debug_key }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/logs.css?v={{ version }}">{% endblock %}
 {% block content %}
 {% from "_status.html" import status_badge with context %}
-<div class="detail-header" data-page="job-detail" data-debug-key="{{ job.debug_key }}">
-    <a href="{{ back_url | default('/logs?tab=jobs') }}" class="btn btn-small btn-secondary">{{ t.job_detail.back }}</a>
-    <h1><code>{{ job.debug_key }}</code></h1>
+{% macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
+{% macro stamp(v) %}{{ v.strftime('%d.%m.%Y %H:%M:%S') if v else '—' }}{% endmacro %}
+{# Step outcome as tone + icon + tooltip. app.js (stepTone) mirrors this
+   for the live refresh — keep both in step. #}
+{% set STEP_TONES = {
+    'error': ('is-error', 'alert-circle', t.status.error),
+    'warning': ('is-warning', 'alert-triangle', t.job_detail.step_warning),
+    'skipped': ('is-neutral', 'pause-circle', t.status.skipped),
+    'duplicate': ('is-warning', 'copy', t.status.duplicate),
+    'dry_run': ('is-info', 'eye', t.sets.dry_run_short),
+} %}
+{% set STEP_OK = ('is-success', 'check-circle', t.job_detail.step_ok) %}
+
+<div class="ui-page-head job-head" data-page="job-detail" data-debug-key="{{ job.debug_key }}">
+    <div class="ui-page-head-text">
+        <a class="ui-page-back" href="{{ back_url | default('/logs?tab=jobs') }}">{{ icon('chevron-left') }}{{ t.logs.job_log }}</a>
+        <h1 class="ui-page-title"><span class="job-key">{{ job.debug_key }}</span></h1>
+        <p class="ui-page-sub job-file">{{ job.filename }}</p>
+    </div>
+    {# Retry/Delete actions are available for any terminal job state.
+       The user is the source of truth for "this needs redoing" — even
+       jobs that look fine in the UI may have stale internal step_result
+       (live: MA-2026-28115/28121 had error_message=None but stale IA-07/
+       IA-08 tags). Only hide for jobs currently being processed. #}
+    {% if job.status not in ('queued', 'processing') %}
+    <div class="ui-page-actions">
+        <form method="post" action="/api/job/{{ job.debug_key }}/retry">
+            <button type="submit" class="ui-btn ui-btn-primary">{{ icon('retry') }}{{ t.job_detail.retry }}</button>
+        </form>
+        <form method="post" action="/api/job/{{ job.debug_key }}/delete"
+              data-confirm="{{ t.job_detail.delete_confirm | replace('{key}', job.debug_key) }}"
+              onsubmit="return confirm(this.dataset.confirm)">
+            <button type="submit" class="ui-btn ui-btn-danger">{{ icon('trash') }}{{ t.job_detail.delete }}</button>
+        </form>
+    </div>
+    {% endif %}
 </div>
 
 {% set filepath = job.target_path or job.original_path %}
 {% set is_immich = filepath and filepath.startswith('immich:') %}
 {% set immich_asset_id = filepath[7:] if is_immich else '' %}
 {% set ext = filepath.rsplit('.', 1)[-1].lower() if filepath and '.' in filepath and not is_immich else '' %}
-{% if is_immich or ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'mts') %}
-<div class="detail-section">
-    <div class="detail-preview">
-        {% if is_immich %}
-        <img src="/api/thumbnail/immich/{{ immich_asset_id }}" alt="{{ job.filename }}"
-             class="lightbox-trigger" data-fullsize="/api/original/immich/{{ immich_asset_id }}">
-        {% else %}
-        <img src="/api/thumbnail/{{ job.id }}" alt="{{ job.filename }}"
-             class="lightbox-trigger" data-fullsize="/api/original/local/{{ job.id }}">
-        {% endif %}
-    </div>
-</div>
-{% endif %}
-
-<div class="detail-grid">
-    <div class="detail-card">
-        <h3>{{ t.job_detail.file }}</h3>
-        <p>{{ job.filename }}</p>
-    </div>
-    <div class="detail-card">
-        <h3>{{ t.job_detail.status }}</h3>
-        <span class="cell-status">{{ status_badge(job.status, field=True) }}{% if job.dry_run %}<span class="dry-run-mark with-text" title="{{ t.sets.dry_run_hint }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>{{ t.sets.dry_run_short }}</span>{% endif %}</span>
-    </div>
-    <div class="detail-card">
-        <h3>{{ t.job_detail.current_step }}</h3>
-        <p data-field="current_step">{{ job.current_step or '—' }}{% if job.current_step %} — {{ t.steps[job.current_step] | default(job.current_step) }}{% endif %}</p>
-    </div>
-    <div class="detail-card">
-        <h3>{{ t.job_detail.source }}</h3>
-        <p>{{ job.source_label or '—' }}</p>
-    </div>
-</div>
-
-<div class="detail-section">
-    <h2>{{ t.job_detail.paths }}</h2>
-    <table class="detail-table">
-        <tr><td>{{ t.job_detail.original }}</td><td><code>{{ job.original_path }}</code>{% if '/inbox' in (job.original_path or '') %} <small style="color: var(--text-muted);">(Inbox — temporär)</small>{% endif %}</td></tr>
-        <tr><td>{{ t.job_detail.target }}</td><td><code data-field="target_path">{{ job.target_path or '—' }}</code></td></tr>
-    </table>
-</div>
-
-{% if job.error_message %}
-<div class="detail-section">
-    {% set failed = job.status == 'error' %}
-    <h2 data-label-error="{{ t.job_detail.error }}" data-label-note="{{ t.job_detail.note }}">{{ t.job_detail.error if failed else t.job_detail.note }}</h2>
-    <div class="alert {{ 'alert-error' if failed else 'alert-info' }} job-message" data-field="error_message">{{ job.error_message }}</div>
-</div>
-{% endif %}
-
-{# Retry/Delete actions are available for any terminal job state.
-   The user is the source of truth for "this needs redoing" — even
-   jobs that look fine in the UI may have stale internal step_result
-   (live: MA-2026-28115/28121 had error_message=None but stale IA-07/
-   IA-08 tags). Only hide for jobs currently being processed. #}
-{% if job.status not in ('queued', 'processing') %}
-<div class="detail-section">
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-        <form method="post" action="/api/job/{{ job.debug_key }}/retry">
-            <button type="submit" class="btn btn-primary">{{ t.job_detail.retry }}</button>
-        </form>
-        <form method="post" action="/api/job/{{ job.debug_key }}/delete"
-              onsubmit="return confirm('{{ t.job_detail.delete_confirm | replace('{key}', job.debug_key) }}')">
-            <button type="submit" class="btn btn-danger">{{ t.job_detail.delete }}</button>
-        </form>
-    </div>
-</div>
-{% endif %}
-
-{% if job.step_result %}
-<div class="detail-section">
-    <h2>{{ t.job_detail.step_results }}</h2>
-    <div class="step-results">
-        {% for step, result in job.step_result.items() %}
-        <div class="step-item">
-            <span class="step-code">{{ step }}</span>
-            <span class="step-label">{{ t.steps[step] | default(step) }}</span>
-            {% if step == 'IA-05' and result is mapping and result.get('_context') %}
-            <div class="step-ai-detail">
-                <div style="margin-bottom: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
-                    <strong>Modell:</strong> {{ result._model }} — <strong>{{ result._images }}</strong> Bild{{ 'er' if result._images > 1 else '' }}
-                </div>
-                <div style="margin-bottom: 0.5rem;">
-                    <strong>Kontext an KI:</strong>
-                    <pre class="step-data" style="margin-top: 0.25rem; color: var(--text-muted);">{{ result._context }}</pre>
-                </div>
-                <strong>KI-Antwort:</strong>
-                {% set display_result = {} %}
-                {% for k, v in result.items() if not k.startswith('_') %}
-                    {% if display_result.update({k: v}) %}{% endif %}
-                {% endfor %}
-                <pre class="step-data" style="margin-top: 0.25rem;">{{ display_result | tojson_unicode(indent=2) }}</pre>
-            </div>
-            {% else %}
-            <pre class="step-data">{{ result | tojson_unicode(indent=2) }}</pre>
-            {% endif %}
+{% set has_preview = is_immich or ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'mts') %}
+<div class="job-summary{{ ' has-preview' if has_preview else '' }}">
+    {% if has_preview %}
+    {# A missing file leaves a placeholder instead of a broken image #}
+    <button type="button" class="job-preview lightbox-trigger"
+            data-fullsize="{{ '/api/original/immich/' ~ immich_asset_id if is_immich else '/api/original/local/' ~ job.id }}"
+            aria-label="{{ t.job_detail.preview_zoom }}: {{ job.filename }}" title="{{ t.job_detail.preview_zoom }}">
+        <img src="{{ '/api/thumbnail/immich/' ~ immich_asset_id if is_immich else '/api/thumbnail/' ~ job.id }}" alt=""
+             onerror="var b=this.parentNode; b.classList.add('is-broken'); b.classList.remove('lightbox-trigger'); b.disabled=true;">
+        <span class="job-preview-ph">{{ icon('image', 28) }}</span>
+    </button>
+    {% endif %}
+    <div class="ui-facts job-facts">
+        <div class="ui-fact">
+            <span class="ui-fact-label">{{ t.job_detail.status }}</span>
+            <span class="ui-fact-value"><span class="cell-status">{{ status_badge(job.status, field=True) }}{% if job.dry_run %}<span class="dry-run-mark with-text" title="{{ t.sets.dry_run_hint }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>{{ t.sets.dry_run_short }}</span>{% endif %}</span></span>
         </div>
-        {% endfor %}
+        <div class="ui-fact">
+            <span class="ui-fact-label">{{ t.job_detail.current_step }}</span>
+            <span class="ui-fact-value" data-field="current_step">{{ job.current_step or '—' }}{% if job.current_step %} — {{ t.steps[job.current_step] | default(job.current_step) }}{% endif %}</span>
+        </div>
+        <div class="ui-fact">
+            <span class="ui-fact-label">{{ t.job_detail.source }}</span>
+            <span class="ui-fact-value">{{ job.source_label or '—' }}</span>
+        </div>
+        {% set start = job.started_at or job.created_at %}
+        <div class="ui-fact">
+            <span class="ui-fact-label">{{ t.job_detail.duration }}</span>
+            <span class="ui-fact-value ui-tabular">
+            {%- if start and job.completed_at -%}
+            {%- set dur = (job.completed_at - start).total_seconds()|int -%}
+            {% if dur >= 60 %}{{ (dur // 60) }}m {{ dur % 60 }}s{% else %}{{ dur }}s{% endif %}
+            {%- else %}—{% endif -%}
+            </span>
+        </div>
     </div>
 </div>
-{% endif %}
 
-<div class="detail-section">
-    <h2>{{ t.job_detail.timestamps }}</h2>
-    <table class="detail-table">
-        <tr><td>{{ t.job_detail.created }}</td><td>{{ job.created_at.strftime('%d.%m.%Y %H:%M:%S') if job.created_at else '—' }}</td></tr>
-        <tr><td>{{ t.job_detail.started }}</td><td>{{ job.started_at.strftime('%d.%m.%Y %H:%M:%S') if job.started_at else '—' }}</td></tr>
-        <tr><td>{{ t.job_detail.updated }}</td><td data-field="updated_at">{{ job.updated_at.strftime('%d.%m.%Y %H:%M:%S') if job.updated_at else '—' }}</td></tr>
-        <tr><td>{{ t.job_detail.completed }}</td><td data-field="completed_at">{{ job.completed_at.strftime('%d.%m.%Y %H:%M:%S') if job.completed_at else '—' }}</td></tr>
-        {% set start = job.started_at or job.created_at %}
-        {% if start and job.completed_at %}
-        {% set dur = (job.completed_at - start).total_seconds()|int %}
-        <tr><td>{{ t.job_detail.duration }}</td><td>{% if dur >= 60 %}{{ (dur // 60) }}m {{ dur % 60 }}s{% else %}{{ dur }}s{% endif %}</td></tr>
+{# Red "Fehler" only for failed jobs, otherwise a blue "Hinweis". Always in
+   the page (hidden when empty) so the live refresh can show a new message. #}
+{% set failed = job.status == 'error' %}
+<div class="ui-alert job-alert {{ 'is-error' if failed else 'is-info' }}" data-section="message"{% if not job.error_message %} hidden{% endif %}>
+    <svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use data-field="message_icon" href="#ui-i-{{ 'alert-circle' if failed else 'info' }}"/></svg>
+    <div class="ui-alert-body">
+        <h2 class="ui-alert-title" data-field="message_title" data-label-error="{{ t.job_detail.error }}" data-label-note="{{ t.job_detail.note }}">{{ t.job_detail.error if failed else t.job_detail.note }}</h2>
+        <div class="ui-alert-text job-message" data-field="error_message">{{ job.error_message or '' }}</div>
+    </div>
+</div>
+
+<div class="job-layout">
+    <section class="job-main">
+        <div class="ui-section-head">
+            <div class="ui-section-head-text">
+                <h2 class="ui-section-title">{{ t.job_detail.step_results }}</h2>
+            </div>
+            <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" id="steps-toggle" aria-controls="step-results"
+                    data-expand="{{ t.job_detail.expand_all }}" data-collapse="{{ t.job_detail.collapse_all }}"
+                    {% if not job.step_result %}hidden{% endif %}>{{ t.job_detail.expand_all }}</button>
+        </div>
+        <div class="ui-steps step-results" id="step-results"
+             data-labels='{{ {
+                "ok": STEP_OK[2], "error": STEP_TONES.error[2], "warning": STEP_TONES.warning[2],
+                "skipped": STEP_TONES.skipped[2], "duplicate": STEP_TONES.duplicate[2], "dry_run": STEP_TONES.dry_run[2],
+                "model": t.job_detail.ai_model, "image_one": t.job_detail.ai_images_one, "image_many": t.job_detail.ai_images_many,
+                "context": t.job_detail.ai_context, "answer": t.job_detail.ai_answer, "none": t.job_detail.no_steps
+             } | tojson }}'>
+            {% for step, result in (job.step_result or {}).items() %}
+            {% set st = result.get('status') if result is mapping else none %}
+            {% set tone = STEP_TONES.get(st, STEP_OK) if result is mapping else ('is-neutral', 'info', '') %}
+            {% set reason = result.get('reason') if result is mapping and result.get('reason') is string else '' %}
+            <details class="ui-step" data-step="{{ step }}"{% if st == 'error' %} open{% endif %}>
+                <summary>
+                    <span class="ui-status {{ tone[0] }}"{% if tone[2] %} title="{{ tone[2] }}"{% endif %}>{{ icon(tone[1]) }}{% if tone[2] %}<span class="ui-sr-only">{{ tone[2] }}</span>{% endif %}</span>
+                    <span class="ui-step-code">{{ step }}</span>
+                    <span class="ui-step-label">{{ t.steps[step] | default(step) }}</span>
+                    {% if reason %}<span class="step-reason" title="{{ reason }}">{{ reason }}</span>{% endif %}
+                    <svg class="ui-i ui-step-chev" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-down"/></svg>
+                </summary>
+                <div class="ui-step-body">
+                    {% if step == 'IA-05' and result is mapping and result.get('_context') %}
+                    {% set images = result._images or 0 %}
+                    <p class="step-ai-meta">{{ t.job_detail.ai_model }}: <strong>{{ result._model }}</strong> · {{ (t.job_detail.ai_images_many if images != 1 else t.job_detail.ai_images_one) | replace('{n}', images) }}</p>
+                    <p class="step-ai-label">{{ t.job_detail.ai_context }}</p>
+                    <pre class="ui-pre ui-pre-wrap step-ai-context">{{ result._context }}</pre>
+                    <p class="step-ai-label">{{ t.job_detail.ai_answer }}</p>
+                    {% set display_result = {} %}
+                    {% for k, v in result.items() if not k.startswith('_') %}
+                        {% if display_result.update({k: v}) %}{% endif %}
+                    {% endfor %}
+                    <pre class="ui-pre ui-pre-wrap">{{ display_result | tojson_unicode(indent=2) }}</pre>
+                    {% else %}
+                    <pre class="ui-pre ui-pre-wrap">{{ result | tojson_unicode(indent=2) }}</pre>
+                    {% endif %}
+                </div>
+            </details>
+            {% else %}
+            <div class="ui-empty-inline job-steps-empty">{{ icon('clock') }}<span>{{ t.job_detail.no_steps }}</span></div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <aside class="job-aside">
+        <section class="ui-card">
+            <div class="ui-card-head"><h2 class="ui-card-title">{{ icon('folder') }}{{ t.job_detail.paths }}</h2></div>
+            <dl class="ui-kv is-inset job-kv-stack">
+                <div class="ui-kv-row">
+                    <dt>{{ t.job_detail.original }}{% if '/inbox' in (job.original_path or '') %} <span class="job-kv-note">({{ t.job_detail.inbox_temp }})</span>{% endif %}</dt>
+                    <dd><code class="ui-path job-path{{ ' is-empty' if not job.original_path else '' }}">{{ job.original_path or '—' }}</code></dd>
+                </div>
+                <div class="ui-kv-row">
+                    <dt>{{ t.job_detail.target }}</dt>
+                    <dd><code class="ui-path job-path{{ ' is-empty' if not job.target_path else '' }}" data-field="target_path">{{ job.target_path or '—' }}</code></dd>
+                </div>
+            </dl>
+        </section>
+
+        <section class="ui-card">
+            <div class="ui-card-head"><h2 class="ui-card-title">{{ icon('clock') }}{{ t.job_detail.timestamps }}</h2></div>
+            <dl class="ui-kv is-inset is-compact job-kv-times">
+                <div class="ui-kv-row"><dt>{{ t.job_detail.created }}</dt><dd class="ui-tabular">{{ stamp(job.created_at) }}</dd></div>
+                <div class="ui-kv-row"><dt>{{ t.job_detail.started }}</dt><dd class="ui-tabular">{{ stamp(job.started_at) }}</dd></div>
+                <div class="ui-kv-row"><dt>{{ t.job_detail.updated }}</dt><dd class="ui-tabular" data-field="updated_at">{{ stamp(job.updated_at) }}</dd></div>
+                <div class="ui-kv-row"><dt>{{ t.job_detail.completed }}</dt><dd class="ui-tabular" data-field="completed_at">{{ stamp(job.completed_at) }}</dd></div>
+            </dl>
+        </section>
+
+        {% if job.file_hash %}
+        <section class="ui-card">
+            <div class="ui-card-head"><h2 class="ui-card-title">{{ icon('hash') }}{{ t.job_detail.hashes }}</h2></div>
+            <dl class="ui-kv is-inset job-kv-stack">
+                <div class="ui-kv-row"><dt>SHA256</dt><dd><code class="ui-path">{{ job.file_hash }}</code></dd></div>
+                <div class="ui-kv-row"><dt>pHash</dt><dd><code class="ui-path job-path{{ ' is-empty' if not job.phash else '' }}">{{ job.phash or '—' }}</code></dd></div>
+            </dl>
+        </section>
         {% endif %}
-    </table>
+    </aside>
 </div>
-
-{% if job.file_hash %}
-<div class="detail-section">
-    <h2>{{ t.job_detail.hashes }}</h2>
-    <table class="detail-table">
-        <tr><td>SHA256</td><td><code>{{ job.file_hash }}</code></td></tr>
-        <tr><td>pHash</td><td><code>{{ job.phash or '—' }}</code></td></tr>
-    </table>
-</div>
-{% endif %}
 {% endblock %}
