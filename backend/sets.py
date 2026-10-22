@@ -7,6 +7,7 @@ categories and the library base path are always those of its own set.
 """
 import json
 import logging
+import os
 
 from sqlalchemy import select, text
 
@@ -93,6 +94,54 @@ async def get_set(session, set_id: int | None) -> ProcessingSet | None:
     return (await session.execute(
         select(ProcessingSet).order_by(ProcessingSet.position, ProcessingSet.id).limit(1)
     )).scalar()
+
+
+async def categories_of(session, set_id: int | None) -> list[LibraryCategory]:
+    """All categories of a set, in their configured order."""
+    processing_set = await get_set(session, set_id)
+    if not processing_set:
+        return []
+    return list((await session.execute(
+        select(LibraryCategory).where(LibraryCategory.set_id == processing_set.id)
+        .order_by(LibraryCategory.position, LibraryCategory.id)
+    )).scalars().all())
+
+
+async def find_category(session, set_id: int | None, *, key: str | None = None,
+                        label: str | None = None) -> LibraryCategory | None:
+    """One category of a set, by key or by label."""
+    processing_set = await get_set(session, set_id)
+    if not processing_set:
+        return None
+    query = select(LibraryCategory).where(LibraryCategory.set_id == processing_set.id)
+    query = query.where(LibraryCategory.key == key) if key is not None \
+        else query.where(LibraryCategory.label == label)
+    return (await session.execute(query.limit(1))).scalar()
+
+
+async def base_path_for(session, job) -> str:
+    """Library base of the job's set — also home of its error and duplicate folders."""
+    processing_set = await get_set(session, getattr(job, "set_id", None))
+    if processing_set and processing_set.library_base_path:
+        return processing_set.library_base_path
+    return "/library"
+
+
+async def library_roots() -> list[str]:
+    """Distinct library base paths of all sets, without paths nested in another.
+
+    A path inside another set's base is already covered by it; scanning both
+    would count every file in it twice.
+    """
+    async with async_session() as session:
+        paths = {os.path.normpath(p) for (p,) in (await session.execute(
+            select(ProcessingSet.library_base_path))).all() if p}
+    roots = sorted(paths, key=len)
+    kept: list[str] = []
+    for path in roots:
+        if not any(path == k or path.startswith(k.rstrip(os.sep) + os.sep) for k in kept):
+            kept.append(path)
+    return kept or ["/library"]
 
 
 async def _cfg(session, key: str, default):
@@ -184,16 +233,31 @@ async def migrate_to_sets() -> None:
         # named access gets a set of its own, so nothing stops being polled.
         poll_sets: dict[int | None, ProcessingSet] = {}
         if poll_enabled:
-            first.immich_poll = True
-            first.immich_last_poll = last_poll
-            poll_sets[None] = first
+            # Poll jobs follow their set's dry-run switch. Polled assets were
+            # never processed as a dry run, so a dry-run first set must not
+            # inherit the poller — it gets a set of its own instead.
+            if first.dry_run:
+                global_poll = ProcessingSet(
+                    name="Immich Auto-Tagging", description="", active=True,
+                    position=len(sets) + 1, **schedule, folder_tags=False, dry_run=False,
+                    ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, target_mode="immich",
+                    library_base_path=base_path, immich_user_id=None,
+                    immich_poll=True, immich_poll_user_id=None, immich_last_poll=last_poll,
+                )
+                session.add(global_poll)
+                await session.flush()
+            else:
+                global_poll = first
+                first.immich_poll = True
+                first.immich_last_poll = last_poll
+            poll_sets[None] = global_poll
             users = (await session.execute(
                 select(ImmichUser).where(ImmichUser.active == True).order_by(ImmichUser.id)  # noqa: E712
             )).scalars().all()
             for u in users:
                 ps = ProcessingSet(
                     name=f"Immich Auto-Tagging {u.label}", description="", active=True,
-                    position=len(sets) + len(poll_sets), **schedule,
+                    position=len(sets) + len(poll_sets) + 1, **schedule,
                     folder_tags=False, dry_run=False, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode,
                     target_mode="immich", library_base_path=base_path, immich_user_id=u.id,
                     immich_poll=True, immich_poll_user_id=u.id, immich_last_poll=last_poll,
@@ -202,7 +266,8 @@ async def migrate_to_sets() -> None:
                 poll_sets[u.id] = ps
             await session.flush()
 
-        all_sets = [ps for ps, _ in sets] + [ps for uid, ps in poll_sets.items() if uid is not None]
+        dir_sets = [ps for ps, _ in sets]
+        all_sets = dir_sets + [ps for ps in poll_sets.values() if ps not in dir_sets]
 
         # Rules and categories: existing ones belong to the first set, every
         # further set gets a copy. A fresh install has none and gets defaults.

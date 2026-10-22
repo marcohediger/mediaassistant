@@ -75,7 +75,7 @@
 
         <div class="review-actions">
             <span class="review-actions-label">{{ t.review.classify_as }}</span>
-            {% for cat in review_categories %}
+            {% for cat in categories_by_set.get(item.set_id, []) %}
             <form method="post" action="/api/review/classify" class="inline-form">
                 <input type="hidden" name="debug_key" value="{{ item.debug_key }}">
                 <input type="hidden" name="category" value="{{ cat.key }}">

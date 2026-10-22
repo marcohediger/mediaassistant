@@ -222,12 +222,9 @@ async def execute(job, session) -> dict:
     mime_type = "image/jpeg"
 
     # ── Kategorien aus DB laden ────────────────────────────────────
-    from models import LibraryCategory
-    from sqlalchemy import select as sa_select
-    cat_result = await session.execute(
-        sa_select(LibraryCategory).where(LibraryCategory.key != "error", LibraryCategory.key != "duplicate").order_by(LibraryCategory.position)
-    )
-    categories = cat_result.scalars().all()
+    from sets import categories_of
+    categories = [c for c in await categories_of(session, job.set_id)
+                  if c.key not in ("error", "duplicate")]
     cat_list = " | ".join(c.label for c in categories)
 
     # ── Alle Metadaten sammeln ──────────────────────────────────────
@@ -242,7 +239,8 @@ async def execute(job, session) -> dict:
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
-    rule_category = await _match_sorting_rules(filename, exif, session, is_video=is_video)
+    rule_category = await _match_sorting_rules(filename, exif, session, is_video=is_video,
+                                               set_id=job.set_id)
     rule_cat_label = ""
     if rule_category:
         for c in categories:

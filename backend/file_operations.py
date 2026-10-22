@@ -111,18 +111,22 @@ def safe_remove_with_log(path: str) -> list[str]:
 # Duplicate directory (reads from config)
 # ---------------------------------------------------------------------------
 
-async def get_duplicate_dir() -> str:
-    """Return the duplicate-files directory, creating it if needed.
+async def get_duplicate_dir(job) -> str:
+    """Return the duplicate-files directory of the job's set, creating it if needed.
 
-    Reads ``library.base_path`` and ``library.path_duplicate`` from config.
+    The base comes from the job's set, the relative part from
+    ``library.path_duplicate`` (default ``error/duplicates/``).
 
     Returns:
         Absolute path to the duplicates directory (guaranteed to exist).
     """
     import asyncio
     from config import config_manager
+    from database import async_session
+    from sets import base_path_for
 
-    base_path = await config_manager.get("library.base_path", "/library")
+    async with async_session() as session:
+        base_path = await base_path_for(session, job)
     dup_rel = await config_manager.get("library.path_duplicate", "error/duplicates/")
     dup_dir = os.path.join(base_path, dup_rel)
     await asyncio.to_thread(os.makedirs, dup_dir, exist_ok=True)
@@ -211,22 +215,18 @@ def parse_date(date_str: str) -> datetime | None:
 
 
 # ---------------------------------------------------------------------------
-# Module-activation check
+# Folder-tag check
 # ---------------------------------------------------------------------------
 
 async def is_folder_tags_active(job) -> bool:
-    """Check if folder tags should be applied — re-reads module AND inbox setting at runtime."""
-    from config import config_manager
-    if not await config_manager.is_module_enabled("ordner_tags"):
-        return False
+    """Folder tags apply when the job's set has them on — re-read at runtime.
+
+    Only files that came from a directory have a folder structure to read.
+    """
     if not job.source_inbox_path:
         return False
-    from models import InboxDirectory
-    from sqlalchemy import select
     from database import async_session
+    from sets import get_set
     async with async_session() as session:
-        result = await session.execute(
-            select(InboxDirectory.folder_tags).where(InboxDirectory.path == job.source_inbox_path)
-        )
-        inbox_folder_tags = result.scalar()
-    return bool(inbox_folder_tags)
+        processing_set = await get_set(session, job.set_id)
+    return bool(processing_set and processing_set.folder_tags)

@@ -24,11 +24,13 @@ Regeln:
 
 async def execute(job, session) -> dict:
     """IA-06: OCR — Texterkennung via KI."""
-    if not await config_manager.is_module_enabled("ocr"):
-        return {"status": "skipped", "reason": "module disabled"}
+    from sets import get_set
+    processing_set = await get_set(session, job.set_id)
+    if not processing_set or not processing_set.ocr_enabled:
+        return {"status": "skipped", "reason": "OCR im Set ausgeschaltet"}
 
     # Check OCR mode: "smart" = only screenshots/documents, "always" = all images
-    ocr_mode = await config_manager.get("ocr.mode", "smart")
+    ocr_mode = processing_set.ocr_mode or "smart"
     if ocr_mode == "smart":
         ai_result = (job.step_result or {}).get("IA-05", {})
         ai_type = ai_result.get("type", "")

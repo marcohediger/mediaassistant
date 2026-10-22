@@ -79,6 +79,7 @@ async def _build_review_items() -> list[dict]:
 
             items.append({
                 "job_id": job.id,
+                "set_id": job.set_id,
                 "debug_key": job.debug_key,
                 "filename": job.filename,
                 "filepath": filepath,
@@ -111,20 +112,20 @@ async def review_page(request: Request):
 
     items = await _build_review_items()
 
-    # Load categories for classify buttons
-    from models import LibraryCategory
+    # Every item gets the classify buttons of its own set — categories are
+    # per set, so one shared row of buttons would offer keys a job's set
+    # may not have.
+    from sets import categories_of
+    categories_by_set: dict = {}
     async with async_session() as session:
-        cat_result = await session.execute(
-            select(LibraryCategory)
-            .where(LibraryCategory.fixed == False)
-            .order_by(LibraryCategory.position)
-        )
-        review_categories = cat_result.scalars().all()
+        for set_id in {item["set_id"] for item in items}:
+            categories_by_set[set_id] = [c for c in await categories_of(session, set_id)
+                                         if not c.fixed]
 
     return await render(request, "review.html", {
         "items": items,
         "total": len(items),
-        "review_categories": review_categories,
+        "categories_by_set": categories_by_set,
     })
 
 
@@ -161,21 +162,17 @@ async def classify_file(request: Request):
     if not debug_key or not category:
         return RedirectResponse(url="/review", status_code=303)
 
-    # Validate category exists in DB
-    from models import LibraryCategory
-    async with async_session() as session_check:
-        valid = (await session_check.execute(
-            select(LibraryCategory).where(LibraryCategory.key == category)
-        )).scalar()
-    if not valid:
-        return RedirectResponse(url="/review", status_code=303)
-
+    from sets import find_category, base_path_for
     async with async_session() as session:
         result = await session.execute(
             select(Job).where(Job.debug_key == debug_key, Job.status == "review")
         )
         job = result.scalars().first()
         if not job:
+            return RedirectResponse(url="/review", status_code=303)
+        # The category has to exist in the job's own set
+        lib_cat = await find_category(session, job.set_id, key=category)
+        if not lib_cat:
             return RedirectResponse(url="/review", status_code=303)
 
         step_results = job.step_result or {}
@@ -190,10 +187,6 @@ async def classify_file(request: Request):
             asset_id = immich_asset_id or target.replace("immich:", "")
 
             # Check if category should be archived in Immich
-            from models import LibraryCategory
-            lib_cat = (await session.execute(
-                select(LibraryCategory).where(LibraryCategory.key == category)
-            )).scalar()
             should_archive = lib_cat.immich_archive if lib_cat else False
 
             if should_archive and asset_id:
@@ -230,17 +223,8 @@ async def classify_file(request: Request):
         if geo.get("country"):
             exif = {**exif, "country": geo["country"], "city": geo.get("city", "")}
 
-        # Get path template from library_categories table
-        from models import LibraryCategory
-        cat_result = await session.execute(
-            select(LibraryCategory).where(LibraryCategory.key == category)
-        )
-        lib_cat = cat_result.scalar()
-        if lib_cat:
-            path_template = lib_cat.path_template
-        else:
-            path_template = "unknown/review/"
-        base_path = await config_manager.get("library.base_path", "/library")
+        path_template = lib_cat.path_template
+        base_path = await base_path_for(session, job)
 
         # Parse date
         date = parse_date(exif.get("date"))
@@ -424,29 +408,34 @@ async def classify_all(request: Request):
 
     if not category:
         return RedirectResponse(url="/review", status_code=303)
-    # Validate category exists
-    from models import LibraryCategory
-    async with async_session() as session_check:
-        valid = (await session_check.execute(
-            select(LibraryCategory).where(LibraryCategory.key == category)
-        )).scalar()
-    if not valid:
-        return RedirectResponse(url="/review", status_code=303)
 
-    count = 0
+    from sets import find_category, base_path_for
+    count, skipped = 0, 0
     async with async_session() as session:
-        # Load target category from DB
-        lib_cat = (await session.execute(
-            select(LibraryCategory).where(LibraryCategory.key == category)
-        )).scalar()
-        should_archive = lib_cat.immich_archive if lib_cat else False
-
         result = await session.execute(
             select(Job).where(Job.status == "review")
         )
         jobs = result.scalars().all()
 
         for job in jobs:
+            # Categories belong to the job's set. "sourceless" is what the
+            # batch button sends; no set has that key — it stands for the
+            # photo or video variant, depending on the file. Until now the
+            # button validated "sourceless" against the keys, found nothing
+            # and silently did nothing at all.
+            key = category
+            if key == "sourceless":
+                exif_1 = (job.step_result or {}).get("IA-01", {})
+                file_type = (exif_1.get("file_type") or "").upper()
+                is_video = (exif_1.get("mime_type") or "").startswith("video/") or \
+                    file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
+                key = "sourceless_video" if is_video else "sourceless_foto"
+            lib_cat = await find_category(session, job.set_id, key=key)
+            if not lib_cat:
+                skipped += 1
+                continue
+            should_archive = bool(lib_cat.immich_archive)
+
             target = job.target_path or ""
             is_immich = target.startswith("immich:") or bool(job.immich_asset_id)
 
@@ -475,8 +464,8 @@ async def classify_all(request: Request):
             step_results = job.step_result or {}
             exif = step_results.get("IA-01", {})
 
-            base_path = await config_manager.get("library.base_path", "/library")
-            path_template = lib_cat.path_template if lib_cat else "unknown/review/"
+            base_path = await base_path_for(session, job)
+            path_template = lib_cat.path_template
 
             date = parse_date(exif.get("date")) or datetime.now()
             relative_dir = path_template.replace("{YYYY}", date.strftime("%Y")).replace("{MM}", date.strftime("%m"))
@@ -520,5 +509,6 @@ async def classify_all(request: Request):
 
         await session.commit()
 
-    await log_info("review", f"Batch: {count} Dateien → {category}")
+    await log_info("review", f"Batch: {count} Dateien → {category}",
+                   f"{skipped} übersprungen — Kategorie fehlt in ihrem Set" if skipped else "")
     return RedirectResponse(url="/review", status_code=303)
