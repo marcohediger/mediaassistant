@@ -8,8 +8,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from config import config_manager
-from database import async_session
-from models import Job, Module, InboxDirectory
+from database import DEFAULT_MODULES, async_session
+from models import Job, Module, InboxDirectory, ProcessingSet
+from routers.processing_sets import summaries as set_summaries
 from system_logger import log_error, log_info, log_warning
 from models import SystemLog
 from i18n import load_lang, DEFAULT_LANGUAGE
@@ -41,8 +42,6 @@ MODULE_REQUIREMENTS = {
     "ki_analyse_2": ["ai2.backend_url", "ai2.model"],
     "geocoding": ["geo.provider", "geo.url"],
     "duplikat_erkennung": [],
-    "ocr": ["ai.backend_url", "ai.model"],
-    "ordner_tags": [],
     "smtp": ["smtp.server", "smtp.recipient"],
     "filewatcher": [],
     "immich": ["immich.url", "immich.api_key"],
@@ -168,13 +167,22 @@ async def _check_smtp(i18n: dict) -> tuple[bool, str]:
 
 
 async def _check_filewatcher(i18n: dict) -> tuple[bool, str]:
-    async with async_session() as session:
-        result = await session.execute(
-            select(InboxDirectory).where(InboxDirectory.active == True)
-        )
-        inboxes = result.scalars().all()
+    """Directories the clock actually scans: active ones in active sets.
 
-    if not inboxes:
+    A set that only polls Immich has no directory and is still a working
+    input, so "no directories" is only an error when nothing polls either.
+    """
+    async with async_session() as session:
+        active_sets = (await session.execute(
+            select(ProcessingSet).where(ProcessingSet.active == True)  # noqa: E712
+        )).scalars().all()
+        set_ids = [ps.id for ps in active_sets]
+        inboxes = (await session.execute(
+            select(InboxDirectory).where(InboxDirectory.active == True,  # noqa: E712
+                                         InboxDirectory.set_id.in_(set_ids))
+        )).scalars().all() if set_ids else []
+
+    if not inboxes and not any(ps.immich_poll for ps in active_sets):
         return False, _t("status_no_inboxes", i18n)
 
     import os
@@ -200,7 +208,6 @@ MODULE_HEALTH_CHECKS = {
     "ki_analyse": _check_ai_backend,
     "ki_analyse_2": _check_ai_backend_2,
     "geocoding": _check_geocoding,
-    "ocr": _check_ai_backend,
     "smtp": _check_smtp,
     "filewatcher": _check_filewatcher,
     "immich": _check_immich,
@@ -222,8 +229,12 @@ async def _get_module_status(i18n: dict, *, record: bool = True) -> list[dict]:
             s["label"] = _get_module_label(s["name"], i18n)
         return _module_cache
 
+    # Only the global modules. Older databases still carry rows of modules
+    # that moved into the processing sets (ordner_tags, ocr); they no longer
+    # switch anything and must not show up as cards.
+    global_modules = [name for name, _ in DEFAULT_MODULES]
     async with async_session() as session:
-        result = await session.execute(select(Module))
+        result = await session.execute(select(Module).where(Module.name.in_(global_modules)))
         modules = result.scalars().all()
 
     statuses = []
@@ -324,6 +335,31 @@ async def _get_module_status(i18n: dict, *, record: bool = True) -> list[dict]:
     return statuses
 
 
+async def _get_set_overview(i18n: dict) -> list[dict]:
+    """One card per processing set: active, directories, Immich poll, queue.
+
+    Shaped like a module card (status/label/detail), so the template and the
+    live refresh render both the same way.
+    """
+    text = i18n.get("dashboard", {})
+    cards = []
+    for s in await set_summaries():
+        poll = text.get("set_poll_on", "Immich-Poll an") if s["immich_poll"] \
+            else text.get("set_poll_off", "Immich-Poll aus")
+        detail = " · ".join((
+            text.get("set_directories", "{n} Verzeichnis(se)").replace("{n}", str(len(s["directories"]))),
+            poll,
+            text.get("set_queue", "{n} in Warteschlange").replace("{n}", str(s["queue"])),
+        ))
+        cards.append({
+            "id": s["id"],
+            "label": s["name"],
+            "status": "ready" if s["active"] else "disabled",
+            "detail": detail,
+        })
+    return cards
+
+
 async def _get_throughput(session) -> dict:
     """Calculate throughput stats for completed jobs."""
     now = datetime.now()
@@ -414,6 +450,7 @@ async def dashboard(request: Request):
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
     i18n = load_lang(lang)
     modules = await _get_module_status(i18n)
+    sets = await _get_set_overview(i18n)
 
     return await render(request, "dashboard.html", {
         "stats": {
@@ -426,6 +463,7 @@ async def dashboard(request: Request):
         },
         "throughput": throughput,
         "modules": modules,
+        "sets": sets,
         "recent_jobs": recent_jobs,
     })
 
@@ -451,6 +489,7 @@ async def dashboard_json():
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
     i18n = load_lang(lang)
     modules = await _get_module_status(i18n)
+    sets = await _get_set_overview(i18n)
 
     return {
         "stats": {
@@ -471,6 +510,7 @@ async def dashboard_json():
             }
             for m in modules
         ],
+        "sets": sets,
         "recent_jobs": [
             {
                 "debug_key": j.debug_key,

@@ -23,6 +23,7 @@
             <input type="text" name="library_path" value="{{ library_path }}" readonly>
             <small>Konfiguriert via Docker Volume Mount</small>
         </div>
+        <p class="section-note">{{ t.get('setup', {}).get('set_hint', 'Beide Pfade gehören zum Verarbeitungs-Set „{name}“. Weitere Sets mit eigenen Verzeichnissen, Regeln und Ablagen lassen sich später in den Einstellungen anlegen.').replace('{name}', set_name) }}</p>
         <div class="form-actions">
             <a href="/setup/step/2" class="btn btn-secondary">Zurück</a>
             <button type="submit" class="btn btn-primary">Weiter</button>

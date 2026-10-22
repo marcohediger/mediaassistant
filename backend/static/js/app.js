@@ -16,6 +16,7 @@
         updateStats(data.stats);
         updateThroughput(data.throughput);
         updateModules(data.modules);
+        updateSets(data.sets);
         updateRecentJobs(data.recent_jobs);
       } catch (_) {}
     }, POLL_INTERVAL);
@@ -47,10 +48,19 @@
   }
 
   function updateModules(modules) {
-    const grid = document.getElementById("modules-grid");
+    renderCards("modules-grid", modules);
+  }
+
+  // Processing sets come shaped like module cards (status/label/detail).
+  function updateSets(sets) {
+    if (sets) renderCards("sets-grid", sets);
+  }
+
+  function renderCards(gridId, items) {
+    const grid = document.getElementById(gridId);
     if (!grid) return;
 
-    grid.innerHTML = modules
+    grid.innerHTML = items
       .map((m) => {
         const dot =
           m.status === "ready"
@@ -212,8 +222,42 @@
     });
   }
 
+  // ── Quick menu: language and theme, applied at once ──
+  function initQuickMenu() {
+    const toggle = document.querySelector(".quick-menu-toggle");
+    const panel = document.getElementById("quick-menu-panel");
+    if (!toggle || !panel) return;
+
+    function setOpen(open) {
+      panel.hidden = !open;
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    toggle.addEventListener("click", function (e) {
+      e.stopPropagation();
+      setOpen(panel.hidden);
+    });
+    document.addEventListener("click", function (e) {
+      if (!panel.hidden && !e.target.closest(".quick-menu")) setOpen(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !panel.hidden) { setOpen(false); toggle.focus(); }
+    });
+    panel.addEventListener("click", function (e) {
+      const btn = e.target.closest("[data-appearance]");
+      if (!btn || btn.classList.contains("active")) return;
+      const body = {};
+      body[btn.dataset.appearance] = btn.dataset.value;
+      fetch("/settings/appearance", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body),
+      }).then(function () { location.reload(); });
+    });
+  }
+
   // ── Init ──
   initDashboard();
   initJobDetail();
   initLightbox();
+  initQuickMenu();
 })();

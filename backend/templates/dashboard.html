@@ -169,6 +169,19 @@ setInterval(refreshPipelineStatus, 5000);
     <span><span class="legend-dot legend-disabled">○</span> {{ t.dashboard.disabled }}</span>
 </div>
 
+<h2 style="margin-top: 2rem;">{{ t.dashboard.sets | default('Verarbeitungs-Sets') }}</h2>
+<div class="modules-grid" id="sets-grid">
+    {% for s in sets %}
+    <div class="module-card module-{{ s.status }}">
+        <div class="module-top">
+            <span class="module-status">{{ '●' if s.status == 'ready' else '○' }}</span>
+            <span class="module-name">{{ s.label }}</span>
+        </div>
+        <div class="module-detail">{{ s.detail }}</div>
+    </div>
+    {% endfor %}
+</div>
+
 <h2 style="margin-top: 2rem;">{{ t.dashboard.recent }}</h2>
 {% if recent_jobs %}
 <div class="log-table-wrap">

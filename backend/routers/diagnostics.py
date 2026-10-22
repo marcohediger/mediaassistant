@@ -22,12 +22,23 @@ from sqlalchemy import select, func
 
 from config import config_manager
 from database import async_session
-from models import Config, Job, InboxDirectory, ImmichUser, SystemLog
+from models import (
+    Config, ImmichUser, InboxDirectory, Job, LibraryCategory, ProcessingSet, SortingRule, SystemLog,
+)
 from version import VERSION, VERSION_DATE
 
 router = APIRouter(prefix="/api/diagnostics")
 
 _STARTED_AT = time.time()
+
+# Config keys the processing sets replaced. They stay in older databases and
+# only fed the one-time sets migration, so they are reported apart from the
+# effective settings — otherwise the report would show values nothing reads.
+SUPERSEDED_SETTINGS = frozenset({
+    "immich.poll_enabled", "immich.last_poll", "ocr.mode",
+    "filewatcher.schedule_mode", "filewatcher.interval", "filewatcher.window_start",
+    "filewatcher.window_end", "filewatcher.scheduled_days", "filewatcher.scheduled_time",
+})
 
 
 def token_hash(token: str) -> str:
@@ -190,18 +201,75 @@ async def diagnostics(request: Request):
                     "status": row.status, "step": row.current_step,
                     "original_path": row.original_path, "target_path": row.target_path,
                     "immich_asset_id": row.immich_asset_id, "retry_count": row.retry_count,
-                    "source": row.source_label, "created": str(row.created_at)[:19],
+                    "source": row.source_label, "set_id": row.set_id,
+                    "created": str(row.created_at)[:19],
                     "started": str(row.started_at)[:19] if row.started_at else None,
                     "completed": str(row.completed_at)[:19] if row.completed_at else None,
                     "error": (row.error_message or "")[:600],
                     "step_result": row.step_result,
                 }
+        directories = (await session.execute(
+            select(InboxDirectory).order_by(InboxDirectory.id)
+        )).scalars().all()
         inboxes = [
-            {"label": lb, "path": p, "active": bool(a), "exists": os.path.isdir(p)}
-            for lb, p, a in (await session.execute(
-                select(InboxDirectory.label, InboxDirectory.path, InboxDirectory.active)
-            )).all()
+            {"label": d.label, "path": d.path, "active": bool(d.active),
+             "exists": os.path.isdir(d.path), "set_id": d.set_id}
+            for d in directories
         ]
+
+        # Everything a set decides, one entry per set. Access ids only — the
+        # keys behind them stay out, like every other secret here.
+        rule_counts = dict((await session.execute(
+            select(SortingRule.set_id, func.count()).group_by(SortingRule.set_id))).all())
+        category_counts = dict((await session.execute(
+            select(LibraryCategory.set_id, func.count()).group_by(LibraryCategory.set_id))).all())
+        queue: dict = {}
+        for set_id, status, n in (await session.execute(
+            select(Job.set_id, Job.status, func.count())
+            .where(Job.status.in_(("queued", "processing")))
+            .group_by(Job.set_id, Job.status)
+        )).all():
+            queue.setdefault(set_id, {"queued": 0, "processing": 0})[status] = n
+        sets = []
+        for ps in (await session.execute(
+            select(ProcessingSet).order_by(ProcessingSet.position, ProcessingSet.id)
+        )).scalars().all():
+            base = ps.library_base_path or ""
+            sets.append({
+                "id": ps.id, "name": ps.name, "active": bool(ps.active), "position": ps.position,
+                "schedule": {
+                    "mode": ps.schedule_mode, "interval_s": ps.interval_s,
+                    "window_start": ps.window_start, "window_end": ps.window_end,
+                    "scheduled_days": ps.scheduled_days, "scheduled_time": ps.scheduled_time,
+                },
+                "directories": [
+                    {"path": d.path, "label": d.label, "active": bool(d.active),
+                     "exists": os.path.isdir(d.path)}
+                    for d in directories if d.set_id == ps.id
+                ],
+                "immich_poll": bool(ps.immich_poll),
+                "immich_poll_user_id": ps.immich_poll_user_id,
+                "immich_last_poll": ps.immich_last_poll,
+                "target_mode": ps.target_mode,
+                "immich_user_id": ps.immich_user_id,
+                "library_base_path": base,
+                "library_base_path_exists": os.path.isdir(base) if base else False,
+                "folder_tags": bool(ps.folder_tags),
+                "dry_run": bool(ps.dry_run),
+                "ocr_enabled": bool(ps.ocr_enabled),
+                "ocr_mode": ps.ocr_mode,
+                "rules": rule_counts.get(ps.id, 0),
+                "categories": category_counts.get(ps.id, 0),
+                "queue": queue.get(ps.id, {"queued": 0, "processing": 0}),
+            })
+        # Jobs whose set is gone or was never assigned run with the first
+        # set's rules (sets.get_set) — worth seeing when they pile up.
+        known = {entry["id"] for entry in sets}
+        queue_without_set = {"queued": 0, "processing": 0}
+        for set_id, counts in queue.items():
+            if set_id not in known:
+                for status, n in counts.items():
+                    queue_without_set[status] += n
         immich_users = (await session.execute(
             select(func.count()).select_from(ImmichUser)
         )).scalar()
@@ -210,11 +278,13 @@ async def diagnostics(request: Request):
         # only and never decrypted here — the report must not be able to leak
         # a secret even if someone widens it later.
         settings = {}
+        superseded = {}
         for key, value, encrypted in sorted(
             (await session.execute(select(Config.key, Config.value, Config.encrypted))).all()
         ):
+            target = superseded if key in SUPERSEDED_SETTINGS else settings
             if encrypted:
-                settings[key] = "<set>" if value else "<unset>"
+                target[key] = "<set>" if value else "<unset>"
                 continue
             try:
                 parsed = json.loads(value)
@@ -222,11 +292,11 @@ async def diagnostics(request: Request):
                 parsed = value
             if isinstance(parsed, str) and len(parsed) > 500:
                 parsed = f"{parsed[:500]}… (+{len(parsed) - 500} Zeichen)"
-            settings[key] = parsed
+            target[key] = parsed
 
     # Reuses the dashboard's own health checks rather than duplicating them, so
-    # the report can never disagree with what the UI shows. Results are cached
-    # there for up to 30 seconds.
+    # the report can never disagree with what the UI shows. record=False keeps
+    # the call side-effect free: fresh checks, no cache, no state-change logs.
     try:
         from routers.dashboard import _get_module_status
         from i18n import load_lang, DEFAULT_LANGUAGE
@@ -234,7 +304,7 @@ async def diagnostics(request: Request):
         modules = [
             {"name": m.get("name"), "enabled": m.get("enabled"),
              "status": m.get("status"), "detail": m.get("detail")}
-            for m in await _get_module_status(load_lang(lang))
+            for m in await _get_module_status(load_lang(lang), record=False)
         ]
     except Exception as e:
         modules = {"error": f"{type(e).__name__}: {e}"[:200]}
@@ -250,16 +320,17 @@ async def diagnostics(request: Request):
         },
         "modules": modules,
         "settings": settings,
+        "settings_superseded": superseded,
+        "sets": sets,
         "jobs": {
             "by_status": by_status,
+            "queue_without_set": queue_without_set,
             "top_errors": errors,
             "newest": newest_jobs,
         },
         "immich": {
             "url": immich_url,
             "api_key": await _secret_state("immich.api_key"),
-            "poll_enabled": await config_manager.get("immich.poll_enabled", False),
-            "last_poll": await config_manager.get("immich.last_poll", ""),
             "extra_users": immich_users,
         },
         "ai": {

@@ -10,416 +10,75 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<!-- Inboxes -->
-<div class="settings-section" id="section-inboxes">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.settings.inboxes }}</h2>
-            <span class="section-desc">{{ t.settings.inboxes_desc }}</span>
-        </div>
-    </div>
-    <div class="section-body">
-        {% if inboxes %}
-        <div class="inbox-list">
-            {% for inbox in inboxes %}
-            <form method="post" action="/settings/inbox/{{ inbox.id }}/update" class="inbox-item">
-                <div class="inbox-row">
-                    <div class="form-group">
-                        <label>{{ t.settings.path }}</label>
-                        <input type="text" name="inbox_path" value="{{ inbox.path }}">
-                    </div>
-                    <div class="form-group">
-                        <label>{{ t.settings.label }}</label>
-                        <input type="text" name="inbox_label" value="{{ inbox.label }}">
-                    </div>
-                </div>
-                <div class="inbox-options">
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_use_immich_{{ inbox.id }}" value="1" {{ 'checked' if inbox.use_immich else '' }}>
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.use_immich }}</span>
-                    </label>
-                    {% if immich_users %}
-                    <div class="form-group" style="min-width: 120px;">
-                        <label>{{ t.settings.immich_user }}</label>
-                        <select name="inbox_immich_user_id_{{ inbox.id }}">
-                            <option value="">{{ t.settings.immich_user_global }}</option>
-                            {% for iu in immich_users %}
-                            <option value="{{ iu.id }}" {{ 'selected' if inbox.immich_user_id == iu.id else '' }}>{{ iu.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    {% endif %}
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_folder_tags_{{ inbox.id }}" value="1" {{ 'checked' if inbox.folder_tags else '' }}>
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.folder_tags }}</span>
-                    </label>
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_dry_run_{{ inbox.id }}" value="1" {{ 'checked' if inbox.dry_run else '' }}>
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.dry_run }}</span>
-                    </label>
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_active_{{ inbox.id }}" value="1" {{ 'checked' if inbox.active else '' }}>
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.active }}</span>
-                    </label>
-                    <div class="inbox-actions">
-                        <button type="submit" class="btn btn-small btn-secondary">{{ t.settings.save }}</button>
-                    </div>
-                </div>
-            </form>
-            <form method="post" action="/settings/inbox/{{ inbox.id }}/delete" class="inbox-delete-form">
-                <button type="submit" class="btn btn-small btn-danger" onclick="return confirm('{{ t.settings.delete_confirm }}')">{{ t.settings.delete }}</button>
-            </form>
-            {% endfor %}
-        </div>
-        {% else %}
-        <p class="section-note">{{ t.settings.no_inboxes }}</p>
-        {% endif %}
-
-        <div class="inbox-add">
-            <h3>{{ t.settings.add_inbox }}</h3>
-            <form method="post" action="/settings/inbox/add">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="new_inbox_path">{{ t.settings.path }}</label>
-                        <input type="text" id="new_inbox_path" name="inbox_path" placeholder="/inbox/mobile">
-                    </div>
-                    <div class="form-group">
-                        <label for="new_inbox_label">{{ t.settings.label }}</label>
-                        <input type="text" id="new_inbox_label" name="inbox_label" placeholder="Handy">
-                    </div>
-                </div>
-                <div class="inbox-options">
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_use_immich" value="1">
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.use_immich }}</span>
-                    </label>
-                    {% if immich_users %}
-                    <div class="form-group" style="min-width: 120px;">
-                        <label>{{ t.settings.immich_user }}</label>
-                        <select name="inbox_immich_user_id">
-                            <option value="">{{ t.settings.immich_user_global }}</option>
-                            {% for iu in immich_users %}
-                            <option value="{{ iu.id }}">{{ iu.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    {% endif %}
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_folder_tags" value="1">
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.folder_tags }}</span>
-                    </label>
-                    <label class="switch-inline">
-                        <input type="checkbox" name="inbox_dry_run" value="1">
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.dry_run }}</span>
-                    </label>
-                    <div class="inbox-actions">
-                        <button type="submit" class="btn btn-small btn-primary">{{ t.settings.add }}</button>
-                    </div>
-                </div>
-            </form>
-        </div>
-        <details style="margin-top: 0.75rem;">
-            <summary style="cursor: pointer; color: var(--primary);">{{ t.settings.inbox_options_info_title | default('Optionen-Übersicht') }}</summary>
-            <div style="margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-input); border-radius: 6px; line-height: 1.7;">
-                {{ t.settings.inbox_options_info | default('') | safe }}
-            </div>
-        </details>
-    </div>
-</div>
-
-<form method="post" action="/settings/save">
+<form method="post" action="/settings/save" id="settings-form">
 <input type="hidden" name="_form_token" value="1">
 
-<!-- File Watcher -->
-<div class="settings-section" id="section-filewatcher">
+<!-- Processing sets -->
+<div class="settings-section" id="section-sets">
     <div class="section-header">
         <div class="section-title">
-            <h2>{{ t.settings.filewatcher }}</h2>
-            <span class="section-desc">{{ t.settings.filewatcher_desc }}</span>
+            <h2>{{ t.sets.title }}</h2>
+            <span class="section-desc">{{ t.sets.desc }}</span>
         </div>
-        <label class="switch">
-            <input type="checkbox" name="mod_filewatcher" value="1" {{ 'checked' if modules.filewatcher else '' }}>
-            <span class="switch-slider"></span>
-        </label>
-    </div>
-    <div class="section-body">
-        <div class="form-row">
-            <div class="form-group">
-                <label for="watch_interval">{{ t.settings.interval }}</label>
-                <input type="number" id="watch_interval" name="watch_interval" value="{{ cfg.watch_interval }}" min="1">
-            </div>
-            <div class="form-group">
-                <label for="schedule_mode">{{ t.settings.schedule_mode }}</label>
-                <select id="schedule_mode" name="schedule_mode" onchange="toggleScheduleFields()">
-                    <option value="continuous" {{ 'selected' if cfg.schedule_mode == 'continuous' else '' }}>{{ t.settings.continuous }}</option>
-                    <option value="window" {{ 'selected' if cfg.schedule_mode == 'window' else '' }}>{{ t.settings.window }}</option>
-                    <option value="scheduled" {{ 'selected' if cfg.schedule_mode == 'scheduled' else '' }}>{{ t.settings.scheduled }}</option>
-                    <option value="manual" {{ 'selected' if cfg.schedule_mode == 'manual' else '' }}>{{ t.settings.manual }}</option>
-                </select>
-            </div>
-        </div>
-        <div id="schedule-window-fields" class="form-row" style="display: none;">
-            <div class="form-group">
-                <label for="window_start">{{ t.settings.window_start }}</label>
-                <input type="time" id="window_start" name="window_start" value="{{ cfg.window_start }}">
-            </div>
-            <div class="form-group">
-                <label for="window_end">{{ t.settings.window_end }}</label>
-                <input type="time" id="window_end" name="window_end" value="{{ cfg.window_end }}">
-            </div>
-        </div>
-        <div id="schedule-planned-fields" style="display: none;">
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="scheduled_time">{{ t.settings.scheduled_time }}</label>
-                    <input type="time" id="scheduled_time" name="scheduled_time" value="{{ cfg.scheduled_time }}">
-                </div>
-                <div class="form-group">
-                    <label>{{ t.settings.scheduled_days }}</label>
-                    <div class="day-checkboxes">
-                        {% set active_days = cfg.scheduled_days.split(',') %}
-                        {% for day_val, day_label in [('0', t.settings.day_mon), ('1', t.settings.day_tue), ('2', t.settings.day_wed), ('3', t.settings.day_thu), ('4', t.settings.day_fri), ('5', t.settings.day_sat), ('6', t.settings.day_sun)] %}
-                        <label class="day-check">
-                            <input type="checkbox" name="scheduled_day_{{ day_val }}" value="1" {{ 'checked' if day_val in active_days else '' }}>
-                            <span>{{ day_label }}</span>
-                        </label>
-                        {% endfor %}
-                    </div>
-                    <input type="hidden" id="scheduled_days" name="scheduled_days" value="{{ cfg.scheduled_days }}">
-                </div>
-            </div>
-        </div>
-        <small id="schedule-manual-hint" style="display: none; color: var(--text-muted);">{{ t.settings.manual_hint }}</small>
-        <script>
-        function toggleScheduleFields() {
-            var mode = document.getElementById('schedule_mode').value;
-            document.getElementById('schedule-window-fields').style.display = mode === 'window' ? '' : 'none';
-            document.getElementById('schedule-planned-fields').style.display = mode === 'scheduled' ? '' : 'none';
-            document.getElementById('schedule-manual-hint').style.display = mode === 'manual' ? '' : 'none';
-        }
-        function updateScheduledDays() {
-            var days = [];
-            for (var i = 0; i < 7; i++) {
-                var cb = document.querySelector('input[name="scheduled_day_' + i + '"]');
-                if (cb && cb.checked) days.push(i);
-            }
-            document.getElementById('scheduled_days').value = days.join(',');
-        }
-        document.querySelectorAll('.day-checkboxes input').forEach(function(cb) {
-            cb.addEventListener('change', updateScheduledDays);
-        });
-        toggleScheduleFields();
-        </script>
-        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
-        <label style="font-weight: 600; display: block; margin-bottom: 0.25rem;">{{ t.settings.google_json }}</label>
-        <small style="display: block; color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem;">{{ t.settings.google_json_desc }}</small>
-        <label class="switch-inline" style="margin-bottom: 1rem;">
-            <input type="checkbox" name="google_json" value="1" {{ 'checked' if cfg.google_json else '' }}>
-            <span class="switch-slider-sm"></span>
-            <span>{{ t.settings.google_json_enabled }}</span>
-        </label>
-    </div>
-</div>
-
-<!-- Sorting Rules -->
-<div class="settings-section" id="section-sorting-rules">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.settings.sorting_rules }}</h2>
-            <span class="section-desc">{{ t.settings.sorting_rules_desc }}</span>
+        <div class="section-header-actions">
+            <label class="switch-inline" title="{{ t.sets.watch_hint }}">
+                <input type="checkbox" name="mod_filewatcher" value="1" {{ 'checked' if modules.filewatcher else '' }}>
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.sets.watch }}</span>
+            </label>
+            <button type="button" class="icon-btn" data-action="set-new" title="{{ t.sets.new }}" aria-label="{{ t.sets.new }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
         </div>
     </div>
     <div class="section-body">
-        <div style="margin-bottom: 1.25rem; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
-            {{ t.settings.sorting_rules_hint }}
-            <details style="margin-top: 0.5rem;">
-                <summary style="cursor: pointer; color: var(--primary);">{{ t.settings.sorting_rules_help_title }}</summary>
-                <div style="margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-input); border-radius: 6px; line-height: 1.7;">
-                    {{ t.settings.sorting_rules_help | safe }}
-                </div>
-            </details>
-        </div>
-        {% if sorting_rules %}
-        <div class="inbox-list">
-            {% for rule in sorting_rules %}
-            <div class="inbox-item" id="rule-{{ rule.id }}">
-                <div style="display: flex; align-items: flex-end; gap: 0.5rem;">
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.sorting_rules_condition }}</span>
-                        <select data-rule="condition" style="width: auto; height: 2.4rem;">
-                            <option value="filename_contains" {{ 'selected' if rule.condition == 'filename_contains' else '' }}>{{ t.settings.rule_filename_contains }}</option>
-                            <option value="filename_pattern" {{ 'selected' if rule.condition == 'filename_pattern' else '' }}>{{ t.settings.rule_filename_pattern }}</option>
-                            <option value="exif_expression" {{ 'selected' if rule.condition == 'exif_expression' else '' }}>{{ t.settings.rule_exif_expression }}</option>
-                            <option value="extension" {{ 'selected' if rule.condition == 'extension' else '' }}>{{ t.settings.rule_extension }}</option>
-                        </select>
-                    </div>
-                    <div class="field-group-grow" style="min-width: 150px;">
-                        <span class="field-label">{{ t.settings.rule_value }}</span>
-                        <input type="text" data-rule="value" value="{{ rule.value }}" style="width: 100%; height: 2.4rem; box-sizing: border-box;">
-                    </div>
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.sorting_rules_target }}</span>
-                        <select data-rule="target" style="width: auto; height: 2.4rem;">
-                            <option value="skip" {{ 'selected' if rule.target_category == 'skip' else '' }}>⛔ {{ t.settings.rule_skip | default('Überspringen') }}</option>
-                            {% for cat in library_categories %}
-                            <option value="{{ cat.key }}" {{ 'selected' if rule.target_category == cat.key else '' }}>{{ cat.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.rule_media_type }}</span>
-                        <select data-rule="media_type" style="width: auto; height: 2.4rem;">
-                            <option value="" {{ 'selected' if not rule.media_type else '' }}>{{ t.settings.rule_media_all }}</option>
-                            <option value="image" {{ 'selected' if rule.media_type == 'image' else '' }}>{{ t.settings.rule_media_image }}</option>
-                            <option value="video" {{ 'selected' if rule.media_type == 'video' else '' }}>{{ t.settings.rule_media_video }}</option>
-                        </select>
-                    </div>
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.active }}</span>
-                        <label class="switch-inline" style="margin: 0; height: 2.4rem; display: flex; align-items: center;">
-                            <input type="checkbox" data-rule="active" value="1" {{ 'checked' if rule.active else '' }}>
-                            <span class="switch-slider-sm"></span>
-                        </label>
-                    </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
-                    <button type="button" class="btn btn-small btn-secondary" style="width: 2rem; height: 2rem; padding: 0; display: inline-flex; align-items: center; justify-content: center;" onclick="postAction('/settings/rule/{{ rule.id }}/move', {direction:'up'})">&#9650;</button>
-                    <button type="button" class="btn btn-small btn-secondary" style="width: 2rem; height: 2rem; padding: 0; display: inline-flex; align-items: center; justify-content: center;" onclick="postAction('/settings/rule/{{ rule.id }}/move', {direction:'down'})">&#9660;</button>
-                    <div style="margin-left: auto; display: flex; gap: 0.5rem;">
-                        <button type="button" class="btn btn-small btn-secondary" onclick="saveRule({{ rule.id }})">{{ t.settings.save }}</button>
-                        <button type="button" class="btn btn-small btn-danger" onclick="if(confirm('{{ t.settings.rule_delete_confirm }}')) postAction('/settings/rule/{{ rule.id }}/delete', {})">{{ t.settings.delete }}</button>
-                    </div>
-                </div>
-            </div>
+        <div class="list-table-wrap">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th class="col-state"><span class="sr-only">{{ t.sets.col_active }}</span></th>
+                    <th>{{ t.sets.col_name }}</th>
+                    <th>{{ t.sets.col_inputs }}</th>
+                    <th>{{ t.sets.col_schedule }}</th>
+                    <th>{{ t.sets.col_target }}</th>
+                    <th class="num">{{ t.sets.col_rules }}</th>
+                    <th>{{ t.sets.col_folder_tags }}</th>
+                    <th class="num">{{ t.sets.col_queue }}</th>
+                    <th class="col-edit"><span class="sr-only">{{ t.sets.edit }}</span></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for s in sets %}
+                <tr class="{{ '' if s.active else 'row-inactive' }}">
+                    <td class="col-state"><span class="dot {{ 'dot-on' if s.active else 'dot-off' }}" title="{{ t.sets.active if s.active else t.sets.inactive }}"></span></td>
+                    <td class="cell-strong">{{ s.name }}{% if s.dry_run %} <span class="pill">{{ t.sets.dry_run_short }}</span>{% endif %}</td>
+                    <td>
+                        {% for d in s.directories %}<code>{{ d }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                        {% if s.immich_poll %}{% if s.directories %} · {% endif %}{{ t.sets.immich_poll_short }}{% if s.poll_access %} ({{ s.poll_access }}){% endif %}{% endif %}
+                        {% if not s.directories and not s.immich_poll %}<span class="muted">{{ t.sets.no_inputs }}</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if s.schedule_mode == 'window' %}{{ s.window_start }}–{{ s.window_end }}
+                        {% elif s.schedule_mode == 'scheduled' %}{{ t.sets.sched_at }} {{ s.scheduled_time }}
+                        {% elif s.schedule_mode == 'manual' %}{{ t.settings.manual }}
+                        {% else %}{{ t.sets.sched_every }} {{ s.interval_s }} s{% endif %}
+                    </td>
+                    <td>
+                        {% if s.target_mode == 'immich' %}Immich ({{ s.target_access or t.sets.global_user }})
+                        {% else %}<code>{{ s.library_base_path }}</code>{% endif %}
+                    </td>
+                    <td class="num">{{ s.rules }}</td>
+                    <td>{{ t.sets.on if s.folder_tags else t.sets.off }}</td>
+                    <td class="num">{{ s.queue }}</td>
+                    <td class="col-edit">
+                        <button type="button" class="icon-btn" data-action="set-edit" data-id="{{ s.id }}" title="{{ t.sets.edit }}" aria-label="{{ t.sets.edit }}: {{ s.name }}">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                        </button>
+                    </td>
+                </tr>
             {% endfor %}
-        </div>
-        {% else %}
-        <p class="section-note">{{ t.settings.no_rules }}</p>
-        {% endif %}
-
-        <div class="inbox-add" style="margin-top: 1rem;">
-            <h3>{{ t.settings.add_rule }}</h3>
-            <div class="inbox-item" id="add-rule-box">
-                <div style="display: flex; align-items: flex-end; gap: 0.5rem;">
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.sorting_rules_condition }}</span>
-                        <select id="new_rule_condition" style="width: auto; height: 2.4rem;">
-                            <option value="filename_contains">{{ t.settings.rule_filename_contains }}</option>
-                            <option value="filename_pattern">{{ t.settings.rule_filename_pattern }}</option>
-                            <option value="exif_expression">{{ t.settings.rule_exif_expression }}</option>
-                            <option value="extension">{{ t.settings.rule_extension }}</option>
-                        </select>
-                    </div>
-                    <div class="field-group-grow" style="min-width: 150px;">
-                        <span class="field-label">{{ t.settings.rule_value }}</span>
-                        <input type="text" id="new_rule_value" style="width: 100%; height: 2.4rem; box-sizing: border-box;">
-                    </div>
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.sorting_rules_target }}</span>
-                        <select id="new_rule_target" style="width: auto; height: 2.4rem;">
-                            <option value="skip">⛔ {{ t.settings.rule_skip | default('Überspringen') }}</option>
-                            {% for cat in library_categories %}
-                            <option value="{{ cat.key }}">{{ cat.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.rule_media_type }}</span>
-                        <select id="new_rule_media_type" style="width: auto; height: 2.4rem;">
-                            <option value="">{{ t.settings.rule_media_all }}</option>
-                            <option value="image">{{ t.settings.rule_media_image }}</option>
-                            <option value="video">{{ t.settings.rule_media_video }}</option>
-                        </select>
-                    </div>
-                    <button type="button" class="btn btn-small btn-primary" style="height: 2.4rem;" onclick="postAction('/settings/rule/add', {rule_condition: document.getElementById('new_rule_condition').value, rule_value: document.getElementById('new_rule_value').value, rule_target: document.getElementById('new_rule_target').value, rule_media_type: document.getElementById('new_rule_media_type').value})">{{ t.settings.add }}</button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Target Storage -->
-<div class="settings-section" id="section-storage">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.settings.target_storage }}</h2>
-            <span class="section-desc">{{ t.settings.storage_desc }}</span>
-        </div>
-    </div>
-    <div class="section-body">
-        <div class="form-group">
-            <label for="library_path">{{ t.settings.library_path }}</label>
-            <input type="text" id="library_path" name="library_path" value="{{ cfg.library_path }}">
-            <small>{{ t.settings.library_hint }}<br>{{ t.settings.storage_placeholders }}</small>
-        </div>
-
-        <div class="inbox-list" style="margin-top: 1rem;">
-            {% for cat in library_categories if not cat.fixed %}
-            <div class="inbox-item">
-                <div style="display: flex; align-items: flex-end; gap: 0.75rem;">
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.cat_name }}</span>
-                        <input type="text" name="cat_label_{{ cat.id }}" value="{{ cat.label }}" style="width: 160px; height: 2.4rem; box-sizing: border-box;">
-                    </div>
-                    <div class="field-group-grow">
-                        <span class="field-label">{{ t.settings.path }}</span>
-                        <input type="text" name="cat_path_{{ cat.id }}" value="{{ cat.path_template }}" style="width: 100%; height: 2.4rem; box-sizing: border-box;" placeholder="photos/{YYYY}/{YYYY-MM}/">
-                    </div>
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.cat_immich_archive }}</span>
-                        <label class="switch-inline" style="margin: 0; height: 2.4rem; display: flex; align-items: center;">
-                            <input type="checkbox" name="cat_immich_archive_{{ cat.id }}" value="1" {{ 'checked' if cat.immich_archive else '' }}>
-                            <span class="switch-slider-sm"></span>
-                        </label>
-                    </div>
-                    <button type="button" class="btn btn-small btn-danger" style="height: 2.4rem;" onclick="if(confirm('{{ t.settings.cat_delete_confirm }}')) { var f=document.createElement('form'); f.method='post'; f.action='/settings/category/{{ cat.id }}/delete'; document.body.appendChild(f); f.submit(); }">{{ t.settings.delete }}</button>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-
-        <div style="margin: 1.25rem 0 0.5rem; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;">{{ t.settings.cat_fixed }}</div>
-        <div class="inbox-list">
-            {% for cat in library_categories if cat.fixed %}
-            <div class="inbox-item" style="padding: 0.65rem 1rem; opacity: 0.7;">
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                    <span style="color: var(--text-muted);">{{ cat.label }}</span>
-                    <span style="color: var(--text-muted);">→</span>
-                    <span style="color: var(--text-muted);">{{ cat.path_template }}</span>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-
-        <div class="inbox-add" style="margin-top: 1rem;">
-            <h3>{{ t.settings.add_category }}</h3>
-            <div class="inbox-item" id="add-cat-box">
-                <div style="display: flex; align-items: flex-end; gap: 0.75rem;">
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.cat_name }}</span>
-                        <input type="text" id="new_cat_label" style="width: 160px; height: 2.4rem; box-sizing: border-box;">
-                    </div>
-                    <div class="field-group-grow">
-                        <span class="field-label">{{ t.settings.path }}</span>
-                        <input type="text" id="new_cat_path" style="width: 100%; height: 2.4rem; box-sizing: border-box;" placeholder="ordner/{YYYY}/">
-                    </div>
-                    <div class="field-group">
-                        <span class="field-label">{{ t.settings.cat_immich_archive }}</span>
-                        <label class="switch-inline" style="margin: 0; height: 2.4rem; display: flex; align-items: center;">
-                            <input type="checkbox" id="new_cat_immich_archive" value="1">
-                            <span class="switch-slider-sm"></span>
-                        </label>
-                    </div>
-                    <button type="button" class="btn btn-small btn-primary" style="height: 2.4rem;" onclick="var f=document.createElement('form'); f.method='post'; f.action='/settings/category/add'; ['cat_label','cat_path_template','cat_immich_archive'].forEach(function(n){ var i=document.createElement('input'); i.type='hidden'; i.name=n; f.appendChild(i); }); f.querySelector('[name=cat_label]').value=document.getElementById('new_cat_label').value; f.querySelector('[name=cat_path_template]').value=document.getElementById('new_cat_path').value; if(document.getElementById('new_cat_immich_archive').checked) f.querySelector('[name=cat_immich_archive]').value='1'; else f.removeChild(f.querySelector('[name=cat_immich_archive]')); document.body.appendChild(f); f.submit();">{{ t.settings.add }}</button>
-                </div>
-            </div>
+            </tbody>
+        </table>
         </div>
     </div>
 </div>
@@ -614,54 +273,6 @@
     </div>
 </div>
 
-<!-- OCR -->
-<div class="settings-section" id="section-ocr">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.settings.ocr }}</h2>
-            <span class="section-desc">{{ t.settings.ocr_desc }}</span>
-        </div>
-        <label class="switch">
-            <input type="checkbox" name="mod_ocr" value="1" {{ 'checked' if modules.ocr else '' }}>
-            <span class="switch-slider"></span>
-        </label>
-    </div>
-    <div class="section-body">
-        <div class="form-group">
-            <label for="ocr_mode">{{ t.settings.ocr_mode }}</label>
-            <select id="ocr_mode" name="ocr_mode">
-                <option value="smart" {{ 'selected' if cfg.ocr_mode == 'smart' else '' }}>{{ t.settings.ocr_smart }}</option>
-                <option value="always" {{ 'selected' if cfg.ocr_mode == 'always' else '' }}>{{ t.settings.ocr_always }}</option>
-            </select>
-            <small>{{ t.settings.ocr_hint }}<br>
-            {{ t.settings.ocr_hint2 }}</small>
-        </div>
-    </div>
-</div>
-
-<!-- Ordner-Tags -->
-<div class="settings-section" id="section-ordner-tags">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.modules.ordner_tags }}</h2>
-            <span class="section-desc">{{ t.settings.ordner_tags_desc | default('Tags und Alben aus Inbox-Ordnerstruktur generieren') }}</span>
-        </div>
-        <label class="switch">
-            <input type="checkbox" name="mod_ordner_tags" value="1" {{ 'checked' if modules.ordner_tags else '' }}>
-            <span class="switch-slider"></span>
-        </label>
-    </div>
-    <div class="section-body">
-        <small>{{ t.settings.ordner_tags_hint | default('Wenn aktiviert, werden aus der Ordnerstruktur der Inbox (z.B. Ferien/Mallorca/) Tags und Immich-Alben erstellt. Die Einstellung pro Inbox (Ordner-Tags Checkbox) muss zusätzlich aktiviert sein.') }}</small>
-        <details style="margin-top: 0.5rem;">
-            <summary style="cursor: pointer; color: var(--primary);">{{ t.settings.ordner_tags_detail_title | default('Wie funktioniert es?') }}</summary>
-            <div style="margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-input); border-radius: 6px; line-height: 1.7;">
-                {{ t.settings.ordner_tags_detail | default('') | safe }}
-            </div>
-        </details>
-    </div>
-</div>
-
 <!-- Metadata Write Mode -->
 <div class="settings-section" id="section-metadata-write">
     <div class="section-header">
@@ -683,6 +294,14 @@
             </label>
             <small style="margin-left: 1.5rem;">{{ t.settings.metadata_write_sidecar_hint }}</small>
         </div>
+        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
+        <label style="font-weight: 600; display: block; margin-bottom: 0.25rem;">{{ t.settings.google_json }}</label>
+        <small style="display: block; color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem;">{{ t.settings.google_json_desc }}</small>
+        <label class="switch-inline">
+            <input type="checkbox" name="google_json" value="1" {{ 'checked' if cfg.google_json else '' }}>
+            <span class="switch-slider-sm"></span>
+            <span>{{ t.settings.google_json_enabled }}</span>
+        </label>
     </div>
 </div>
 
@@ -701,78 +320,48 @@
     <div class="section-body">
         <div class="form-group">
             <label for="immich_url">{{ t.settings.immich_url }}</label>
-            <input type="url" id="immich_url" name="immich_url" value="{{ cfg.immich_url }}" placeholder="http://localhost:2283">
+            <input type="url" id="immich_url" name="immich_url" value="{{ cfg.immich_url }}" placeholder="http://immich_server:2283">
         </div>
-        <div class="form-group">
-            <label for="immich_api_key">{{ t.settings.immich_api_key }}</label>
-            <input type="password" id="immich_api_key" name="immich_api_key" placeholder="{{ '•' * cfg.immich_api_key_len }}">
-            <small>{{ t.settings.immich_api_key_hint }}</small>
-        </div>
-        <div class="inbox-actions" style="margin-bottom: 1rem; align-items: center; gap: 0.75rem;">
-            <button type="button" class="btn btn-small btn-secondary" onclick="testConnection('/settings/immich/test', {immich_api_key: document.getElementById('immich_api_key').value}, 'immich_test_result')">{{ t.settings.immich_test }}</button>
-            <span id="immich_test_result" class="test-result"></span>
-        </div>
-        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
-        <h3>{{ t.settings.immich_poll }}</h3>
-        <p class="section-note" style="margin-bottom: 1rem;">{{ t.settings.immich_poll_desc }}</p>
-        <label class="switch-inline" style="margin-bottom: 1rem;">
-            <input type="checkbox" name="immich_poll_enabled" value="1" {{ 'checked' if cfg.immich_poll_enabled else '' }}>
-            <span class="switch-slider-sm"></span>
-            <span>{{ t.settings.immich_poll_active }}</span>
-        </label>
-        <div style="border-top: 1px solid var(--border); margin: 1.5rem -1.25rem;"></div>
-        <h3>{{ t.settings.immich_users }}</h3>
-        <p class="section-note" style="margin-bottom: 1rem;">{{ t.settings.immich_users_desc }}</p>
 
-        {% if immich_users %}
-        <div class="inbox-list">
-            {% for iu in immich_users %}
-            <div class="inbox-item" id="iu-{{ iu.id }}">
-                <div class="inbox-row">
-                    <div class="form-group">
-                        <label>{{ t.settings.immich_user_label }}</label>
-                        <input type="text" data-iu="label" value="{{ iu.label }}">
-                    </div>
-                    <div class="form-group">
-                        <label>{{ t.settings.immich_user_api_key }}</label>
-                        <input type="password" data-iu="api_key" placeholder="{{ '•' * iu.api_key_len }}">
-                    </div>
-                </div>
-                <div class="inbox-options">
-                    <label class="switch-inline">
-                        <input type="checkbox" data-iu="active" value="1" {{ 'checked' if iu.active else '' }}>
-                        <span class="switch-slider-sm"></span>
-                        <span>{{ t.settings.active }}</span>
-                    </label>
-                    <span id="iu_test_result_{{ iu.id }}" class="test-result"></span>
-                    <div class="inbox-actions">
-                        <button type="button" class="btn btn-small btn-secondary" onclick="saveImmichUser({{ iu.id }})">{{ t.settings.save }}</button>
-                        <button type="button" class="btn btn-small btn-secondary" onclick="testConnection('/settings/immich-user/{{ iu.id }}/test', {iu_api_key: document.querySelector('#iu-{{ iu.id }} [data-iu=api_key]').value}, 'iu_test_result_{{ iu.id }}')">{{ t.settings.immich_user_test }}</button>
-                        <button type="button" class="btn btn-small btn-danger" onclick="if(confirm('{{ t.settings.immich_user_delete_confirm }}')) postAction('/settings/immich-user/{{ iu.id }}/delete', {})">{{ t.settings.delete }}</button>
-                    </div>
-                </div>
-            </div>
+        <div class="subsection-head">
+            <h3>{{ t.sets.accesses }}</h3>
+            <button type="button" class="icon-btn" data-action="access-new" title="{{ t.sets.access_new }}" aria-label="{{ t.sets.access_new }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+        </div>
+        <p class="section-note">{{ t.sets.accesses_desc }}</p>
+        {% if accesses %}
+        <div class="list-table-wrap">
+        <table class="list-table" id="access-table">
+            <thead>
+                <tr>
+                    <th>{{ t.sets.col_name }}</th>
+                    <th>{{ t.sets.col_account }}</th>
+                    <th>{{ t.sets.col_connection }}</th>
+                    <th>{{ t.sets.col_used_by }}</th>
+                    <th class="col-edit"><span class="sr-only">{{ t.sets.edit }}</span></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for a in accesses %}
+                <tr data-access="{{ a.id }}" class="{{ '' if a.active else 'row-inactive' }}">
+                    <td class="cell-strong">{{ t.sets.global_user if a.global else a.label }}</td>
+                    <td class="access-account muted">…</td>
+                    <td class="access-state"><span class="dot dot-wait" title="…"></span></td>
+                    <td>{% if a.used_by %}{{ a.used_by | join(', ') }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                    <td class="col-edit">
+                        <button type="button" class="icon-btn" data-action="access-edit" data-id="{{ a.id }}" title="{{ t.sets.edit }}" aria-label="{{ t.sets.edit }}">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                        </button>
+                    </td>
+                </tr>
             {% endfor %}
+            </tbody>
+        </table>
         </div>
         {% else %}
-        <p class="section-note">{{ t.settings.no_immich_users }}</p>
+        <p class="section-note">{{ t.sets.no_accesses }}</p>
         {% endif %}
-
-        <div class="inbox-add" id="iu-add">
-            <h3>{{ t.settings.add_immich_user }}</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>{{ t.settings.immich_user_label }}</label>
-                    <input type="text" data-iu="label" placeholder="Marco">
-                </div>
-                <div class="form-group">
-                    <label>{{ t.settings.immich_user_api_key }}</label>
-                    <input type="password" data-iu="api_key" placeholder="API Key">
-                </div>
-            </div>
-            <small style="display: block; margin-bottom: 0.5rem;">{{ t.settings.immich_user_api_key_hint }}</small>
-            <button type="button" class="btn btn-small btn-primary" onclick="addImmichUser()">{{ t.settings.add }}</button>
-        </div>
     </div>
 </div>
 
@@ -826,89 +415,52 @@
     </div>
 </div>
 
-<!-- Appearance -->
-<div class="settings-section" id="section-appearance">
-    <div class="section-header">
-        <div class="section-title">
-            <h2>{{ t.settings.appearance }}</h2>
-            <span class="section-desc">{{ t.settings.appearance_desc }}</span>
-        </div>
-    </div>
-    <div class="section-body">
-        <div class="form-row">
-            <div class="form-group">
-                <label for="ui_language">{{ t.settings.language }}</label>
-                <select id="ui_language" name="ui_language">
-                    {% for code, name in supported_languages.items() %}
-                    <option value="{{ code }}" {{ 'selected' if cfg.ui_language == code else '' }}>{{ name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="ui_theme">{{ t.settings.theme }}</label>
-                <select id="ui_theme" name="ui_theme">
-                    <option value="dark" {{ 'selected' if cfg.ui_theme == 'dark' else '' }}>{{ t.settings.theme_dark }}</option>
-                    <option value="light" {{ 'selected' if cfg.ui_theme == 'light' else '' }}>{{ t.settings.theme_light }}</option>
-                </select>
-            </div>
-        </div>
-    </div>
-</div>
-
+<!-- Diagnostics -->
 <div class="settings-section" id="section-diagnostics">
     <div class="section-header">
         <div class="section-title">
             <h2>{{ t.settings.diagnostics }}</h2>
             <span class="section-desc">{{ t.settings.diagnostics_desc }}</span>
         </div>
+        <div class="section-header-actions">
+            <button type="button" class="icon-btn" data-action="token-new" title="{{ t.settings.diagnostics_add }}" aria-label="{{ t.settings.diagnostics_add }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+        </div>
     </div>
     <div class="section-body">
         {% if cfg.diagnostics_tokens %}
-        <div class="inbox-list" id="diag_list">
+        <div class="list-table-wrap">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>{{ t.settings.diagnostics_label }}</th>
+                    <th>{{ t.settings.diagnostics_created }}</th>
+                    <th>{{ t.sets.col_status }}</th>
+                    <th class="col-edit"><span class="sr-only">{{ t.sets.edit }}</span></th>
+                </tr>
+            </thead>
+            <tbody>
             {% for tk in cfg.diagnostics_tokens %}
-            <div class="inbox-item" id="diag-{{ tk.id }}">
-                <div class="inbox-row">
-                    <div class="form-group">
-                        <label>{{ t.settings.diagnostics_label }}</label>
-                        <input type="text" value="{{ tk.label }}" readonly>
-                    </div>
-                    <div class="form-group">
-                        <label>{{ t.settings.diagnostics_created }}</label>
-                        <input type="text" value="{{ tk.created }}" readonly>
-                    </div>
-                </div>
-                <div class="inbox-options">
-                    <span class="test-result" style="color: {{ 'var(--success)' if tk.active else 'var(--text-muted)' }}">
-                        {{ t.settings.diagnostics_on if tk.active else t.settings.diagnostics_off }}
-                    </span>
-                    <div class="inbox-actions">
-                        <button type="button" class="btn btn-small btn-secondary" onclick="diagToken('{{ tk.id }}/toggle')">{{ t.settings.diagnostics_toggle }}</button>
-                        <button type="button" class="btn btn-small btn-danger" onclick="if(confirm('{{ t.settings.diagnostics_delete_confirm }}')) diagToken('{{ tk.id }}/delete')">{{ t.settings.delete }}</button>
-                    </div>
-                </div>
-            </div>
+                <tr class="{{ '' if tk.active else 'row-inactive' }}">
+                    <td class="cell-strong">{{ tk.label }}</td>
+                    <td>{{ tk.created | replace('T', ' ') }}</td>
+                    <td><span class="dot {{ 'dot-on' if tk.active else 'dot-off' }}"></span> {{ t.settings.diagnostics_on if tk.active else t.settings.diagnostics_off }}</td>
+                    <td class="col-edit">
+                        <button type="button" class="icon-btn" data-action="token-edit" data-id="{{ tk.id }}"
+                                data-label="{{ tk.label }}" data-active="{{ '1' if tk.active else '0' }}"
+                                title="{{ t.sets.edit }}" aria-label="{{ t.sets.edit }}: {{ tk.label }}">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                        </button>
+                    </td>
+                </tr>
             {% endfor %}
+            </tbody>
+        </table>
         </div>
         {% else %}
         <p class="section-note">{{ t.settings.diagnostics_none }}</p>
         {% endif %}
-
-        <div class="inbox-add">
-            <h3>{{ t.settings.diagnostics_add }}</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="diag_label">{{ t.settings.diagnostics_label }}</label>
-                    <input type="text" id="diag_label" placeholder="Claude">
-                </div>
-            </div>
-            <button type="button" class="btn btn-small btn-primary" onclick="createDiagToken()">{{ t.settings.diagnostics_generate }}</button>
-        </div>
-
-        <div id="diag_token_box" style="display: none; margin-top: 1rem;">
-            <label for="diag_token">{{ t.settings.diagnostics_token_once }}</label>
-            <input type="text" id="diag_token" readonly onclick="this.select()">
-            <small>{{ t.settings.diagnostics_usage }}</small>
-        </div>
     </div>
 </div>
 
@@ -917,140 +469,326 @@
 </div>
 
 </form>
-<script>
-function postAction(url, data) {
-    var f = document.createElement('form');
-    f.method = 'post';
-    f.action = url;
-    for (var k in data) {
-        var i = document.createElement('input');
-        i.type = 'hidden';
-        i.name = k;
-        i.value = data[k];
-        f.appendChild(i);
-    }
-    document.body.appendChild(f);
-    f.submit();
-}
-function createDiagToken() {
-    var body = new URLSearchParams();
-    body.append('label', document.getElementById('diag_label').value);
-    fetch('/settings/diagnostics/token', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: body
-    }).then(function (r) { return r.json(); })
-      .then(function (d) {
-        document.getElementById('diag_token').value = d.token;
-        document.getElementById('diag_token_box').style.display = '';
-      });
-}
-function diagToken(action) {
-    fetch('/settings/diagnostics/token/' + action, {method: 'POST'})
-        .then(function () { location.reload(); });
-}
-function loadAiModels(modelId, urlId) {
-    var urlEl = document.getElementById(urlId);
-    var list = document.getElementById(modelId + '_options');
-    var hint = document.getElementById(modelId + '_hint');
-    if (!urlEl || !urlEl.value) { list.innerHTML = ''; hint.textContent = ''; return; }
-    fetch('/settings/ai-models?url=' + encodeURIComponent(urlEl.value))
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-            list.innerHTML = '';
-            (d.models || []).forEach(function (m) {
-                var o = document.createElement('option');
-                o.value = m;
-                list.appendChild(o);
-            });
-            if (d.ok) {
-                var tpl = d.filtered ? hint.dataset.found : hint.dataset.any;
-                hint.textContent = tpl.replace('{n}', (d.models || []).length);
-                hint.style.color = '';
-            } else {
-                hint.textContent = d.detail;
-                hint.style.color = 'var(--error)';
-            }
-        })
-        .catch(function (e) { hint.textContent = String(e); hint.style.color = 'var(--error)'; });
-}
-document.addEventListener('DOMContentLoaded', function () {
-    [['ai_model', 'ai_url'], ['ai2_model', 'ai2_url']].forEach(function (p) {
-        loadAiModels(p[0], p[1]);
-        var u = document.getElementById(p[1]);
-        if (u) { u.addEventListener('change', function () { loadAiModels(p[0], p[1]); }); }
-    });
-});
-function testConnection(url, data, outId) {
-    var out = document.getElementById(outId);
-    out.textContent = '\u2026';
-    out.style.color = '';
-    var body = new URLSearchParams();
-    for (var k in data) { body.append(k, data[k]); }
-    fetch(url, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: body
-    }).then(function (r) {
-        return r.json();
-    }).then(function (d) {
-        out.textContent = d.detail;
-        out.style.color = d.ok ? 'var(--success)' : 'var(--error)';
-    }).catch(function (e) {
-        out.textContent = String(e);
-        out.style.color = 'var(--error)';
-    });
-}
-function saveImmichUser(id) {
-    var box = document.getElementById('iu-' + id);
-    var data = {
-        iu_label: box.querySelector('[data-iu=label]').value,
-        iu_api_key: box.querySelector('[data-iu=api_key]').value
-    };
-    if (box.querySelector('[data-iu=active]').checked) {
-        data['iu_active_' + id] = '1';
-    }
-    postAction('/settings/immich-user/' + id + '/update', data);
-}
-function addImmichUser() {
-    var box = document.getElementById('iu-add');
-    postAction('/settings/immich-user/add', {
-        iu_label: box.querySelector('[data-iu=label]').value,
-        iu_api_key: box.querySelector('[data-iu=api_key]').value
-    });
-}
-function saveRule(id) {
-    var box = document.getElementById('rule-' + id);
-    var data = {
-        rule_condition: box.querySelector('[data-rule=condition]').value,
-        rule_value: box.querySelector('[data-rule=value]').value,
-        rule_target: box.querySelector('[data-rule=target]').value,
-        rule_media_type: box.querySelector('[data-rule=media_type]').value
-    };
-    if (box.querySelector('[data-rule=active]').checked) {
-        data['rule_active_' + id] = '1';
-    }
-    postAction('/settings/rule/' + id + '/update', data);
-}
-// Save scroll position before any form submit or postAction
-document.querySelectorAll('form').forEach(function(f) {
-    f.addEventListener('submit', function() {
-        sessionStorage.setItem('settings_scroll', window.scrollY);
-    });
-});
-// Patch postAction to also save scroll
-var _origPostAction = postAction;
-postAction = function(url, data) {
-    sessionStorage.setItem('settings_scroll', window.scrollY);
-    _origPostAction(url, data);
-};
-// Restore scroll position on page load
-(function() {
-    var saved = sessionStorage.getItem('settings_scroll');
-    if (saved) {
-        window.scrollTo(0, parseInt(saved));
-        sessionStorage.removeItem('settings_scroll');
-    }
-})();
-</script>
+
+<!-- ── Popups (outside the settings form: they save through their own API) ── -->
+
+<!-- Set editor -->
+<dialog id="dlg-set" class="modal modal-wide" aria-labelledby="dlg-set-title">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <h2 id="dlg-set-title">{{ t.sets.edit_title }}</h2>
+            <button type="button" class="icon-btn" data-close aria-label="{{ t.sets.close }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </header>
+        <div class="tabs" role="tablist" aria-label="{{ t.sets.edit_title }}">
+            {% for key, label in [('general', t.sets.tab_general), ('inputs', t.sets.tab_inputs), ('schedule', t.sets.tab_schedule), ('rules', t.sets.tab_rules), ('folder', t.sets.tab_folder_tags), ('ocr', t.sets.tab_ocr), ('target', t.sets.tab_target)] %}
+            <button type="button" role="tab" class="tab" id="tabbtn-{{ key }}" data-tab="{{ key }}"
+                    aria-controls="tab-{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}"
+                    tabindex="{{ '0' if loop.first else '-1' }}">{{ label }}</button>
+            {% endfor %}
+        </div>
+        <div class="modal-body">
+            <!-- General -->
+            <section class="tab-panel" role="tabpanel" id="tab-general" aria-labelledby="tabbtn-general">
+                <div class="form-group">
+                    <label for="set-name">{{ t.sets.name }}</label>
+                    <input type="text" id="set-name" data-field="name" maxlength="80">
+                </div>
+                <div class="form-group">
+                    <label for="set-description">{{ t.sets.description }}</label>
+                    <input type="text" id="set-description" data-field="description" maxlength="200">
+                </div>
+                <label class="switch-inline">
+                    <input type="checkbox" data-field="active">
+                    <span class="switch-slider-sm"></span>
+                    <span>{{ t.sets.active }}</span>
+                </label>
+                <label class="switch-inline">
+                    <input type="checkbox" data-field="dry_run">
+                    <span class="switch-slider-sm"></span>
+                    <span>{{ t.settings.dry_run }}</span>
+                </label>
+                <small class="field-hint">{{ t.sets.dry_run_hint }}</small>
+            </section>
+
+            <!-- Inputs -->
+            <section class="tab-panel" role="tabpanel" id="tab-inputs" aria-labelledby="tabbtn-inputs" hidden>
+                <div class="subsection-head">
+                    <h3>{{ t.settings.inboxes }}</h3>
+                    <button type="button" class="btn btn-small btn-secondary" data-add="directory">{{ t.sets.add_directory }}</button>
+                </div>
+                <div class="edit-rows" id="set-directories"></div>
+                <p class="field-hint" id="set-directories-empty" hidden>{{ t.sets.no_directories }}</p>
+
+                <div class="subsection-head subsection-gap">
+                    <h3>{{ t.settings.immich_poll }}</h3>
+                </div>
+                <p class="field-hint">{{ t.settings.immich_poll_desc }}</p>
+                <div class="inline-fields">
+                    <label class="switch-inline">
+                        <input type="checkbox" data-field="immich_poll">
+                        <span class="switch-slider-sm"></span>
+                        <span>{{ t.settings.immich_poll_active }}</span>
+                    </label>
+                    <div class="form-group">
+                        <label for="set-poll-access">{{ t.sets.access }}</label>
+                        <select id="set-poll-access" data-field="immich_poll_user_id" data-access-select></select>
+                    </div>
+                </div>
+                <small class="field-hint" id="set-last-poll"></small>
+            </section>
+
+            <!-- Schedule -->
+            <section class="tab-panel" role="tabpanel" id="tab-schedule" aria-labelledby="tabbtn-schedule" hidden>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="set-mode">{{ t.settings.schedule_mode }}</label>
+                        <select id="set-mode" data-field="schedule_mode">
+                            <option value="continuous">{{ t.settings.continuous }}</option>
+                            <option value="window">{{ t.settings.window }}</option>
+                            <option value="scheduled">{{ t.settings.scheduled }}</option>
+                            <option value="manual">{{ t.settings.manual }}</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="set-interval">{{ t.settings.interval }}</label>
+                        <input type="number" id="set-interval" data-field="interval_s" min="1">
+                    </div>
+                </div>
+                <div class="form-row" data-when-mode="window">
+                    <div class="form-group">
+                        <label for="set-wstart">{{ t.settings.window_start }}</label>
+                        <input type="time" id="set-wstart" data-field="window_start">
+                    </div>
+                    <div class="form-group">
+                        <label for="set-wend">{{ t.settings.window_end }}</label>
+                        <input type="time" id="set-wend" data-field="window_end">
+                    </div>
+                </div>
+                <div data-when-mode="scheduled">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="set-stime">{{ t.settings.scheduled_time }}</label>
+                            <input type="time" id="set-stime" data-field="scheduled_time">
+                        </div>
+                        <div class="form-group">
+                            <span class="field-label">{{ t.settings.scheduled_days }}</span>
+                            <div class="day-checkboxes" id="set-days">
+                                {% for day_val, day_label in [('0', t.settings.day_mon), ('1', t.settings.day_tue), ('2', t.settings.day_wed), ('3', t.settings.day_thu), ('4', t.settings.day_fri), ('5', t.settings.day_sat), ('6', t.settings.day_sun)] %}
+                                <label class="day-check"><input type="checkbox" value="{{ day_val }}"><span>{{ day_label }}</span></label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <small class="field-hint" data-when-mode="manual">{{ t.settings.manual_hint }}</small>
+            </section>
+
+            <!-- Sorting rules -->
+            <section class="tab-panel" role="tabpanel" id="tab-rules" aria-labelledby="tabbtn-rules" hidden>
+                <p class="field-hint">{{ t.settings.sorting_rules_hint }}</p>
+                <details class="help-details">
+                    <summary>{{ t.settings.sorting_rules_help_title }}</summary>
+                    <div class="help-body">{{ t.settings.sorting_rules_help | safe }}</div>
+                </details>
+                <div class="edit-rows" id="set-rules"></div>
+                <button type="button" class="btn btn-small btn-secondary" data-add="rule">{{ t.settings.add_rule }}</button>
+            </section>
+
+            <!-- Folder tags -->
+            <section class="tab-panel" role="tabpanel" id="tab-folder" aria-labelledby="tabbtn-folder" hidden>
+                <label class="switch-inline">
+                    <input type="checkbox" data-field="folder_tags">
+                    <span class="switch-slider-sm"></span>
+                    <span>{{ t.modules.ordner_tags }}</span>
+                </label>
+                <p class="field-hint">{{ t.settings.ordner_tags_desc }}</p>
+                <details class="help-details" open>
+                    <summary>{{ t.settings.ordner_tags_detail_title }}</summary>
+                    <div class="help-body">{{ t.settings.ordner_tags_detail | safe }}</div>
+                </details>
+            </section>
+
+            <!-- OCR -->
+            <section class="tab-panel" role="tabpanel" id="tab-ocr" aria-labelledby="tabbtn-ocr" hidden>
+                <label class="switch-inline">
+                    <input type="checkbox" data-field="ocr_enabled">
+                    <span class="switch-slider-sm"></span>
+                    <span>{{ t.settings.ocr }}</span>
+                </label>
+                <p class="field-hint">{{ t.settings.ocr_desc }}</p>
+                <div class="form-group">
+                    <label for="set-ocr-mode">{{ t.settings.ocr_mode }}</label>
+                    <select id="set-ocr-mode" data-field="ocr_mode">
+                        <option value="smart">{{ t.settings.ocr_smart }}</option>
+                        <option value="always">{{ t.settings.ocr_always }}</option>
+                    </select>
+                    <small>{{ t.settings.ocr_hint }}<br>{{ t.settings.ocr_hint2 }}</small>
+                </div>
+            </section>
+
+            <!-- Target storage -->
+            <section class="tab-panel" role="tabpanel" id="tab-target" aria-labelledby="tabbtn-target" hidden>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="set-target-mode">{{ t.sets.target_mode }}</label>
+                        <select id="set-target-mode" data-field="target_mode">
+                            <option value="library">{{ t.sets.target_library }}</option>
+                            <option value="immich">{{ t.sets.target_immich }}</option>
+                        </select>
+                    </div>
+                    <div class="form-group" data-when-target="immich">
+                        <label for="set-target-access">{{ t.sets.access }}</label>
+                        <select id="set-target-access" data-field="immich_user_id" data-access-select></select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="set-base">{{ t.settings.library_path }}</label>
+                    <input type="text" id="set-base" data-field="library_base_path">
+                    <small>{{ t.sets.base_path_hint }}<br>{{ t.settings.storage_placeholders }}</small>
+                    <small class="warn-text" id="set-base-missing" hidden>{{ t.sets.base_path_missing }}</small>
+                </div>
+                <div class="subsection-head subsection-gap">
+                    <h3>{{ t.sets.categories }}</h3>
+                    <button type="button" class="btn btn-small btn-secondary" data-add="category">{{ t.settings.add_category }}</button>
+                </div>
+                <div class="edit-rows" id="set-categories"></div>
+            </section>
+        </div>
+        <footer class="modal-foot">
+            <p class="modal-error" role="alert" hidden></p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-small btn-danger" data-set-action="delete">{{ t.settings.delete }}</button>
+                <button type="button" class="btn btn-small btn-secondary" data-set-action="duplicate">{{ t.sets.duplicate }}</button>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-small btn-secondary" data-close>{{ t.sets.cancel }}</button>
+                <button type="button" class="btn btn-small btn-primary" data-set-action="save">{{ t.settings.save }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
+
+<!-- New set -->
+<dialog id="dlg-set-new" class="modal" aria-labelledby="dlg-set-new-title">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <h2 id="dlg-set-new-title">{{ t.sets.new }}</h2>
+            <button type="button" class="icon-btn" data-close aria-label="{{ t.sets.close }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </header>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="new-set-name">{{ t.sets.name }}</label>
+                <input type="text" id="new-set-name" maxlength="80">
+            </div>
+            <div class="form-group">
+                <label for="new-set-template">{{ t.sets.template }}</label>
+                <select id="new-set-template">
+                    <option value="">{{ t.sets.template_defaults }}</option>
+                    {% for s in sets %}
+                    <option value="{{ s.id }}">{{ t.sets.template_copy }} „{{ s.name }}"</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <footer class="modal-foot">
+            <p class="modal-error" role="alert" hidden></p>
+            <div class="modal-actions">
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-small btn-secondary" data-close>{{ t.sets.cancel }}</button>
+                <button type="button" class="btn btn-small btn-primary" id="new-set-create">{{ t.sets.create }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
+
+<!-- Immich access -->
+<dialog id="dlg-access" class="modal" aria-labelledby="dlg-access-title">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <h2 id="dlg-access-title">{{ t.sets.access }}</h2>
+            <button type="button" class="icon-btn" data-close aria-label="{{ t.sets.close }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </header>
+        <div class="modal-body">
+            <fieldset class="choice-group" id="access-kind">
+                <legend>{{ t.sets.access_kind }}</legend>
+                <label class="choice"><input type="radio" name="access_kind" value="global"> <span>{{ t.sets.global_user }}</span></label>
+                <label class="choice"><input type="radio" name="access_kind" value="named" checked> <span>{{ t.sets.named_user }}</span></label>
+                <small class="field-hint" id="access-global-taken" hidden>{{ t.sets.global_exists }}</small>
+            </fieldset>
+            <div class="form-group" id="access-label-group">
+                <label for="access-label">{{ t.sets.name }}</label>
+                <input type="text" id="access-label" maxlength="60" placeholder="Melissa">
+            </div>
+            <div class="form-group">
+                <label for="access-key">{{ t.settings.immich_api_key }}</label>
+                <input type="password" id="access-key" autocomplete="off">
+                <small>{{ t.settings.immich_user_api_key_hint }}</small>
+            </div>
+            <label class="switch-inline" id="access-active-row">
+                <input type="checkbox" id="access-active" checked>
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.settings.active }}</span>
+            </label>
+            <div class="inline-fields">
+                <button type="button" class="btn btn-small btn-secondary" id="access-test">{{ t.settings.immich_test }}</button>
+                <span class="test-result" id="access-test-result" role="status"></span>
+            </div>
+            <small class="field-hint" id="access-used-by" hidden></small>
+        </div>
+        <footer class="modal-foot">
+            <p class="modal-error" role="alert" hidden></p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-small btn-danger" id="access-delete">{{ t.settings.delete }}</button>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-small btn-secondary" data-close>{{ t.sets.cancel }}</button>
+                <button type="button" class="btn btn-small btn-primary" id="access-save">{{ t.settings.save }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
+
+<!-- Diagnostics token -->
+<dialog id="dlg-token" class="modal" aria-labelledby="dlg-token-title">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <h2 id="dlg-token-title">{{ t.settings.diagnostics }}</h2>
+            <button type="button" class="icon-btn" data-close aria-label="{{ t.sets.close }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </header>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="token-label">{{ t.settings.diagnostics_label }}</label>
+                <input type="text" id="token-label" maxlength="60" placeholder="Claude">
+            </div>
+            <label class="switch-inline" id="token-active-row">
+                <input type="checkbox" id="token-active">
+                <span class="switch-slider-sm"></span>
+                <span>{{ t.settings.diagnostics_on }}</span>
+            </label>
+            <div class="form-group" id="token-once" hidden>
+                <label for="token-value">{{ t.settings.diagnostics_token_once }}</label>
+                <input type="text" id="token-value" readonly>
+                <small>{{ t.settings.diagnostics_usage }}</small>
+            </div>
+        </div>
+        <footer class="modal-foot">
+            <p class="modal-error" role="alert" hidden></p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-small btn-danger" id="token-delete">{{ t.settings.delete }}</button>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-small btn-secondary" data-close>{{ t.sets.close }}</button>
+                <button type="button" class="btn btn-small btn-primary" id="token-save">{{ t.settings.diagnostics_generate }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
+
+<script id="settings-data" type="application/json">{{ {"accesses": accesses, "i18n": t.sets, "i18n_settings": t.settings, "edit": request.query_params.get("edit")} | tojson }}</script>
+<script src="/static/js/settings.js?v={{ version }}"></script>
 {% endblock %}

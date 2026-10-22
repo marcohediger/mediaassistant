@@ -9,7 +9,7 @@ from database import init_db, seed_inbox_from_env
 from sets import migrate_to_sets
 from filewatcher import start_filewatcher
 from health_watcher import start_health_watcher
-from routers import dashboard, setup, settings, logs, api, duplicates, review, diagnostics, tools
+from routers import dashboard, setup, settings, logs, api, duplicates, review, diagnostics, tools, processing_sets
 
 # Configure logging for Docker stdout
 log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -82,6 +82,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth_oidc.router)
 app.include_router(dashboard.router)
 app.include_router(setup.router)
+app.include_router(processing_sets.router)
 app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(api.router)
