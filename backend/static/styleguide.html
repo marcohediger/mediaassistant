@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design System — MediaAssistant</title>
+<link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg">
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="stylesheet" href="/static/css/ui.css">
+<!-- Static reference page for the shared components in ui.css and the base
+     layer in style.css. No Jinja: the icon sprite below is a copy of
+     templates/_icons.html. The theme switch loads /static/css/light.css
+     the same way base.html does. -->
+<style>
+    /* Styleguide-only helpers (sg-*); not part of the design system. */
+    .sg-top { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 1rem; padding: 0.75rem var(--ui-gutter); background: color-mix(in srgb, var(--bg-card) 92%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(6px); }
+    .sg-top h1 { margin: 0; font-size: 1.05rem; letter-spacing: -0.01em; }
+    .sg-top .ui-muted { font-size: var(--ui-fs-sm); }
+    @media (max-width: 600px) { .sg-top { gap: 0.5rem; } .sg-top h1 { font-size: 0.95rem; } .sg-top > .ui-muted { display: none; } .sg-top .ui-seg { padding: 0 0.55rem; } }
+    .sg-main { max-width: 1280px; margin: 0 auto; padding: 1.5rem var(--ui-gutter) 4rem; }
+    .sg-main > .ui-layout-sidenav > .ui-sidenav { top: 4.5rem; }
+    .sg-sec { scroll-margin-top: 4.5rem; padding-bottom: 2.25rem; margin-bottom: 2.25rem; border-bottom: 1px dashed var(--ui-line); min-width: 0; }
+    .sg-sec:last-child { border-bottom: 0; }
+    .sg-sec > h2 { margin: 0 0 0.25rem; font-size: 1.25rem; }
+    .sg-sec > .sg-lead { margin: 0 0 1.25rem; color: var(--text-muted); font-size: var(--ui-fs-sm); max-width: 80ch; }
+    .sg-sec > .sg-lead code, .sg-label code { font-size: 0.78rem; }
+    .sg-label { display: block; margin: 1.5rem 0 0.6rem; font-size: var(--ui-fs-xs); font-weight: 600; color: var(--text-muted); }
+    .sg-lead + .sg-label, .sg-sec > h2 + .sg-label { margin-top: 0; }
+    .sg-demo { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+    .sg-swatches { display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+    .sg-swatch { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--bg-card); font-size: var(--ui-fs-xs); min-width: 0; }
+    .sg-swatch i { flex: none; width: 2rem; height: 2rem; border-radius: 6px; border: 1px solid var(--ui-line); }
+    .sg-swatch code { font-size: 0.72rem; }
+    .sg-box { display: grid; place-items: center; background: var(--ui-accent-soft); color: var(--primary); font-size: var(--ui-fs-2xs); font-weight: 600; border: 1px dashed color-mix(in srgb, var(--primary) 50%, transparent); }
+    .sg-icons { display: grid; gap: 0.5rem; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); }
+    .sg-icon { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.65rem; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--bg-card); font-family: var(--ui-mono); font-size: 0.72rem; color: var(--text-muted); min-width: 0; overflow: hidden; }
+    .sg-icon .ui-i { color: var(--text); }
+    .sg-img { width: 100%; height: 100%; display: block; }
+    .sg-menu-demo { position: relative; height: 13.5rem; }
+    .sg-menu-demo .ui-menu { position: absolute; left: 0; right: auto; top: 2.75rem; }
+    .sg-dialog-demo { position: static; display: block; margin: 0; width: min(30rem, 100%); animation: none; }
+</style>
+</head>
+<body data-theme="dark">
+<!-- Icon sprite: copy of templates/_icons.html -->
+<svg class="ui-sprite" width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0;overflow:hidden">
+    <!-- Navigation / pages -->
+    <symbol id="ui-i-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
+    <symbol id="ui-i-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+    <symbol id="ui-i-images" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.296-1.296a2.41 2.41 0 0 0-3.408 0L11 18"/><circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/></symbol>
+    <symbol id="ui-i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="ui-i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></symbol>
+    <symbol id="ui-i-scroll" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></symbol>
+    <symbol id="ui-i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+    <symbol id="ui-i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="ui-i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/></symbol>
+    <symbol id="ui-i-bar-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+    <symbol id="ui-i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+
+    <!-- Media and files -->
+    <symbol id="ui-i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></symbol>
+    <symbol id="ui-i-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></symbol>
+    <symbol id="ui-i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+    <symbol id="ui-i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+    <symbol id="ui-i-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+    <symbol id="ui-i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="ui-i-folder-input" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"/><path d="M2 13h10"/><path d="m9 16 3-3-3-3"/></symbol>
+    <symbol id="ui-i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+    <symbol id="ui-i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+    <symbol id="ui-i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></symbol>
+    <symbol id="ui-i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="ui-i-merge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+    <symbol id="ui-i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+    <symbol id="ui-i-scan-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h8"/><path d="M7 12h10"/><path d="M7 16h6"/></symbol>
+    <symbol id="ui-i-map-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="ui-i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></symbol>
+    <symbol id="ui-i-hash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="M16 3l-2 18"/></symbol>
+
+    <!-- Actions -->
+    <symbol id="ui-i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="ui-i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></symbol>
+    <symbol id="ui-i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+    <symbol id="ui-i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+    <symbol id="ui-i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="ui-i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="ui-i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="ui-i-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z"/></symbol>
+    <symbol id="ui-i-sort" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+    <symbol id="ui-i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+    <symbol id="ui-i-retry" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="ui-i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+    <symbol id="ui-i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
+    <symbol id="ui-i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="ui-i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+    <symbol id="ui-i-external-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="ui-i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="ui-i-log-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
+    <symbol id="ui-i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.79 0"/></symbol>
+
+    <!-- Arrows and chevrons -->
+    <symbol id="ui-i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="ui-i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="ui-i-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="ui-i-chevron-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></symbol>
+    <symbol id="ui-i-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+    <symbol id="ui-i-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+    <symbol id="ui-i-trending-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></symbol>
+    <symbol id="ui-i-trending-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17 13.5 8.5 8.5 13.5 2 7"/><path d="M16 17h6v-6"/></symbol>
+    <symbol id="ui-i-more-horizontal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+    <symbol id="ui-i-more-vertical" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+
+    <!-- Views -->
+    <symbol id="ui-i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></symbol>
+    <symbol id="ui-i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+
+    <!-- Status -->
+    <symbol id="ui-i-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="ui-i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+    <symbol id="ui-i-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+    <symbol id="ui-i-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="ui-i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    <symbol id="ui-i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+    <symbol id="ui-i-pause-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M10 15V9"/><path d="M14 15V9"/></symbol>
+    <symbol id="ui-i-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></symbol>
+    <symbol id="ui-i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="ui-i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
+    <symbol id="ui-i-loader" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+    <symbol id="ui-i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+    <symbol id="ui-i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+    <symbol id="ui-i-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></symbol>
+    <symbol id="ui-i-flask" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></symbol>
+
+    <!-- Systems and connections -->
+    <symbol id="ui-i-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+    <symbol id="ui-i-cloud-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8l-4-4"/><path d="m12 21 4-4"/><path d="M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284"/></symbol>
+    <symbol id="ui-i-cloud-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"/><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="m8 17 4-4 4 4"/></symbol>
+    <symbol id="ui-i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></symbol>
+    <symbol id="ui-i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></symbol>
+    <symbol id="ui-i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></symbol>
+    <symbol id="ui-i-hard-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M6 16h.01"/><path d="M10 16h.01"/></symbol>
+    <symbol id="ui-i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/></symbol>
+    <symbol id="ui-i-wifi-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></symbol>
+    <symbol id="ui-i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="ui-i-mail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+    <symbol id="ui-i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="ui-i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+    <symbol id="ui-i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+    <symbol id="ui-i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="ui-i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+</svg>
+
+<header class="sg-top">
+    <h1>MediaAssistant · Design System</h1>
+    <span class="ui-muted">style.css + ui.css</span>
+    <span class="ui-spacer"></span>
+    <div class="ui-segmented" role="group" aria-label="Darstellung">
+        <button type="button" class="ui-seg" data-theme-btn="dark" aria-pressed="true"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-moon"/></svg>Dunkel</button>
+        <button type="button" class="ui-seg" data-theme-btn="light" aria-pressed="false"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-sun"/></svg>Hell</button>
+    </div>
+</header>
+
+<main class="sg-main">
+<div class="ui-layout-sidenav">
+<nav class="ui-sidenav" aria-label="Komponenten">
+    <p class="ui-sidenav-title">Grundlagen</p>
+    <a class="ui-sidenav-item" href="#tokens"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-sliders"/></svg><span class="ui-sidenav-label">Tokens</span></a>
+    <a class="ui-sidenav-item" href="#icons"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-sparkles"/></svg><span class="ui-sidenav-label">Icons</span><span class="ui-sidenav-meta" id="icon-count"></span></a>
+    <a class="ui-sidenav-item" href="#layout"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-dashboard"/></svg><span class="ui-sidenav-label">Seitenkopf &amp; Karten</span></a>
+    <p class="ui-sidenav-title">Komponenten</p>
+    <a class="ui-sidenav-item" href="#buttons"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-plus"/></svg><span class="ui-sidenav-label">Buttons</span></a>
+    <a class="ui-sidenav-item" href="#status"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg><span class="ui-sidenav-label">Status &amp; Badges</span></a>
+    <a class="ui-sidenav-item" href="#table"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-list"/></svg><span class="ui-sidenav-label">Tabellen</span></a>
+    <a class="ui-sidenav-item" href="#toolbar"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-filter"/></svg><span class="ui-sidenav-label">Toolbar &amp; Filter</span></a>
+    <a class="ui-sidenav-item" href="#forms"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-pencil"/></svg><span class="ui-sidenav-label">Formulare</span></a>
+    <a class="ui-sidenav-item" href="#options"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-power"/></svg><span class="ui-sidenav-label">Optionen &amp; Auswahl</span></a>
+    <a class="ui-sidenav-item" href="#stats"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-bar-chart"/></svg><span class="ui-sidenav-label">Kennzahlen</span></a>
+    <a class="ui-sidenav-item" href="#feedback"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-bell"/></svg><span class="ui-sidenav-label">Hinweise &amp; Toasts</span></a>
+    <a class="ui-sidenav-item" href="#nav"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-menu"/></svg><span class="ui-sidenav-label">Tabs &amp; Navigation</span></a>
+    <a class="ui-sidenav-item" href="#details"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-file-text"/></svg><span class="ui-sidenav-label">Details &amp; Code</span></a>
+    <a class="ui-sidenav-item" href="#media"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-images"/></svg><span class="ui-sidenav-label">Vorschaubilder</span></a>
+    <a class="ui-sidenav-item" href="#overlays"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-layers"/></svg><span class="ui-sidenav-label">Menü &amp; Dialog</span></a>
+    <p class="ui-sidenav-title">Bestand</p>
+    <a class="ui-sidenav-item" href="#base"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-archive"/></svg><span class="ui-sidenav-label">Basis (style.css)</span></a>
+</nav>
+
+<div>
+
+<!-- ═══ Tokens ═══ -->
+<section class="sg-sec" id="tokens">
+    <h2>Tokens</h2>
+    <p class="sg-lead">Farben nur aus den Theme-Variablen (<code>style.css</code> / <code>light.css</code>). Alles andere sind <code>--ui-*</code>-Tokens aus <code>ui.css</code>, die daraus abgeleitet sind.</p>
+    <span class="sg-label">Theme-Farben</span>
+    <div class="sg-swatches" id="swatches-theme"></div>
+    <span class="sg-label">Abgeleitete Tokens</span>
+    <div class="sg-swatches" id="swatches-ui"></div>
+    <span class="sg-label">Schriftgrössen</span>
+    <div class="ui-stack ui-stack-sm">
+        <div style="font-size:var(--ui-fs-2xl);font-weight:650;letter-spacing:-.02em">--ui-fs-2xl · Seitentitel</div>
+        <div style="font-size:var(--ui-fs-xl);font-weight:600">--ui-fs-xl · Dialog-Titel</div>
+        <div style="font-size:var(--ui-fs-lg);font-weight:600">--ui-fs-lg · Abschnittstitel</div>
+        <div style="font-size:var(--ui-fs-md);font-weight:600">--ui-fs-md · Kartentitel</div>
+        <div style="font-size:var(--ui-fs-base)">--ui-fs-base · Fliesstext, Tabellen, Bedienelemente</div>
+        <div style="font-size:var(--ui-fs-sm);color:var(--text-muted)">--ui-fs-sm · Beschreibungen, Hinweise</div>
+        <div style="font-size:var(--ui-fs-xs);color:var(--text-muted)">--ui-fs-xs · Badges, Meta-Zeilen</div>
+        <div class="ui-mono">--ui-mono · /library/2026/2026-10/IMG_3140.HEIC</div>
+    </div>
+    <span class="sg-label">Radien &amp; Abstände</span>
+    <div class="sg-demo">
+        <div class="sg-box" style="width:3.5rem;height:3.5rem;border-radius:var(--ui-radius-sm)">sm 6</div>
+        <div class="sg-box" style="width:3.5rem;height:3.5rem;border-radius:var(--ui-radius)">8</div>
+        <div class="sg-box" style="width:3.5rem;height:3.5rem;border-radius:var(--ui-radius-md)">md 10</div>
+        <div class="sg-box" style="width:3.5rem;height:3.5rem;border-radius:var(--ui-radius-lg)">lg 12</div>
+        <div class="sg-box" style="width:3.5rem;height:3.5rem;border-radius:var(--ui-radius-xl)">xl 14</div>
+        <span class="ui-spacer" style="flex:0 0 1rem"></span>
+        <div class="sg-box" style="width:var(--ui-space-2);height:2rem"></div>
+        <div class="sg-box" style="width:var(--ui-space-3);height:2rem"></div>
+        <div class="sg-box" style="width:var(--ui-space-4);height:2rem"></div>
+        <div class="sg-box" style="width:var(--ui-space-6);height:2rem"></div>
+        <div class="sg-box" style="width:var(--ui-space-8);height:2rem"></div>
+        <span class="ui-muted ui-text-xs">space 2 · 3 · 4 · 6 · 8</span>
+    </div>
+</section>
+
+<!-- ═══ Icons ═══ -->
+<section class="sg-sec" id="icons">
+    <h2>Icons</h2>
+    <p class="sg-lead">Sprite <code>templates/_icons.html</code>, in base.html eingebunden. Verwendung: <code>&lt;svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"&gt;&lt;use href="#ui-i-trash"/&gt;&lt;/svg&gt;</code></p>
+    <div class="sg-icons" id="icon-grid"></div>
+</section>
+
+<!-- ═══ Layout ═══ -->
+<section class="sg-sec" id="layout">
+    <h2>Seitenkopf, Abschnitte, Karten</h2>
+    <p class="sg-lead"><code>.ui-page-head</code> · <code>.ui-section-head</code> · <code>.ui-card</code> mit <code>-head</code>, <code>-body</code>, <code>-foot</code>.</p>
+
+    <span class="sg-label">.ui-page-head</span>
+    <div class="ui-page-head">
+        <div class="ui-page-head-text">
+            <a class="ui-page-back" href="#layout"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-left"/></svg>Logs</a>
+            <h1 class="ui-page-title">Duplikate <span class="ui-badge is-warning">211 offen</span></h1>
+            <p class="ui-page-sub">Exakte und visuell ähnliche Dateien. Behalte pro Gruppe die beste Version — Metadaten der anderen werden übernommen.</p>
+        </div>
+        <div class="ui-page-actions">
+            <button type="button" class="ui-btn ui-btn-secondary"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-refresh"/></svg>Neu laden</button>
+            <button type="button" class="ui-btn ui-btn-primary"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-sparkles"/></svg>Beste behalten</button>
+        </div>
+    </div>
+
+    <span class="sg-label">.ui-section-head + .ui-card</span>
+    <div class="ui-section-head">
+        <div class="ui-section-head-text">
+            <h2 class="ui-section-title">Letzte Verarbeitungen</h2>
+            <p class="ui-section-desc">Die zwanzig zuletzt abgeschlossenen Jobs.</p>
+        </div>
+        <a class="ui-btn ui-btn-ghost ui-btn-sm" href="#layout">Alle Logs<svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-arrow-right"/></svg></a>
+    </div>
+    <div class="ui-grid" style="--ui-min:18rem">
+        <div class="ui-card">
+            <div class="ui-card-head">
+                <div class="ui-card-head-text">
+                    <h3 class="ui-card-title"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-tag"/></svg>Tag-Aufräumen</h3>
+                    <p class="ui-card-desc">Entfernt Schlagwörter aus XMP-Sidecars und Immich.</p>
+                </div>
+                <div class="ui-card-actions"><button type="button" class="ui-icon-btn" aria-label="Mehr"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-more-horizontal"/></svg></button></div>
+            </div>
+            <div class="ui-card-body"><p class="ui-muted ui-text-sm" style="margin:0">Karteninhalt mit 1.25rem Innenabstand.</p></div>
+            <div class="ui-card-foot ui-card-foot-end">
+                <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm">Abbrechen</button>
+                <button type="button" class="ui-btn ui-btn-primary ui-btn-sm">Suchen</button>
+            </div>
+        </div>
+        <a class="ui-card ui-card-body" href="#layout">
+            <span class="ui-row" style="margin-bottom:.4rem"><span class="ui-icon-tile ui-icon-tile-sm is-success"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-layers"/></svg></span><strong>Standard</strong><span class="ui-badge is-success">Aktiv</span></span>
+            <span class="ui-muted ui-text-sm">Klickbare Karte (a.ui-card) · 1 Verzeichnis · Immich-Poll aus</span>
+        </a>
+        <div class="ui-card ui-card-dashed ui-card-body ui-muted ui-text-sm">.ui-card-dashed — Platzhalter / Drop-Zone</div>
+    </div>
+</section>
+
+<!-- ═══ Buttons ═══ -->
+<section class="sg-sec" id="buttons">
+    <h2>Buttons</h2>
+    <p class="sg-lead"><code>.ui-btn</code> + Variante + Grösse. Icon-Buttons ohne Rahmen, immer mit <code>aria-label</code>.</p>
+    <span class="sg-label">Varianten</span>
+    <div class="sg-demo">
+        <button type="button" class="ui-btn ui-btn-primary">Speichern</button>
+        <button type="button" class="ui-btn ui-btn-secondary">Abbrechen</button>
+        <button type="button" class="ui-btn ui-btn-ghost">Zurücksetzen</button>
+        <button type="button" class="ui-btn ui-btn-danger"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg>Löschen</button>
+        <button type="button" class="ui-btn ui-btn-danger-solid">Endgültig löschen</button>
+        <button type="button" class="ui-btn ui-btn-ghost-danger"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg>Entfernen</button>
+        <button type="button" class="ui-btn ui-btn-new"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-plus"/></svg>Neues Set</button>
+    </div>
+    <span class="sg-label">Grössen, Icon, Zustände</span>
+    <div class="sg-demo">
+        <button type="button" class="ui-btn ui-btn-primary ui-btn-lg">Gross</button>
+        <button type="button" class="ui-btn ui-btn-primary"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-play"/></svg>Standard</button>
+        <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-retry"/></svg>Klein</button>
+        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs">XS</button>
+        <button type="button" class="ui-btn ui-btn-primary" disabled>Deaktiviert</button>
+        <button type="button" class="ui-btn ui-btn-secondary" aria-busy="true"><svg class="ui-i ui-spin" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-loader"/></svg>Lädt …</button>
+    </div>
+    <span class="sg-label">.ui-icon-btn · .ui-actions</span>
+    <div class="sg-demo">
+        <div class="ui-actions">
+            <button type="button" class="ui-icon-btn" aria-label="Verbindung testen" title="Verbindung testen"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-wifi"/></svg></button>
+            <button type="button" class="ui-icon-btn" aria-label="Duplizieren" title="Duplizieren"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-copy"/></svg></button>
+            <button type="button" class="ui-icon-btn" aria-label="Bearbeiten" title="Bearbeiten"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-pencil"/></svg></button>
+            <button type="button" class="ui-icon-btn is-danger" aria-label="Löschen" title="Löschen"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg></button>
+            <button type="button" class="ui-icon-btn" aria-label="Gesperrt" aria-disabled="true"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg></button>
+        </div>
+        <button type="button" class="ui-icon-btn" aria-pressed="true" aria-label="Rasteransicht"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-grid"/></svg></button>
+        <button type="button" class="ui-icon-btn ui-icon-btn-sm" aria-label="Schliessen"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-x"/></svg></button>
+        <button type="button" class="ui-icon-btn ui-icon-btn-outline" aria-label="Neu laden"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-refresh"/></svg></button>
+    </div>
+</section>
+
+<!-- ═══ Status ═══ -->
+<section class="sg-sec" id="status">
+    <h2>Status, Badges, Tags, Punkte</h2>
+    <p class="sg-lead">Töne: <code>is-success</code> · <code>is-warning</code> · <code>is-error</code> · <code>is-info</code> · <code>is-accent</code> · <code>is-violet</code> · <code>is-neutral</code>.</p>
+    <span class="sg-label">.ui-status (Icon + farbiger Text)</span>
+    <div class="sg-demo">
+        <span class="ui-status is-success"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg>Fertig</span>
+        <span class="ui-status is-warning"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-clock"/></svg>Wartend</span>
+        <span class="ui-status is-info"><svg class="ui-i ui-spin" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-loader"/></svg>In Arbeit</span>
+        <span class="ui-status is-error"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-alert-circle"/></svg>Fehler</span>
+        <span class="ui-status is-violet"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-eye"/></svg>Review</span>
+        <span class="ui-status"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-pause-circle"/></svg>Inaktiv</span>
+        <span class="ui-status-stack"><span class="ui-status is-error"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-wifi-off"/></svg>Nicht erreichbar</span><span class="ui-status-reason" title="Connection refused">Connection refused</span></span>
+    </div>
+    <span class="sg-label">.ui-badge</span>
+    <div class="sg-demo">
+        <span class="ui-badge">XMP</span>
+        <span class="ui-badge is-success"><span class="ui-dot is-success"></span>Aktiv</span>
+        <span class="ui-badge is-warning">Probelauf</span>
+        <span class="ui-badge is-error">Fehler</span>
+        <span class="ui-badge is-info">1 wartend</span>
+        <span class="ui-badge is-accent">Original</span>
+        <span class="ui-badge is-violet">Immich</span>
+        <span class="ui-badge ui-badge-lg is-success"><svg class="ui-i" width="12" height="12" aria-hidden="true" focusable="false"><use href="#ui-i-star"/></svg>Beste Qualität</span>
+        <span class="ui-count">12</span>
+    </div>
+    <span class="sg-label">.ui-tag (Schlagwörter)</span>
+    <div class="ui-tags">
+        <span class="ui-tag">Landschaft</span><span class="ui-tag">Berg</span><span class="ui-tag">Schweiz</span>
+        <span class="ui-tag is-success">+ Ferien 2026</span><span class="ui-tag is-accent">Album: Wallis</span>
+    </div>
+    <span class="sg-label">.ui-dot</span>
+    <div class="sg-demo">
+        <span class="ui-row"><span class="ui-dot is-success"></span>Bereit</span>
+        <span class="ui-row"><span class="ui-dot is-warning"></span>Nicht konfiguriert</span>
+        <span class="ui-row"><span class="ui-dot is-error"></span>Fehler</span>
+        <span class="ui-row"><span class="ui-dot is-info is-pulse"></span>Läuft</span>
+        <span class="ui-row"><span class="ui-dot is-hollow"></span>Deaktiviert</span>
+    </div>
+</section>
+
+<!-- ═══ Table ═══ -->
+<section class="sg-sec" id="table">
+    <h2>Tabellen</h2>
+    <p class="sg-lead"><code>.ui-table-card</code> &gt; <code>.ui-table</code>. Name-Spalte als <code>&lt;th scope="row"&gt;</code> mit Icon, Nebenspalten gedämpft, Aktionen rechts. Auf dem Handy scrollt die Tabelle in ihrer Karte — oder wird mit <code>.ui-table-stack</code> zu Karten.</p>
+    <div class="ui-table-card">
+        <table class="ui-table ui-table-nowrap">
+            <thead><tr>
+                <th scope="col">Datei</th><th scope="col">Debug-Key</th><th scope="col">Ziel</th><th scope="col">Status</th><th scope="col" class="ui-num">Grösse</th><th scope="col" class="ui-col-actions">Aktionen</th>
+            </tr></thead>
+            <tbody>
+                <tr>
+                    <th scope="row"><div class="ui-cell-name"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-image"/></svg><strong>IMG_3140.HEIC</strong></div></th>
+                    <td><a class="ui-link ui-mono" href="#table">MA-2026-28123</a></td>
+                    <td><span class="ui-cell-meta"><svg class="ui-i" width="15" height="15" aria-hidden="true" focusable="false"><use href="#ui-i-cloud-up"/></svg>Immich<span class="ui-badge">XMP</span></span></td>
+                    <td><span class="ui-status is-success"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg>Fertig</span></td>
+                    <td class="ui-num">3.4 MB</td>
+                    <td class="ui-col-actions"><div class="ui-actions">
+                        <button type="button" class="ui-icon-btn" aria-label="Erneut verarbeiten: IMG_3140.HEIC"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-retry"/></svg></button>
+                        <button type="button" class="ui-icon-btn is-danger" aria-label="Löschen: IMG_3140.HEIC"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg></button>
+                    </div></td>
+                </tr>
+                <tr>
+                    <th scope="row"><div class="ui-cell-name"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-video"/></svg><strong>VID_0042.MOV</strong></div></th>
+                    <td><a class="ui-link ui-mono" href="#table">MA-2026-28124</a></td>
+                    <td><span class="ui-cell-meta"><svg class="ui-i" width="15" height="15" aria-hidden="true" focusable="false"><use href="#ui-i-folder"/></svg><code class="ui-path">/library/2026/2026-10/</code></span></td>
+                    <td><span class="ui-status is-error"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-alert-circle"/></svg>Fehler</span></td>
+                    <td class="ui-num">212.0 MB</td>
+                    <td class="ui-col-actions"><div class="ui-actions">
+                        <button type="button" class="ui-icon-btn" aria-label="Erneut verarbeiten: VID_0042.MOV"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-retry"/></svg></button>
+                        <button type="button" class="ui-icon-btn is-danger" aria-label="Löschen: VID_0042.MOV"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg></button>
+                    </div></td>
+                </tr>
+                <tr class="is-inactive">
+                    <th scope="row"><div class="ui-cell-name"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-image"/></svg><strong>scan_001.tiff</strong></div></th>
+                    <td><span class="ui-mono">MA-2026-28125</span></td>
+                    <td><span class="ui-muted">—</span></td>
+                    <td><span class="ui-status"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-pause-circle"/></svg>Übersprungen</span></td>
+                    <td class="ui-num">117 KB</td>
+                    <td class="ui-col-actions"><div class="ui-actions"><span class="ui-icon-btn ui-icon-btn-spacer" aria-hidden="true"></span><button type="button" class="ui-icon-btn is-danger" aria-label="Löschen: scan_001.tiff"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg></button></div></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <span class="sg-label">.ui-table-stack · .ui-table-compact · .ui-cell-wrap (Logs)</span>
+    <div class="ui-table-card">
+        <table class="ui-table ui-table-compact ui-table-stack">
+            <thead><tr><th scope="col">Zeit</th><th scope="col">Level</th><th scope="col">Quelle</th><th scope="col">Nachricht</th></tr></thead>
+            <tbody>
+                <tr><td data-label="Zeit" class="ui-nowrap ui-tabular">22.10.2026 21:03:24</td><td data-label="Level"><span class="ui-badge is-info">INFO</span></td><td data-label="Quelle">sets</td><td data-label="Nachricht" class="ui-cell-text ui-cell-wrap">Verarbeitungs-Set „Standard“ gespeichert</td></tr>
+                <tr><td data-label="Zeit" class="ui-nowrap ui-tabular">22.10.2026 20:55:51</td><td data-label="Level"><span class="ui-badge is-warning">WARNING</span></td><td data-label="Quelle">immich_client</td><td data-label="Nachricht" class="ui-cell-text ui-cell-wrap">delete_asset cd742bd2-add7-4b40-94d9-dc48b4c52267 wird ausgeführt</td></tr>
+                <tr><td data-label="Zeit" class="ui-nowrap ui-tabular">22.10.2026 20:55:34</td><td data-label="Level"><span class="ui-badge is-error">ERROR</span></td><td data-label="Quelle">pipeline</td><td data-label="Nachricht" class="ui-cell-text ui-cell-wrap">MA-2026-10215 IA-08 fehlgeschlagen: Ziel nicht beschreibbar</td></tr>
+                <tr class="ui-table-empty"><td colspan="4">Keine weiteren Einträge</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- ═══ Toolbar ═══ -->
+<section class="sg-sec" id="toolbar">
+    <h2>Toolbar &amp; Filter</h2>
+    <p class="sg-lead"><code>.ui-toolbar</code> mit <code>.ui-search</code>, <code>.ui-select</code>, <code>.ui-segmented</code> und <code>.ui-toolbar-meta</code>.</p>
+    <form class="ui-toolbar" role="search" onsubmit="return false">
+        <label class="ui-search"><span class="ui-sr-only">Suchen</span>
+            <svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-search"/></svg>
+            <input class="ui-input" type="search" placeholder="Nachricht oder Quelle suchen">
+        </label>
+        <select class="ui-select" aria-label="Level"><option>Alle Level</option><option>Info</option><option>Warnung</option><option>Fehler</option></select>
+        <div class="ui-segmented" role="group" aria-label="Status">
+            <button type="button" class="ui-seg" aria-pressed="true">Alle <span class="ui-count">2085</span></button>
+            <button type="button" class="ui-seg" aria-pressed="false">Fehler <span class="ui-count">104</span></button>
+            <button type="button" class="ui-seg" aria-pressed="false">Wartend</button>
+        </div>
+        <button type="submit" class="ui-btn ui-btn-secondary"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-filter"/></svg>Filtern</button>
+        <span class="ui-toolbar-meta">1428 Einträge</span>
+    </form>
+    <nav class="ui-pagination" aria-label="Seiten">
+        <a class="ui-btn ui-btn-secondary ui-btn-sm" aria-disabled="true"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-left"/></svg>Zurück</a>
+        <span class="ui-pagination-info">Seite 1 / 29</span>
+        <a class="ui-btn ui-btn-secondary ui-btn-sm" href="#toolbar">Weiter<svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-right"/></svg></a>
+    </nav>
+</section>
+
+<!-- ═══ Forms ═══ -->
+<section class="sg-sec" id="forms">
+    <h2>Formulare</h2>
+    <p class="sg-lead"><code>.ui-field</code> = Label oben, Feld, Hinweis darunter. Alle Felder gleich hoch (2.5rem) und gleich gerundet.</p>
+    <div class="ui-card ui-card-body">
+    <div class="ui-form">
+        <div class="ui-fields">
+            <div class="ui-field">
+                <label class="ui-label" for="f-url">Immich URL <span class="ui-req" aria-hidden="true">*</span></label>
+                <input class="ui-input" id="f-url" type="url" value="http://immich_server:2283">
+                <p class="ui-hint">Interne Adresse im Docker-Netz, nicht über den Reverse Proxy.</p>
+            </div>
+            <div class="ui-field">
+                <label class="ui-label" for="f-sel">Anbieter</label>
+                <select class="ui-select" id="f-sel"><option>Nominatim (OpenStreetMap)</option><option>Photon</option></select>
+            </div>
+            <div class="ui-field">
+                <label class="ui-label" for="f-time">Zeitfenster ab</label>
+                <input class="ui-input" id="f-time" type="time" value="22:00">
+            </div>
+            <div class="ui-field">
+                <label class="ui-label" for="f-num">Bildgrösse <span class="ui-opt">(optional)</span></label>
+                <div class="ui-inline"><input class="ui-input ui-input-narrow" id="f-num" type="number" value="1024" min="256" max="4096" step="128"><span class="ui-muted">px</span></div>
+            </div>
+            <div class="ui-field">
+                <label class="ui-label" for="f-err">Muster (regulärer Ausdruck)</label>
+                <input class="ui-input ui-input-mono" id="f-err" type="text" value="^\d{4}-(\d{2}" aria-invalid="true" aria-describedby="f-err-msg">
+                <p class="ui-field-error" id="f-err-msg"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-alert-circle"/></svg>Klammer nicht geschlossen.</p>
+            </div>
+            <div class="ui-field">
+                <label class="ui-label" for="f-key">API-Key</label>
+                <div class="ui-input-group"><input class="ui-input ui-input-mono" id="f-key" type="password" value="secret-key-123"><button type="button" class="ui-btn ui-btn-secondary"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-wifi"/></svg>Testen</button></div>
+            </div>
+            <div class="ui-field ui-span-all">
+                <label class="ui-label" for="f-ta">System-Prompt</label>
+                <textarea class="ui-textarea ui-input-mono" id="f-ta" rows="3">You are an image analysis assistant for a photo media library.</textarea>
+            </div>
+            <div class="ui-field">
+                <label class="ui-label" for="f-dis">Deaktiviert</label>
+                <input class="ui-input" id="f-dis" type="text" value="Nur lesbar" disabled>
+            </div>
+            <div class="ui-field" style="justify-content:flex-end">
+                <label class="ui-check"><input type="checkbox" checked><span>Bestehende Sidecars überschreiben</span></label>
+            </div>
+        </div>
+    </div>
+    </div>
+</section>
+
+<!-- ═══ Options ═══ -->
+<section class="sg-sec" id="options">
+    <h2>Optionszeilen, Schalter, Auswahl</h2>
+    <p class="sg-lead">Titel + Beschreibung links (flexibel, max. 60ch), Bedienelement rechts (schrumpft nie), mindestens 1.5rem dazwischen.</p>
+    <span class="sg-label">.ui-option-list · .ui-option</span>
+    <div class="ui-option-list">
+        <label class="ui-option">
+            <span class="ui-option-text">
+                <span class="ui-option-title">JPG+RAW Paare beide übernehmen</span>
+                <span class="ui-option-desc">Aus = Paare landen im Duplikat-Review zur manuellen Auswahl. Ein sehr langer Beschreibungstext bricht weit vor dem Schalter um und läuft nie in ihn hinein, auch wenn die Zeile sehr breit ist.</span>
+            </span>
+            <span class="ui-switch"><input type="checkbox" role="switch" checked><span class="ui-switch-track"></span></span>
+        </label>
+        <label class="ui-option">
+            <span class="ui-option-text">
+                <span class="ui-option-title">Bestätigungsdialog überspringen</span>
+                <span class="ui-option-desc">Deaktiviert die Sicherheitsabfrage beim Behalten, Löschen und „Kein Duplikat“.</span>
+            </span>
+            <span class="ui-switch"><input type="checkbox" role="switch"><span class="ui-switch-track"></span></span>
+        </label>
+        <div class="ui-option">
+            <span class="ui-option-text">
+                <label class="ui-option-title" for="o-sel">Skalierung</label>
+                <span class="ui-option-desc">Prozent der Original-Auflösung für Video-Vorschaubilder.</span>
+            </span>
+            <div class="ui-option-control ui-option-control-wide"><select class="ui-select" id="o-sel"><option>50% — Standard</option><option>100% (Original)</option></select></div>
+        </div>
+    </div>
+
+    <span class="sg-label">.ui-switch · .ui-switch-label</span>
+    <div class="sg-demo">
+        <span class="ui-switch"><input type="checkbox" role="switch" checked aria-label="An"><span class="ui-switch-track"></span></span>
+        <span class="ui-switch"><input type="checkbox" role="switch" aria-label="Aus"><span class="ui-switch-track"></span></span>
+        <span class="ui-switch"><input type="checkbox" role="switch" checked disabled aria-label="Gesperrt"><span class="ui-switch-track"></span></span>
+        <label class="ui-switch-label"><span class="ui-switch"><input type="checkbox" role="switch" checked><span class="ui-switch-track"></span></span><span>In XMP-Sidecars bereinigen</span></label>
+    </div>
+
+    <span class="sg-label">.ui-choices · .ui-choice (Radio-Karten)</span>
+    <div class="ui-choices ui-choices-3" role="radiogroup" aria-label="Metadaten schreiben">
+        <label class="ui-choice"><input type="radio" name="sg-meta" checked><span class="ui-choice-body"><span class="ui-choice-radio"></span><span class="ui-choice-text"><span class="ui-choice-title">In die Datei</span><span class="ui-choice-desc">ExifTool schreibt direkt in das Original. Kein Begleitfile.</span></span></span></label>
+        <label class="ui-choice"><input type="radio" name="sg-meta"><span class="ui-choice-body"><span class="ui-choice-radio"></span><span class="ui-choice-text"><span class="ui-choice-title">XMP-Sidecar</span><span class="ui-choice-desc">Original bleibt unverändert, Metadaten in einer .xmp-Datei daneben.</span></span></span></label>
+        <label class="ui-choice"><input type="radio" name="sg-meta" disabled><span class="ui-choice-body"><span class="ui-choice-radio"></span><span class="ui-choice-text"><span class="ui-choice-title">Nicht verfügbar</span><span class="ui-choice-desc">Deaktivierte Option.</span></span></span></label>
+    </div>
+
+    <span class="sg-label">.ui-segmented (Radio-Variante, .is-block)</span>
+    <div class="ui-segmented is-block" role="radiogroup" aria-label="Medientyp" style="max-width:26rem">
+        <label class="ui-seg"><input type="radio" name="sg-media" checked><span>Alle</span></label>
+        <label class="ui-seg"><input type="radio" name="sg-media"><span>Fotos</span></label>
+        <label class="ui-seg"><input type="radio" name="sg-media"><span>Videos</span></label>
+    </div>
+</section>
+
+<!-- ═══ Stats ═══ -->
+<section class="sg-sec" id="stats">
+    <h2>Kennzahlen &amp; Fortschritt</h2>
+    <p class="sg-lead"><code>.ui-stats</code> &gt; <code>.ui-stat</code> (Label oben, grosse Zahl, Unterzeile). Ton färbt Zahl und Icon.</p>
+    <div class="ui-stats">
+        <div class="ui-stat"><span class="ui-stat-label"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-layers"/></svg>Total</span><span class="ui-stat-value">2085</span><span class="ui-stat-sub"><span class="ui-trend is-up"><svg class="ui-i" width="12" height="12" aria-hidden="true" focusable="false"><use href="#ui-i-trending-up"/></svg>179</span>letzte 24 Std</span></div>
+        <div class="ui-stat is-success"><span class="ui-stat-label"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg>Fertig</span><span class="ui-stat-value">1224</span><span class="ui-stat-sub">59 % aller Jobs</span></div>
+        <div class="ui-stat is-warning"><span class="ui-stat-label"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-clock"/></svg>Wartend</span><span class="ui-stat-value">1</span><span class="ui-stat-sub">ca. 2 Min</span></div>
+        <div class="ui-stat is-info"><span class="ui-stat-label"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-loader"/></svg>In Arbeit</span><span class="ui-stat-value">0</span><span class="ui-stat-sub">Pipeline pausiert</span></div>
+        <a class="ui-stat is-error" href="#stats"><span class="ui-stat-label"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-alert-circle"/></svg>Fehler</span><span class="ui-stat-value">104</span><span class="ui-stat-sub"><span class="ui-trend is-down"><svg class="ui-i" width="12" height="12" aria-hidden="true" focusable="false"><use href="#ui-i-trending-down"/></svg>3</span>seit gestern</span></a>
+        <div class="ui-stat"><span class="ui-stat-label">Durchsatz</span><span class="ui-stat-value">179<span class="ui-stat-unit">/Std</span></span><span class="ui-stat-sub">0 / Min · 179 / 24 Std</span></div>
+    </div>
+    <span class="sg-label">.ui-progress</span>
+    <div class="ui-grid" style="--ui-min:16rem">
+        <div><div class="ui-progress-meta"><strong>Verwaiste aufräumen</strong><span class="ui-tabular">412 / 1000</span></div><div class="ui-progress" role="progressbar" aria-valuenow="41" aria-valuemin="0" aria-valuemax="100" aria-label="Fortschritt"><div class="ui-progress-bar" style="width:41%"></div></div></div>
+        <div><div class="ui-progress-meta"><strong>Fertig</strong><span class="ui-tabular">100 %</span></div><div class="ui-progress is-success" role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" aria-label="Fertig"><div class="ui-progress-bar" style="width:100%"></div></div></div>
+        <div><div class="ui-progress-meta"><strong>Scan läuft …</strong><span>unbekannt</span></div><div class="ui-progress ui-progress-sm is-indeterminate" role="progressbar" aria-label="Scan läuft"><div class="ui-progress-bar"></div></div></div>
+    </div>
+</section>
+
+<!-- ═══ Feedback ═══ -->
+<section class="sg-sec" id="feedback">
+    <h2>Hinweise, leere Zustände, Toasts</h2>
+    <span class="sg-label">.ui-alert</span>
+    <div class="ui-stack ui-stack-sm">
+        <div class="ui-alert is-warning" role="status">
+            <svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-pause-circle"/></svg>
+            <div class="ui-alert-body"><p class="ui-alert-title">Pipeline pausiert</p><p class="ui-alert-text">Worker im Leerlauf, keine Jobs aktiv (1 wartend).</p></div>
+            <div class="ui-alert-actions"><button type="button" class="ui-btn ui-btn-secondary ui-btn-sm"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-play"/></svg>Fortsetzen</button></div>
+        </div>
+        <div class="ui-alert is-error" role="alert"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-alert-circle"/></svg><div class="ui-alert-body"><p class="ui-alert-text">Immich nicht erreichbar: 403 Forbidden (HTML-Antwort — vermutlich der Reverse Proxy).</p></div></div>
+        <div class="ui-alert is-success" role="status"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg><div class="ui-alert-body"><p class="ui-alert-text">Einstellungen gespeichert.</p></div><button type="button" class="ui-icon-btn ui-icon-btn-sm" aria-label="Schliessen"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-x"/></svg></button></div>
+        <div class="ui-alert ui-alert-sm" role="note"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-info"/></svg><div class="ui-alert-body"><p class="ui-alert-text">.ui-alert-sm · Info ist der Standardton.</p></div></div>
+    </div>
+    <span class="sg-label">.ui-empty · .ui-empty-inline</span>
+    <div class="ui-grid" style="--ui-min:18rem">
+        <div class="ui-card"><div class="ui-empty">
+            <span class="ui-empty-icon is-success"><svg class="ui-i" width="22" height="22" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg></span>
+            <p class="ui-empty-title">Keine offenen Duplikate</p>
+            <p class="ui-empty-text">Neue Gruppen erscheinen hier, sobald die Pipeline sie findet.</p>
+            <div class="ui-empty-actions"><button type="button" class="ui-btn ui-btn-secondary ui-btn-sm">Zum Dashboard</button></div>
+        </div></div>
+        <div><div class="ui-empty-inline"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-key"/></svg><span>Keine Tokens vorhanden — die Schnittstelle antwortet 404.</span></div></div>
+    </div>
+    <span class="sg-label">.ui-toast (statisch gezeigt; live per Button)</span>
+    <div class="ui-stack ui-stack-sm" style="max-width:28rem">
+        <div class="ui-toast is-shown is-success"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg><span class="ui-toast-text">Set „Standard“ dupliziert.</span></div>
+        <div class="ui-toast is-shown is-error"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-alert-circle"/></svg><span class="ui-toast-text">Löschen nicht möglich: 3 Jobs warten noch.</span><button type="button" class="ui-icon-btn" aria-label="Schliessen"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-x"/></svg></button></div>
+    </div>
+    <div class="sg-demo" style="margin-top:.75rem"><button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" id="toast-demo">Toast zeigen</button></div>
+</section>
+
+<!-- ═══ Navigation ═══ -->
+<section class="sg-sec" id="nav">
+    <h2>Tabs &amp; Seitennavigation</h2>
+    <p class="sg-lead"><code>.ui-tabs</code> für Seiten-Reiter (Links mit <code>aria-current="page"</code> oder Buttons mit <code>aria-selected</code>). <code>.ui-sidenav</code> für längere Bereichslisten — links auf dieser Seite zu sehen; auf dem Handy wird sie zur waagrechten Leiste.</p>
+    <nav class="ui-tabs" aria-label="Logs">
+        <a class="ui-tab" href="#nav" aria-current="page"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-scroll"/></svg>System-Log</a>
+        <a class="ui-tab" href="#nav"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-list"/></svg>Verarbeitungs-Log <span class="ui-count">1428</span></a>
+        <a class="ui-tab" href="#nav">Probelauf-Bericht</a>
+    </nav>
+</section>
+
+<!-- ═══ Details ═══ -->
+<section class="sg-sec" id="details">
+    <h2>Details, Code, Schritte</h2>
+    <span class="sg-label">.ui-facts</span>
+    <div class="ui-facts">
+        <div class="ui-fact"><span class="ui-fact-label">Datei</span><span class="ui-fact-value">IMG_3140.HEIC</span></div>
+        <div class="ui-fact"><span class="ui-fact-label">Status</span><span class="ui-fact-value"><span class="ui-status is-success"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg>Fertig</span></span></div>
+        <div class="ui-fact"><span class="ui-fact-label">Schritt</span><span class="ui-fact-value">IA-11</span></div>
+        <div class="ui-fact"><span class="ui-fact-label">Quelle</span><span class="ui-fact-value">Immich · Handy</span></div>
+    </div>
+    <span class="sg-label">.ui-kv in .ui-card (is-inset)</span>
+    <div class="ui-card">
+        <dl class="ui-kv is-inset">
+            <div class="ui-kv-row"><dt>Original</dt><dd><code class="ui-path">/inbox/Handy/2026/IMG_3140.HEIC</code></dd></div>
+            <div class="ui-kv-row"><dt>Ziel</dt><dd><span class="ui-copyable"><code class="ui-path">immich:cd742bd2-add7-4b40-94d9-dc48b4c52267</code><button type="button" class="ui-icon-btn" aria-label="Kopieren"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-copy"/></svg></button></span></dd></div>
+            <div class="ui-kv-row"><dt>SHA256</dt><dd><span class="ui-mono ui-clip" style="--ui-clip:22rem" title="9f2c4e1ab7d03c5e8f61b2a4c9d0e7f3a5b6c8d1e2f3a4b5c6d7e8f9a0b1c2d3">9f2c4e1ab7d03c5e8f61b2a4c9d0e7f3a5b6c8d1e2f3a4b5c6d7e8f9a0b1c2d3</span></dd></div>
+            <div class="ui-kv-row"><dt>Erstellt</dt><dd>22.10.2026 20:51:20</dd></div>
+        </dl>
+    </div>
+    <span class="sg-label">.ui-steps (details/summary)</span>
+    <div class="ui-steps">
+        <details class="ui-step" open>
+            <summary><span class="ui-status is-success" title="OK"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg></span><span class="ui-step-code">IA-01</span><span class="ui-step-label">EXIF lesen</span><span class="ui-step-meta">0.4 s</span><svg class="ui-i ui-step-chev" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-down"/></svg></summary>
+            <div class="ui-step-body"><pre class="ui-pre">{
+  "date": "2026-10-22T20:51:20",
+  "gps": true,
+  "camera": "iPhone 15 Pro"
+}</pre></div>
+        </details>
+        <details class="ui-step">
+            <summary><span class="ui-status is-warning" title="Warnung"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-alert-triangle"/></svg></span><span class="ui-step-code">IA-04</span><span class="ui-step-label">Geocoding</span><span class="ui-step-meta">Zeitüberschreitung</span><svg class="ui-i ui-step-chev" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-down"/></svg></summary>
+            <div class="ui-step-body"><p class="ui-muted ui-text-sm" style="margin:0">Nominatim antwortete nicht innerhalb von 10 s.</p></div>
+        </details>
+        <details class="ui-step">
+            <summary><span class="ui-status" title="Übersprungen"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-circle"/></svg></span><span class="ui-step-code">IA-06</span><span class="ui-step-label">OCR</span><span class="ui-step-meta">übersprungen</span><svg class="ui-i ui-step-chev" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-down"/></svg></summary>
+            <div class="ui-step-body"><p class="ui-muted ui-text-sm" style="margin:0">Im Set deaktiviert.</p></div>
+        </details>
+    </div>
+    <span class="sg-label">.ui-code · .ui-path · .ui-pre</span>
+    <p style="margin:0 0 .75rem">Durchsucht rekursiv alle .xmp-Dateien unter <code class="ui-code">/library</code>.</p>
+    <pre class="ui-pre ui-pre-wrap">2026-10-22 20:55:51 immich_client delete_asset cd742bd2-add7-4b40-94d9-dc48b4c52267 OK force=True</pre>
+</section>
+
+<!-- ═══ Media ═══ -->
+<section class="sg-sec" id="media">
+    <h2>Vorschaubilder</h2>
+    <p class="sg-lead"><code>.ui-thumbs</code> &gt; <code>.ui-thumb</code> (Duplikate) und <code>.ui-media</code> (Review-Zeile). Badges im Bild über <code>.ui-thumb-overlay</code>.</p>
+    <div class="ui-thumbs">
+        <article class="ui-thumb is-success">
+            <button type="button" class="ui-thumb-media" aria-label="Vorschau vergrössern: IMG_3140.HEIC"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 30'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2334d399'/%3E%3Cstop offset='1' stop-color='%231e3a8a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='40' height='30' fill='url(%23g)'/%3E%3Cpath d='M0 30 14 14l8 9 6-6 12 13z' fill='%230b1220' opacity='.45'/%3E%3C/svg%3E"></button>
+            <div class="ui-thumb-overlay"><span class="ui-badge is-success"><svg class="ui-i" width="12" height="12" aria-hidden="true" focusable="false"><use href="#ui-i-star"/></svg>Beste</span><span class="ui-badge is-accent">Original</span></div>
+            <div class="ui-thumb-corner"><button type="button" class="ui-icon-btn ui-icon-btn-sm" aria-label="Mehr Aktionen"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-more-vertical"/></svg></button></div>
+            <div class="ui-thumb-body">
+                <p class="ui-thumb-title" title="IMG_3140.HEIC">IMG_3140.HEIC</p>
+                <div class="ui-thumb-meta"><span>4032 × 3024</span><span>3.4 MB</span><span>HEIC</span></div>
+                <div class="ui-tags"><span class="ui-tag">Berg</span><span class="ui-tag is-success">+ GPS</span></div>
+            </div>
+            <div class="ui-thumb-actions"><button type="button" class="ui-btn ui-btn-primary ui-btn-sm">Behalten</button><button type="button" class="ui-btn ui-btn-ghost ui-btn-sm">Kein Duplikat</button></div>
+        </article>
+        <article class="ui-thumb">
+            <div class="ui-thumb-media"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 30'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fbbf24'/%3E%3Cstop offset='1' stop-color='%23b91c1c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='40' height='30' fill='url(%23g)'/%3E%3Ccircle cx='28' cy='9' r='4' fill='%23fff' opacity='.7'/%3E%3C/svg%3E"></div>
+            <div class="ui-thumb-overlay"><span class="ui-badge is-warning">pHash 96 %</span></div>
+            <div class="ui-thumb-body">
+                <p class="ui-thumb-title">IMG_3140 (1).JPG</p>
+                <div class="ui-thumb-meta"><span>2016 × 1512</span><span>0.9 MB</span><span>JPEG</span></div>
+            </div>
+            <div class="ui-thumb-actions"><button type="button" class="ui-btn ui-btn-secondary ui-btn-sm">Behalten</button><button type="button" class="ui-btn ui-btn-ghost-danger ui-btn-sm">Löschen</button></div>
+        </article>
+        <article class="ui-thumb is-selected">
+            <div class="ui-thumb-media"><span class="ui-thumb-placeholder"><svg class="ui-i" width="28" height="28" aria-hidden="true" focusable="false"><use href="#ui-i-video"/></svg>Keine Vorschau</span></div>
+            <div class="ui-thumb-body">
+                <p class="ui-thumb-title">VID_0042.MOV</p>
+                <div class="ui-thumb-meta"><span>1920 × 1080</span><span>0:42</span></div>
+            </div>
+            <div class="ui-thumb-actions"><span class="ui-status is-accent"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check"/></svg>Ausgewählt</span></div>
+        </article>
+    </div>
+    <span class="sg-label">.ui-media (Review)</span>
+    <article class="ui-media">
+        <div class="ui-media-thumb"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 30'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%2360a5fa'/%3E%3Cstop offset='1' stop-color='%23065f46'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='40' height='30' fill='url(%23g)'/%3E%3Cpath d='M0 30 12 16l7 7 9-11 12 18z' fill='%23fff' opacity='.35'/%3E%3C/svg%3E"></div>
+        <div class="ui-media-body">
+            <div class="ui-row"><strong class="ui-truncate">__d11_best_1776345946.jpg</strong><span class="ui-mono ui-muted ui-text-xs">D11-BEST-1776345946</span></div>
+            <p class="ui-muted ui-text-sm" style="margin:0">Bergpanorama</p>
+            <div class="ui-thumb-meta"><span>4000 × 3000</span><span>2026-04-16 15:25</span><span>EXIF ✗</span><span>GPS ✗</span></div>
+            <div class="ui-tags"><span class="ui-badge is-accent">unknown</span><span class="ui-tag">Landschaft</span><span class="ui-tag">Berg</span></div>
+        </div>
+        <div class="ui-media-actions">
+            <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm">Persönliches Foto</button>
+            <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm">Screenshot</button>
+            <button type="button" class="ui-btn ui-btn-ghost-danger ui-btn-sm"><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg>Löschen</button>
+        </div>
+    </article>
+</section>
+
+<!-- ═══ Overlays ═══ -->
+<section class="sg-sec" id="overlays">
+    <h2>Menü &amp; Dialog</h2>
+    <div class="ui-grid" style="--ui-min:18rem">
+        <div class="sg-menu-demo">
+            <span class="sg-label" style="margin-top:0">.ui-menu (statisch offen)</span>
+            <div class="ui-menu" role="menu">
+                <button type="button" class="ui-menu-item" role="menuitem"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-retry"/></svg>Erneut verarbeiten</button>
+                <button type="button" class="ui-menu-item" role="menuitem"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-external-link"/></svg>In Immich öffnen</button>
+                <div class="ui-menu-sep" role="separator"></div>
+                <button type="button" class="ui-menu-item is-danger" role="menuitem"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-trash"/></svg>Löschen</button>
+            </div>
+        </div>
+        <div>
+            <span class="sg-label" style="margin-top:0">dialog.ui-dialog (Vorschau, echter Dialog per Button)</span>
+            <div class="ui-dialog sg-dialog-demo ui-card" style="overflow:hidden">
+                <div class="ui-dialog-head"><div class="ui-dialog-head-text"><h3 class="ui-dialog-title">Gruppe auflösen?</h3><p class="ui-dialog-sub">3 Dateien · 1 bleibt, 2 werden gelöscht</p></div><button type="button" class="ui-icon-btn" aria-label="Schliessen"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-x"/></svg></button></div>
+                <div class="ui-dialog-body"><p style="margin:0">Metadaten der gelöschten Dateien (GPS, Datum, Schlagwörter) werden auf die behaltene übertragen.</p></div>
+                <div class="ui-dialog-foot"><button type="button" class="ui-btn ui-btn-secondary">Abbrechen</button><button type="button" class="ui-btn ui-btn-danger-solid">Auflösen</button></div>
+            </div>
+            <div class="sg-demo" style="margin-top:.75rem"><button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" id="dlg-open">Dialog öffnen</button></div>
+        </div>
+    </div>
+    <dialog class="ui-dialog" id="dlg-demo" aria-labelledby="dlg-demo-title">
+        <div class="ui-dialog-shell">
+            <div class="ui-dialog-head"><div class="ui-dialog-head-text"><h3 class="ui-dialog-title" id="dlg-demo-title">Gruppe auflösen?</h3><p class="ui-dialog-sub">Echter &lt;dialog&gt; mit showModal()</p></div><button type="button" class="ui-icon-btn" data-close aria-label="Schliessen"><svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-x"/></svg></button></div>
+            <div class="ui-dialog-body"><p style="margin:0">Escape oder Abbrechen schliesst den Dialog.</p></div>
+            <div class="ui-dialog-foot"><button type="button" class="ui-btn ui-btn-secondary" data-close>Abbrechen</button><button type="button" class="ui-btn ui-btn-primary" data-close>OK</button></div>
+        </div>
+    </dialog>
+</section>
+
+<!-- ═══ Base layer ═══ -->
+<section class="sg-sec" id="base">
+    <h2>Basis-Klassen aus style.css</h2>
+    <p class="sg-lead">Bestehende Klassen, die die Seiten heute schon verwenden — modernisiert ohne Markup-Änderung. Neue Seiten nehmen die <code>ui-*</code>-Komponenten.</p>
+    <span class="sg-label">.btn</span>
+    <div class="sg-demo">
+        <button type="button" class="btn btn-primary">btn-primary</button>
+        <button type="button" class="btn btn-secondary">btn-secondary</button>
+        <button type="button" class="btn btn-danger">btn-danger</button>
+        <button type="button" class="btn btn-small btn-secondary">btn-small</button>
+        <button type="button" class="btn btn-success">btn-success</button>
+        <button type="button" class="btn btn-warning">btn-warning</button>
+        <button type="button" class="btn btn-delete">btn-delete</button>
+        <button type="button" class="btn btn-primary" disabled>disabled</button>
+    </div>
+    <span class="sg-label">.alert</span>
+    <div class="alert alert-success">Einstellungen gespeichert.</div>
+    <div class="alert alert-error">Speichern fehlgeschlagen: <strong>Pfad nicht beschreibbar</strong>.</div>
+    <div class="alert alert-warning">Pipeline pausiert — Geocoding nicht erreichbar.</div>
+    <div class="alert alert-info">Neue Version verfügbar.</div>
+    <span class="sg-label">.settings-section · .switch · .switch-inline · .form-group</span>
+    <div class="settings-section">
+        <div class="section-header">
+            <div class="section-title">
+                <h2>Geocoding</h2>
+                <span class="section-desc">Wandelt GPS-Koordinaten aus den EXIF-Daten in lesbare Ortsnamen um (Land, Stadt, Stadtteil). Diese werden als Keywords in die Datei geschrieben und in Immich als Tags verwendet.</span>
+            </div>
+            <label class="switch"><input type="checkbox" checked aria-label="Geocoding"><span class="switch-slider"></span></label>
+        </div>
+        <div class="section-body">
+            <div class="form-row">
+                <div class="form-group"><label for="b-sel">Provider</label><select id="b-sel"><option>Nominatim (OpenStreetMap)</option></select></div>
+                <div class="form-group"><label for="b-url">URL</label><input type="url" id="b-url" value="https://nominatim.openstreetmap.org"><small>Für eigene Nominatim/Photon-Instanzen</small></div>
+                <div class="form-group"><label for="b-num">pHash Schwellwert</label><input type="number" id="b-num" value="5" min="0" max="20"></div>
+                <div class="form-group"><label for="b-time">Zeit</label><input type="time" id="b-time" value="03:30"></div>
+            </div>
+            <label class="switch-inline"><input type="checkbox" checked><span class="switch-slider-sm"></span><span>JPG+RAW Paare beide übernehmen</span></label>
+            <small>Aus = Paare landen im Duplikat-Review zur manuellen Auswahl</small>
+        </div>
+    </div>
+    <span class="sg-label">.tabs · .data-table · .status-badge · .level-badge · .section-note</span>
+    <div class="tabs"><a class="tab tab-active" href="#base">System-Log</a><a class="tab" href="#base">Verarbeitungs-Log</a></div>
+    <p class="section-note">Durchsucht rekursiv alle .xmp-Dateien unter <code>/library</code>.</p>
+    <table class="data-table">
+        <thead><tr><th>Tag</th><th>Status</th><th>Level</th></tr></thead>
+        <tbody>
+            <tr><td><code>2020-06-22</code></td><td><span class="status-badge status-done">done</span></td><td><span class="level-badge level-info">INFO</span></td></tr>
+            <tr><td><code>Teststrand</code></td><td><span class="status-badge status-duplicate">duplicate</span></td><td><span class="level-badge level-warning">WARNING</span></td></tr>
+            <tr><td><code>TESTSTRAND</code></td><td><span class="status-badge status-error">error</span></td><td><span class="level-badge level-error">ERROR</span></td></tr>
+        </tbody>
+    </table>
+    <div class="form-actions"><button type="button" class="btn btn-primary">Alle Einstellungen speichern</button></div>
+</section>
+
+</div>
+</div>
+</main>
+
+<div class="ui-toast-region" id="toasts" aria-live="polite"></div>
+
+<script>
+(function () {
+    "use strict";
+    var root = document.documentElement;
+
+    /* Theme: load/unload light.css like base.html, remember per viewer. */
+    function setTheme(theme) {
+        var link = document.getElementById("sg-light");
+        if (theme === "light" && !link) {
+            link = document.createElement("link");
+            link.id = "sg-light"; link.rel = "stylesheet"; link.href = "/static/css/light.css";
+            document.head.appendChild(link);
+        } else if (theme !== "light" && link) {
+            link.remove();
+        }
+        document.body.dataset.theme = theme;
+        document.querySelectorAll("[data-theme-btn]").forEach(function (b) {
+            b.setAttribute("aria-pressed", b.dataset.themeBtn === theme ? "true" : "false");
+        });
+        try { localStorage.setItem("sg-theme", theme); } catch (e) { /* private mode */ }
+        requestAnimationFrame(fillSwatches);
+    }
+    document.querySelectorAll("[data-theme-btn]").forEach(function (b) {
+        b.addEventListener("click", function () { setTheme(b.dataset.themeBtn); });
+    });
+    var initial = new URLSearchParams(location.search).get("theme");
+    if (!initial) { try { initial = localStorage.getItem("sg-theme"); } catch (e) { initial = null; } }
+    /* The screenshot tool swaps light.css itself; follow it if it did. */
+    var observer = new MutationObserver(function () {
+        var t = document.body.dataset.theme;
+        document.querySelectorAll("[data-theme-btn]").forEach(function (b) {
+            b.setAttribute("aria-pressed", b.dataset.themeBtn === t ? "true" : "false");
+        });
+        fillSwatches();
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["data-theme"] });
+
+    /* Colour swatches read the live values, so they show the active theme. */
+    function swatch(target, name) {
+        var row = document.createElement("div"); row.className = "sg-swatch";
+        var chip = document.createElement("i"); chip.style.background = "var(" + name + ")";
+        var text = document.createElement("span");
+        var code = document.createElement("code"); code.textContent = name;
+        var val = document.createElement("div"); val.className = "ui-muted";
+        val.textContent = getComputedStyle(document.body).getPropertyValue(name).trim().slice(0, 28);
+        text.append(code, val); row.append(chip, text); target.appendChild(row);
+    }
+    function fillSwatches() {
+        var a = document.getElementById("swatches-theme"), b = document.getElementById("swatches-ui");
+        a.textContent = ""; b.textContent = "";
+        ["--bg", "--bg-card", "--bg-item", "--bg-input", "--border", "--text", "--text-muted",
+         "--primary", "--primary-hover", "--success", "--warning", "--error", "--info"].forEach(function (n) { swatch(a, n); });
+        ["--ui-line", "--ui-card-border", "--ui-border-strong", "--ui-hover", "--ui-row-hover", "--ui-track",
+         "--ui-accent-soft", "--ui-danger-soft", "--ui-ok-text", "--ui-warn-text", "--ui-err-text", "--ui-info-text",
+         "--ui-violet", "--ui-teal"].forEach(function (n) { swatch(b, n); });
+    }
+
+    /* Icon gallery straight from the sprite */
+    var grid = document.getElementById("icon-grid");
+    var symbols = document.querySelectorAll(".ui-sprite symbol");
+    symbols.forEach(function (sym) {
+        var cell = document.createElement("div"); cell.className = "sg-icon";
+        cell.innerHTML = '<svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#' + sym.id + '"/></svg>';
+        var label = document.createElement("span"); label.textContent = sym.id.replace("ui-i-", "");
+        cell.appendChild(label); grid.appendChild(cell);
+    });
+    document.getElementById("icon-count").textContent = symbols.length;
+
+    /* Live toast: built with textContent, as page code should. */
+    document.getElementById("toast-demo").addEventListener("click", function () {
+        var region = document.getElementById("toasts");
+        var t = document.createElement("div"); t.className = "ui-toast is-success"; t.setAttribute("role", "status");
+        t.innerHTML = '<svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-check-circle"/></svg>';
+        var msg = document.createElement("span"); msg.className = "ui-toast-text"; msg.textContent = "Gespeichert — 3 Dateien neu eingereiht.";
+        t.appendChild(msg); region.appendChild(t);
+        requestAnimationFrame(function () { t.classList.add("is-shown"); });
+        setTimeout(function () { t.classList.remove("is-shown"); setTimeout(function () { t.remove(); }, 250); }, 3200);
+    });
+
+    /* Dialog */
+    var dlg = document.getElementById("dlg-demo");
+    document.getElementById("dlg-open").addEventListener("click", function () { dlg.showModal(); });
+    dlg.addEventListener("click", function (e) { if (e.target.closest("[data-close]")) dlg.close(); });
+
+    /* Segmented demo buttons toggle */
+    document.querySelectorAll("#toolbar .ui-seg").forEach(function (b) {
+        b.addEventListener("click", function () {
+            b.parentNode.querySelectorAll(".ui-seg").forEach(function (o) { o.setAttribute("aria-pressed", o === b ? "true" : "false"); });
+        });
+    });
+
+    /* Side nav: highlight the section in view */
+    var links = Array.prototype.slice.call(document.querySelectorAll(".ui-sidenav-item"));
+    var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+            if (!en.isIntersecting) return;
+            links.forEach(function (l) {
+                if (l.getAttribute("href") === "#" + en.target.id) l.setAttribute("aria-current", "true"); else l.removeAttribute("aria-current");
+            });
+        });
+    }, { rootMargin: "-20% 0px -70% 0px" });
+    document.querySelectorAll(".sg-sec").forEach(function (s) { io.observe(s); });
+
+    setTheme(initial === "light" ? "light" : "dark");
+})();
+</script>
+</body>
+</html>

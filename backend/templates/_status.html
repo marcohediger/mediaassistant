@@ -16,10 +16,14 @@
 } %}
 {% set STATUSES = STATUS_ICONS.keys() | list %}
 
-{% macro status_badge(status, field=False) -%}
-<span class="status-badge status-{{ status }}"{% if field %} data-field="status"{% endif %} data-status="{{ status }}">
-{%- if status in STATUS_ICONS -%}
+{# icon_only: lists show just the icon, the label becomes the tooltip
+   (and stays readable for screen readers). Detail pages show both. #}
+{% macro status_badge(status, field=False, icon_only=False) -%}
+{%- set label = t.status[status] if t.status and status in t.status else status -%}
+{%- set has_icon = status in STATUS_ICONS -%}
+<span class="status-badge status-{{ status }}{{ ' is-icon' if icon_only and has_icon else '' }}"{% if field %} data-field="status"{% endif %} data-status="{{ status }}"{% if icon_only and has_icon %} title="{{ label }}"{% endif %}>
+{%- if has_icon -%}
 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ STATUS_ICONS[status] | safe }}</svg>
 {%- endif -%}
-{{ t.status[status] if t.status and status in t.status else status }}</span>
+{%- if icon_only and has_icon -%}<span class="sr-only">{{ label }}</span>{%- else -%}{{ label }}{%- endif -%}</span>
 {%- endmacro %}

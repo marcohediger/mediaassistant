@@ -12,6 +12,7 @@
     {% endif %}
 </head>
 <body data-theme="{{ theme | default('dark') }}">
+    {% include "_icons.html" %}
     <nav class="navbar">
         <a href="/" class="nav-brand">
             {% if theme | default('dark') == 'light' %}
@@ -20,13 +21,12 @@
             <img src="/static/img/logo_dark.svg?v=2" alt="MediaAssistant" class="nav-logo">
             {% endif %}
         </a>
+        {% set path = request.url.path %}
         <div class="nav-links">
-            <a href="/">{{ t.nav.dashboard | default('Dashboard') }}</a>
-            <a href="/duplicates">{{ t.nav.duplicates | default('Duplikate') }}</a>
-            <a href="/review">{{ t.nav.review | default('Review') }}</a>
-            <a href="/logs">{{ t.nav.logs | default('Logs') }}</a>
-            <a href="/tools">{{ t.nav.tools | default('Tools') }}</a>
-            <a href="/settings">{{ t.nav.settings | default('Einstellungen') }}</a>
+            {% for href, label in [('/', t.nav.dashboard), ('/duplicates', t.nav.duplicates), ('/review', t.nav.review),
+                                   ('/logs', t.nav.logs), ('/tools', t.nav.tools), ('/settings', t.nav.settings)] %}
+            <a href="{{ href }}"{% if path == href or (href != '/' and path.startswith(href ~ '/')) %} aria-current="page"{% endif %}>{{ label }}</a>
+            {% endfor %}
         </div>
         <div class="nav-right">
         {% if sso_user %}
@@ -108,7 +108,7 @@
         <img id="lightbox-img" src="" alt="">
     </div>
     {% from "_status.html" import status_badge, STATUSES with context %}
-    <template id="status-badges">{% for s in STATUSES %}{{ status_badge(s) }}{% endfor %}</template>
+    <template id="status-badges">{% for s in STATUSES %}{{ status_badge(s) }}{{ status_badge(s, icon_only=True) }}{% endfor %}</template>
     <script src="/static/js/app.js?v={{ version }}"></script>
 </body>
 </html>
