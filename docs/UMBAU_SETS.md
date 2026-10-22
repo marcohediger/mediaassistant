@@ -13,9 +13,10 @@ Beliebig viele **Sets**. Jedes Set bündelt, was heute global eingestellt ist:
 | Sortier-Regeln | eine globale Liste | eigene Liste pro Set |
 | Ordner-Tags | pro Verzeichnis + globales Modul (beide müssen an sein) | **nur noch pro Set** — das globale Modul entfällt |
 | Immich Auto-Tagging | global an/aus, ein Cursor | pro Set an/aus, eigener Benutzer, eigener Cursor |
+| OCR | globales Modul an/aus + Modus smart / immer | **an/aus und Modus pro Set** — das globale Modul entfällt |
 | Ziel-Ablage | global: Basis-Pfad + Kategorien mit Pfad-Vorlagen | pro Set: Ziel (Library oder Immich), Basis-Pfad, Kategorien |
 
-**Global bleiben:** KI-Backends, Geocoding, OCR, Duplikat-Erkennung, Video-Vorschauen,
+**Global bleiben:** KI-Backends, Geocoding, Duplikat-Erkennung, Video-Vorschauen,
 Metadaten-Schreibmodus, Immich-Server und -Zugänge, SMTP, Darstellung, Diagnose.
 
 **Nach dem Update ändert sich nichts.** Die heutige Konfiguration wird automatisch zu
@@ -74,6 +75,7 @@ Neue Tabelle `processing_sets`:
 | `schedule_mode`, `interval_s`, `window_start`, `window_end`, `scheduled_days`, `scheduled_time` | Zeitplan |
 | `folder_tags` | Ordner-Tags an/aus |
 | `dry_run` | Probelauf |
+| `ocr_enabled`, `ocr_mode` | OCR an/aus; `smart` (nur Screenshots/Dokumente) oder `always` |
 | `target_mode` | `library` oder `immich` |
 | `library_base_path` | Basis der Ablage (auch für Fehler-/Duplikat-/Review-Ordner) |
 | `immich_user_id` | Zugang für den Upload (leer = globaler Schlüssel) |
@@ -95,7 +97,7 @@ Einmalig, mit Flag `migration.sets_v1`, das **nur bei Erfolg** gesetzt wird:
    wie bisher, obwohl das Modul danach wegfällt.
    Die Gruppierung im Einzelnen: Eine Gruppe → ein Set
    (bei nur einer Gruppe heisst es „Standard"). Live: ein Verzeichnis → ein Set.
-2. Zeitplan aus `filewatcher.*`, Basis-Pfad aus `library.base_path`.
+2. Zeitplan aus `filewatcher.*`, Basis-Pfad aus `library.base_path`, OCR an/aus aus dem Modul `ocr`, Modus aus `ocr.mode`.
 3. Regeln und Kategorien dem Set zuordnen (bei mehreren Sets: kopieren).
 4. `immich.poll_enabled` + `immich.last_poll` → ins Set „Standard".
 5. Alle bestehenden Jobs bekommen ihr Set (über `source_inbox_path`, Immich-Jobs ins Poll-Set).
@@ -117,9 +119,10 @@ muss jede Datei dieselbe Kategorie und denselben Zielpfad ergeben wie vorher.
 
 - ● aktiv / ○ inaktiv. Ein Klick auf den Stift öffnet das Set in einem grossen Popup.
 - Popup mit Reitern: Allgemein · Eingänge · Zeitplan · Sortier-Regeln · Ordner-Tags ·
-  Ziel-Ablage. Unten: Speichern, Abbrechen, Duplizieren, Löschen. „Duplizieren"
+  OCR · Ziel-Ablage. Unten: Speichern, Abbrechen, Duplizieren, Löschen. „Duplizieren"
   kopiert Regeln und Kategorien mit.
-- Der globale Abschnitt **Ordner-Tags entfällt** samt Modul `ordner_tags`; seine
+- Die globalen Abschnitte **Ordner-Tags und OCR entfallen** samt Modulen `ordner_tags`
+  und `ocr`; seine
   Erklärung „Wie funktioniert es?" wandert in den Reiter Ordner-Tags des Popups.
 - Die bisherigen Einstellungs-Abschnitte Eingangsverzeichnisse, Filewatcher,
   Sortier-Regeln, Ziel-Ablage und Ordner-Tags gehen in diesem Popup auf; beim
@@ -150,6 +153,13 @@ ganz rechts der Stift, Bearbeiten im Popup:
 benannte in `immich_users`; „kein Benutzer" (`immich_user_id = NULL`) heisst global.
 Die Liste ist eine neue Ansicht, kein neues Datenmodell — Jobs und Immich-Aufrufe
 bleiben unberührt.
+
+### Darstellung im Schnellmenü
+
+Sprache und Theme wandern aus den Einstellungen in ein **kleines Menü oben rechts
+neben dem Benutzer**. Umschalten wirkt sofort, ohne Speichern. Der Abschnitt
+„Darstellung" in den Einstellungen entfällt. Gespeichert wird weiterhin global
+(`ui.language`, `ui.theme`).
 
 - Dashboard und Diagnose-API zeigen die Sets mit Warteschlange je Set.
 - Review-Ansicht bietet die Kategorien des Sets an, aus dem der Job stammt.
