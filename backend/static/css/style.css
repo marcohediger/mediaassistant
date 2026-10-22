@@ -1949,10 +1949,13 @@ a.sm-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px
 .cell-status { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
 td.cell-status { display: table-cell; }
 td.cell-status > * + * { margin-left: 0.3rem; }
+/* Badge (inline-flex, baseline) and mark (middle) sat 2.3 px apart */
+td.cell-status > * { vertical-align: middle; }
 .dry-run-mark {
     display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem;
     width: 1.375rem; height: 1.375rem; vertical-align: middle; border-radius: 50%;
-    color: var(--ui-info-text, var(--info)); background: color-mix(in srgb, var(--info) 14%, transparent);
+    color: var(--ui-info-text, var(--info)); background: color-mix(in srgb, var(--info) 12%, transparent);
+    border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
 }
 .dry-run-mark.with-text { width: auto; padding: 0 0.55rem 0 0.45rem; border-radius: 999px; font-size: var(--ui-fs-xs, 0.75rem); font-weight: 600; }
 /* ── end log tables ── */
