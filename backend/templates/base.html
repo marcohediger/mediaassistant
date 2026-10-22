@@ -26,7 +26,7 @@
         {% set path = request.url.path %}
         <div class="nav-links">
             {% for href, label in [('/', t.nav.dashboard), ('/duplicates', t.nav.duplicates), ('/review', t.nav.review),
-                                   ('/logs', t.nav.logs), ('/tools', t.nav.tools), ('/settings', t.nav.settings)] %}
+                                   ('/logs', t.nav.logs), ('/tools', t.nav.tools)] %}
             <a href="{{ href }}"{% if path == href or (href != '/' and path.startswith(href ~ '/')) %} aria-current="page"{% endif %}>{{ label }}</a>
             {% endfor %}
         </div>
@@ -97,6 +97,11 @@
                 </div>
             </div>
         </div>
+        <a href="/settings" class="quick-menu-toggle nav-settings" title="{{ t.nav.settings }}"
+           {%- if path == '/settings' or path.startswith('/settings/') %} aria-current="page"{% endif %}>
+            <svg class="ui-i" width="18" height="18" aria-hidden="true"><use href="#ui-i-settings"/></svg>
+            <span class="sr-only">{{ t.nav.settings }}</span>
+        </a>
         </div>
     </nav>
     <main class="container">

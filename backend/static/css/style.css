@@ -1987,3 +1987,13 @@ td.cell-status > * { vertical-align: middle; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .status-processing svg { animation: none; } }
 /* ── end status badges ── */
+
+/* ── Settings link (navbar) ── */
+/* Settings left the page links and sits as a gear at the far right,
+   after the appearance menu; same round button as the menus. */
+.nav-settings { text-decoration: none; }
+.nav-settings[aria-current="page"] {
+    color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+/* ── end settings link ── */
