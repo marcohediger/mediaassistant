@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from config import config_manager
 from database import init_db, seed_inbox_from_env
+from sets import migrate_to_sets
 from filewatcher import start_filewatcher
 from health_watcher import start_health_watcher
 from routers import dashboard, setup, settings, logs, api, duplicates, review, diagnostics, tools
@@ -45,6 +46,9 @@ async def lifespan(app: FastAPI):
     await init_db()
     await config_manager.seed_from_env()
     await seed_inbox_from_env()
+    # After the env import, so a fresh install's INBOX_PATH and
+    # LIBRARY_BASE_PATH end up in its first set.
+    await migrate_to_sets()
     shutdown_event = asyncio.Event()
     watcher_task = asyncio.create_task(_supervise("filewatcher", start_filewatcher(shutdown_event)))
     health_task = asyncio.create_task(_supervise("health_watcher", start_health_watcher(shutdown_event)))

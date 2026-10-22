@@ -1,7 +1,7 @@
 import os
 import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from models import Base, Module, SortingRule, LibraryCategory, InboxDirectory
+from models import Base, Module, InboxDirectory
 
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")
 
@@ -36,8 +36,6 @@ DEFAULT_MODULES = [
     ("ki_analyse_2", False),
     ("geocoding", False),
     ("duplikat_erkennung", False),
-    ("ocr", False),
-    ("ordner_tags", False),
     ("smtp", False),
     ("filewatcher", False),
     ("immich", False),
@@ -60,6 +58,10 @@ async def _migrate_columns(conn):
         ("inbox_directories", "immich_user_id", "ALTER TABLE inbox_directories ADD COLUMN immich_user_id INTEGER"),
         ("jobs", "folder_tags", "ALTER TABLE jobs ADD COLUMN folder_tags BOOLEAN DEFAULT 0"),
         ("jobs", "started_at", "ALTER TABLE jobs ADD COLUMN started_at DATETIME"),
+        ("jobs", "set_id", "ALTER TABLE jobs ADD COLUMN set_id INTEGER"),
+        ("inbox_directories", "set_id", "ALTER TABLE inbox_directories ADD COLUMN set_id INTEGER"),
+        ("sorting_rules", "set_id", "ALTER TABLE sorting_rules ADD COLUMN set_id INTEGER"),
+        ("library_categories", "set_id", "ALTER TABLE library_categories ADD COLUMN set_id INTEGER"),
     ]
     for table, column, sql in migrations:
         try:
@@ -83,9 +85,54 @@ async def _migrate_columns(conn):
         # Speeds up the cleanup-stale-errors / cleanup-stuck-duplicate-winners
         # endpoints — both look up jobs by filename in batches.
         "CREATE INDEX IF NOT EXISTS idx_job_filename ON jobs(filename)",
+        "CREATE INDEX IF NOT EXISTS idx_job_set_status ON jobs(set_id, status)",
     ]
     for sql in indexes:
         await conn.execute(sqlalchemy.text(sql))
+
+    await _rebuild_library_categories(conn)
+
+
+async def _rebuild_library_categories(conn):
+    """Drop the global UNIQUE on library_categories.key, once.
+
+    Older databases made a category key unique across the whole table. With
+    sets, every set carries its own categories, so the same key exists once
+    per set. SQLite cannot drop a constraint in place; the table is rebuilt
+    with UNIQUE(set_id, key) instead, keeping every row and its id.
+    """
+    t = sqlalchemy.text
+    needs_rebuild = False
+    for idx in (await conn.execute(t("PRAGMA index_list(library_categories)"))).all():
+        # (seq, name, unique, origin, partial)
+        if not idx[2]:
+            continue
+        cols = [c[2] for c in (await conn.execute(t(f"PRAGMA index_info('{idx[1]}')"))).all()]
+        if cols == ["key"]:
+            needs_rebuild = True
+    if not needs_rebuild:
+        return
+    await conn.execute(t("""
+        CREATE TABLE library_categories_new (
+            id INTEGER NOT NULL PRIMARY KEY,
+            set_id INTEGER,
+            key TEXT NOT NULL,
+            label TEXT NOT NULL,
+            path_template TEXT NOT NULL,
+            fixed BOOLEAN,
+            immich_archive BOOLEAN DEFAULT 0,
+            position INTEGER,
+            created_at DATETIME,
+            updated_at DATETIME,
+            CONSTRAINT uq_category_set_key UNIQUE (set_id, key)
+        )"""))
+    await conn.execute(t("""
+        INSERT INTO library_categories_new
+            (id, set_id, key, label, path_template, fixed, immich_archive, position, created_at, updated_at)
+        SELECT id, set_id, key, label, path_template, fixed, immich_archive, position, created_at, updated_at
+        FROM library_categories"""))
+    await conn.execute(t("DROP TABLE library_categories"))
+    await conn.execute(t("ALTER TABLE library_categories_new RENAME TO library_categories"))
 
 
 async def init_db():
@@ -105,42 +152,6 @@ async def init_db():
             if not existing:
                 session.add(Module(name=name, enabled=enabled))
         await session.commit()
-
-    # Seed default library categories (only if table is empty)
-    async with async_session() as session:
-        from sqlalchemy import select, func
-        count = (await session.execute(select(func.count(LibraryCategory.id)))).scalar()
-        if count == 0:
-            defaults = [
-                LibraryCategory(key="personliches_foto", label="Persönliches Foto", path_template="photos/{YYYY}/{YYYY-MM}/", fixed=False, immich_archive=False, position=1),
-                LibraryCategory(key="personliches_video", label="Persönliches Video", path_template="videos/{YYYY}/{YYYY-MM}/", fixed=False, immich_archive=False, position=2),
-                LibraryCategory(key="screenshot", label="Screenshot", path_template="screenshots/{YYYY}/", fixed=False, immich_archive=False, position=3),
-                LibraryCategory(key="sourceless_foto", label="Sourceless Foto", path_template="sourceless/foto/{YYYY}/", fixed=False, immich_archive=False, position=4),
-                LibraryCategory(key="unknown", label="Unbekannt / Review", path_template="unknown/review/", fixed=True, immich_archive=False, position=5),
-                LibraryCategory(key="error", label="Fehler", path_template="error/", fixed=True, immich_archive=False, position=6),
-                LibraryCategory(key="duplicate", label="Duplikate", path_template="error/duplicates/", fixed=True, immich_archive=False, position=7),
-                LibraryCategory(key="sourceless_video", label="Sourceless Video", path_template="sourceless/video/{YYYY}/", fixed=False, immich_archive=False, position=8),
-            ]
-            session.add_all(defaults)
-            await session.commit()
-
-    # Seed default sorting rules (only if table is empty)
-    async with async_session() as session:
-        from sqlalchemy import select, func
-        count = (await session.execute(select(func.count(SortingRule.id)))).scalar()
-        if count == 0:
-            default_rules = [
-                SortingRule(position=1, condition="filename_contains", value="-WA", target_category="sourceless_foto", media_type="image"),
-                SortingRule(position=2, condition="filename_contains", value="-WA", target_category="sourceless_video", media_type="video"),
-                SortingRule(position=3, condition="filename_pattern", value=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\w+$", target_category="sourceless_foto", media_type="image"),
-                SortingRule(position=4, condition="filename_pattern", value=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\w+$", target_category="sourceless_video", media_type="video"),
-                SortingRule(position=5, condition="filename_contains", value="Screenshot", target_category="screenshot", media_type="image"),
-                SortingRule(position=6, condition="exif_expression", value='make != "" & date != ""', target_category="personliches_foto", media_type="image"),
-                SortingRule(position=7, condition="exif_expression", value='make != "" & date != ""', target_category="personliches_video", media_type="video"),
-                SortingRule(position=8, condition="exif_expression", value='has_exif == False', target_category="unknown"),
-            ]
-            session.add_all(default_rules)
-            await session.commit()
 
 
 async def seed_inbox_from_env():

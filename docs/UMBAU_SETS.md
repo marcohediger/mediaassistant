@@ -107,14 +107,26 @@ muss jede Datei dieselbe Kategorie und denselben Zielpfad ergeben wie vorher.
 
 ## Oberfläche
 
+### Ein Muster für alle Listen
+
+Verarbeitungs-Sets, Immich-Zugänge und Diagnose-Tokens sehen gleich aus und
+bedienen sich gleich:
+
+- **eine kompakte Zeile pro Eintrag** mit den wichtigsten Angaben,
+- ganz rechts ein **Stift** → Bearbeiten im Popup,
+- im Kopf des Abschnitts ein **kleines ＋-Symbol** → Anlegen im Popup.
+
+Keine offenen Formulare mehr unter den Listen.
+
+
 **In den Einstellungen** ein Abschnitt „Verarbeitungs-Sets" mit einer Liste —
 **eine Zeile pro Set**, ganz rechts ein **Stift** zum Bearbeiten im Popup:
 
 ```
+ Verarbeitungs-Sets                                                                                                  ＋
  ●  Name          Eingänge                 Zeitplan        Ziel                  Regeln  Ordner-Tags  Warteschlange   ✎
  ●  Standard      /inbox · Immich-Poll     durchgehend     Immich (global)         10       aus            3        ✎
  ○  Scanner       /inbox/scans             22:00–06:00     /library/scans           4       an             0        ✎
-                                                                                              [ + Neues Set ]
 ```
 
 - ● aktiv / ○ inaktiv. Ein Klick auf den Stift öffnet das Set in einem grossen Popup.
@@ -134,13 +146,13 @@ Benutzer werden zu **einer Liste nach demselben Muster** — eine Zeile pro Zuga
 ganz rechts der Stift, Bearbeiten im Popup:
 
 ```
+ Immich-Zugänge                                                           ＋
  Name            Immich-Konto              Verbindung   verwendet von     ✎
  Globaler User   Marco (m…@…)              ✓            Standard          ✎
  Melissa         Melissa (m…@…)            ✓            Handy Melissa     ✎
-                                                              [ + Neuer Zugang ]
 ```
 
-- **„+ Neuer Zugang"** fragt zuerst: **Globaler User** oder **User mit Name**.
+- Das **＋-Symbol** fragt zuerst: **Globaler User** oder **User mit Name**.
   Globaler User gibt es höchstens einmal; existiert er schon, ist die Wahl gesperrt.
 - In der Namensspalte steht „Globaler User" bzw. der vergebene Name.
 - „Immich-Konto" zeigt, wem der Schlüssel in Immich gehört (`/api/users/me`) —
@@ -153,6 +165,19 @@ ganz rechts der Stift, Bearbeiten im Popup:
 benannte in `immich_users`; „kein Benutzer" (`immich_user_id = NULL`) heisst global.
 Die Liste ist eine neue Ansicht, kein neues Datenmodell — Jobs und Immich-Aufrufe
 bleiben unberührt.
+
+### Diagnose-Tokens als Liste
+
+```
+ Diagnose-Tokens                                               ＋
+ Bezeichnung       Erstellt              Status               ✎
+ Token             01.09.2026 20:05      ● aktiv              ✎
+ Claude            22.10.2026 19:40      ○ aus                ✎
+```
+
+- **＋** öffnet ein Popup mit der Bezeichnung; nach dem Anlegen zeigt dasselbe
+  Popup den Token **einmalig** im Klartext zum Kopieren.
+- **Stift** öffnet ein Popup mit Bezeichnung, Ein/Aus und Löschen.
 
 ### Darstellung im Schnellmenü
 

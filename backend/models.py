@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text, Boolean, DateTime, JSON
+from sqlalchemy import Column, Integer, Text, Boolean, DateTime, JSON, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime, timezone
 
@@ -26,6 +26,7 @@ class Job(Base):
     use_immich = Column(Boolean, default=False)  # upload to Immich instead of target directory
     immich_asset_id = Column(Text)  # source asset ID when processing via Immich webhook
     immich_user_id = Column(Integer)  # FK to immich_users.id (for per-user API key)
+    set_id = Column(Integer)  # FK to processing_sets.id — rules, categories and base path come from here
     file_hash = Column(Text)  # SHA256
     phash = Column(Text)  # perceptual hash
     retry_count = Column(Integer, default=0)  # number of pipeline restart attempts
@@ -72,6 +73,7 @@ class SortingRule(Base):
     value = Column(Text, nullable=False)  # match value (e.g. "-WA", "Screenshot", ".png")
     target_category = Column(Text, nullable=False)  # photo / screenshot / sourceless / video / unknown
     media_type = Column(Text, nullable=True)  # "image" / "video" / None (= all)
+    set_id = Column(Integer)  # FK to processing_sets.id
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
@@ -79,9 +81,12 @@ class SortingRule(Base):
 
 class LibraryCategory(Base):
     __tablename__ = "library_categories"
+    # Every set carries its own categories, so a key is only unique within it.
+    __table_args__ = (UniqueConstraint("set_id", "key", name="uq_category_set_key"),)
 
     id = Column(Integer, primary_key=True)
-    key = Column(Text, nullable=False, unique=True)  # internal key (photo, video, screenshot, ...)
+    set_id = Column(Integer)  # FK to processing_sets.id
+    key = Column(Text, nullable=False)  # internal key (photo, video, screenshot, ...)
     label = Column(Text, nullable=False)  # display name
     path_template = Column(Text, nullable=False)  # e.g. "photos/{YYYY}/{YYYY-MM}/"
     fixed = Column(Boolean, default=False)  # fixed categories cannot be deleted (unknown, error, duplicate)
@@ -106,12 +111,50 @@ class InboxDirectory(Base):
     __tablename__ = "inbox_directories"
 
     id = Column(Integer, primary_key=True)
-    path = Column(Text, nullable=False, unique=True)
+    path = Column(Text, nullable=False, unique=True)  # one directory belongs to exactly one set
     label = Column(Text, nullable=False)
+    set_id = Column(Integer)  # FK to processing_sets.id
+    # folder_tags / dry_run / use_immich / immich_user_id still exist as columns
+    # in older databases. They moved to the set and are read only once, by the
+    # sets migration.
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class ProcessingSet(Base):
+    """One bundle of input, schedule, rules, folder tags and target storage."""
+    __tablename__ = "processing_sets"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(Text, nullable=False)
+    description = Column(Text, default="")
+    active = Column(Boolean, default=True)
+    position = Column(Integer, default=0)
+
+    # Schedule — same modes and value formats the global filewatcher had
+    schedule_mode = Column(Text, default="continuous")  # continuous / manual / window / scheduled
+    interval_s = Column(Integer, default=5)
+    window_start = Column(Text, default="22:00")
+    window_end = Column(Text, default="06:00")
+    scheduled_days = Column(Text, default="0,1,2,3,4")
+    scheduled_time = Column(Text, default="23:00")
+
+    # Processing
     folder_tags = Column(Boolean, default=False)
     dry_run = Column(Boolean, default=False)
-    use_immich = Column(Boolean, default=False)
-    immich_user_id = Column(Integer)  # FK to immich_users.id
-    active = Column(Boolean, default=True)
+    ocr_enabled = Column(Boolean, default=False)
+    ocr_mode = Column(Text, default="smart")  # smart = screenshots/documents only, always = every image
+
+    # Target storage
+    target_mode = Column(Text, default="library")  # library / immich
+    library_base_path = Column(Text, default="/library")  # also hosts unknown/error/duplicate folders
+    immich_user_id = Column(Integer)  # access used for uploads; NULL = global key
+
+    # Immich auto-tagging
+    immich_poll = Column(Boolean, default=False)
+    immich_poll_user_id = Column(Integer)  # access polled; NULL = global key
+    immich_last_poll = Column(Text)  # ISO timestamp cursor, per set
+
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
