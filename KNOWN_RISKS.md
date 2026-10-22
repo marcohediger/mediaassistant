@@ -280,6 +280,15 @@ Tod in die DB.
 Startpfad selbst nie. Ein Test, der `start_filewatcher` wirklich
 aufruft, hätte das in einer Sekunde gefunden.
 
+### S-8 — Unfixierte Abhängigkeiten — ✅ festgenagelt (v2.32.25)
+**Datei:** `backend/requirements.txt`, `backend/constraints.txt`
+
+`requirements.txt` gab nur Untergrenzen vor; jeder Build zog die neuesten
+Releases. v2.32.24 bekam SQLAlchemy 2.1 ohne `greenlet` und startete
+nicht. Seit v2.32.25 legt `constraints.txt` jede Version fest. Aufgefallen
+ist es am Startpfad-Test des veröffentlichten Images (S-5) — vor dem
+Update der Produktion.
+
 ### S-5 — Ein Release kann ausgeliefert werden, ohne startfähig zu sein
 **Datei:** `backend/version.py` — ✅ Wache eingebaut (v2.32.23)
 
