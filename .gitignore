@@ -6,3 +6,7 @@ test_inbox/
 test_library/
 .env
 docker-compose.local.yml
+# Local Immich test instance (moved into the repo folder): photos and the
+# Postgres data directory must never reach the public repository.
+Bilder/
+immich/
