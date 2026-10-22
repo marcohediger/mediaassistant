@@ -1857,10 +1857,18 @@ dialog.modal::backdrop { background: var(--ui-backdrop); }
 .choice-block small { display: block; color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; margin-top: 0.15rem; }
 
 /* ── Navigation on narrow screens ───────────────────────────────────
-   Row 1: logo left, user + quick menu right. Row 2: the page links as a
-   swipeable strip. Before, the links ran off the right edge and pushed
-   the quick menu out of reach entirely. */
-@media (max-width: 760px) {
+   Row 1: logo left, user + menus right. Row 2: the page links as a
+   swipeable strip. One row needs about 870 px (logo, five links, three
+   round buttons); below that the links slid under the buttons. The
+   breakpoint keeps a margin, and the strip scrolls instead of overlapping
+   should a longer translation or the SSO name still not fit. */
+.nav-links { overflow-x: auto; scrollbar-width: none; }
+.nav-links::-webkit-scrollbar { display: none; }
+.nav-links a { white-space: nowrap; }
+@media (max-width: 1180px) {
+    .nav-user span { display: none; }
+}
+@media (max-width: 960px) {
     .navbar { flex-wrap: wrap; padding: 0.6rem 1rem 0.4rem; gap: 0.35rem 1rem; }
     .nav-brand { order: 0; }
     .nav-logo { height: 46px; }
