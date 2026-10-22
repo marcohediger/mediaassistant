@@ -31,7 +31,7 @@
     </div>
     <div class="detail-card">
         <h3>{{ t.job_detail.status }}</h3>
-        <span class="status-badge status-{{ job.status }}" data-field="status">{{ job.status }}</span>{% if job.dry_run %} <span class="status-badge status-preview" style="background: var(--accent-blue, #0078d4); color: #fff; font-size: 0.7rem;">Preview</span>{% endif %}
+        <span class="cell-status"><span class="status-badge status-{{ job.status }}" data-field="status">{{ job.status }}</span>{% if job.dry_run %}<span class="dry-run-mark with-text" title="{{ t.sets.dry_run_hint }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>{{ t.sets.dry_run_short }}</span>{% endif %}</span>
     </div>
     <div class="detail-card">
         <h3>{{ t.job_detail.current_step }}</h3>
@@ -53,8 +53,9 @@
 
 {% if job.error_message %}
 <div class="detail-section">
-    <h2>{{ t.job_detail.error }}</h2>
-    <div class="alert alert-error" style="white-space: pre-wrap; font-family: monospace; font-size: 0.85rem;">{{ job.error_message }}</div>
+    {% set failed = job.status == 'error' %}
+    <h2 data-label-error="{{ t.job_detail.error }}" data-label-note="{{ t.job_detail.note }}">{{ t.job_detail.error if failed else t.job_detail.note }}</h2>
+    <div class="alert {{ 'alert-error' if failed else 'alert-info' }} job-message" data-field="error_message">{{ job.error_message }}</div>
 </div>
 {% endif %}
 

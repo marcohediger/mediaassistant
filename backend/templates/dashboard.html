@@ -178,7 +178,7 @@ setInterval(refreshPipelineStatus, 5000);
                 <td>{{ job.filename }}</td>
                 <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
                 <td>{{ job.current_step or '—' }}</td>
-                <td class="cell-error">{{ job.error_message or '' }}</td>
+                <td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }}">{{ job.error_message or '' }}</td>
                 <td>{{ job.updated_at.strftime('%d.%m. %H:%M:%S') if job.updated_at else '—' }}</td>
             </tr>
             {% endfor %}

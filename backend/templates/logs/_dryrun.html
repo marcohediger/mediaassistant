@@ -1,28 +1,26 @@
-{% extends "base.html" %}
-{% block title %}{{ t.dryrun.title }} — MediaAssistant{% endblock %}
-{% block content %}
-<h1>{{ t.dryrun.title }}</h1>
-<p class="section-note">{{ t.dryrun.subtitle }} — {{ t.dryrun.generated }}: {{ generated_at }}</p>
+{# Third tab of the logs page: summary of every job from a set in dry-run
+   mode. Before, this was a page of its own behind a button. #}
+<p class="section-note">{{ t.dryrun.subtitle }} — {{ t.dryrun.generated }}: {{ report.generated_at }}</p>
 
 <div class="stats-grid" style="margin-bottom: 2rem;">
     <div class="stat-card">
-        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-value">{{ report.stats.total }}</div>
         <div class="stat-label">{{ t.dashboard.total }}</div>
     </div>
     <div class="stat-card stat-success">
-        <div class="stat-value">{{ stats.done }}</div>
+        <div class="stat-value">{{ report.stats.done }}</div>
         <div class="stat-label">{{ t.dashboard.done }}</div>
     </div>
     <div class="stat-card stat-error">
-        <div class="stat-value">{{ stats.errors }}</div>
+        <div class="stat-value">{{ report.stats.errors }}</div>
         <div class="stat-label">{{ t.dashboard.errors }}</div>
     </div>
     <div class="stat-card">
-        <div class="stat-value">{{ stats.duplicates }}</div>
+        <div class="stat-value">{{ report.stats.duplicates }}</div>
         <div class="stat-label">{{ t.dashboard.duplicates }}</div>
     </div>
     <div class="stat-card">
-        <div class="stat-value">{{ stats.review }}</div>
+        <div class="stat-value">{{ report.stats.review }}</div>
         <div class="stat-label">Review</div>
     </div>
 </div>
@@ -37,7 +35,7 @@
             </tr>
         </thead>
         <tbody>
-            {% for cat, count in categories.items() %}
+            {% for cat, count in report.categories.items() %}
             <tr>
                 <td>{{ cat }}</td>
                 <td>{{ count }}</td>
@@ -47,9 +45,9 @@
     </table>
 </div>
 
-{% if by_inbox %}
+{% if report.by_inbox %}
 <h2>{{ t.dryrun.by_inbox }}</h2>
-{% for inbox_label, inbox_stats in by_inbox.items() %}
+{% for inbox_label, inbox_stats in report.by_inbox.items() %}
 <h3>{{ inbox_label }} ({{ inbox_stats.total }})</h3>
 <div class="log-table-wrap">
     <table class="log-table">
@@ -85,7 +83,7 @@
             </tr>
         </thead>
         <tbody>
-            {% for job in jobs %}
+            {% for job in report.jobs %}
             <tr class="log-row log-{{ job.status }}">
                 <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key }}</code></a></td>
                 <td>{{ job.filename }}</td>
@@ -98,7 +96,7 @@
     </table>
 </div>
 
-{% if errors %}
+{% if report.errors %}
 <h2>{{ t.dryrun.errors }}</h2>
 <div class="log-table-wrap">
     <table class="log-table">
@@ -110,7 +108,7 @@
             </tr>
         </thead>
         <tbody>
-            {% for job in errors %}
+            {% for job in report.errors %}
             <tr class="log-row log-error">
                 <td><a href="/logs/job/{{ job.debug_key }}" class="log-link-key"><code>{{ job.debug_key }}</code></a></td>
                 <td>{{ job.filename }}</td>
@@ -121,8 +119,3 @@
     </table>
 </div>
 {% endif %}
-
-<div class="log-link" style="margin-top: 2rem;">
-    <a href="/logs?tab=jobs" class="btn btn-small btn-secondary">{{ t.dryrun.back_to_logs }}</a>
-</div>
-{% endblock %}

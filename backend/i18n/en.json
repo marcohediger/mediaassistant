@@ -97,7 +97,8 @@
     "no_entries": "No entries found.",
     "prev": "Previous",
     "next": "Next",
-    "page": "Page"
+    "page": "Page",
+    "dryrun_tab": "Dry run"
   },
   "job_detail": {
     "back": "Back",
@@ -120,7 +121,8 @@
     "completed": "Completed",
     "duration": "Processing time",
     "hashes": "Hashes",
-    "not_found": "Not found"
+    "not_found": "Not found",
+    "note": "Note"
   },
   "steps": {
     "IA-01": "Read EXIF",
@@ -474,7 +476,7 @@
   },
   "dryrun": {
     "title": "Dry-Run Report",
-    "subtitle": "Preview of all files in dry-run mode",
+    "subtitle": "Every file from sets in dry-run mode — nothing was moved, uploaded or written",
     "generated": "Generated",
     "by_category": "By Category",
     "by_inbox": "By Inbox Directory",
@@ -483,9 +485,7 @@
     "count": "Count",
     "target_path": "Target Path",
     "errors": "Errors",
-    "error_message": "Error Message",
-    "back_to_logs": "Back to Logs",
-    "report_button": "Dry-Run Report"
+    "error_message": "Error Message"
   },
   "common": {
     "yes": "Yes",
