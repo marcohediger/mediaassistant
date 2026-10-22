@@ -1,0 +1,607 @@
+{#- Popups of the settings page. They live outside the settings form and save
+    through their own JSON endpoints — see static/js/settings.js. Styles in
+    static/css/editor.css. -#}
+
+{%- macro icon(name, size=16) -%}
+{%- set paths = {
+    'close': '<path d="M18 6 6 18M6 6l12 12"/>',
+    'general': '<path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+    'inputs': '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    'schedule': '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    'rules': '<path d="M3 6h18M7 12h10M10 18h4"/>',
+    'folder': '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    'ocr': '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8h8M7 12h10M7 16h6"/>',
+    'metadata': '<path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+    'target': '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/>',
+    'image': '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
+    'plus': '<path d="M12 5v14M5 12h14"/>',
+    'trash': '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>',
+    'copy': '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+    'info': '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+    'alert': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/>',
+    'error': '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+    'chevron': '<path d="m6 9 6 6 6-6"/>',
+    'plug': '<path d="M12 22v-5M9 8V2M15 8V2M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>',
+    'key': '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4M21 2l-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>',
+} -%}
+<svg class="ico" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">{{ paths[name] | safe }}</svg>
+{%- endmacro -%}
+
+{%- macro close_button(label) -%}
+<button type="button" class="icon-btn modal-close" data-close aria-label="{{ label }}" title="{{ label }}">{{ icon('close', 18) }}</button>
+{%- endmacro -%}
+
+{#- A row of an option list: title and description on the left, a switch on
+    the right. The whole row toggles the switch. -#}
+{%- macro option_switch(id, attrs, title, desc='', row_id='') -%}
+<label class="option-row"{% if row_id %} id="{{ row_id }}"{% endif %}>
+    <span class="option-text">
+        <span class="option-title" id="{{ id }}-lbl">{{ title }}</span>
+        {%- if desc %}
+        <span class="option-desc" id="{{ id }}-desc">{{ desc }}</span>
+        {%- endif %}
+    </span>
+    <span class="sw"><input type="checkbox" id="{{ id }}" {{ attrs | safe }} aria-labelledby="{{ id }}-lbl"{% if desc %} aria-describedby="{{ id }}-desc"{% endif %}><span class="sw-track" aria-hidden="true"></span></span>
+</label>
+{%- endmacro -%}
+
+{#- A selectable card in a radio group: radio circle, title, description. -#}
+{%- macro choice_card(name, value, attrs, title, desc='') -%}
+<label class="choice-card">
+    <input type="radio" name="{{ name }}" value="{{ value }}" {{ attrs | safe }}>
+    <span class="choice-card-body">
+        <span class="choice-radio" aria-hidden="true"></span>
+        <span class="choice-card-text">
+            <span class="choice-card-title">{{ title }}</span>
+            {%- if desc %}
+            <span class="choice-card-desc">{{ desc }}</span>
+            {%- endif %}
+        </span>
+    </span>
+</label>
+{%- endmacro -%}
+
+{%- macro error_banner() -%}
+<div class="modal-error" role="alert" hidden>{{ icon('error', 16) }}<span class="modal-error-text"></span></div>
+{%- endmacro -%}
+
+{%- macro time_field(id, field, label, when) -%}
+<div class="field" data-when-mode="{{ when }}">
+    <label class="field-label" for="{{ id }}">{{ label }}</label>
+    <span class="input-icon">{{ icon('schedule', 15) }}<input type="text" id="{{ id }}" class="time-input" data-field="{{ field }}" data-time
+          inputmode="numeric" maxlength="5" placeholder="HH:MM" autocomplete="off" spellcheck="false"></span>
+</div>
+{%- endmacro -%}
+
+<!-- ── Set editor ─────────────────────────────────────────────────────── -->
+<dialog id="dlg-set" class="modal modal-editor" aria-labelledby="dlg-set-title">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <h2 id="dlg-set-title" class="modal-title">
+                <span class="modal-eyebrow">{{ t.sets.edit_title }}</span>
+                <span class="modal-title-text" id="dlg-set-name"></span>
+            </h2>
+            <div class="modal-badges" id="set-badges" aria-live="polite"></div>
+            {{ close_button(t.sets.close) }}
+        </header>
+
+        <div class="editor">
+            <nav class="editor-nav">
+                <div class="editor-tabs" role="tablist" aria-orientation="vertical" aria-label="{{ t.sets.edit_title }}">
+                    {%- for key, label in [('general', t.sets.tab_general), ('inputs', t.sets.tab_inputs), ('schedule', t.sets.tab_schedule), ('rules', t.sets.tab_rules), ('folder', t.sets.tab_folder_tags), ('ocr', t.sets.tab_ocr), ('metadata', t.sets.tab_metadata), ('target', t.sets.tab_target)] %}
+                    <button type="button" role="tab" class="editor-tab" id="tabbtn-{{ key }}" data-tab="{{ key }}"
+                            aria-controls="tab-{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}"
+                            tabindex="{{ '0' if loop.first else '-1' }}">
+                        {{ icon(key, 17) }}<span class="editor-tab-label">{{ label }}</span><span class="editor-tab-meta" data-meta="{{ key }}" aria-hidden="true"></span>
+                    </button>
+                    {%- endfor %}
+                </div>
+            </nav>
+
+            <div class="editor-main">
+                {{ error_banner() }}
+                <div class="editor-scroll">
+
+            <!-- General -->
+            <section class="tab-panel" role="tabpanel" id="tab-general" aria-labelledby="tabbtn-general">
+                <header class="panel-head">
+                    <h3>{{ t.sets.tab_general }}</h3>
+                    <p>{{ t.sets.sec_general_desc | default('Name, Beschreibung und ob dieses Set Dateien verarbeitet.') }}</p>
+                </header>
+                <div class="panel-body">
+                    <div class="field-grid field-grid-name">
+                        <div class="field">
+                            <label class="field-label" for="set-name">{{ t.sets.name }}</label>
+                            <input type="text" id="set-name" data-field="name" maxlength="80" autocomplete="off">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="set-description">{{ t.sets.description }}</label>
+                            <input type="text" id="set-description" data-field="description" maxlength="200" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="option-list">
+                        {{ option_switch('set-active', 'data-field="active"', t.sets.active,
+                                         t.sets.active_hint | default('Nur aktive Sets lesen ihre Eingänge ein. Ein inaktives Set behält seine Einstellungen.')) }}
+                        {{ option_switch('set-dry-run', 'data-field="dry_run"', t.sets.dry_run_short, t.sets.dry_run_hint) }}
+                    </div>
+                </div>
+            </section>
+
+            <!-- Inputs: directories and the (single) Immich input in one list -->
+            <section class="tab-panel" role="tabpanel" id="tab-inputs" aria-labelledby="tabbtn-inputs" hidden>
+                <header class="panel-head">
+                    <h3>{{ t.sets.tab_inputs }}</h3>
+                    <p>{{ t.sets.sec_inputs_desc | default('Woher dieses Set seine Dateien bekommt: überwachte Verzeichnisse und neue Uploads aus Immich.') }}</p>
+                </header>
+                <div class="panel-body">
+                    <div class="gtable gt-inputs">
+                        <div class="gt-row gt-head" aria-hidden="true">
+                            <span>{{ t.sets.col_type | default('Typ') }}</span><span>{{ t.sets.col_source | default('Quelle') }}</span><span>{{ t.sets.label }}</span><span>{{ t.sets.col_status }}</span><span></span>
+                        </div>
+                        <div class="gt-body" id="set-inputs" role="list" aria-label="{{ t.sets.tab_inputs }}"></div>
+                        <p class="gt-empty" id="set-inputs-empty" hidden>{{ t.sets.inputs_empty | default('Dieses Set hat noch keinen Eingang. Füge ein Verzeichnis oder Immich hinzu.') }}</p>
+                        <div class="gt-foot">
+                            <div class="add-menu">
+                                <button type="button" class="btn-add" id="input-add" aria-haspopup="menu" aria-expanded="false" aria-controls="input-add-menu">{{ icon('plus', 15) }}<span>{{ t.sets.add_input | default('Eingang hinzufügen') }}</span>{{ icon('chevron', 14) }}</button>
+                                <div class="menu" id="input-add-menu" role="menu" aria-labelledby="input-add" hidden>
+                                    <button type="button" role="menuitem" class="menu-item" data-add-input="directory" tabindex="-1">
+                                        <span class="menu-ico">{{ icon('folder', 17) }}</span>
+                                        <span class="menu-text"><span class="menu-title">{{ t.sets.input_dir | default('Verzeichnis') }}</span>
+                                        <span class="menu-desc">{{ t.sets.input_dir_desc | default('Ein Ordner im Container wird auf neue Dateien überwacht.') }}</span></span>
+                                    </button>
+                                    <button type="button" role="menuitem" class="menu-item" data-add-input="immich" tabindex="-1">
+                                        <span class="menu-ico">{{ icon('image', 17) }}</span>
+                                        <span class="menu-text"><span class="menu-title">{{ t.sets.input_immich | default('Immich') }}</span>
+                                        <span class="menu-desc" data-when-free>{{ t.sets.input_immich_desc | default('Neue Uploads in Immich (z. B. vom Handy) werden abgeholt und getaggt.') }}</span>
+                                        <span class="menu-desc" data-when-taken hidden>{{ t.sets.input_immich_exists | default('Dieses Set hat bereits einen Immich-Eingang.') }}</span></span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Schedule -->
+            <section class="tab-panel" role="tabpanel" id="tab-schedule" aria-labelledby="tabbtn-schedule" hidden>
+                <header class="panel-head">
+                    <h3>{{ t.sets.tab_schedule }}</h3>
+                    <p>{{ t.sets.sec_schedule_desc | default('Wann dieses Set seine Eingänge prüft und neue Dateien verarbeitet.') }}</p>
+                </header>
+                <div class="panel-body">
+                    <fieldset class="field">
+                        <legend class="field-label">{{ t.settings.schedule_mode }}</legend>
+                        <div class="choice-cards cards-4">
+                            {{ choice_card('set_schedule_mode', 'continuous', 'data-radio-field="schedule_mode"', t.sets.mode_continuous | default('Durchgehend'),
+                                           t.sets.mode_continuous_desc | default('Neue Dateien werden laufend erkannt, im angegebenen Intervall.')) }}
+                            {{ choice_card('set_schedule_mode', 'window', 'data-radio-field="schedule_mode"', t.settings.window,
+                                           t.sets.mode_window_desc | default('Nur zwischen „von“ und „bis“, z. B. nachts.')) }}
+                            {{ choice_card('set_schedule_mode', 'scheduled', 'data-radio-field="schedule_mode"', t.settings.scheduled,
+                                           t.sets.mode_scheduled_desc | default('An ausgewählten Wochentagen ab einer Uhrzeit, mindestens eine Stunde lang.')) }}
+                            {{ choice_card('set_schedule_mode', 'manual', 'data-radio-field="schedule_mode"', t.sets.mode_manual | default('Manuell'),
+                                           t.sets.mode_manual_desc | default('Nur auf Knopfdruck („Jetzt scannen“).')) }}
+                        </div>
+                    </fieldset>
+
+                    <div class="field-grid field-grid-compact" data-when-mode="continuous window scheduled">
+                        {{ time_field('set-wstart', 'window_start', t.settings.window_start, 'window') }}
+                        {{ time_field('set-wend', 'window_end', t.settings.window_end, 'window') }}
+                        {{ time_field('set-stime', 'scheduled_time', t.settings.scheduled_time, 'scheduled') }}
+                        <div class="field" data-when-mode="continuous window">
+                            <label class="field-label" for="set-interval">{{ t.settings.interval }}</label>
+                            <input type="number" id="set-interval" data-field="interval_s" min="1" inputmode="numeric">
+                        </div>
+                    </div>
+
+                    <fieldset class="field" data-when-mode="scheduled">
+                        <legend class="field-label">{{ t.settings.scheduled_days }}</legend>
+                        <div class="day-chips" id="set-days">
+                            {%- for day_val, day_label in [('0', t.settings.day_mon), ('1', t.settings.day_tue), ('2', t.settings.day_wed), ('3', t.settings.day_thu), ('4', t.settings.day_fri), ('5', t.settings.day_sat), ('6', t.settings.day_sun)] %}
+                            <label class="day-chip"><input type="checkbox" value="{{ day_val }}"><span>{{ day_label }}</span></label>
+                            {%- endfor %}
+                        </div>
+                    </fieldset>
+
+                    <div class="callout" data-when-mode="manual">
+                        {{ icon('info', 16) }}<p>{{ t.settings.manual_hint }}</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sorting rules -->
+            <section class="tab-panel" role="tabpanel" id="tab-rules" aria-labelledby="tabbtn-rules" hidden>
+                <header class="panel-head">
+                    <h3>{{ t.sets.tab_rules }}</h3>
+                    <p>{{ t.sets.sec_rules_desc | default('Die Regeln werden von oben nach unten geprüft — die erste passende bestimmt die Kategorie.') }}</p>
+                </header>
+                <div class="panel-body">
+                    <div class="gtable gt-rules">
+                        <div class="gt-row gt-head" aria-hidden="true">
+                            <span class="center">#</span><span>{{ t.sets.condition }}</span><span>{{ t.sets.value }}</span><span>{{ t.sets.target }}</span><span>{{ t.sets.media }}</span><span>{{ t.sets.col_status }}</span><span></span>
+                        </div>
+                        <div class="gt-body" id="set-rules" role="list" aria-label="{{ t.sets.tab_rules }}"></div>
+                        <p class="gt-empty" id="set-rules-empty" hidden>{{ t.sets.no_rules | default('Keine Regeln — Dateien landen in der Kategorie «Unbekannt».') }}</p>
+                        <div class="gt-foot">
+                            <button type="button" class="btn-add" data-add="rule">{{ icon('plus', 15) }}<span>{{ t.settings.add_rule }}</span></button>
+                        </div>
+                    </div>
+                    <details class="disclosure">
+                        <summary>{{ icon('info', 16) }}<span>{{ t.settings.sorting_rules_help_title }}</span><span class="disclosure-chev">{{ icon('chevron', 16) }}</span></summary>
+                        <div class="disclosure-body">
+                            <p>{{ t.settings.sorting_rules_hint }}</p>
+                            <div class="help-text">{{ t.settings.sorting_rules_help | safe }}</div>
+                        </div>
+                    </details>
+                </div>
+            </section>
+
+            <!-- Folder tags -->
+            <section class="tab-panel" role="tabpanel" id="tab-folder" aria-labelledby="tabbtn-folder" hidden>
+                <header class="panel-head">
+                    <h3>{{ t.sets.tab_folder_tags }}</h3>
+                    <p>{{ t.settings.ordner_tags_desc }}</p>
+                </header>
+                <div class="panel-body">
+                    <div class="option-list">
+                        {{ option_switch('set-folder-tags', 'data-field="folder_tags"', t.sets.folder_tags_enable | default('Ordner-Tags für dieses Set erzeugen')) }}
+                    </div>
+                    <div class="callout">
+                        {{ icon('info', 16) }}
+                        <div>
+                            <p class="callout-title">{{ t.settings.ordner_tags_detail_title }}</p>
+                            <div class="help-text">{{ t.settings.ordner_tags_detail | safe }}</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- OCR -->
+            <section class="tab-panel" role="tabpanel" id="tab-ocr" aria-labelledby="tabbtn-ocr" hidden>
+                <header class="panel-head">
+                    <h3>{{ t.sets.tab_ocr }}</h3>
+                    <p>{{ t.sets.sec_ocr_desc | default('Texterkennung in Bildern über das KI-Backend.') }}</p>
+                </header>
+                <div class="panel-body">
+                    <div class="option-list">
+                        {{ option_switch('set-ocr', 'data-field="ocr_enabled"', t.sets.ocr_enable | default('OCR für dieses Set aktivieren'), t.settings.ocr_desc) }}
+                    </div>
+                    <fieldset class="field" data-depends="ocr_enabled">
+                        <legend class="field-label">{{ t.settings.ocr_mode }}</legend>
+                        <div class="choice-cards cards-2">
+                            {{ choice_card('set_ocr_mode', 'smart', 'data-radio-field="ocr_mode"', t.sets.ocr_smart_title | default('Nur Screenshots & Dokumente'),
+                                           t.sets.ocr_smart_desc | default('Die KI erkennt Screenshots und Dokumente und liest nur dort Text; normale Fotos werden übersprungen.')) }}
+                            {{ choice_card('set_ocr_mode', 'always', 'data-radio-field="ocr_mode"', t.sets.ocr_always_title | default('Alle Bilder'),
+                                           t.sets.ocr_always_desc | default('Liest Text in jedem Bild, auch auf Schildern, Plakaten oder Etiketten. Langsamer.')) }}
+                        </div>
+                        <p class="field-hint field-hint-after">{{ t.settings.ocr_hint2 }}</p>
+                    </fieldset>
+                </div>
+            </section>
+
+            <!-- Metadata -->
+            <section class="tab-panel" role="tabpanel" id="tab-metadata" aria-labelledby="tabbtn-metadata" hidden>
+                <header class="panel-head">
+                    <h3>{{ t.sets.tab_metadata }}</h3>
+                    <p>{{ t.sets.sec_metadata_desc | default('Wie Keywords und Beschreibung zur Datei kommen.') }}</p>
+                </header>
+                <div class="panel-body">
+                    <fieldset class="field">
+                        <legend class="field-label">{{ t.settings.metadata_write_mode }}</legend>
+                        <div class="choice-cards cards-2">
+                            {{ choice_card('set_write_mode', 'direct', 'data-radio-field="metadata_write_mode"', t.settings.metadata_write_direct, t.settings.metadata_write_direct_hint) }}
+                            {{ choice_card('set_write_mode', 'sidecar', 'data-radio-field="metadata_write_mode"', t.settings.metadata_write_sidecar, t.settings.metadata_write_sidecar_hint) }}
+                        </div>
+                    </fieldset>
+                    <div class="option-list">
+                        {{ option_switch('set-google-json', 'data-field="google_json"', t.settings.google_json_enabled, t.settings.google_json_desc) }}
+                    </div>
+                </div>
+            </section>
+
+            <!-- Target storage -->
+            <section class="tab-panel" role="tabpanel" id="tab-target" aria-labelledby="tabbtn-target" hidden>
+                <header class="panel-head">
+                    <h3>{{ t.sets.tab_target }}</h3>
+                    <p>{{ t.sets.sec_target_desc | default('Wohin verarbeitete Dateien gehen und wie sie einsortiert werden.') }}</p>
+                </header>
+                <div class="panel-body">
+                    <fieldset class="field">
+                        <legend class="field-label">{{ t.sets.target_mode }}</legend>
+                        <div class="choice-cards cards-2">
+                            {{ choice_card('set_target_mode', 'library', 'data-radio-field="target_mode"', t.sets.target_library,
+                                           t.sets.target_library_desc | default('Dateien werden nach Kategorie in den Ablage-Ordner einsortiert.')) }}
+                            {{ choice_card('set_target_mode', 'immich', 'data-radio-field="target_mode"', t.sets.target_immich,
+                                           t.sets.target_immich_desc | default('Dateien werden zu Immich hochgeladen. Lokal bleiben nur Fehler und Duplikate.')) }}
+                        </div>
+                    </fieldset>
+
+                    <div class="field field-narrow target-access" data-when-target="immich">
+                        <label class="field-label" for="set-target-access">{{ t.sets.access }}</label>
+                        <select id="set-target-access" data-field="immich_user_id" data-access-select></select>
+                    </div>
+
+                    {#- One base-path field for both modes; CSS moves it below the categories for Immich. #}
+                    <div class="field field-narrow target-base">
+                        <label class="field-label" for="set-base">
+                            <span data-when-target="library">{{ t.sets.base_path_library | default('Ablage-Ordner') }}</span>
+                            <span data-when-target="immich">{{ t.sets.base_path_immich | default('Ordner für Fehler und Duplikate') }}</span>
+                        </label>
+                        <input type="text" id="set-base" class="mono" data-field="library_base_path" autocomplete="off" spellcheck="false" aria-describedby="set-base-hint set-base-hint-immich">
+                        <p class="field-note warn" id="set-base-missing" hidden>{{ icon('alert', 14) }}<span>{{ t.sets.base_path_missing }}</span></p>
+                        <p class="field-hint" id="set-base-hint" data-when-target="library">{{ t.sets.base_path_hint }}</p>
+                        <p class="field-hint" id="set-base-hint-immich" data-when-target="immich">{{ t.sets.base_path_immich_hint | default('Hochgeladene Dateien landen in Immich. Hier bleiben nur Dateien, die nicht verarbeitet werden konnten (error/) und erkannte Duplikate (error/duplicates/).') }}</p>
+                    </div>
+
+                    <div class="block target-cats">
+                        <div class="block-head">
+                            <h4>{{ t.sets.categories }}</h4>
+                            <p data-when-target="library">{{ t.sets.categories_desc | default('Ziel-Ordner je Kategorie, relativ zum Ablage-Ordner. Die Sortier-Regeln wählen die Kategorie.') }}</p>
+                            <p data-when-target="immich">{{ t.sets.categories_desc_immich | default('Die Sortier-Regeln wählen die Kategorie. In Immich entscheidet sie nur, ob eine Datei im Archiv landet.') }}</p>
+                        </div>
+                        <div class="gtable gt-cats" id="set-categories-table">
+                            <div class="gt-row gt-head" aria-hidden="true">
+                                <span>{{ t.sets.cat_name }}</span><span class="h-path">{{ t.sets.path }}</span><span class="h-archive">{{ t.sets.col_archive | default('Immich-Archiv') }}</span><span></span>
+                            </div>
+                            <div class="gt-body" id="set-categories" role="list" aria-label="{{ t.sets.categories }}"></div>
+                            <div class="gt-foot">
+                                <button type="button" class="btn-add" data-add="category">{{ icon('plus', 15) }}<span>{{ t.settings.add_category }}</span></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+                </div>
+            </div>
+        </div>
+
+        <footer class="modal-foot">
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost btn-ghost-danger" data-set-action="delete" title="{{ t.settings.delete }}">{{ icon('trash', 16) }}<span class="btn-label">{{ t.settings.delete }}</span></button>
+                <button type="button" class="btn btn-ghost" data-set-action="duplicate" title="{{ t.sets.duplicate }}">{{ icon('copy', 16) }}<span class="btn-label">{{ t.sets.duplicate }}</span></button>
+                <span class="spacer"></span>
+                <span class="foot-status" id="set-dirty" hidden><span class="foot-status-dot" aria-hidden="true"></span>{{ t.sets.unsaved | default('Nicht gespeicherte Änderungen') }}</span>
+                <button type="button" class="btn btn-secondary" data-close>{{ t.sets.cancel }}</button>
+                <button type="button" class="btn btn-primary" data-set-action="save">{{ t.settings.save }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
+
+<!-- ── Item popup on top of the set editor: one form per list ──────────
+     Changes land in the editor state only; the set's "Speichern" saves them. -->
+<dialog id="dlg-item" class="modal modal-item" aria-labelledby="dlg-item-title">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <div class="modal-title-wrap">
+                <h2 id="dlg-item-title" class="modal-title"></h2>
+            </div>
+            {{ close_button(t.sets.close) }}
+        </header>
+        <div class="modal-body">
+            <!-- Directory input -->
+            <div class="item-form" data-form="directory" hidden>
+                <div class="field">
+                    <label class="field-label" for="item-dir-path">{{ t.sets.path }}</label>
+                    <input type="text" id="item-dir-path" class="mono" placeholder="/inbox/handy" autocomplete="off" spellcheck="false" aria-describedby="item-dir-hint">
+                    <p class="field-note warn" id="item-dir-missing" hidden>{{ icon('alert', 14) }}<span>{{ t.sets.path_missing }}</span></p>
+                    <p class="field-hint" id="item-dir-hint">{{ t.sets.dir_path_hint | default('Absoluter Pfad im Container. Ein Verzeichnis gehört immer zu genau einem Set.') }}</p>
+                </div>
+                <div class="field">
+                    <label class="field-label" for="item-dir-label">{{ t.sets.label }}</label>
+                    <input type="text" id="item-dir-label" placeholder="Handy" maxlength="60" autocomplete="off">
+                </div>
+                <div class="option-list">
+                    {{ option_switch('item-dir-active', '', t.sets.active) }}
+                </div>
+            </div>
+
+            <!-- Immich input -->
+            <div class="item-form" data-form="immich" hidden>
+                <div class="field">
+                    <label class="field-label" for="item-immich-access">{{ t.sets.access }}</label>
+                    <select id="item-immich-access" data-access-select aria-describedby="item-immich-poll"></select>
+                    <p class="field-hint" id="item-immich-poll"></p>
+                </div>
+                <div class="option-list">
+                    {{ option_switch('item-immich-active', '', t.settings.immich_poll_active, t.settings.immich_poll_desc) }}
+                </div>
+            </div>
+
+            <!-- Sorting rule -->
+            <div class="item-form" data-form="rule" hidden>
+                <fieldset class="field">
+                    <legend class="field-label">{{ t.sets.condition }}</legend>
+                    <div class="segmented-group seg-4" id="item-rule-cond">
+                        {%- for value, label in [('filename_contains', t.settings.rule_filename_contains), ('filename_pattern', t.sets.cond_pattern | default('Dateiname-Muster')), ('exif_expression', t.sets.cond_exif | default('EXIF-Ausdruck')), ('extension', t.settings.rule_extension)] %}
+                        <label class="seg"><input type="radio" name="item_rule_cond" value="{{ value }}"><span>{{ label }}</span></label>
+                        {%- endfor %}
+                    </div>
+                </fieldset>
+                <div class="field">
+                    <label class="field-label" for="item-rule-value">{{ t.sets.value }}</label>
+                    <input type="text" id="item-rule-value" class="mono" autocomplete="off" spellcheck="false" aria-describedby="item-rule-hint">
+                    <p class="field-hint" id="item-rule-hint">
+                        <span data-hint="filename_contains">{{ t.sets.hint_contains | default('Text, der im Dateinamen vorkommen muss (Gross/Klein egal).') }} {{ t.sets.example | default('Beispiel') }}: <code>-WA</code></span>
+                        <span data-hint="filename_pattern">{{ t.sets.hint_pattern | default('Regulärer Ausdruck, geprüft auf den ganzen Dateinamen (Gross/Klein egal).') }} {{ t.sets.example | default('Beispiel') }}: <code>^IMG_\d{8}_\d{6}</code></span>
+                        <span data-hint="exif_expression">{{ t.sets.hint_exif | default('Bedingungen auf EXIF-Feldern, verknüpft mit & (UND) oder | (ODER).') }} {{ t.sets.example | default('Beispiel') }}: <code>make != "" &amp; date != ""</code></span>
+                        <span data-hint="extension">{{ t.sets.hint_extension | default('Eine oder mehrere Endungen, kommagetrennt, mit oder ohne Punkt.') }} {{ t.sets.example | default('Beispiel') }}: <code>.mp4,.mov</code></span>
+                    </p>
+                </div>
+                <div class="field-grid field-grid-rule">
+                    <div class="field">
+                        <label class="field-label" for="item-rule-target">{{ t.sets.target }}</label>
+                        <select id="item-rule-target"></select>
+                    </div>
+                    <fieldset class="field">
+                        <legend class="field-label">{{ t.sets.media }}</legend>
+                        <div class="segmented-group seg-3" id="item-rule-media">
+                            {%- for value, label in [('', t.settings.rule_media_all), ('image', t.settings.rule_media_image), ('video', t.settings.rule_media_video)] %}
+                            <label class="seg"><input type="radio" name="item_rule_media" value="{{ value }}"><span>{{ label }}</span></label>
+                            {%- endfor %}
+                        </div>
+                    </fieldset>
+                </div>
+                <div class="option-list">
+                    {{ option_switch('item-rule-active', '', t.sets.active) }}
+                </div>
+            </div>
+
+            <!-- Category -->
+            <div class="item-form" data-form="category" hidden>
+                <div class="field">
+                    <label class="field-label" for="item-cat-label">{{ t.sets.cat_name }}</label>
+                    <input type="text" id="item-cat-label" maxlength="60" autocomplete="off">
+                </div>
+                <div class="field" id="item-cat-path-field">
+                    <label class="field-label" for="item-cat-path">{{ t.sets.path }}</label>
+                    <input type="text" id="item-cat-path" class="mono" placeholder="ordner/{YYYY}/" autocomplete="off" spellcheck="false" aria-describedby="item-cat-hint">
+                    <p class="field-hint" id="item-cat-hint">{{ t.sets.cat_path_hint | default('Relativ zum Ablage-Ordner. Platzhalter anklicken, um ihn einzufügen:') }}</p>
+                    <div class="chips" id="item-cat-placeholders">
+                        {%- for ph in ['{YYYY}', '{MM}', '{DD}', '{YYYY-MM}', '{CAMERA}', '{TYPE}', '{COUNTRY}', '{CITY}'] %}
+                        <button type="button" class="chip-btn" data-insert="{{ ph }}">{{ ph }}</button>
+                        {%- endfor %}
+                    </div>
+                </div>
+                <div class="option-list" id="item-cat-archive-wrap">
+                    {{ option_switch('item-cat-archive', '', t.sets.col_archive | default('Immich-Archiv'),
+                                     t.sets.cat_archive_hint | default('Im Zeitstrahl ausblenden: Dateien dieser Kategorie landen in Immich im Archiv.')) }}
+                </div>
+            </div>
+            {{ error_banner() }}
+        </div>
+        <footer class="modal-foot">
+            <div class="modal-actions">
+                <span class="foot-note">{{ t.sets.apply_hint | default('Gespeichert wird erst mit «Speichern» des Sets.') }}</span>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-secondary" data-close>{{ t.sets.cancel }}</button>
+                <button type="button" class="btn btn-primary" id="item-apply">{{ t.sets.apply | default('Übernehmen') }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
+
+<!-- ── New set ────────────────────────────────────────────────────────── -->
+<dialog id="dlg-set-new" class="modal" aria-labelledby="dlg-set-new-title" aria-describedby="dlg-set-new-sub">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <div class="modal-title-wrap">
+                <h2 id="dlg-set-new-title" class="modal-title">{{ t.sets.new }}</h2>
+                <p class="modal-sub" id="dlg-set-new-sub">{{ t.sets.desc }}</p>
+            </div>
+            {{ close_button(t.sets.close) }}
+        </header>
+        <div class="modal-body">
+            <div class="field">
+                <label class="field-label" for="new-set-name">{{ t.sets.name }}</label>
+                <input type="text" id="new-set-name" maxlength="80" autocomplete="off">
+            </div>
+            <div class="field">
+                <label class="field-label" for="new-set-template">{{ t.sets.template }}</label>
+                <select id="new-set-template">
+                    <option value="">{{ t.sets.template_defaults }}</option>
+                    {%- for s in sets %}
+                    <option value="{{ s.id }}">{{ t.sets.template_copy }} „{{ s.name }}"</option>
+                    {%- endfor %}
+                </select>
+            </div>
+            {{ error_banner() }}
+        </div>
+        <footer class="modal-foot">
+            <div class="modal-actions">
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-secondary" data-close>{{ t.sets.cancel }}</button>
+                <button type="button" class="btn btn-primary" id="new-set-create">{{ t.sets.create }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
+
+<!-- ── Immich access ──────────────────────────────────────────────────── -->
+<dialog id="dlg-access" class="modal" aria-labelledby="dlg-access-title" aria-describedby="dlg-access-sub">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <div class="modal-title-wrap">
+                <h2 id="dlg-access-title" class="modal-title">{{ t.sets.access }}</h2>
+                <p class="modal-sub" id="dlg-access-sub">{{ t.sets.access_sub | default('API-Key eines Immich-Kontos für Upload und Auto-Tagging.') }}</p>
+            </div>
+            {{ close_button(t.sets.close) }}
+        </header>
+        <div class="modal-body">
+            <fieldset class="field" id="access-kind">
+                <legend class="field-label">{{ t.sets.access_kind }}</legend>
+                <div class="choice-cards cards-2 choice-compact">
+                    {{ choice_card('access_kind', 'global', '', t.sets.global_user) }}
+                    {{ choice_card('access_kind', 'named', 'checked', t.sets.named_user) }}
+                </div>
+                <p class="field-hint field-hint-after" id="access-global-taken" hidden>{{ t.sets.global_exists }}</p>
+            </fieldset>
+            <div class="field" id="access-label-group">
+                <label class="field-label" for="access-label">{{ t.sets.name }}</label>
+                <input type="text" id="access-label" maxlength="60" placeholder="Melissa" autocomplete="off">
+            </div>
+            <div class="field">
+                <label class="field-label" for="access-key">{{ t.settings.immich_api_key }}</label>
+                <input type="password" id="access-key" autocomplete="off" spellcheck="false" aria-describedby="access-key-hint">
+                <p class="field-hint" id="access-key-hint" role="status"></p>
+            </div>
+            <div class="test-row">
+                <button type="button" class="btn btn-secondary btn-sm" id="access-test">{{ icon('plug', 15) }}<span>{{ t.settings.immich_test }}</span></button>
+                <span class="status-text" id="access-test-result" role="status"></span>
+            </div>
+            <div class="option-list" id="access-active-wrap">
+                {{ option_switch('access-active', 'checked', t.settings.active, '', 'access-active-row') }}
+            </div>
+            <p class="field-hint" id="access-used-by" hidden></p>
+            {{ error_banner() }}
+        </div>
+        <footer class="modal-foot">
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost btn-ghost-danger" id="access-delete">{{ icon('trash', 16) }}<span class="btn-label">{{ t.settings.delete }}</span></button>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-secondary" data-close>{{ t.sets.cancel }}</button>
+                <button type="button" class="btn btn-primary" id="access-save">{{ t.settings.save }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
+
+<!-- ── Diagnostics token ──────────────────────────────────────────────── -->
+<dialog id="dlg-token" class="modal" aria-labelledby="dlg-token-title" aria-describedby="dlg-token-sub">
+    <div class="modal-shell">
+        <header class="modal-head">
+            <div class="modal-title-wrap">
+                <h2 id="dlg-token-title" class="modal-title">{{ t.settings.diagnostics }}</h2>
+                <p class="modal-sub" id="dlg-token-sub">{{ t.settings.diagnostics_desc }}</p>
+            </div>
+            {{ close_button(t.sets.close) }}
+        </header>
+        <div class="modal-body">
+            <div class="field">
+                <label class="field-label" for="token-label">{{ t.settings.diagnostics_label }}</label>
+                <input type="text" id="token-label" maxlength="60" placeholder="Claude" autocomplete="off">
+            </div>
+            <div class="option-list" id="token-active-wrap">
+                {{ option_switch('token-active', '', t.sets.active, '', 'token-active-row') }}
+            </div>
+            <p class="field-hint" id="token-create-hint">{{ t.sets.token_once_hint | default('Der Token wird nach dem Erzeugen genau einmal angezeigt — danach nur noch sein Name.') }}</p>
+            <div class="field token-once" id="token-once" hidden>
+                <label class="field-label" for="token-value">{{ icon('key', 14) }}{{ t.settings.diagnostics_token_once }}</label>
+                <div class="input-group">
+                    <input type="text" id="token-value" readonly spellcheck="false">
+                    <button type="button" class="btn btn-secondary" id="token-copy">{{ icon('copy', 15) }}<span>{{ t.sets.copy | default('Kopieren') }}</span></button>
+                </div>
+                <p class="field-hint">{{ t.settings.diagnostics_usage }}</p>
+            </div>
+            {{ error_banner() }}
+        </div>
+        <footer class="modal-foot">
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost btn-ghost-danger" id="token-delete">{{ icon('trash', 16) }}<span class="btn-label">{{ t.settings.delete }}</span></button>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-secondary" data-close>{{ t.sets.close }}</button>
+                <button type="button" class="btn btn-primary" id="token-save">{{ t.settings.diagnostics_generate }}</button>
+            </div>
+        </footer>
+    </div>
+</dialog>
