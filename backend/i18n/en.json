@@ -251,7 +251,7 @@
     "ssl": "SSL/TLS",
     "enabled": "Enabled",
     "immich": "Immich",
-    "immich_desc": "Connects MediaAssistant to an Immich instance. Files from inbox directories with the 'Immich' flag enabled are automatically uploaded after processing, tagged, and optionally archived or locked (NSFW).",
+    "immich_desc": "Connects MediaAssistant to an Immich instance. Each set decides itself whether it uploads or uses Immich auto-tagging (tabs Inputs and Target storage).",
     "immich_url": "Immich URL",
     "immich_api_key": "API Key",
     "immich_api_key_hint": "API key from Immich: Account Settings → API Keys",
@@ -647,7 +647,15 @@
     "err_rule": "Every rule needs a valid condition and a value.",
     "err_rule_target": "The rule \"{value}\" points to a category that does not exist in this set.",
     "err_rule_regex": "Invalid pattern in rule \"{value}\".",
-    "tab_metadata": "Metadata"
+    "tab_metadata": "Metadata",
+    "col_features": "Features",
+    "col_actions": "Actions",
+    "status_inactive": "Inactive",
+    "status_connected": "Connected",
+    "status_checking": "Checking …",
+    "queue_waiting": "{n} queued",
+    "activate": "Activate",
+    "deactivate": "Deactivate"
   },
   "setup": {
     "set_hint": "Both paths belong to the processing set \"{name}\". Further sets with their own folders, rules and storage can be added later in the settings."

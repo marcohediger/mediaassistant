@@ -251,7 +251,7 @@
     "ssl": "SSL/TLS",
     "enabled": "Aktiviert",
     "immich": "Immich",
-    "immich_desc": "Verbindet MediaAssistant mit einer Immich-Instanz. Dateien aus Inbox-Verzeichnissen mit aktiviertem «Immich»-Flag werden nach der Verarbeitung automatisch hochgeladen, getaggt und bei Bedarf archiviert oder gesperrt (NSFW).",
+    "immich_desc": "Verbindet MediaAssistant mit einer Immich-Instanz. Welche Sets hochladen oder Immich Auto-Tagging nutzen, legt jedes Set selbst fest (Reiter Eingänge und Ziel-Ablage).",
     "immich_url": "Immich URL",
     "immich_api_key": "API Key",
     "immich_api_key_hint": "API Key aus Immich: Kontoeinstellungen → API Keys",
@@ -647,7 +647,15 @@
     "err_rule": "Jede Regel braucht eine gültige Bedingung und einen Wert.",
     "err_rule_target": "Die Regel „{value}\" zeigt auf eine Kategorie, die es im Set nicht gibt.",
     "err_rule_regex": "Ungültiges Muster in der Regel „{value}\".",
-    "tab_metadata": "Metadaten"
+    "tab_metadata": "Metadaten",
+    "col_features": "Funktionen",
+    "col_actions": "Aktionen",
+    "status_inactive": "Inaktiv",
+    "status_connected": "Verbunden",
+    "status_checking": "Prüfe …",
+    "queue_waiting": "{n} wartend",
+    "activate": "Aktivieren",
+    "deactivate": "Deaktivieren"
   },
   "setup": {
     "set_hint": "Beide Pfade gehören zum Verarbeitungs-Set „{name}\". Weitere Sets mit eigenen Verzeichnissen, Regeln und Ablagen lassen sich später in den Einstellungen anlegen."

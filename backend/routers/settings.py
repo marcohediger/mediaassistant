@@ -18,7 +18,7 @@ def _sanitize(value: str) -> str:
 
 router = APIRouter(prefix="/settings")
 
-MODULE_NAMES = ["ki_analyse", "ki_analyse_2", "geocoding", "duplikat_erkennung", "smtp", "filewatcher", "immich"]
+MODULE_NAMES = ["geocoding", "duplikat_erkennung", "smtp", "filewatcher", "immich"]
 
 
 async def _get_modules_dict() -> dict:
@@ -118,6 +118,7 @@ async def settings_page(request: Request):
         "cfg": type("C", (), cfg)(),
         "sets": sets,
         "accesses": accesses,
+        "ai_backends": await _ai_backends(),
         "success": success,
         "error": error,
     })
@@ -140,30 +141,11 @@ async def save_settings(request: Request):
         enabled = f"mod_{name}" in form
         await config_manager.set_module_enabled(name, enabled)
 
-    # KI
-    await config_manager.set("ai.backend_url", _sanitize(form.get("ai_url", "")))
-    await config_manager.set("ai.model", _sanitize(form.get("ai_model", "")))
+    # KI: backend URL, model, slots and keys are saved by the AI backend popup
+    # (/settings/ai-backends/…). Only the global AI options stay in this form.
     await config_manager.set("ai.image_resize", "ai_image_resize" in form)
     ai_max_px = int(form.get("ai_image_max_px", 1024))
     await config_manager.set("ai.image_max_px", max(256, ai_max_px))
-    if form.get("ai_api_key"):
-        await config_manager.set("ai.api_key", form["ai_api_key"], encrypted=True)
-    try:
-        ai_slots = max(1, int(form.get("ai_slots", 1)))
-    except ValueError:
-        ai_slots = 1
-    await config_manager.set("ai.slots", ai_slots)
-
-    # KI 2 (optional second backend)
-    await config_manager.set("ai2.backend_url", _sanitize(form.get("ai2_url", "")))
-    await config_manager.set("ai2.model", _sanitize(form.get("ai2_model", "")))
-    if form.get("ai2_api_key"):
-        await config_manager.set("ai2.api_key", form["ai2_api_key"], encrypted=True)
-    try:
-        ai2_slots = max(1, int(form.get("ai2_slots", 1)))
-    except ValueError:
-        ai2_slots = 1
-    await config_manager.set("ai2.slots", ai2_slots)
 
     ai_prompt = form.get("ai_prompt", "").strip()
     if ai_prompt:
@@ -348,6 +330,81 @@ async def delete_immich_access(access_id: str):
     return JSONResponse({"ok": True})
 
 
+# --- AI backends (list + popup) ---
+
+AI_BACKENDS = {1: ("ai", "ki_analyse"), 2: ("ai2", "ki_analyse_2")}
+
+
+async def _ai_backends() -> list[dict]:
+    """Both backend slots, configured or not. Key material only as a length."""
+    modules = await _get_modules_dict()
+    out = []
+    for n, (prefix, module) in AI_BACKENDS.items():
+        try:
+            key = await config_manager.get(f"{prefix}.api_key", "")
+        except Exception:
+            key = ""
+        url = await config_manager.get(f"{prefix}.backend_url", "")
+        out.append({
+            "id": n, "configured": bool(url), "enabled": bool(modules.get(module)),
+            "url": url, "model": await config_manager.get(f"{prefix}.model", ""),
+            "slots": await config_manager.get(f"{prefix}.slots", 1), "key_len": len(key or ""),
+        })
+    return out
+
+
+@router.put("/ai-backends/{n}")
+async def save_ai_backend(request: Request, n: int):
+    if n not in AI_BACKENDS:
+        return JSONResponse({"ok": False, "detail": "?"}, status_code=404)
+    prefix, module = AI_BACKENDS[n]
+    data = await request.json()
+    url = _sanitize((data.get("url") or "").strip())
+    if not url.startswith(("http://", "https://")):
+        return JSONResponse({"ok": False, "detail": await _t_settings("ai_url_invalid")}, status_code=400)
+    try:
+        slots = max(1, min(int(data.get("slots") or 1), 16))
+    except (TypeError, ValueError):
+        slots = 1
+    await config_manager.set(f"{prefix}.backend_url", url)
+    await config_manager.set(f"{prefix}.model", _sanitize((data.get("model") or "").strip()))
+    await config_manager.set(f"{prefix}.slots", slots)
+    if (data.get("api_key") or "").strip():
+        await config_manager.set(f"{prefix}.api_key", data["api_key"].strip(), encrypted=True)
+    await config_manager.set_module_enabled(module, bool(data.get("enabled")))
+    await log_info("settings", f"KI-Backend {n} gespeichert", f"{url} · Modell {data.get('model') or '—'} · {slots} Slots")
+    return JSONResponse({"ok": True, "backends": await _ai_backends()})
+
+
+@router.delete("/ai-backends/{n}")
+async def delete_ai_backend(n: int):
+    """Only the second backend can be removed; the first can just be switched off."""
+    if n != 2:
+        return JSONResponse({"ok": False, "detail": await _t_settings("ai_first_not_removable")}, status_code=400)
+    for key in ("backend_url", "model"):
+        await config_manager.set(f"ai2.{key}", "")
+    await config_manager.set("ai2.api_key", "", encrypted=True)
+    await config_manager.set("ai2.slots", 1)
+    await config_manager.set_module_enabled("ki_analyse_2", False)
+    await log_info("settings", "KI-Backend 2 entfernt")
+    return JSONResponse({"ok": True, "backends": await _ai_backends()})
+
+
+@router.get("/ai-backends/status")
+async def ai_backends_status():
+    """Reachability and vision-model count per configured backend."""
+    result = []
+    for b in await _ai_backends():
+        if not b["configured"]:
+            continue
+        d = await _fetch_models(b["url"])
+        models = d.get("models") or []
+        result.append({"id": b["id"], "ok": bool(d.get("ok")), "detail": d.get("detail", ""),
+                       "models": len(models), "filtered": bool(d.get("filtered")),
+                       "model_available": (b["model"] in models) if b["model"] else None})
+    return JSONResponse({"ok": True, "backends": result})
+
+
 # --- Appearance (quick menu in the navigation bar) ---
 
 @router.post("/appearance")
@@ -467,6 +524,36 @@ async def delete_diagnostics_token(request: Request, token_id: str):
     return JSONResponse({"ok": True, "tokens": _diag_public(remaining)})
 
 
+async def _fetch_models(url: str) -> dict:
+    """Model ids of one backend, narrowed to vision models where the backend says which."""
+    def ids(entries, only_vision):
+        return sorted(
+            str(m["id"]) for m in entries
+            if isinstance(m, dict) and m.get("id")
+            and (not only_vision or m.get("type") == "vlm")
+        )
+
+    async with httpx.AsyncClient(timeout=8) as client:
+        try:
+            resp = await client.get(f"{_lmstudio_base(url)}/api/v0/models")
+            if resp.status_code == 200:
+                entries = resp.json().get("data", [])
+                if any(isinstance(m, dict) and m.get("type") for m in entries):
+                    return {"ok": True, "detail": "", "models": ids(entries, True), "filtered": True}
+        except Exception:
+            pass  # not an LM Studio backend — fall through to the generic list
+
+        try:
+            resp = await client.get(f"{url.rstrip('/')}/models")
+            if resp.status_code != 200:
+                return {"ok": False, "detail": f"HTTP {resp.status_code}", "models": [], "filtered": False}
+            entries = resp.json().get("data", [])
+        except Exception as e:
+            return {"ok": False, "detail": f"{type(e).__name__}: {e}", "models": [], "filtered": False}
+
+    return {"ok": True, "detail": "", "models": ids(entries, False), "filtered": False}
+
+
 @router.get("/ai-models")
 async def list_ai_models(request: Request):
     """Model ids offered by a backend, narrowed to the ones that can see images.
@@ -489,35 +576,8 @@ async def list_ai_models(request: Request):
         return JSONResponse({"ok": False, "detail": await _t_settings("ai_models_no_url"),
                              "models": [], "filtered": False})
 
-    def ids(entries, only_vision):
-        return sorted(
-            str(m["id"]) for m in entries
-            if isinstance(m, dict) and m.get("id")
-            and (not only_vision or m.get("type") == "vlm")
-        )
+    return JSONResponse(await _fetch_models(url))
 
-    async with httpx.AsyncClient(timeout=8) as client:
-        try:
-            resp = await client.get(f"{_lmstudio_base(url)}/api/v0/models")
-            if resp.status_code == 200:
-                entries = resp.json().get("data", [])
-                if any(isinstance(m, dict) and m.get("type") for m in entries):
-                    return JSONResponse({"ok": True, "detail": "",
-                                         "models": ids(entries, True), "filtered": True})
-        except Exception:
-            pass  # not an LM Studio backend — fall through to the generic list
-
-        try:
-            resp = await client.get(f"{url.rstrip('/')}/models")
-            if resp.status_code != 200:
-                return JSONResponse({"ok": False, "detail": f"HTTP {resp.status_code}",
-                                     "models": [], "filtered": False})
-            entries = resp.json().get("data", [])
-        except Exception as e:
-            return JSONResponse({"ok": False, "detail": f"{type(e).__name__}: {e}",
-                                 "models": [], "filtered": False})
-
-    return JSONResponse({"ok": True, "detail": "", "models": ids(entries, False), "filtered": False})
 
 
 @router.post("/immich/test")
