@@ -153,7 +153,10 @@ class ProcessingSet(Base):
     library_base_path = Column(Text, default="/library")  # also hosts unknown/error/duplicate folders
     immich_user_id = Column(Integer)  # access used for uploads; NULL = global key
 
-    # Immich auto-tagging
+    # Immich auto-tagging. immich_input = the set HAS an Immich input,
+    # immich_poll = that input is active. Kept apart so an input switched
+    # off stays in the list, like a directory does.
+    immich_input = Column(Boolean, default=False)
     immich_poll = Column(Boolean, default=False)
     immich_poll_user_id = Column(Integer)  # access polled; NULL = global key
     immich_last_poll = Column(Text)  # ISO timestamp cursor, per set

@@ -84,10 +84,10 @@
                         {% for d in s.directories %}
                             <span class="lst-meta"><svg class="lst-i" width="15" height="15" aria-hidden="true" focusable="false"><use href="#lst-i-folder-input"/></svg><code class="lst-path">{{ d }}</code></span>
                         {% endfor %}
-                        {% if s.immich_poll %}
-                            <span class="lst-meta" title="{{ t.sets.immich_poll_short }} · {{ s.poll_access or t.sets.global_user }}"><svg class="lst-i" width="15" height="15" aria-hidden="true" focusable="false"><use href="#lst-i-cloud-down"/></svg>Immich{% if s.poll_access %}<span class="lst-sub">· {{ s.poll_access }}</span>{% endif %}</span>
+                        {% if s.immich_input %}
+                            <span class="lst-meta{{ '' if s.immich_poll else ' lst-off' }}" title="{{ t.sets.immich_poll_short }} · {{ s.poll_access or t.sets.global_user }}{{ '' if s.immich_poll else ' · ' ~ t.sets.inactive }}"><svg class="lst-i" width="15" height="15" aria-hidden="true" focusable="false"><use href="#lst-i-cloud-down"/></svg>Immich{% if s.poll_access %}<span class="lst-sub">· {{ s.poll_access }}</span>{% endif %}</span>
                         {% endif %}
-                        {% if not s.directories and not s.immich_poll %}<span class="lst-none">{{ t.sets.no_inputs }}</span>{% endif %}
+                        {% if not s.directories and not s.immich_input %}<span class="lst-none">{{ t.sets.no_inputs }}</span>{% endif %}
                         </div>
                     </td>
                     <td>

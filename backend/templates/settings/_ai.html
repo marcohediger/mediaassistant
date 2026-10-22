@@ -88,17 +88,32 @@
             <small>{{ t.settings.prompt_hint }}
             <br>{{ t.settings.prompt_hint2 }}</small>
         </div>
-        <div class="ai-divider"></div>
-        <div class="ai-option-title">{{ t.settings.ai_image_resize }}</div>
-        <small class="ai-option-desc">{{ t.settings.ai_image_resize_desc }}</small>
-        <div class="ai-resize-row">
-            <label class="switch-inline">
-                <input type="checkbox" name="ai_image_resize" value="1" {{ 'checked' if cfg.ai_image_resize else '' }} onchange="document.getElementById('ai_image_max_px').disabled = !this.checked">
-                <span class="switch-slider-sm"></span>
-                <span>{{ t.settings.ai_image_resize_enabled }}</span>
-            </label>
-            <input type="number" id="ai_image_max_px" name="ai_image_max_px" value="{{ cfg.ai_image_max_px }}" min="256" max="4096" step="128" {{ 'disabled' if not cfg.ai_image_resize else '' }} aria-label="{{ t.settings.ai_image_max_px }}">
-            <small>px</small>
+    </div>
+</div>
+
+<!-- Image resize for the AI — a setting of its own, not part of the prompt -->
+<div class="settings-section" id="section-ai-resize">
+    <div class="section-header">
+        <div class="section-title">
+            <h2>{{ t.settings.ai_image_resize }}</h2>
+            <span class="section-desc">{{ t.settings.ai_image_resize_desc }}</span>
+        </div>
+        <label class="switch" title="{{ t.settings.ai_image_resize_enabled }}">
+            <input type="checkbox" name="ai_image_resize" value="1" {{ 'checked' if cfg.ai_image_resize else '' }}
+                   aria-label="{{ t.settings.ai_image_resize }}"
+                   onchange="document.getElementById('ai_image_max_px').closest('.form-group').classList.toggle('is-off', !this.checked)">
+            <span class="switch-slider"></span>
+        </label>
+    </div>
+    <div class="section-body">
+        <div class="form-group resize-size{{ '' if cfg.ai_image_resize else ' is-off' }}">
+            <label for="ai_image_max_px">{{ t.settings.ai_image_max_px | default('Maximale Kantenlänge') }}</label>
+            <div class="input-with-unit">
+                <input type="number" id="ai_image_max_px" name="ai_image_max_px" value="{{ cfg.ai_image_max_px }}" min="256" max="4096" step="128">
+                <span class="unit">px</span>
+            </div>
+            <small>{{ t.settings.ai_image_max_px_hint | default('Längere Bildseite in Pixeln, 256–4096. 1024 ist ein guter Ausgangswert.') }}</small>
         </div>
     </div>
 </div>
+

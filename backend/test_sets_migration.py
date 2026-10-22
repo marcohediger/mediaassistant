@@ -375,6 +375,9 @@ async def main() -> int:
                and (not before["poll"] or (global_poll["immich_last_poll"] == before["last_poll"]
                                            and not global_poll["dry_run"])),
                f"Poll {'an im Set ' + global_poll['name'] if global_poll else 'aus'}")
+        report("Immich-Eingang = Polling nach der Migration",
+               all(bool(s["immich_input"]) == bool(s["immich_poll"]) for s in sets),
+               f"{[(s['name'], s['immich_input'], s['immich_poll']) for s in sets]}")
         polled = sorted(s["immich_poll_user_id"] for s in sets
                         if s["immich_poll"] and s["immich_poll_user_id"] is not None)
         report("Jeder benannte Immich-Zugang wird weiter gepollt",

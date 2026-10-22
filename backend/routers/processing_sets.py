@@ -75,6 +75,7 @@ async def serialize(session, ps: ProcessingSet) -> dict:
         "library_base_path": ps.library_base_path or "/library",
         "base_path_exists": os.path.isdir(ps.library_base_path or ""),
         "immich_user_id": ps.immich_user_id,
+        "immich_input": bool(ps.immich_input),
         "immich_poll": bool(ps.immich_poll), "immich_poll_user_id": ps.immich_poll_user_id,
         "immich_last_poll": ps.immich_last_poll,
         "directories": [{"id": d.id, "path": d.path, "label": d.label, "active": bool(d.active),
@@ -104,6 +105,7 @@ async def summaries() -> list[dict]:
         out.append({
             "id": ps.id, "name": ps.name, "active": bool(ps.active),
             "directories": [d.path for d in dirs if d.set_id == ps.id],
+            "immich_input": bool(ps.immich_input),
             "immich_poll": bool(ps.immich_poll), "poll_access": access(ps.immich_poll_user_id),
             "schedule_mode": ps.schedule_mode or "continuous", "interval_s": ps.interval_s or 5,
             "window_start": ps.window_start, "window_end": ps.window_end,
@@ -321,7 +323,9 @@ async def save_set(request: Request, set_id: int):
         ps.target_mode = data["target_mode"]
         ps.library_base_path = base
         ps.immich_user_id = int(data["immich_user_id"]) if data.get("immich_user_id") not in (None, "") else None
-        poll_on = bool(data.get("immich_poll"))
+        # Older clients only know immich_poll; then input and active coincide.
+        ps.immich_input = bool(data.get("immich_input", data.get("immich_poll")))
+        poll_on = bool(data.get("immich_poll")) and ps.immich_input
         if poll_on and not ps.immich_poll:
             # Switching polling on starts from now, not from an old cursor.
             ps.immich_last_poll = None

@@ -144,8 +144,13 @@ async def save_settings(request: Request):
     # KI: backend URL, model, slots and keys are saved by the AI backend popup
     # (/settings/ai-backends/…). Only the global AI options stay in this form.
     await config_manager.set("ai.image_resize", "ai_image_resize" in form)
-    ai_max_px = int(form.get("ai_image_max_px", 1024))
-    await config_manager.set("ai.image_max_px", max(256, ai_max_px))
+    # Only when sent: the size field used to be disabled while resizing was
+    # off, a disabled field is not submitted, and the value fell back to 1024.
+    if form.get("ai_image_max_px"):
+        try:
+            await config_manager.set("ai.image_max_px", max(256, min(int(form["ai_image_max_px"]), 4096)))
+        except ValueError:
+            pass
 
     ai_prompt = form.get("ai_prompt", "").strip()
     if ai_prompt:
@@ -212,7 +217,7 @@ def _uses(sets: list[dict], key) -> list[str]:
     names = []
     for s in sets:
         if (s["target_mode"] == "immich" and s["target_access_id"] == key) or \
-                (s["immich_poll"] and s["poll_access_id"] == key):
+                (s["immich_input"] and s["poll_access_id"] == key):
             names.append(s["name"])
     return names
 
@@ -223,7 +228,7 @@ async def _accesses(sets: list[dict] | None = None) -> list[dict]:
         rows = (await session.execute(select(ProcessingSet))).scalars().all()
         users = (await session.execute(select(ImmichUser).order_by(ImmichUser.id))).scalars().all()
     usage = [{"name": r.name, "target_mode": r.target_mode, "target_access_id": r.immich_user_id or "global",
-              "immich_poll": bool(r.immich_poll), "poll_access_id": r.immich_poll_user_id or "global"}
+              "immich_input": bool(r.immich_input), "poll_access_id": r.immich_poll_user_id or "global"}
              for r in rows]
     out = []
     try:
