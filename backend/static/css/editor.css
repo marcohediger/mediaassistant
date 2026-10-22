@@ -1,0 +1,716 @@
+/* Settings popups (set editor, new set, Immich access, diagnostics token).
+ *
+ * Loaded after style.css and overrides its generic .modal / .tabs / form
+ * rules for everything inside a <dialog class="modal">. Colours come only
+ * from the theme variables, so dark and light work alike.
+ */
+
+/* ── Tokens ─────────────────────────────────────────────────────────── */
+dialog.modal {
+    --m-radius: 14px;
+    --m-pad: 1.5rem;
+    --ctl-h: 2.5rem;
+    --ctl-h-sm: 2.25rem;
+    --ctl-r: 8px;
+    --hover: color-mix(in srgb, var(--text) 5%, transparent);
+    --accent-soft: color-mix(in srgb, var(--primary) 13%, transparent);
+    --accent-ring: color-mix(in srgb, var(--primary) 30%, transparent);
+    --danger-soft: color-mix(in srgb, var(--error) 11%, transparent);
+    --danger-ring: color-mix(in srgb, var(--error) 28%, transparent);
+    --sidebar: color-mix(in srgb, var(--bg) 45%, var(--bg-card));
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    color-scheme: dark;
+}
+body[data-theme="light"] dialog.modal { color-scheme: light; }
+
+/* ── Shell ──────────────────────────────────────────────────────────── */
+dialog.modal {
+    width: min(520px, calc(100vw - 2rem));
+    max-width: none;
+    max-height: min(90vh, calc(100dvh - 2rem));
+    padding: 0;
+    margin: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--m-radius);
+    background: var(--bg-card);
+    color: var(--text);
+    box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+dialog.modal[open] { animation: modal-in 0.16s ease-out; }
+dialog.modal::backdrop { background: rgba(6, 8, 14, 0.58); backdrop-filter: blur(2px); }
+body[data-theme="light"] dialog.modal::backdrop { background: rgba(17, 24, 39, 0.42); }
+@keyframes modal-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.99); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    dialog.modal[open] { animation: none; }
+    dialog.modal * { transition: none !important; }
+}
+
+/* Author display rules would otherwise beat the [hidden] attribute. */
+dialog.modal [hidden] { display: none !important; }
+
+dialog.modal .modal-shell {
+    display: flex; flex-direction: column;
+    max-height: min(90vh, calc(100dvh - 2rem));
+}
+
+/* Header */
+dialog.modal .modal-head {
+    display: flex; align-items: center; gap: 1rem;
+    padding: 1.1rem 1rem 1.1rem var(--m-pad);
+    border-bottom: 1px solid var(--border);
+    flex: none;
+}
+dialog.modal .modal-title-wrap { flex: 1; min-width: 0; }
+dialog.modal .modal-title {
+    flex: 1; min-width: 0; margin: 0;
+    font-size: 1.125rem; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em;
+    color: var(--text);
+}
+dialog.modal .modal-title-wrap .modal-title { flex: none; }
+dialog.modal .modal-eyebrow {
+    display: block; margin-bottom: 0.1rem;
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted);
+}
+dialog.modal .modal-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+dialog.modal .modal-sub {
+    margin: 0.2rem 0 0; color: var(--text-muted); font-size: 0.8125rem; line-height: 1.5;
+}
+dialog.modal .modal-badges { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
+dialog.modal .modal-close { align-self: center; margin-right: 0.1rem; }
+dialog.modal .modal-head:has(.modal-sub) .modal-close { align-self: flex-start; }
+
+/* Body of the small popups */
+dialog.modal .modal-body {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 1.35rem var(--m-pad) 1.5rem;
+    display: flex; flex-direction: column; gap: 1.25rem;
+}
+
+/* Footer */
+dialog.modal .modal-foot {
+    flex: none;
+    padding: 0.85rem 1rem 0.85rem var(--m-pad);
+    border-top: 1px solid var(--border);
+    background: var(--bg-card);
+}
+dialog.modal .modal-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+dialog.modal .modal-actions .spacer { flex: 1; }
+dialog.modal .modal-actions > .btn-ghost:first-child { margin-left: -0.75rem; }
+dialog.modal .foot-status {
+    display: inline-flex; align-items: center; gap: 0.45rem; margin-right: 0.5rem;
+    color: var(--text-muted); font-size: 0.8125rem;
+}
+dialog.modal .foot-status-dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--warning); }
+
+/* Error banner */
+dialog.modal .modal-error {
+    display: flex; align-items: flex-start; gap: 0.6rem; margin: 0;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
+    border-radius: 10px;
+    background: var(--danger-soft);
+    color: var(--error);
+    font-size: 0.8125rem; font-weight: 500; line-height: 1.5;
+}
+dialog.modal .modal-error .ico { flex: none; margin-top: 0.1rem; }
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+dialog.modal .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+    height: 2.25rem; padding: 0 1rem;
+    border-radius: var(--ctl-r); border: 1px solid transparent;
+    font: inherit; font-size: 0.875rem; font-weight: 500; line-height: 1;
+    white-space: nowrap; cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+dialog.modal .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+dialog.modal .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+dialog.modal .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+dialog.modal .btn-primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+dialog.modal .btn-secondary { background: transparent; border-color: var(--border); color: var(--text); }
+dialog.modal .btn-secondary:hover:not(:disabled) { background: var(--hover); border-color: color-mix(in srgb, var(--text-muted) 55%, var(--border)); }
+dialog.modal .btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); padding: 0 0.75rem; }
+dialog.modal .btn-ghost:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+dialog.modal .btn-ghost-danger { color: var(--error); }
+dialog.modal .btn-ghost-danger:hover:not(:disabled) { background: var(--danger-soft); color: var(--error); }
+dialog.modal .btn-ghost-danger:focus-visible { box-shadow: 0 0 0 3px var(--danger-ring); }
+dialog.modal .btn-sm { height: 2rem; padding: 0 0.75rem; font-size: 0.8125rem; }
+
+dialog.modal .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 2rem; height: 2rem; padding: 0;
+    background: transparent; border: 0; border-radius: 7px;
+    color: var(--text-muted); cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+dialog.modal .icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); border: 0; }
+dialog.modal .icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary); }
+dialog.modal .icon-btn.icon-danger:hover:not(:disabled) { background: var(--danger-soft); color: var(--error); }
+dialog.modal .icon-btn:disabled { opacity: 0.3; cursor: default; }
+
+dialog.modal .btn-add {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    height: 2rem; padding: 0 0.65rem;
+    background: transparent; border: 0; border-radius: 7px;
+    color: var(--primary); font: inherit; font-size: 0.8125rem; font-weight: 500; cursor: pointer;
+}
+dialog.modal .btn-add:hover { background: var(--accent-soft); }
+dialog.modal .btn-add:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary); }
+
+/* ── Form controls ──────────────────────────────────────────────────── */
+dialog.modal :is(input[type="text"], input[type="number"], input[type="time"],
+                 input[type="password"], input[type="url"], select) {
+    width: 100%; height: var(--ctl-h); margin: 0;
+    padding: 0 0.75rem;
+    background: var(--bg-input); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--ctl-r);
+    font: inherit; font-size: 0.875rem; line-height: normal;
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+dialog.modal select {
+    appearance: none; -webkit-appearance: none;
+    padding-right: 2rem; text-overflow: ellipsis; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b8fa3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 0.6rem center;
+}
+dialog.modal :is(input, select)::placeholder { color: var(--text-muted); opacity: 0.7; }
+dialog.modal :is(input[type="text"], input[type="number"], input[type="time"],
+                 input[type="password"], input[type="url"], select):hover:not(:disabled):not(:focus) {
+    border-color: color-mix(in srgb, var(--text-muted) 50%, var(--border));
+}
+dialog.modal :is(input[type="text"], input[type="number"], input[type="time"],
+                 input[type="password"], input[type="url"], select):focus {
+    outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--accent-ring);
+}
+dialog.modal :is(input, select):disabled { opacity: 0.55; cursor: not-allowed; }
+dialog.modal input[readonly] { background: var(--bg-item); }
+dialog.modal [aria-invalid="true"] {
+    border-color: var(--error) !important; box-shadow: 0 0 0 3px var(--danger-ring) !important;
+}
+
+dialog.modal fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+dialog.modal legend { padding: 0; }
+
+dialog.modal .field { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; margin: 0; }
+dialog.modal .field-label {
+    display: inline-flex; align-items: center; gap: 0.4rem; margin: 0 0 0.05rem;
+    font-size: 0.8125rem; font-weight: 500; color: var(--text);
+}
+dialog.modal legend.field-label { margin-bottom: 0.5rem; }
+dialog.modal .field-hint {
+    display: block; margin: 0; max-width: 72ch;
+    color: var(--text-muted); font-size: 0.8rem; line-height: 1.55;
+}
+dialog.modal .field-note {
+    display: inline-flex; align-items: center; gap: 0.35rem; margin: 0;
+    font-size: 0.78rem; font-weight: 500; line-height: 1.3;
+}
+dialog.modal .field-note.warn { color: var(--warning); }
+
+dialog.modal .field-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem;
+}
+dialog.modal .field-grid .span-2 { grid-column: 1 / -1; }
+dialog.modal .field-grid-name { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); }
+dialog.modal .field-grid-compact { grid-template-columns: repeat(auto-fill, minmax(10rem, 12.5rem)); }
+
+dialog.modal code {
+    font-family: var(--mono); font-size: 0.82em;
+    padding: 0.1em 0.4em; border-radius: 5px;
+    background: var(--bg-input); color: var(--text);
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+/* Disabled-by-switch areas */
+dialog.modal .is-off { opacity: 0.55; }
+dialog.modal .is-off :is(input, select):disabled { opacity: 1; }
+
+/* ── Switch ─────────────────────────────────────────────────────────── */
+dialog.modal .sw { position: relative; display: inline-flex; flex: none; }
+dialog.modal .sw input {
+    position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+    opacity: 0; cursor: pointer; z-index: 1;
+}
+dialog.modal .sw-track {
+    position: relative; display: inline-block;
+    width: 2.25rem; height: 1.25rem; border-radius: 999px;
+    background: color-mix(in srgb, var(--text-muted) 38%, var(--bg-input));
+    transition: background 0.18s;
+}
+dialog.modal .sw-track::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: calc(1.25rem - 4px); height: calc(1.25rem - 4px); border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    transition: transform 0.18s;
+}
+dialog.modal .sw input:checked + .sw-track { background: var(--primary); }
+dialog.modal .sw input:checked + .sw-track::after { transform: translateX(1rem); }
+dialog.modal .sw input:focus-visible + .sw-track { box-shadow: 0 0 0 3px var(--accent-ring); }
+dialog.modal .sw input:disabled { cursor: not-allowed; }
+
+/* ── Option list: settings rows with a control on the right ─────────── */
+dialog.modal .option-list {
+    border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card);
+}
+dialog.modal .option-row {
+    display: flex; align-items: center; gap: 2rem;
+    padding: 0.95rem 1.25rem 0.95rem 1.1rem; margin: 0;
+    cursor: pointer;
+}
+dialog.modal label.option-row:hover { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+dialog.modal div.option-row { cursor: default; }
+dialog.modal .option-row + .option-row { border-top: 1px solid var(--border); }
+dialog.modal .option-list > :first-child { border-radius: 11px 11px 0 0; }
+dialog.modal .option-list > :last-child { border-radius: 0 0 11px 11px; }
+dialog.modal .option-list > :only-child { border-radius: 11px; }
+dialog.modal .option-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+dialog.modal .option-row > .sw, dialog.modal .option-row > .option-control { flex: none; }
+dialog.modal .option-title { font-size: 0.875rem; font-weight: 500; color: var(--text); margin: 0; cursor: inherit; }
+dialog.modal .option-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.55; max-width: 60ch; }
+dialog.modal .option-desc:empty { display: none; }
+dialog.modal .option-control { flex: none; width: 16rem; }
+
+/* ── Choice cards (radio groups) ────────────────────────────────────── */
+dialog.modal .choice-cards { display: grid; gap: 0.75rem; }
+dialog.modal .cards-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+dialog.modal .cards-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+dialog.modal .choice-card { position: relative; display: block; margin: 0; cursor: pointer; }
+dialog.modal .choice-card input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+dialog.modal .choice-card-body {
+    display: flex; align-items: flex-start; gap: 0.7rem; height: 100%;
+    padding: 0.85rem 0.95rem;
+    border: 1px solid var(--border); border-radius: 11px;
+    background: var(--bg-card);
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+dialog.modal .choice-card:hover .choice-card-body { border-color: color-mix(in srgb, var(--text-muted) 55%, var(--border)); }
+dialog.modal .choice-card input:checked + .choice-card-body {
+    border-color: var(--primary);
+    box-shadow: inset 0 0 0 1px var(--primary);
+    background: color-mix(in srgb, var(--primary) 6%, var(--bg-card));
+}
+dialog.modal .choice-card input:focus-visible + .choice-card-body { box-shadow: 0 0 0 3px var(--accent-ring), inset 0 0 0 1px var(--primary); }
+dialog.modal .choice-card input:disabled + .choice-card-body { opacity: 0.45; cursor: not-allowed; }
+dialog.modal .choice-radio {
+    flex: none; display: grid; place-items: center;
+    width: 1rem; height: 1rem; margin-top: 0.12rem; border-radius: 50%;
+    border: 1.5px solid color-mix(in srgb, var(--text-muted) 75%, transparent);
+    transition: border-color 0.15s;
+}
+dialog.modal .choice-radio::after {
+    content: ""; width: 0.5rem; height: 0.5rem; border-radius: 50%;
+    background: var(--primary); transform: scale(0); transition: transform 0.15s;
+}
+dialog.modal .choice-card input:checked + .choice-card-body .choice-radio { border-color: var(--primary); }
+dialog.modal .choice-card input:checked + .choice-card-body .choice-radio::after { transform: scale(1); }
+dialog.modal .choice-card-text { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+dialog.modal .choice-card-title { font-size: 0.875rem; font-weight: 600; color: var(--text); line-height: 1.35; }
+dialog.modal .choice-card-desc { font-size: 0.78rem; color: var(--text-muted); line-height: 1.55; }
+dialog.modal .choice-compact .choice-card-body { padding: 0.7rem 0.9rem; align-items: center; }
+dialog.modal .choice-compact .choice-radio { margin-top: 0; }
+
+/* ── Weekday chips ──────────────────────────────────────────────────── */
+dialog.modal .day-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+dialog.modal .day-chip { position: relative; display: inline-flex; margin: 0; }
+dialog.modal .day-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+dialog.modal .day-chip span {
+    display: inline-grid; place-items: center;
+    min-width: 3rem; height: var(--ctl-h); padding: 0 0.75rem;
+    border: 1px solid var(--border); border-radius: var(--ctl-r);
+    background: var(--bg-card); color: var(--text-muted);
+    font-size: 0.8125rem; font-weight: 500; cursor: pointer; user-select: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+dialog.modal .day-chip span:hover { border-color: color-mix(in srgb, var(--text-muted) 55%, var(--border)); color: var(--text); }
+dialog.modal .day-chip input:checked + span {
+    background: var(--accent-soft); border-color: var(--primary); color: var(--primary); font-weight: 600;
+}
+dialog.modal .day-chip input:focus-visible + span { box-shadow: 0 0 0 3px var(--accent-ring); }
+dialog.modal .day-chip input[aria-invalid="true"] + span { border-color: var(--error); }
+
+/* ── Callouts and disclosures ───────────────────────────────────────── */
+dialog.modal .callout {
+    display: flex; gap: 0.75rem; align-items: flex-start;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border); border-radius: 12px;
+    background: var(--bg-item);
+    font-size: 0.8125rem; line-height: 1.6; color: var(--text);
+}
+dialog.modal .callout > .ico { flex: none; margin-top: 0.15rem; color: var(--primary); }
+dialog.modal .callout p { margin: 0; max-width: 78ch; }
+dialog.modal .callout-title { font-weight: 600; margin-bottom: 0.3rem !important; }
+dialog.modal .help-text { color: var(--text-muted); line-height: 1.75; }
+dialog.modal .help-text b { color: var(--text); font-weight: 600; }
+
+dialog.modal .disclosure { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); }
+dialog.modal .disclosure > summary {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.75rem 1rem; border-radius: 11px;
+    list-style: none; cursor: pointer;
+    font-size: 0.8125rem; font-weight: 500; color: var(--text);
+}
+dialog.modal .disclosure > summary::-webkit-details-marker { display: none; }
+dialog.modal .disclosure > summary > .ico { color: var(--primary); flex: none; }
+dialog.modal .disclosure > summary:hover { background: var(--hover); }
+dialog.modal .disclosure > summary:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary); }
+dialog.modal .disclosure-chev { margin-left: auto; display: inline-flex; color: var(--text-muted); transition: transform 0.2s; }
+dialog.modal .disclosure[open] .disclosure-chev { transform: rotate(180deg); }
+dialog.modal .disclosure[open] > summary { border-radius: 11px 11px 0 0; border-bottom: 1px solid var(--border); }
+dialog.modal .disclosure-body {
+    padding: 0.9rem 1.1rem 1rem; font-size: 0.8125rem; line-height: 1.7;
+}
+dialog.modal .disclosure-body > p { margin: 0 0 0.75rem; color: var(--text); }
+
+/* ── Badges and status text ─────────────────────────────────────────── */
+dialog.modal .badge {
+    display: inline-flex; align-items: center; gap: 0.35rem; flex: none;
+    height: 1.4rem; padding: 0 0.55rem;
+    border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text-muted); font-size: 0.72rem; font-weight: 600; line-height: 1; white-space: nowrap;
+}
+dialog.modal .badge-dot { width: 0.42rem; height: 0.42rem; border-radius: 50%; background: currentColor; }
+dialog.modal .badge-ok {
+    color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, transparent);
+    background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+dialog.modal .badge-warn {
+    color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+dialog.modal .badge-off .badge-dot { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+
+dialog.modal .status-text {
+    display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0;
+    font-size: 0.8125rem; color: var(--text-muted); word-break: break-word;
+}
+dialog.modal .status-text .ico { flex: none; }
+dialog.modal .status-ok { color: var(--success); }
+dialog.modal .status-fail { color: var(--error); }
+dialog.modal .test-row { display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; }
+
+dialog.modal .input-group { display: flex; gap: 0.5rem; }
+dialog.modal .input-group input { flex: 1; font-family: var(--mono); font-size: 0.8125rem; }
+dialog.modal .input-group .btn { height: var(--ctl-h); }
+dialog.modal .token-once {
+    padding: 1rem; border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
+    background: color-mix(in srgb, var(--success) 6%, var(--bg-card));
+}
+dialog.modal .token-once .field-label { color: var(--success); }
+dialog.modal .muted { color: var(--text-muted); }
+
+/* ════════════════════════════════════════════════════════════════════
+   Set editor
+   ════════════════════════════════════════════════════════════════════ */
+dialog.modal-editor {
+    width: min(1160px, calc(100vw - 2rem));
+    height: min(54rem, 90vh, calc(100dvh - 2rem));
+}
+dialog.modal-editor .modal-shell { height: 100%; max-height: none; }
+
+dialog.modal .editor {
+    flex: 1; min-height: 0;
+    display: grid; grid-template-columns: 13rem minmax(0, 1fr);
+}
+
+/* Section navigation */
+dialog.modal .editor-nav {
+    min-height: 0; overflow-y: auto;
+    padding: 1rem 0.7rem;
+    border-right: 1px solid var(--border);
+    background: var(--sidebar);
+}
+dialog.modal .editor-tabs { display: flex; flex-direction: column; gap: 0.15rem; }
+dialog.modal .editor-tab {
+    display: flex; align-items: center; gap: 0.65rem;
+    width: 100%; height: 2.4rem; padding: 0 0.65rem;
+    background: transparent; border: 0; border-radius: 8px;
+    color: var(--text-muted); font: inherit; font-size: 0.875rem; text-align: left;
+    cursor: pointer; white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+}
+dialog.modal .editor-tab .ico { flex: none; opacity: 0.8; }
+dialog.modal .editor-tab:hover { background: var(--hover); color: var(--text); }
+dialog.modal .editor-tab[aria-selected="true"] { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+dialog.modal .editor-tab[aria-selected="true"] .ico { color: var(--primary); opacity: 1; }
+dialog.modal .editor-tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--primary); }
+dialog.modal .editor-tab-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+dialog.modal .editor-tab-meta {
+    flex: none; min-width: 1.1rem; text-align: right;
+    font-size: 0.75rem; font-weight: 500; color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+dialog.modal .editor-tab-meta:empty:not(.meta-dot) { display: none; }
+dialog.modal .meta-dot { display: inline-flex; justify-content: flex-end; }
+dialog.modal .meta-dot::after { content: ""; width: 0.45rem; height: 0.45rem; border-radius: 50%; }
+dialog.modal .meta-dot.on::after { background: var(--success); }
+dialog.modal .meta-dot.off::after { box-shadow: inset 0 0 0 1.5px var(--text-muted); opacity: 0.7; }
+
+/* Content */
+dialog.modal .editor-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+dialog.modal .editor-main > .modal-error { margin: 1rem 1.75rem 0; flex: none; }
+dialog.modal .editor-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 1.6rem 1.75rem 2.5rem; }
+
+dialog.modal .panel-head { margin: 0 0 1.5rem; }
+dialog.modal .panel-head h3 { margin: 0; font-size: 1.05rem; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+dialog.modal .panel-head p { margin: 0.3rem 0 0; color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; max-width: 72ch; }
+dialog.modal .panel-body { display: flex; flex-direction: column; gap: 1.75rem; }
+
+dialog.modal .block-head { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 0.8rem; }
+dialog.modal .block-head h4 { margin: 0; font-size: 0.9rem; font-weight: 600; color: var(--text); }
+dialog.modal .block-head p { margin: 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; max-width: 72ch; }
+/* ── List tables (inputs, rules, categories) ────────────────────────── */
+dialog.modal .gtable { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); }
+dialog.modal .gt-row {
+    display: grid; grid-template-columns: var(--cols); gap: 0.75rem; align-items: center;
+    padding: 0.55rem 0.6rem 0.55rem 1rem; min-height: 3.2rem;
+}
+dialog.modal .gt-head {
+    min-height: 0; padding-top: 0.55rem; padding-bottom: 0.55rem;
+    background: var(--bg-item); border-bottom: 1px solid var(--border); border-radius: 11px 11px 0 0;
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--text-muted); white-space: nowrap;
+}
+dialog.modal .gt-head > span { overflow: hidden; text-overflow: ellipsis; }
+dialog.modal .gt-body > .gt-row + .gt-row { border-top: 1px solid var(--border); }
+dialog.modal .gt-body > .gt-row { transition: background 0.12s; }
+dialog.modal .gt-body > .gt-row:hover { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+dialog.modal .gt-body > .gt-row.is-invalid { background: var(--danger-soft); box-shadow: inset 3px 0 0 var(--error); }
+dialog.modal .gt-cell { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 0.15rem; }
+dialog.modal .gt-cell.center, dialog.modal .gt-head .center { align-items: center; text-align: center; }
+dialog.modal .gt-cell.end { flex-direction: row; align-items: center; justify-content: flex-end; gap: 0.1rem; }
+dialog.modal .gt-empty {
+    margin: 0; padding: 1.25rem 1rem;
+    color: var(--text-muted); font-size: 0.8125rem; text-align: center;
+}
+dialog.modal .gt-foot { padding: 0.35rem 0.5rem; border-top: 1px solid var(--border); }
+dialog.modal .gt-body:empty { display: none; }
+
+dialog.modal .gt-inputs { --cols: 8.5rem minmax(0, 1.5fr) minmax(0, 1.2fr) 6rem 4.25rem; }
+dialog.modal .gt-rules { --cols: 1.6rem minmax(0, 1.05fr) minmax(0, 1.5fr) minmax(0, 1.05fr) 4.75rem 5.5rem 8.4rem; }
+dialog.modal .gt-cats { --cols: minmax(0, 1.1fr) minmax(0, 1.5fr) 7.5rem 4.25rem; }
+dialog.modal .gt-cats.no-archive { --cols: minmax(0, 1.1fr) minmax(0, 1.9fr) 4.25rem; }
+dialog.modal .gt-cats.no-path { --cols: minmax(0, 1.6fr) minmax(0, 1fr) 4.25rem; }
+dialog.modal .gt-cats.no-path .h-path, dialog.modal .gt-cats.no-archive .h-archive { display: none; }
+
+/* Ziel-Ablage: the base-path field sits above the categories for the
+   library and below them (as error/duplicate folder) for Immich. */
+dialog.modal #tab-target .panel-body > .target-access { order: 1; }
+dialog.modal #tab-target .panel-body > .target-base { order: 2; }
+dialog.modal #tab-target .panel-body > .target-cats { order: 3; }
+dialog.modal #tab-target.is-immich .panel-body > .target-base { order: 4; }
+dialog.modal .field-narrow { max-width: 34rem; }
+
+dialog.modal input.mono, dialog.modal .mono { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: -0.01em; }
+dialog.modal .gt-cell > .badge { align-self: flex-start; }
+
+/* Read-only cell content */
+dialog.modal .cell-text, dialog.modal .cell-code, dialog.modal .cell-strong, dialog.modal .cell-sub {
+    display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+dialog.modal .cell-text { font-size: 0.8125rem; color: var(--text); }
+dialog.modal .cell-strong { font-size: 0.8125rem; font-weight: 600; color: var(--text); }
+dialog.modal .cell-sub { font-size: 0.75rem; color: var(--text-muted); }
+dialog.modal code.cell-code, dialog.modal .cell-code {
+    align-self: flex-start; font-family: var(--mono); font-size: 0.78rem; color: var(--text);
+    padding: 0.15rem 0.45rem; border-radius: 6px;
+    background: var(--bg-input); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+dialog.modal .cell-code.muted-code { background: transparent; border-color: transparent; padding-left: 0; color: var(--text-muted); }
+dialog.modal .name-line { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+dialog.modal .pos { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+dialog.modal .type-chip {
+    display: inline-flex; align-items: center; gap: 0.45rem; align-self: flex-start;
+    font-size: 0.8125rem; font-weight: 500; color: var(--text);
+}
+dialog.modal .type-chip .ico { color: var(--primary); flex: none; }
+dialog.modal .target-skip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8125rem; color: var(--text-muted); }
+dialog.modal .state { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8125rem; font-weight: 500; }
+dialog.modal .state-dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; flex: none; }
+dialog.modal .state-text { display: inline-block; }
+dialog.modal .state-text::first-letter { text-transform: uppercase; }
+dialog.modal .state-on { color: var(--success); }
+dialog.modal .state-on .state-dot { background: var(--success); }
+dialog.modal .state-off { color: var(--text-muted); }
+dialog.modal .state-off .state-dot { box-shadow: inset 0 0 0 1.5px currentColor; }
+dialog.modal .row-inactive :is(.cell-text, .cell-code, .type-chip, .target-skip, .cell-strong) { opacity: 0.55; }
+dialog.modal .row-fixed .cell-strong { font-weight: 500; }
+dialog.modal .icon-btn.is-blocked { opacity: 0.45; }
+dialog.modal .icon-btn.is-blocked:hover { opacity: 1; }
+
+/* ── Add menu (inputs) ──────────────────────────────────────────────── */
+dialog.modal .add-menu { position: relative; display: inline-block; }
+dialog.modal .add-menu .btn-add > .ico:last-child { margin-left: -0.1rem; opacity: 0.8; transition: transform 0.15s; }
+dialog.modal .add-menu .btn-add[aria-expanded="true"] > .ico:last-child { transform: rotate(180deg); }
+dialog.modal .menu {
+    position: absolute; left: 0; top: calc(100% + 0.35rem); z-index: 5;
+    width: min(23rem, calc(100vw - 3rem)); padding: 0.35rem;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+dialog.modal .menu-item {
+    display: flex; align-items: flex-start; gap: 0.75rem; width: 100%;
+    padding: 0.65rem 0.75rem; border: 0; border-radius: 8px;
+    background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+dialog.modal .menu-item:hover:not(:disabled), dialog.modal .menu-item:focus-visible { background: var(--hover); outline: none; }
+dialog.modal .menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--primary); }
+dialog.modal .menu-item:disabled { cursor: not-allowed; }
+dialog.modal .menu-item:disabled .menu-ico, dialog.modal .menu-item:disabled .menu-title { opacity: 0.45; }
+dialog.modal .menu-ico {
+    flex: none; display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 8px;
+    background: var(--accent-soft); color: var(--primary);
+}
+dialog.modal .menu-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+dialog.modal .menu-title { font-size: 0.875rem; font-weight: 600; }
+dialog.modal .menu-desc { font-size: 0.78rem; color: var(--text-muted); line-height: 1.45; }
+
+/* ── Segmented radio groups (rule condition, media type) ────────────── */
+dialog.modal .segmented-group {
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+    padding: 0.2rem; gap: 0.2rem;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input);
+}
+dialog.modal .seg { position: relative; display: flex; margin: 0; }
+dialog.modal .seg input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+dialog.modal .seg span {
+    flex: 1; display: grid; place-items: center; text-align: center;
+    min-height: 2.05rem; padding: 0.3rem 0.5rem; border-radius: 7px;
+    font-size: 0.8125rem; font-weight: 500; line-height: 1.25; color: var(--text-muted);
+    cursor: pointer; user-select: none; transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+dialog.modal .seg span:hover { color: var(--text); }
+dialog.modal .seg input:checked + span {
+    background: var(--bg-card); color: var(--text); font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), inset 0 0 0 1px var(--border);
+}
+dialog.modal .seg input:focus-visible + span { box-shadow: 0 0 0 2px var(--primary); }
+
+/* ── Time fields: plain text with a leading icon, no native clock ───── */
+dialog.modal .input-icon { position: relative; display: block; }
+dialog.modal .input-icon > .ico {
+    position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%);
+    color: var(--text-muted); pointer-events: none;
+}
+dialog.modal .input-icon > input { padding-left: 2.25rem; }
+dialog.modal .time-input { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+/* ── Item popup (on top of the set editor) ──────────────────────────── */
+dialog.modal-item { width: min(600px, calc(100vw - 2rem)); }
+dialog.modal-item::backdrop { background: rgba(6, 8, 14, 0.35); backdrop-filter: none; }
+body[data-theme="light"] dialog.modal-item::backdrop { background: rgba(17, 24, 39, 0.25); }
+dialog.modal .item-form { display: flex; flex-direction: column; gap: 1.25rem; }
+dialog.modal .field-grid-rule { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+dialog.modal #item-rule-hint code { font-size: 0.78rem; }
+dialog.modal .foot-note { color: var(--text-muted); font-size: 0.78rem; line-height: 1.35; max-width: 17rem; }
+dialog.modal .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+dialog.modal .chip-btn {
+    height: 1.7rem; padding: 0 0.5rem; border-radius: 6px; cursor: pointer;
+    font-family: var(--mono); font-size: 0.74rem; color: var(--text);
+    background: var(--bg-input); border: 1px solid var(--border);
+    transition: border-color 0.15s, color 0.15s;
+}
+dialog.modal .chip-btn:hover { border-color: var(--primary); color: var(--primary); }
+dialog.modal .chip-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary); }
+dialog.modal .field-hint-after { margin-top: 0.6rem; }
+dialog.modal .badge-accent {
+    color: var(--primary); border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+    background: var(--accent-soft);
+}
+
+/* Scrollbars: none in the section list, a thin one for the content. */
+dialog.modal .editor-nav { scrollbar-width: none; }
+dialog.modal .editor-nav::-webkit-scrollbar { display: none; }
+dialog.modal :is(.editor-scroll, .modal-body) { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+/* ════════════════════════════════════════════════════════════════════
+   Narrow screens
+   ════════════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+    dialog.modal .cards-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+    dialog.modal { --m-pad: 1rem; }
+    dialog.modal-editor {
+        width: 100vw; height: 100dvh; max-height: 100dvh;
+        border: 0; border-radius: 0;
+    }
+    dialog.modal-editor .modal-shell { max-height: 100dvh; }
+    dialog.modal .modal-head { padding: 0.8rem 0.6rem 0.8rem var(--m-pad); gap: 0.6rem; }
+    dialog.modal .modal-title { font-size: 1rem; }
+    dialog.modal .modal-badges .badge-ok { display: none; }
+
+    dialog.modal .editor { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    dialog.modal .editor-nav {
+        overflow-x: auto; overflow-y: hidden; padding: 0.5rem 0.6rem;
+        border-right: 0; border-bottom: 1px solid var(--border);
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+    }
+    dialog.modal .editor-tabs { flex-direction: row; gap: 0.25rem; width: max-content; padding-right: 1.5rem; }
+    dialog.modal .editor-tab { width: auto; height: 2.1rem; padding: 0 0.7rem; gap: 0.45rem; font-size: 0.8125rem; }
+    dialog.modal .editor-tab-meta { display: none; }
+    dialog.modal .editor-main > .modal-error { margin: 0.75rem var(--m-pad) 0; }
+    dialog.modal .editor-scroll { padding: 1.25rem var(--m-pad) 2rem; }
+    dialog.modal .panel-head { margin-bottom: 1.25rem; }
+
+    dialog.modal .field-grid,
+    dialog.modal .field-grid-name { grid-template-columns: minmax(0, 1fr); }
+    dialog.modal .field-grid-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    dialog.modal .cards-2 { grid-template-columns: minmax(0, 1fr); }
+    dialog.modal .choice-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    dialog.modal .option-row { gap: 1.5rem; padding: 0.85rem 1rem 0.85rem 0.9rem; }
+    dialog.modal div.option-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+    dialog.modal .option-control { width: auto; }
+    dialog.modal .seg-4 { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    /* Lists become one card per entry with captions above each value. */
+    dialog.modal .gt-head { display: none; }
+    dialog.modal .gt-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 0.55rem 0.75rem; padding: 0.8rem 0.6rem 0.6rem 0.9rem;
+    }
+    dialog.modal .gt-cell[data-label]::before {
+        content: attr(data-label);
+        font-size: 0.66rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+        color: var(--text-muted);
+    }
+    dialog.modal .gt-cell.center { align-items: flex-start; }
+    dialog.modal .gt-cell.end { align-self: end; }
+    dialog.modal .gt-rules .c-pos { display: none; }
+    dialog.modal .gt-inputs .gt-row { grid-template-areas: "type status" "source source" "label actions"; }
+    dialog.modal .gt-rules .gt-row { grid-template-areas: "cond target" "value value" "media status" "actions actions"; }
+    dialog.modal .gt-cats .gt-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name actions" "path archive"; }
+    dialog.modal .gt-cats .c-archive::before { display: none; }
+    dialog.modal .gt-cats .c-archive { align-self: end; }
+    dialog.modal .gt-cats .c-archive > .muted { display: none; }
+    dialog.modal .c-type { grid-area: type; } dialog.modal .c-source { grid-area: source; }
+    dialog.modal .c-label { grid-area: label; } dialog.modal .c-status { grid-area: status; }
+    dialog.modal .c-actions { grid-area: actions; }
+    dialog.modal .c-cond { grid-area: cond; } dialog.modal .c-value { grid-area: value; }
+    dialog.modal .c-target { grid-area: target; } dialog.modal .c-media { grid-area: media; }
+    dialog.modal .c-name { grid-area: name; } dialog.modal .c-path { grid-area: path; }
+    dialog.modal .c-archive { grid-area: archive; }
+    dialog.modal .gt-rules .c-actions { margin-top: -0.35rem; }
+
+    dialog.modal .modal-foot { padding: 0.7rem 0.6rem 0.7rem var(--m-pad); }
+    dialog.modal .modal-actions { flex-wrap: nowrap; gap: 0.35rem; }
+    dialog.modal .btn-ghost { padding: 0 0.6rem; }
+    dialog.modal .btn-ghost .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    dialog.modal .foot-status { font-size: 0; margin-right: 0.25rem; gap: 0; }
+    dialog.modal .foot-note { display: none; }
+    dialog.modal .btn { padding: 0 0.85rem; }
+}
+
+@media (max-width: 420px) {
+    dialog.modal .cards-4 { grid-template-columns: minmax(0, 1fr); }
+    dialog.modal .field-grid-compact { grid-template-columns: minmax(0, 1fr); }
+    dialog.modal .field-grid-rule { grid-template-columns: minmax(0, 1fr); }
+}
