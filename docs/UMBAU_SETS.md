@@ -11,7 +11,7 @@ Beliebig viele **Sets**. Jedes Set bündelt, was heute global eingestellt ist:
 | Eingangsverzeichnisse | Liste, je Verzeichnis eigene Schalter | ein oder mehrere Verzeichnisse pro Set |
 | Filewatcher (Zeitplan) | global: Modus, Intervall, Fenster, Tage | pro Set |
 | Sortier-Regeln | eine globale Liste | eigene Liste pro Set |
-| Ordner-Tags | pro Verzeichnis + globales Modul | pro Set (Modul bleibt Hauptschalter) |
+| Ordner-Tags | pro Verzeichnis + globales Modul (beide müssen an sein) | **nur noch pro Set** — das globale Modul entfällt |
 | Immich Auto-Tagging | global an/aus, ein Cursor | pro Set an/aus, eigener Benutzer, eigener Cursor |
 | Ziel-Ablage | global: Basis-Pfad + Kategorien mit Pfad-Vorlagen | pro Set: Ziel (Library oder Immich), Basis-Pfad, Kategorien |
 
@@ -90,7 +90,10 @@ inzwischen geändert wurde. Regeln, Kategorien und Basis-Pfad liest die Pipeline
 
 Einmalig, mit Flag `migration.sets_v1`, das **nur bei Erfolg** gesetzt wird:
 
-1. Bestehende Verzeichnisse nach ihren Schaltern gruppieren. Eine Gruppe → ein Set
+1. Bestehende Verzeichnisse nach ihren Schaltern gruppieren. Ordner-Tags des Sets =
+   Verzeichnis-Schalter **und** globales Modul `ordner_tags` — so verhält sich das Set
+   wie bisher, obwohl das Modul danach wegfällt.
+   Die Gruppierung im Einzelnen: Eine Gruppe → ein Set
    (bei nur einer Gruppe heisst es „Standard"). Live: ein Verzeichnis → ein Set.
 2. Zeitplan aus `filewatcher.*`, Basis-Pfad aus `library.base_path`.
 3. Regeln und Kategorien dem Set zuordnen (bei mehreren Sets: kopieren).
@@ -116,6 +119,8 @@ muss jede Datei dieselbe Kategorie und denselben Zielpfad ergeben wie vorher.
 - Popup mit Reitern: Allgemein · Eingänge · Zeitplan · Sortier-Regeln · Ordner-Tags ·
   Ziel-Ablage. Unten: Speichern, Abbrechen, Duplizieren, Löschen. „Duplizieren"
   kopiert Regeln und Kategorien mit.
+- Der globale Abschnitt **Ordner-Tags entfällt** samt Modul `ordner_tags`; seine
+  Erklärung „Wie funktioniert es?" wandert in den Reiter Ordner-Tags des Popups.
 - Die bisherigen Einstellungs-Abschnitte Eingangsverzeichnisse, Filewatcher,
   Sortier-Regeln, Ziel-Ablage und Ordner-Tags gehen in diesem Popup auf; beim
   Immich-Abschnitt wandert nur der Poll-Schalter ins Set.
