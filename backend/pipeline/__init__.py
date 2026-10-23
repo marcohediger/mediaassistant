@@ -7,8 +7,8 @@ import time
 import traceback
 from datetime import datetime
 from sqlalchemy import update, or_, and_
-from sqlalchemy.orm.attributes import flag_modified
 import fileops
+import runs
 from config import config_manager
 from database import async_session
 from file_operations import sha256 as _sha256
@@ -54,6 +54,7 @@ async def _heartbeat(job_id: int) -> None:
                     update(Job).where(Job.id == job_id, Job.status == "processing")
                     .values(updated_at=datetime.now())
                     .execution_options(synchronize_session=False))
+                await runs.heartbeat(session, job_id)
                 await session.commit()
         except Exception as exc:  # a missed beat only makes the job look slower
             logger.warning("heartbeat of job %s failed: %s", job_id, exc)
@@ -99,6 +100,17 @@ FINALIZERS = [
 
 MAIN_STEPS = [s for s in STEPS if s[0] not in {"IA-09", "IA-10", "IA-11"}]
 
+# What IA-05 stands for when it failed: later modules read these fields.
+_IA05_FALLBACK = {
+    "type": "unknown",
+    "tags": [],
+    "description": "",
+    "mood": "",
+    "people_count": 0,
+    "quality": "unbekannt",
+    "confidence": 0.0,
+}
+
 
 async def run_pipeline(job_id: int):
     if job_id in _ACTIVE_RUNS:
@@ -107,11 +119,12 @@ async def run_pipeline(job_id: int):
         logger.info("Job %s: already claimed — its pipeline is running in this process, skipping", job_id)
         return
     async with _running(job_id, "pipeline"):
-        await _run_pipeline(job_id)
-
-
-def _without_run_params(step_result: dict | None) -> dict:
-    return {k: v for k, v in (step_result or {}).items() if not reprocess.is_run_param(k)}
+        try:
+            await _run_pipeline(job_id)
+        except runs.RunSuperseded as exc:
+            # Another run took the job over (its claim superseded this run's
+            # module run): stop here, it carries on.
+            await log_warning("pipeline", f"Job #{job_id}: Lauf beendet — ein anderer Lauf hat übernommen", str(exc))
 
 
 async def _run_pipeline(job_id: int):
@@ -139,35 +152,42 @@ async def _run_pipeline(job_id: int):
         if not job:
             return
 
-        if reprocess.PREPARE_SOURCE in (job.step_result or {}):
+        # A step_result written outside runs.py (tests, old tools) becomes
+        # runs first; from here on the runs decide what is done.
+        await runs.adopt(session, job)
+        await session.commit()
+
+        if reprocess.PREPARE_SOURCE in runs.params_of(job):
             # A retry dropped the old results and was cut short before its
             # file was in place (crash, R-10b): finish that first.
             ok, notes = await reprocess.resume_prepare_source(session, job, actor="system:resume")
             if not ok:
                 job.status = "error"
                 job.error_message = reprocess.missing_source_message(notes)
-                job.step_result = _without_run_params(job.step_result)
-                flag_modified(job, "step_result")
+                await runs.set_values(session, job, clear_params=True)
                 job.completed_at = datetime.now()
                 await session.commit()
                 await log_warning("pipeline", f"{job.debug_key} unterbrochener Retry: Datei nicht auffindbar",
                                   job.error_message)
                 return
 
-        existing_results = dict(job.step_result or {})
         # Run parameters (e.g. _force_reupload, _retry_previous_immich_tags)
-        # belong to exactly this run. They stay in step_result while it runs,
-        # so a crash hands them to the resumed run, and are removed when it
-        # ends. Steps read them through pipeline.run_params(job).
-        params = {k: v for k, v in existing_results.items() if reprocess.is_run_param(k)}
+        # belong to exactly this run. They stay job values while it runs, so
+        # a crash hands them to the resumed run, every module run notes them,
+        # and they are removed when it ends. Steps read them through
+        # pipeline.run_params(job).
+        params = runs.params_of(job)
         setattr(job, reprocess.RUN_PARAMS_ATTR, params)
+        # Resume: a module whose current run is finished (an error run too)
+        # is not run again; an interrupted 'running' one is (runs.start).
+        current = await runs.current_runs(session, job_id)
         pipeline_failed = False
 
         # Main pipeline steps (IA-01 to IA-08)
         duplicate_detected = False
         early_skip = False
         for step_code, step_fn in MAIN_STEPS:
-            if step_code in existing_results:
+            if runs.is_done(current.get(step_code)):
                 continue
 
             # Early skip check: after IA-01, evaluate sorting rules to detect
@@ -176,7 +196,7 @@ async def _run_pipeline(job_id: int):
             if step_code == "IA-02" and not early_skip:
                 try:
                     from pipeline.step_ia08_sort import _match_sorting_rules
-                    exif = existing_results.get("IA-01", {})
+                    exif = (job.step_result or {}).get("IA-01", {})
                     file_type = (exif.get("file_type") or "").upper()
                     mime = exif.get("mime_type", "")
                     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
@@ -186,9 +206,9 @@ async def _run_pipeline(job_id: int):
                     )
                     if rule_cat == "skip":
                         job.status = "skipped"
-                        existing_results["IA-08"] = {"status": "skipped", "reason": "excluded by sorting rule (early check)"}
-                        job.step_result = existing_results
-                        flag_modified(job, "step_result")
+                        await runs.record(session, job, "IA-08",
+                                          {"status": "skipped", "reason": "excluded by sorting rule (early check)"},
+                                          params=params)
                         await session.commit()
                         early_skip = True
                         break
@@ -197,13 +217,23 @@ async def _run_pipeline(job_id: int):
 
             job.current_step = step_code
             _mark_step(job_id, step_code)
+            run = await runs.start(session, job, step_code, params=params)
             await session.commit()
+            run_open = True
+
+            async def close(result, error=None):
+                # The step's result ends its run; after the run is closed (a
+                # check after the step failed) a new run replaces it.
+                nonlocal run_open
+                if run_open:
+                    await runs.finish(session, job, run, result, error=error)
+                    run_open = False
+                else:
+                    await runs.record(session, job, step_code, result, error=error, params=params)
 
             try:
                 result = await step_fn(job, session)
-                existing_results[step_code] = result
-                job.step_result = existing_results
-                flag_modified(job, "step_result")
+                await close(result)
                 await session.commit()
 
                 # IA-02: If duplicate detected, skip remaining main steps
@@ -215,18 +245,19 @@ async def _run_pipeline(job_id: int):
                 if step_code == "IA-08" and job.status == "skipped":
                     break
 
-                # Post-IA-04: Video pHash duplicate check (frames now available)
+                # Post-IA-04: Video pHash duplicate check (frames now available).
+                # It overrules IA-02: a new IA-02 run.
                 if step_code == "IA-04":
                     from pipeline.step_ia02_duplicates import execute_video_phash
                     vphash_result = await execute_video_phash(job, session)
                     if vphash_result and vphash_result.get("status") == "duplicate":
-                        existing_results["IA-02"] = vphash_result
-                        job.step_result = existing_results
-                        flag_modified(job, "step_result")
+                        await runs.record(session, job, "IA-02", vphash_result, params=params)
                         await session.commit()
                         duplicate_detected = True
                         break
 
+            except runs.RunSuperseded:
+                raise
             except Exception as e:
                 # Service-outage exceptions: auto-pause the entire pipeline
                 # so we don't bulldoze through hundreds of files producing
@@ -250,7 +281,7 @@ async def _run_pipeline(job_id: int):
                     )
                     job.status = "error"
                     job.error_message = f"[{step_code}] {reason} — Pipeline auto-pausiert: {type(e).__name__}: {e}"
-                    existing_results[step_code] = {
+                    error_result = {
                         "status": "error",
                         "reason": f"{type(e).__name__}: {e}",
                         "ai_unreachable": isinstance(e, AIConnectionError),
@@ -258,17 +289,8 @@ async def _run_pipeline(job_id: int):
                         "traceback": tb,
                     }
                     if step_code == "IA-05":
-                        existing_results[step_code].update({
-                            "type": "unknown",
-                            "tags": [],
-                            "description": "",
-                            "mood": "",
-                            "people_count": 0,
-                            "quality": "unbekannt",
-                            "confidence": 0.0,
-                        })
-                    job.step_result = existing_results
-                    flag_modified(job, "step_result")
+                        error_result.update(_IA05_FALLBACK)
+                    await close(error_result)
                     await session.commit()
                     logger.error(f"{job.debug_key} Service down at {step_code}: pipeline auto-paused ({reason})")
                     pipeline_failed = True
@@ -281,34 +303,22 @@ async def _run_pipeline(job_id: int):
                     # IA-02: If file was already moved as duplicate before the error,
                     # treat it as a successful duplicate detection (don't continue pipeline)
                     if step_code == "IA-02" and job.status == "duplicate":
-                        existing_results[step_code] = {"status": "duplicate", "note": f"detected but cleanup failed: {type(e).__name__}: {e}"}
-                        job.step_result = existing_results
-                        flag_modified(job, "step_result")
+                        await close({"status": "duplicate", "note": f"detected but cleanup failed: {type(e).__name__}: {e}"},
+                                    error=f"{type(e).__name__}: {e}\n\n{tb}")
                         await session.commit()
                         duplicate_detected = True
                         break
-                    existing_results[step_code] = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
+                    error_result = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
                     if step_code == "IA-05":
-                        existing_results[step_code].update({
-                            "type": "unknown",
-                            "tags": [],
-                            "description": "",
-                            "mood": "",
-                            "people_count": 0,
-                            "quality": "unbekannt",
-                            "confidence": 0.0,
-                        })
-                    job.step_result = existing_results
-                    flag_modified(job, "step_result")
+                        error_result.update(_IA05_FALLBACK)
+                    await close(error_result, error=f"{type(e).__name__}: {e}\n\n{tb}")
                     await session.commit()
                     continue
                 # Critical step failed — mark error, then run finalizers
                 tb = traceback.format_exc()
                 job.status = "error"
                 job.error_message = f"[{step_code}] {type(e).__name__}: {e}\n\n{tb}"
-                existing_results[step_code] = {"status": "error", "reason": f"{type(e).__name__}: {e}", "traceback": tb}
-                job.step_result = existing_results
-                flag_modified(job, "step_result")
+                await close({"status": "error", "reason": f"{type(e).__name__}: {e}", "traceback": tb})
                 await session.commit()
                 await log_error("pipeline", f"{job.debug_key} Error at {step_code}", f"{type(e).__name__}: {e}\n\n{tb}")
                 logger.error(f"{job.debug_key} Error at {step_code}: {e}")
@@ -321,17 +331,14 @@ async def _run_pipeline(job_id: int):
 
         # Finalizers (IA-09, IA-10, IA-11) — always run, even after critical errors
         for step_code, step_fn in FINALIZERS:
-            if step_code in existing_results:
+            if runs.is_done(current.get(step_code)):
                 continue
             job.current_step = step_code
             _mark_step(job_id, step_code)
+            run = await runs.start(session, job, step_code, params=params)
             await session.commit()
             try:
                 result = await step_fn(job, session)
-                existing_results[step_code] = result
-                job.step_result = existing_results
-                flag_modified(job, "step_result")
-                await session.commit()
             except Exception as e:
                 tb = traceback.format_exc()
                 await log_warning(
@@ -339,18 +346,17 @@ async def _run_pipeline(job_id: int):
                     f"{job.debug_key} {step_code} übersprungen",
                     f"{type(e).__name__}: {e}\n\n{tb}",
                 )
-                existing_results[step_code] = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
-                job.step_result = existing_results
-                flag_modified(job, "step_result")
-                await session.commit()
+                await runs.finish(session, job, run, {"status": "error", "reason": f"{type(e).__name__}: {e}"},
+                                  error=f"{type(e).__name__}: {e}\n\n{tb}")
+            else:
+                await runs.finish(session, job, run, result)
+            await session.commit()
 
         # The run is over: its parameters must not reach the next one (R-12).
-        # Removed from the dict the run wrote, whichever copy a step popped from.
-        existing_results = _without_run_params(existing_results)
-        job.step_result = existing_results
-        flag_modified(job, "step_result")
+        await runs.set_values(session, job, clear_params=True)
         setattr(job, reprocess.RUN_PARAMS_ATTR, {})
         await session.commit()
+        existing_results = dict(job.step_result or {})
 
         # A pipeline run that reaches this point succeeded at least from
         # the crash-recovery perspective — reset the stale/resume retry
@@ -595,8 +601,10 @@ async def _prepare_retry(session, job_id: int, actor: str) -> bool:
     previous_description = previous_ia08.get("description_written") or previous_ia07.get("description_written")
     if previous_description:
         params["_retry_previous_immich_description"] = previous_description
-    reprocess._reset_step_results(job, keep_steps=set(), drop_step_statuses=None,
-                                  inject_steps=None, run_params=params)
+    # The runs of all modules are superseded (kept for the history) in one
+    # commit with the marker, before any file is touched.
+    superseded = await reprocess._reset_step_results(session, job, keep_steps=set(), drop_step_statuses=None,
+                                                     inject_steps=None, run_params=params)
     # User-triggered retry means "try fresh": the stale/resume counter is
     # for automatic recovery, not for user intent.
     job.retry_count = 0
@@ -606,9 +614,9 @@ async def _prepare_retry(session, job_id: int, actor: str) -> bool:
         path, sidecar = await reprocess.materialize(job, source, actor=actor)
     except fileops.FileOpError as exc:
         # Nothing was lost: the file is still where it was. Back to the
-        # old results, with the reason.
-        job.step_result = _without_run_params(previous_sr)
-        flag_modified(job, "step_result")
+        # old results (copies of the superseded runs), with the reason.
+        await runs.restore(session, job, superseded)
+        await runs.set_values(session, job, clear_params=True)
         job.status = "error"
         job.error_message = f"Retry abgebrochen — Datei nicht bereitgestellt: {exc}"[:2000]
         await session.commit()
@@ -617,10 +625,7 @@ async def _prepare_retry(session, job_id: int, actor: str) -> bool:
         return False
 
     reprocess.point_job_at(job, path, sidecar)
-    sr = dict(job.step_result or {})
-    sr.pop(reprocess.PREPARE_SOURCE, None)
-    job.step_result = sr
-    flag_modified(job, "step_result")
+    await runs.set_values(session, job, {reprocess.PREPARE_SOURCE: None})
     job.status = "queued"
     job.error_message = None
     await session.commit()

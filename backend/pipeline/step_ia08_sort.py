@@ -27,10 +27,10 @@ from folder_path import folder_targets, is_tag_path
 # temp dir (inventory S19), so IA-08 leaves them alone.
 _POLLER_TMP_PREFIX = "/tmp/ma_immich_"
 
-# Control flags other code leaves in step_result for this one IA-08 run.
-# _force_reupload is no longer read: whether an asset is replaced follows
-# from its content (R-12), so a leaked flag cannot trigger a replace.
-_SENTINELS = ("_retry_previous_immich_tags", "_retry_previous_immich_description", "_force_reupload")
+# Run parameters IA-08 reads (pipeline.run_params): what a retry hands over
+# from the previous run. _force_reupload is no longer read: whether an asset
+# is replaced follows from its content (R-12), so a leaked flag cannot
+# trigger a replace.
 
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
@@ -511,11 +511,13 @@ async def _execute(job, session) -> dict:
     exif = step_results.get("IA-01", {})
     ai_result = step_results.get("IA-05", {})
     geo_result = step_results.get("IA-03", {})
-    # Sentinel list injected by reset_job_for_retry() — tags this job
-    # wrote on its PREVIOUS run, so we can delete any that are no
-    # longer in the current set (= real stale removal).
-    previous_immich_tags = list(step_results.get("_retry_previous_immich_tags") or [])
-    previous_descriptions = {d.strip() for d in [step_results.get("_retry_previous_immich_description")]
+    # Run parameters from reset_job_for_retry() — tags this job wrote on
+    # its PREVIOUS run, so we can delete any that are no longer in the
+    # current set (= real stale removal). Empty outside a pipeline run.
+    from pipeline.reprocess import run_params
+    params = run_params(job)
+    previous_immich_tags = list(params.get("_retry_previous_immich_tags") or [])
+    previous_descriptions = {d.strip() for d in [params.get("_retry_previous_immich_description")]
                              if isinstance(d, str) and d.strip()}
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
@@ -643,9 +645,6 @@ async def _execute(job, session) -> dict:
         result = await _to_library(job, category=category, target_dir=target_dir,
                                    wished_path=wished_path, sidecar_path=sidecar_path)
 
-    # Drop the control flags so they don't leak into the next run's step_result
-    for key in _SENTINELS:
-        step_results.pop(key, None)
     return result
 
 

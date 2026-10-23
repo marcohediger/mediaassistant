@@ -21,7 +21,12 @@ class Job(Base):
     debug_key = Column(Text, unique=True)
     status = Column(Text, default="queued")  # queued/processing/done/error/duplicate/review/orphan/skipped/deleted
     current_step = Column(Text)  # IA-01 bis IA-11
+    # Derived view, written by runs.py only: the current finished run per
+    # module (module_runs) plus job_data.
     step_result = Column(JSON, default=dict)
+    # Job values next to the module results in step_result: parameters of the
+    # next/current pipeline run ("_…"), duplicate plan, merge record. runs.py only.
+    job_data = Column(JSON, default=dict)
     error_message = Column(Text)
     source_label = Column(Text)  # which inbox this came from
     source_inbox_path = Column(Text)  # inbox base path (always set for cleanup)
@@ -146,10 +151,10 @@ class ProcessingSet(Base):
 
     # Processing
     # Folder structure below the inbox (folder_path.py): as tags — none, flat
-    # (one tag per folder level) or nested ("Ordner/…") — and/or as one album
-    # per folder. Both replace folder_tags, which is only read by the
+    # (one tag per folder level), legacy (the old word tags) or nested
+    # ("Ordner/…") — and/or as one album per folder. Both replace folder_tags, which is only read by the
     # one-time migration (database._migrate_columns).
-    folder_tag_mode = Column(Text, default="none")  # none / flat / nested
+    folder_tag_mode = Column(Text, default="none")  # none / flat / legacy / nested
     folder_albums = Column(Boolean, default=False)
     folder_tags = Column(Boolean, default=False)  # legacy switch, superseded by the two above
     dry_run = Column(Boolean, default=False)
@@ -247,6 +252,9 @@ class FileCopy(Base):
         Index("idx_file_copies_job", "job_id"),
         Index("idx_file_copies_sha", "sha256"),
         Index("idx_file_copies_trash", "state", "trashed_at"),
+        # The ledger points at these ids: never hand one out twice
+        # (database._register_autoincrement rebuilds older databases).
+        {"sqlite_autoincrement": True},
     )
 
     id = Column(Integer, primary_key=True)
@@ -275,6 +283,7 @@ class AssetRef(Base):
     __table_args__ = (
         UniqueConstraint("kind", "location", "job_id", name="uq_asset_refs"),
         Index("idx_asset_refs_job", "job_id"),
+        {"sqlite_autoincrement": True},
     )
 
     id = Column(Integer, primary_key=True)
@@ -284,3 +293,65 @@ class AssetRef(Base):
     created_at = Column(DateTime, default=lambda: datetime.now())
 
     asset_id = synonym("location")
+
+
+# ---------------------------------------------------------------------------
+# Module runs: one row per run of a pipeline module (written by runs.py only)
+# ---------------------------------------------------------------------------
+
+MODULE_CODES = tuple(f"IA-{n:02d}" for n in range(1, 12))
+# Statuses of a finished run; a run is also queued, running or superseded.
+RUN_RESULT_STATUSES = ("ok", "warning", "error", "skipped", "dry_run", "duplicate")
+
+
+class ModuleRun(Base):
+    """One run of one pipeline module for one job.
+
+    jobs.step_result is the derived view of these rows (the current
+    finished run per module plus jobs.job_data), rebuilt by runs.py in the
+    same transaction. Per job and module at most one run is not superseded
+    (its current run). A finished run never changes again except for being
+    marked superseded, and rows are never deleted: MODULE_RUNS_GUARDS.
+    """
+    __tablename__ = "module_runs"
+    __table_args__ = (
+        Index("idx_module_runs_job", "job_id", "module", "id"),
+        Index("idx_module_runs_status", "status"),
+        Index("uq_module_runs_current", "job_id", "module", unique=True,
+              sqlite_where=text("status <> 'superseded'")),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, nullable=False)  # jobs.id
+    module = Column(Text, nullable=False)  # IA-01 … IA-11
+    attempt = Column(Integer, nullable=False)  # 1, 2, … per job and module
+    trigger = Column(Text, nullable=False)  # pipeline/retry/rerun/cascade/copied/migrated
+    # queued/running/ok/warning/error/skipped/dry_run/duplicate/superseded
+    status = Column(Text, nullable=False)
+    params = Column(JSON)  # run parameters in effect (the former step_result sentinels)
+    result = Column(JSON)  # what the module returned (the step_result entry)
+    error = Column(Text)  # reason and traceback of a failed run
+    inputs_fingerprint = Column(Text)  # hash of the inputs, for "stale" (later steps)
+    copied_from_run_id = Column(Integer)  # the run this one was copied or restored from
+    started_at = Column(DateTime)
+    finished_at = Column(DateTime)
+    heartbeat_at = Column(DateTime)  # last sign of life while running (R-11)
+
+
+# Executed at startup (database._migrate_module_runs), like FILE_OPS_GUARDS.
+MODULE_RUNS_GUARDS = [
+    "CREATE TRIGGER IF NOT EXISTS trg_module_runs_no_delete BEFORE DELETE ON module_runs "
+    "BEGIN SELECT RAISE(ABORT, 'module_runs rows are kept'); END",
+    # A finished run may only be marked superseded, with nothing else changed.
+    "CREATE TRIGGER IF NOT EXISTS trg_module_runs_finished BEFORE UPDATE ON module_runs "
+    "WHEN OLD.status NOT IN ('queued', 'running') AND NOT ("
+    "OLD.status <> 'superseded' AND NEW.status = 'superseded' "
+    "AND NEW.id IS OLD.id AND NEW.job_id IS OLD.job_id AND NEW.module IS OLD.module "
+    "AND NEW.attempt IS OLD.attempt AND NEW.\"trigger\" IS OLD.\"trigger\" "
+    "AND NEW.params IS OLD.params AND NEW.result IS OLD.result AND NEW.error IS OLD.error "
+    "AND NEW.inputs_fingerprint IS OLD.inputs_fingerprint "
+    "AND NEW.copied_from_run_id IS OLD.copied_from_run_id AND NEW.started_at IS OLD.started_at "
+    "AND NEW.finished_at IS OLD.finished_at AND NEW.heartbeat_at IS OLD.heartbeat_at) "
+    "BEGIN SELECT RAISE(ABORT, 'module_runs row is finished'); END",
+]

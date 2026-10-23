@@ -84,6 +84,36 @@ tr.hist-row.is-open > * { background: var(--ui-row-hover); border-bottom-color: 
 .hist-mod-meta { font-size: var(--ui-fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hist-mod[data-s="not_run"] :is(.hist-mod-label, .hist-mod-code) { color: var(--text-muted); }
 
+/* Earlier attempts of a module (module_runs): "2×" opens them below the row,
+   and the job page shows them at the top of the step result */
+.hist-mod-attempts {
+    display: inline-flex; align-items: center; gap: 0.1rem; padding: 0 0.15rem 0 0.3rem;
+    border: 1px solid var(--ui-line); border-radius: var(--ui-radius-pill); background: none;
+    font: inherit; color: var(--primary); cursor: pointer;
+}
+.hist-mod-attempts .ui-i { transition: transform 0.15s; }
+.hist-mod-attempts[aria-expanded="true"] .ui-i { transform: rotate(180deg); }
+.hist-mod-attempts:hover { color: var(--text); }
+.hist-mod-attempts:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.hist-mod > .hist-runs { grid-column: 1 / -1; padding: 0.15rem 0 0.35rem 1.6rem; }
+.hist-mod > .hist-runs[hidden] { display: none; }
+.hist-runs-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+.hist-run { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 0.5rem; align-items: start; font-size: var(--ui-fs-xs); }
+.hist-run > .ui-status { gap: 0; padding-top: 0.1rem; }
+.hist-run-body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.hist-run-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.15rem 0.5rem; min-width: 0; }
+.hist-run-title { font-weight: 600; color: var(--text); }
+.hist-run-status { color: var(--text-muted); }
+.hist-run-head .ui-badge { height: 1.1rem; font-size: 0.625rem; }
+.hist-run-meta { color: var(--text-muted); font-style: italic; }
+.hist-run-time { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hist-run-error { margin: 0; color: var(--ui-err-text); overflow-wrap: anywhere; }
+.step-attempts {
+    margin: 0 0 0.75rem; padding: 0.6rem 0.75rem;
+    background: var(--bg-item); border: 1px solid var(--ui-line); border-radius: var(--ui-radius);
+}
+.step-attempts-title { margin: 0 0 0.35rem; font-size: var(--ui-fs-xs); font-weight: 600; color: var(--text-muted); }
+
 /* ═══ Ledger timeline ════════════════════════════════════════════════ */
 .hist-ops { position: relative; margin: 0; padding: 0; list-style: none; }
 .hist-op { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 0.7rem; padding-bottom: 0.85rem; }
@@ -255,6 +285,8 @@ tr.hist-row.is-open > * { background: var(--ui-row-hover); border-bottom-color: 
     .hist-mod-detail { grid-column: 3; white-space: normal; overflow-wrap: anywhere; font-size: var(--ui-fs-xs); }
     .hist-mod-detail:empty { display: none; }
     .hist-mod-meta { grid-column: 3; }
+    .hist-mod > .hist-runs { padding-left: 0; }
+    .hist-run-time { margin-left: 0; flex-basis: 100%; }
     .hist-op-time { margin-left: 0; flex-basis: 100%; }
     /* Two lines: count, then what; the times are inside */
     .hist-hk-sum { flex-wrap: wrap; }

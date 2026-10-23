@@ -7,9 +7,9 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import or_, select
-from sqlalchemy.orm.attributes import flag_modified
 
 import fileops
+import runs
 from config import config_manager
 from database import async_session
 from file_operations import (
@@ -244,8 +244,7 @@ async def _classify_one(job_id: int, category: str, *, actor: str) -> tuple[str 
             row = await session.get(Job, job_id)
             row.status = "done"
             row.completed_at = datetime.now()
-            row.step_result = dict(row.step_result or {}, **{"IA-08": sort_result})
-            flag_modified(row, "step_result")
+            await _record_sorting(session, row, sort_result)
             await session.commit()
         await log_info("review", f"Manuell klassifiziert (Immich): {job.debug_key} → {key}")
         return None, ""
@@ -290,11 +289,18 @@ async def _classify_one(job_id: int, category: str, *, actor: str) -> tuple[str 
         row.target_path = moved.location
         row.status = "done"
         row.completed_at = datetime.now()
-        row.step_result = dict(row.step_result or {}, **{"IA-08": sort_result})
-        flag_modified(row, "step_result")
+        await _record_sorting(session, row, sort_result)
         await session.commit()
     await log_info("review", f"Manuell klassifiziert: {job.debug_key} → {key}", f"→ {moved.location}")
     return None, ""
+
+
+async def _record_sorting(session, row, sort_result: dict) -> None:
+    """The user's category is IA-08's result now: a run of its own (trigger
+    'rerun'), based on the run that left the file for review."""
+    previous = await runs.current(session, row.id, "IA-08")
+    await runs.record(session, row, "IA-08", sort_result, trigger="rerun",
+                      copied_from_run_id=previous.id if previous else None)
 
 
 async def _review_job(debug_key: str):
