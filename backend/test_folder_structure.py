@@ -425,11 +425,13 @@ def make_jpg(path):
     n = random.randint(0, 10**6)
     img = Image.new("RGB", (640, 480), ((n * 37) % 256, (n * 53) % 256, (n * 71) % 256))
     draw = ImageDraw.Draw(img)
-    for i in range(4):
-        for j in range(4):
-            if (i * 3 + j + n) % 4 in (0, 1):
-                draw.rectangle([i * 160, j * 120, (i + 1) * 160, (j + 1) * 120],
-                               fill=((i * 70 + n) % 256, (j * 90 + n) % 256, ((i + j) * 50 + n) % 256))
+    # A random 8x8 light/dark layout: the pHash follows the coarse structure,
+    # so a layout derived from n alone (4 variants) let two images of one run
+    # land within IA-02's distance and be flagged as duplicates.
+    for i in range(8):
+        for j in range(8):
+            v = random.choice((30, 220))
+            draw.rectangle([i * 80, j * 60, (i + 1) * 80, (j + 1) * 60], fill=(v, (v + n) % 256, v))
     draw.text((20, 20), f"P7-{n}\n{os.path.basename(path)}\n{time.time()}", fill=(255, 255, 255))
     for _ in range(150):
         img.putpixel((random.randint(0, 639), random.randint(0, 479)),
