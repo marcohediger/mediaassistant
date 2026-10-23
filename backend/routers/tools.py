@@ -75,18 +75,88 @@ async def _read_library_subjects(libraries: list[str]) -> list[dict]:
     return json.loads(out)
 
 
+def _is_part_file(path: str) -> bool:
+    """fileops' private copy of a file being rewritten — never a sidecar of its own."""
+    return os.path.basename(path).startswith(".fops-")
+
+
 def _collect(entries: list[dict], rx: re.Pattern) -> tuple[dict, list[str]]:
     """Matching keyword -> occurrences, plus the sidecars carrying them."""
     counts: dict[str, int] = {}
     files: list[str] = []
     for entry in entries:
         hits = [s for s in _subjects(entry) if rx.search(s)]
-        if not hits:
+        if not hits or _is_part_file(entry.get("SourceFile", "")):
             continue
         files.append(entry.get("SourceFile", ""))
         for h in hits:
             counts[h] = counts.get(h, 0) + 1
     return counts, files
+
+
+async def _sidecar_copy(path: str) -> tuple[int | None, int]:
+    """(owner job, register row) of a sidecar, registering it if needed.
+
+    The owner is whoever the register names; for a sidecar from before the
+    register, the one job whose library target it sits next to (no owner
+    if none or several do — then it belongs to no job, which is the truth).
+    """
+    import fileops
+    from sqlalchemy import select
+    from database import async_session
+    from models import FileCopy, Job
+
+    norm = os.path.abspath(os.path.normpath(path))
+    async with async_session() as session:
+        row = (await session.execute(select(FileCopy.job_id, FileCopy.id).where(
+            FileCopy.location == norm, FileCopy.state == "present"))).first()
+        if row is not None:
+            return row.job_id, row.id
+        owners = []
+        if norm.endswith(".xmp"):
+            owners = (await session.execute(select(Job.id).where(
+                Job.target_path == norm[:-len(".xmp")], Job.status != "deleted"))).scalars().all()
+    owner = owners[0] if len(owners) == 1 else None
+    registered = await fileops.register_existing(owner, "sidecar", norm)
+    return registered.job_id, registered.id
+
+
+def _exiftool_writer(args: list[str]):
+    """A writer for fileops.write_metadata: exiftool on fileops' private copy."""
+    def writer(path: str) -> None:
+        proc = subprocess.run(["exiftool", "-overwrite_original", "-q", *args, path],
+                              capture_output=True, timeout=SCAN_TIMEOUT_S)
+        if proc.returncode != 0:
+            raise RuntimeError((proc.stderr or b"").decode("utf-8", errors="replace").strip()[:300]
+                               or f"exiftool Exit-Code {proc.returncode}")
+    return writer
+
+
+async def _rewrite_sidecars(files: list[str], args: list[str], actor: str, progress_offset: int = 0
+                            ) -> tuple[int, int]:
+    """Apply exiftool `args` to each sidecar through fileops: crash-safe (the
+    file is old or new, never torn), recorded in the ledger, logged before
+    and after. Returns (changed, failed)."""
+    import fileops
+    from routers.api import _cleanup_progress
+
+    changed, failed = 0, 0
+    writer = _exiftool_writer(args)
+    for i, path in enumerate(files, 1):
+        if _cancelled():
+            break
+        try:
+            owner, copy_id = await _sidecar_copy(path)
+            await fileops.write_metadata(owner, copy_id, writer, actor=actor)
+            changed += 1
+        except fileops.FileOpError:
+            failed += 1  # fileops has logged the refusal or failure with its reason
+        except Exception as e:
+            failed += 1
+            await log_warning("tools", f"Sidecar nicht geändert: {os.path.basename(path)}",
+                              f"{path}: {type(e).__name__}: {e}"[:300])
+        _cleanup_progress["current"] = progress_offset + i
+    return changed, failed
 
 
 def _tag_name(tag: dict) -> str:
@@ -355,6 +425,22 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset:
         _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
+async def _delete_tag_logged(delete_tag, tag: dict) -> bool:
+    """Delete one Immich tag, logged before and after (AGENTS.md). Immich
+    takes the tag's children along (ON DELETE CASCADE)."""
+    name = tag.get("name", "")
+    await log_info("tools", f"Tag „{name}“ wird in Immich gelöscht",
+                   f"Tag-ID {tag['id']}; Kind-Tags werden von Immich mitgelöscht")
+    try:
+        await delete_tag(tag["id"])
+    except Exception as e:
+        tag["_error"] = f"{type(e).__name__}: {e}"[:160]
+        await log_warning("tools", f"Tag „{name}“ nicht gelöscht", f"Tag-ID {tag['id']}: {tag['_error']}")
+        return False
+    await log_info("tools", f"Tag „{name}“ in Immich gelöscht", f"Tag-ID {tag['id']}")
+    return True
+
+
 async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_asset: bool, _also_delete: bool):
     """Strip the keywords from the sidecars the preview listed.
 
@@ -369,27 +455,16 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
         _cleanup_progress["total"] = max(len(files), 1)
         _cleanup_phase("removing_keywords")
         # Removing a value a file does not carry is a no-op, so the whole
-        # approved set can be passed for every chunk.
+        # approved set can be passed for every file. One file at a time
+        # through fileops: each change is in the ledger and survives a crash.
         removals = [f"-Subject-={value}" for value in counts]
         changed, failed = 0, 0
-        for start in range(0, len(files), REMOVE_CHUNK):
-            if _cancelled():
-                break
-            chunk = files[start:start + REMOVE_CHUNK]
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                ["exiftool", "-overwrite_original", "-q", *removals, *chunk],
-                capture_output=True, timeout=SCAN_TIMEOUT_S,
-            )
-            if proc.returncode == 0:
-                changed += len(chunk)
-            else:
-                failed += len(chunk)
-                await log_warning(
-                    "tools", "exiftool meldet Fehler beim Entfernen",
-                    (proc.stderr or b"").decode("utf-8", errors="replace")[:300],
-                )
-            _cleanup_progress["current"] = min(start + REMOVE_CHUNK, len(files))
+        if files:
+            await log_info("tools", f"Tag-Aufräumen: {len(counts)} Schlagwörter werden aus "
+                                    f"{len(files)} Sidecars entfernt", f"Muster={pattern}")
+            changed, failed = await _rewrite_sidecars(files, removals, "tools:tag_cleanup")
+            await log_info("tools", f"Tag-Aufräumen: {changed} Sidecars geändert",
+                           f"Muster={pattern}, fehlgeschlagen={failed}")
 
         # Immich second: the sidecars are the source a re-index would read
         # back, so they have to be clean before the tags go.
@@ -407,17 +482,26 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
             for i, tag in enumerate(immich_tags, 1):
                 if _cancelled():
                     break
-                _cleanup_phase("untagging", name=tag.get("name", ""), done=immich_deleted)
+                name = tag.get("name", "")
+                _cleanup_phase("untagging", name=name, done=immich_deleted)
+                removed_here = 0
                 try:
                     ids = await list_tag_assets(tag["id"])
+                    await log_info("tools", f"Tag „{name}“: {len(ids)} Zuordnungen werden in Immich entfernt",
+                                   f"Tag-ID {tag['id']}")
                     for start in range(0, len(ids), REMOVE_CHUNK):
                         if _cancelled():
                             break
                         await untag_assets(tag["id"], ids[start:start + REMOVE_CHUNK])
-                        immich_deleted += len(ids[start:start + REMOVE_CHUNK])
+                        removed_here += len(ids[start:start + REMOVE_CHUNK])
+                    await log_info("tools", f"Tag „{name}“: {removed_here} von {len(ids)} Zuordnungen entfernt",
+                                   f"Tag-ID {tag['id']}" + (" (abgebrochen)" if removed_here < len(ids) else ""))
                 except Exception as e:
                     immich_failed += 1
                     immich_error = f"{type(e).__name__}: {e}"[:160]
+                    await log_warning("tools", f"Tag „{name}“: Zuordnungen nicht vollständig entfernt",
+                                      f"Tag-ID {tag['id']}, entfernt {removed_here}: {immich_error}")
+                immich_deleted += removed_here
                 _cleanup_progress["current"] = i
 
             # Optional second step: drop the now-empty tags as well.
@@ -430,12 +514,11 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
                         break
                     _cleanup_phase("deleting_empty_tags")
                     _cleanup_progress["current"] = n
-                    try:
-                        await delete_tag(tag["id"])
+                    if await _delete_tag_logged(delete_tag, tag):
                         tags_deleted += 1
-                    except Exception as e:
+                    else:
                         immich_failed += 1
-                        immich_error = f"{type(e).__name__}: {e}"[:160]
+                        immich_error = tag.get("_error", "")
         elif immich_tags:
             _cleanup_progress["total"] = len(immich_tags)
             _cleanup_progress["current"] = 0
@@ -445,13 +528,12 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
                     break
                 _cleanup_phase("deleting_tags")
                 _cleanup_progress["current"] = n
-                try:
-                    await delete_tag(tag["id"])
+                if await _delete_tag_logged(delete_tag, tag):
                     immich_deleted += 1
                     tags_deleted += 1
-                except Exception as e:
+                else:
                     immich_failed += 1
-                    immich_error = f"{type(e).__name__}: {e}"[:160]
+                    immich_error = tag.get("_error", "")
 
         # The preview is spent — the files no longer carry those keywords.
         _last_scan.clear()
@@ -459,7 +541,7 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
             "mode": "remove",
             "cancelled": _cancelled(),
             "pattern": pattern,
-            "sidecars_enabled": bool(_last_scan.get("sidecars_enabled")),
+            "sidecars_enabled": _last_scan_sidecars,
             "sidecars_changed": changed,
             "sidecars_failed": failed,
             "tags_removed": len(counts),
@@ -650,37 +732,33 @@ async def _merge_apply(*_ignored):
         failed_names: list[str] = []
 
         if do_sidecars:
-            _cleanup_progress["total"] = len(groups)
-            for i, g in enumerate(groups, 1):
-                if _cancelled():
-                    break
+            plans = []
+            for g in groups:
                 winner = g["winner"]["name"]
                 losers = [m["name"] for m in g["losers"]]
-                files = sorted({f for n in losers for f in sidecar_files.get(n, []) if f})
-                _cleanup_progress["current"] = i
-                if not files:
-                    continue
+                files = sorted({f for n in losers for f in sidecar_files.get(n, [])
+                                if f and not _is_part_file(f)})
+                if files:
+                    plans.append((winner, losers, files))
+            _cleanup_progress["total"] = max(sum(len(p[2]) for p in plans), 1)
+            _cleanup_progress["current"] = 0
+            done = 0
+            for winner, losers, files in plans:
+                if _cancelled():
+                    break
                 _cleanup_phase("merging_sidecars", name=winner)
                 # Removing the winner before adding it keeps files that already
                 # carry both spellings from ending up with it twice.
                 args = [f"-Subject-={n}" for n in losers] + [
                     f"-Subject-={winner}", f"-Subject+={winner}"]
-                for start in range(0, len(files), REMOVE_CHUNK):
-                    if _cancelled():
-                        break
-                    chunk = files[start:start + REMOVE_CHUNK]
-                    proc = await asyncio.to_thread(
-                        subprocess.run,
-                        ["exiftool", "-overwrite_original", "-q", *args, *chunk],
-                        capture_output=True, timeout=SCAN_TIMEOUT_S,
-                    )
-                    if proc.returncode == 0:
-                        files_changed += len(chunk)
-                    else:
-                        files_failed += len(chunk)
-                        await log_warning(
-                            "tools", "exiftool meldet Fehler beim Zusammenführen",
-                            (proc.stderr or b"").decode("utf-8", errors="replace")[:300])
+                await log_info("tools", f"Schreibweisen: „{winner}“ wird in {len(files)} Sidecars gesetzt",
+                               "ersetzt: " + ", ".join(f"„{n}“" for n in losers)[:300])
+                ok, bad = await _rewrite_sidecars(files, args, "tools:tag_merge", progress_offset=done)
+                done += len(files)
+                files_changed += ok
+                files_failed += bad
+                await log_info("tools", f"Schreibweisen: „{winner}“ in {ok} Sidecars gesetzt",
+                               f"fehlgeschlagen={bad}")
 
         if do_immich:
             _cleanup_progress["total"] = len(groups)
@@ -693,9 +771,12 @@ async def _merge_apply(*_ignored):
                     if not loser.get("id"):
                         continue
                     name = loser["name"]
+                    winner_name = g["winner"]["name"]
                     try:
                         ids = await _retry_once(f'„{name}“ lesen',
                                                 lambda: list_tag_assets(loser["id"]))
+                        await log_info("tools", f'Schreibweise „{name}“ wird in „{winner_name}“ zusammengeführt',
+                                       f"{len(ids)} Zuordnungen umhängen, dann Tag-ID {loser['id']} löschen")
                         if ids and g["winner"].get("id"):
                             for start in range(0, len(ids), REMOVE_CHUNK):
                                 chunk = ids[start:start + REMOVE_CHUNK]
@@ -706,6 +787,8 @@ async def _merge_apply(*_ignored):
                         await _retry_once(f'„{name}“ löschen',
                                           lambda: delete_tag(loser["id"]))
                         merged += 1
+                        await log_info("tools", f'Schreibweise „{name}“ in „{winner_name}“ zusammengeführt',
+                                       f"{len(ids)} Zuordnungen umgehängt, Tag gelöscht")
                     except Exception as e:
                         failed += 1
                         last_error = _reason(e)

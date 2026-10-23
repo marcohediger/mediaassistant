@@ -46,6 +46,12 @@ def _nested(a: str, b: str) -> bool:
     return a != b and (a.startswith(b) or b.startswith(a))
 
 
+def _overlap(a: str, b: str) -> bool:
+    """The same directory, or one inside the other."""
+    a, b = os.path.normpath(a), os.path.normpath(b)
+    return a == b or _nested(a, b)
+
+
 def slugify(label: str) -> str:
     """Category key from its label — the same rule the old settings page used."""
     normalized = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode()
@@ -269,6 +275,25 @@ async def save_set(request: Request, set_id: int):
                 if _nested(path, other.path):
                     return _fail(await _t("err_dir_nested", path=path, other=other.path,
                                           set=set_names.get(other.set_id, "?")))
+
+        # ── Inbox vs. base path (R-05b) ───────────────────────────
+        # An inbox inside a base path (or a base path inside an inbox) makes
+        # the scanner pick up what IA-08 placed, and a file can be its own
+        # target — IA-08 then removed the source itself. Base paths of every
+        # set count, whatever their target: error, duplicates and the trash
+        # live there too.
+        bases = {p.id: p.library_base_path for p in (await session.execute(
+            select(ProcessingSet))).scalars().all() if p.id != set_id and p.library_base_path}
+        bases[set_id] = base
+        for path in seen:
+            for sid, other_base in bases.items():
+                if _overlap(path, other_base):
+                    key = "err_dir_in_base_self" if sid == set_id else "err_dir_in_base"
+                    return _fail(await _t(key, path=path, base=other_base, set=set_names.get(sid, "?")))
+        for other in foreign:
+            if _overlap(base, other.path):
+                return _fail(await _t("err_base_in_dir", base=base, path=other.path,
+                                      set=set_names.get(other.set_id, "?")))
 
         # ── Categories ────────────────────────────────────────────
         existing_cats = {c.id: c for c in (await session.execute(

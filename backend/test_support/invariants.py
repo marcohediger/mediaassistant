@@ -43,6 +43,8 @@ import hashlib
 import os
 from dataclasses import dataclass, field
 
+TRASH_DIRNAME = ".papierkorb"  # mirrors fileops.TRASH_DIRNAME (no app import at module load)
+
 
 # ---------------------------------------------------------------------------
 # Hashing and path helpers
@@ -180,6 +182,11 @@ class FileGuard:
             if any(is_under(c.path, o) for o in self.own):
                 continue
             if c.kind == "created" and any(is_under(c.path, m) for m in self.may_create):
+                continue
+            # fileops' trash (<base>/.papierkorb/…) is the sanctioned fallback:
+            # a new entry there loses nothing. A foreign file moved into it
+            # still shows up as "deleted" at the place it came from.
+            if c.kind == "created" and TRASH_DIRNAME in c.path.split(os.sep):
                 continue
             foreign.append(c)
         return foreign

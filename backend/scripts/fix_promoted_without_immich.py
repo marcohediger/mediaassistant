@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fix 147 promoted jobs that were never uploaded to Immich.
+"""OBSOLETE (refuses to run without --obsolete-ok). Fix 147 promoted jobs that were never uploaded to Immich.
 
 These jobs were promoted by Batch-Clean (better quality duplicate) but
 the Immich asset ID from the deleted counterpart was not transferred.
@@ -26,7 +26,24 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+# OBSOLETE (rebuild "Module & Datensicherheit", 2026-10). One-shot for the 147 promoted jobs of an old batch-clean bug.
+# It refuses to run unless --obsolete-ok is given explicitly.
+OBSOLETE_REASON = (
+    "This one-shot repaired 147 jobs of an old batch-clean bug. It copies an Immich asset id\n"
+    "from a pHash look-alike onto another job, after which IA-08 replaces - and so removes - that\n"
+    "asset, even when it belongs to a different job (inventory I3, risk R-08). It bypasses the copy\n"
+    "register of fileops."
+)
+
+
+def _refuse_unless_forced() -> None:
+    if "--obsolete-ok" not in sys.argv:
+        print("OBSOLETE — not run.\n" + OBSOLETE_REASON + "\nOnly with --obsolete-ok, and only after reading the script.")
+        sys.exit(2)
+
+
 async def main():
+    _refuse_unless_forced()
     dry_run = "--dry-run" in sys.argv
 
     from database import init_db, async_session

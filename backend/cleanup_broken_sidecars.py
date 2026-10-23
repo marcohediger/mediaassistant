@@ -7,9 +7,13 @@ Usage (dry-run — report only):
 
     docker exec mediaassistant-dev python /app/cleanup_broken_sidecars.py /library
 
-Actual deletion (ADD --delete):
+Actual removal (ADD --delete) — into the trash of the set, via fileops
+(ledger row per file, restorable for 30 days; nothing is deleted for good):
 
     docker exec mediaassistant-dev python /app/cleanup_broken_sidecars.py --delete /library
+
+Superseded for the live repair by the external tool ma-sidecar-repair; kept
+for checking a library.
 
 Follow-up after deletion: trigger a "Retry all done" or click Retry on
 each affected job so IA-07 regenerates a proper sidecar. Since v2.28.40,
@@ -23,8 +27,11 @@ Detection heuristic:
     HEIC/HEIF brand identifier is a binary image file that was
     misnamed `.xmp`.
 """
+import asyncio
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def is_broken_sidecar(path: str) -> tuple[bool, str]:
@@ -79,13 +86,38 @@ def is_broken_sidecar(path: str) -> tuple[bool, str]:
     return False, "likely XML"
 
 
-def walk_and_report(root: str, do_delete: bool) -> None:
+async def trash_sidecar(path: str, reason: str) -> None:
+    """Move one broken sidecar into the trash through fileops.
+
+    The owner is the job the copy register names; an unregistered file is
+    registered for no job (its content hash taken now) and trashed as that.
+    """
+    import fileops
+    from file_operations import sha256
+    from sqlalchemy import select
+    from database import async_session
+    from models import FileCopy
+
+    norm = os.path.abspath(path)
+    async with async_session() as session:
+        row = (await session.execute(select(FileCopy).where(
+            FileCopy.location == norm, FileCopy.state == "present"))).scalar()
+    if row is not None:
+        await fileops.trash(row.job_id, row.id, actor="script:cleanup_broken_sidecars",
+                            reason=reason, allow_last_copy=True)
+    else:
+        await fileops.trash(None, norm, actor="script:cleanup_broken_sidecars", reason=reason,
+                            allow_last_copy=True, expected_sha256=await asyncio.to_thread(sha256, norm))
+
+
+async def walk_and_report(root: str, do_delete: bool) -> None:
     total = 0
     broken = 0
     deleted = 0
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != ".papierkorb"]  # the trash is not the library
         for name in filenames:
-            if not name.endswith(".xmp"):
+            if not name.endswith(".xmp") or name.startswith(".fops-"):
                 continue
             total += 1
             path = os.path.join(dirpath, name)
@@ -96,22 +128,22 @@ def walk_and_report(root: str, do_delete: bool) -> None:
                 print(f"[BROKEN] {path} ({size_kb:.1f} KB, {reason})")
                 if do_delete:
                     try:
-                        os.remove(path)
+                        await trash_sidecar(path, f"defekte Sidecar ({reason}), v2.28.13-Fehler")
                         deleted += 1
-                    except OSError as e:
-                        print(f"  !! delete failed: {e}")
+                    except Exception as e:
+                        print(f"  !! not moved to the trash: {type(e).__name__}: {e}")
 
     print()
     print("=" * 60)
     print(f"Scanned:  {total} .xmp files under {root}")
     print(f"Broken:   {broken}")
     if do_delete:
-        print(f"Deleted:  {deleted}")
+        print(f"Trashed:  {deleted} (restorable for 30 days)")
     else:
         print("Run again with --delete to actually remove them.")
 
 
-def main() -> int:
+async def main() -> int:
     args = sys.argv[1:]
     do_delete = "--delete" in args
     paths = [a for a in args if a != "--delete"]
@@ -119,13 +151,16 @@ def main() -> int:
         print(__doc__)
         print("ERROR: provide at least one directory to scan")
         return 2
+    if do_delete:
+        from database import init_db
+        await init_db()
     for root in paths:
         if not os.path.isdir(root):
             print(f"WARN: {root} is not a directory, skipping")
             continue
-        walk_and_report(root, do_delete)
+        await walk_and_report(root, do_delete)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(main()))
