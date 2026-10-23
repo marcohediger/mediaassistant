@@ -85,6 +85,15 @@ function _t(key, vars) {
     for (const [k, v] of Object.entries(vars || {})) s = s.split('{' + k + '}').join(String(v));
     return s;
 }
+// Phase of a maintenance task: a key plus values, same text as on the Werkzeuge page.
+// Single pass, so a tag name containing "{done}" stays as it is; the result goes into textContent.
+const PHASE_L = {{ t.maintenance | tojson }};
+function _phaseText(p) {
+    if (!p || !p.phase) return '';
+    const params = p.phase_params || {};
+    return (PHASE_L['phase_' + p.phase] || p.phase).replace(/\{(\w+)\}/g, (m, k) =>
+        Object.prototype.hasOwnProperty.call(params, k) ? String(params[k]) : m);
+}
 
 // The menu button shows a busy marker while any action runs.
 function _setMenuBusy(busy) {
@@ -177,7 +186,7 @@ function _showProgress(task) {
     document.getElementById('cleanup-progress-counter').textContent = '0 / ?';
     document.getElementById('cleanup-progress-bar').style.width = '0%';
     document.getElementById('cleanup-progress-track').setAttribute('aria-valuenow', '0');
-    document.getElementById('cleanup-progress-phase').textContent = _t('task_starting');
+    document.getElementById('cleanup-progress-phase').textContent = _phaseText({phase: 'starting'});
     box.hidden = false;
     _setButtonsDisabled(true);
 }
@@ -199,8 +208,7 @@ function _updateProgress(data) {
         cur + ' / ' + (total || '?') + ' (' + pct + '%)';
     document.getElementById('cleanup-progress-bar').style.width = pct + '%';
     document.getElementById('cleanup-progress-track').setAttribute('aria-valuenow', String(pct));
-    document.getElementById('cleanup-progress-phase').textContent =
-        data.phase || '';
+    document.getElementById('cleanup-progress-phase').textContent = _phaseText(data);
 }
 
 function _formatResult(task, result) {

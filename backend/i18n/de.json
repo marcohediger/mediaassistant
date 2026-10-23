@@ -124,7 +124,6 @@
     "first_ids": "Erste IDs: {ids}",
     "reloading": "Seite wird neu geladen.",
     "task_running": "{task} läuft …",
-    "task_starting": "Wird gestartet …",
     "cleanup_done": "Cleanup abgeschlossen.",
     "cleanup_failed": "Cleanup fehlgeschlagen: {error}",
     "cleanup_failed_http": "Cleanup fehlgeschlagen: HTTP {status}",
@@ -959,5 +958,27 @@
     "logged_out": "Du wurdest erfolgreich abgemeldet.",
     "button": "Mit SSO anmelden",
     "denied": "Zugriff verweigert. Dein Konto ist nicht berechtigt."
+  },
+  "maintenance": {
+    "phase_starting": "Wird gestartet …",
+    "phase_scanning": "Jobs werden auf fehlende Dateien geprüft",
+    "phase_loading_error_jobs": "Fehler-Jobs werden geladen",
+    "phase_loading_done_counterparts": "Erledigte Gegenstücke werden gesucht",
+    "phase_verifying_targets": "Ablageorte der Gegenstücke werden geprüft",
+    "phase_deleting": "Veraltete Fehler-Jobs werden gelöscht",
+    "phase_loading_candidates": "Kandidaten werden geladen",
+    "phase_classifying": "Kandidaten werden eingeordnet",
+    "phase_requeueing": "Jobs werden neu eingereiht",
+    "phase_marking_done": "Jobs werden als erledigt markiert",
+    "phase_reading_sidecars": "Sidecars werden gelesen",
+    "phase_collecting_matches": "Treffer werden gesammelt",
+    "phase_reading_immich_tags": "Immich-Tags werden gelesen",
+    "phase_removing_keywords": "Schlagwörter werden aus den Sidecars entfernt",
+    "phase_untagging": "Zuordnungen von «{name}» werden entfernt (bisher {done})",
+    "phase_deleting_empty_tags": "Leere Tags werden in Immich gelöscht",
+    "phase_deleting_tags": "Tags werden in Immich gelöscht",
+    "phase_counting_assets": "Bilder je Schreibweise werden gezählt",
+    "phase_merging_sidecars": "Sidecars werden auf «{name}» umgestellt",
+    "phase_merging_immich": "Immich-Tags werden in «{name}» zusammengeführt"
   }
 }

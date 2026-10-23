@@ -159,6 +159,16 @@ function showProgress(id, p) {
     bar.firstElementChild.style.width = known ? pct + '%' : '';
     if (known) { bar.setAttribute('aria-valuenow', String(pct)); } else { bar.removeAttribute('aria-valuenow'); }
 }
+// Phase of a maintenance task: a key plus values, same text as on the logs page.
+// Single pass, so a tag name containing "{done}" stays as it is; the result goes into textContent.
+var PHASE_L = {{ t.maintenance | tojson }};
+function phaseText(p) {
+    if (!p || !p.phase) { return ''; }
+    var params = p.phase_params || {};
+    return (PHASE_L['phase_' + p.phase] || p.phase).replace(/\{(\w+)\}/g, function (m, k) {
+        return Object.prototype.hasOwnProperty.call(params, k) ? String(params[k]) : m;
+    });
+}
 function setState(id, text, isError) {
     var state = document.getElementById(id);
     state.textContent = text;
@@ -303,7 +313,7 @@ function pollSidecar() {
       .then(function (p) {
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
-              setState('sidecar_state', (p.phase || '') + n);
+              setState('sidecar_state', phaseText(p) + n);
               showProgress('sidecar_progress', p);
               setTimeout(pollSidecar, 1000);
               return;
@@ -435,7 +445,7 @@ function pollMerge() {
       .then(function (p) {
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
-              setState('merge_state', (p.phase || '') + n);
+              setState('merge_state', phaseText(p) + n);
               showProgress('merge_progress', p);
               setTimeout(pollMerge, 1000);
               return;

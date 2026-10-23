@@ -305,7 +305,7 @@ def _attach(groups: list[list[dict]], index: dict[str, int], target: dict, damag
 
 
 async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset: bool, also_delete: bool):
-    from routers.api import _cleanup_progress, _cleanup_finish
+    from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
     try:
         library = await library_roots()
         rx = _compile(pattern)
@@ -314,16 +314,16 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset:
         # the run is meant for Immich only.
         entries, counts, files = [], {}, []
         if with_sidecars:
-            _cleanup_progress["phase"] = "Sidecars werden gelesen"
+            _cleanup_phase("reading_sidecars")
             entries = await _read_library_subjects(library)
             _cleanup_progress["total"] = len(entries)
             _cleanup_progress["current"] = len(entries)
-            _cleanup_progress["phase"] = "Treffer werden gesammelt"
+            _cleanup_phase("collecting_matches")
             counts, files = _collect(entries, rx)
         immich = {"enabled": False, "available": False, "error": "",
                   "total": 0, "tags": [], "collateral": []}
         if with_immich:
-            _cleanup_progress["phase"] = "Immich-Tags werden gelesen"
+            _cleanup_phase("reading_immich_tags")
             immich = {"enabled": True, **await _scan_immich(rx, per_asset)}
 
         _last_scan.clear()
@@ -361,13 +361,13 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
     Deliberately no fresh scan: the user approved a concrete set of files and
     keywords, and that is what gets changed.
     """
-    from routers.api import _cleanup_progress, _cleanup_finish
+    from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
     try:
         pattern = _last_scan.get("pattern", "")
         counts = dict(_last_scan.get("counts") or {})
         files = list(_last_scan.get("files") or [])
         _cleanup_progress["total"] = max(len(files), 1)
-        _cleanup_progress["phase"] = "Schlagwörter werden entfernt"
+        _cleanup_phase("removing_keywords")
         # Removing a value a file does not carry is a no-op, so the whole
         # approved set can be passed for every chunk.
         removals = [f"-Subject-={value}" for value in counts]
@@ -407,10 +407,7 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
             for i, tag in enumerate(immich_tags, 1):
                 if _cancelled():
                     break
-                _cleanup_progress["phase"] = (
-                    f"Zuordnungen entfernen: {tag.get('name', '')} "
-                    f"({i}/{len(immich_tags)}, {immich_deleted} erledigt)"
-                )
+                _cleanup_phase("untagging", name=tag.get("name", ""), done=immich_deleted)
                 try:
                     ids = await list_tag_assets(tag["id"])
                     for start in range(0, len(ids), REMOVE_CHUNK):
@@ -431,7 +428,7 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
                 for n, tag in enumerate(immich_tags, 1):
                     if _cancelled():
                         break
-                    _cleanup_progress["phase"] = f"Leere Tags löschen ({n}/{len(immich_tags)})"
+                    _cleanup_phase("deleting_empty_tags")
                     _cleanup_progress["current"] = n
                     try:
                         await delete_tag(tag["id"])
@@ -446,7 +443,7 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
             for n, tag in enumerate(immich_tags, 1):
                 if _cancelled():
                     break
-                _cleanup_progress["phase"] = f"Tags löschen ({n}/{len(immich_tags)})"
+                _cleanup_phase("deleting_tags")
                 _cleanup_progress["current"] = n
                 try:
                     await delete_tag(tag["id"])
@@ -537,13 +534,13 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
     sidecar is exactly what re-creates a tag in Immich after it was deleted —
     measured on a running instance, sidecar in hand.
     """
-    from routers.api import _cleanup_progress, _cleanup_finish
+    from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
     from immich_client import list_tags, count_tag_assets
     try:
         library = await library_roots()
         sidecar_files: dict[str, list[str]] = {}
         if with_sidecars:
-            _cleanup_progress["phase"] = "Sidecars werden gelesen"
+            _cleanup_phase("reading_sidecars")
             for entry in await _read_library_subjects(library):
                 for value in _subjects(entry):
                     sidecar_files.setdefault(value, []).append(entry.get("SourceFile", ""))
@@ -551,7 +548,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
         immich_tags: dict[str, dict] = {}
         immich_error = ""
         if with_immich:
-            _cleanup_progress["phase"] = "Immich-Tags werden gelesen"
+            _cleanup_phase("reading_immich_tags")
             try:
                 for t in await list_tags():
                     immich_tags[_tag_name(t)] = t
@@ -582,7 +579,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
             index = {_tag_name(m): gi for gi, g in enumerate(groups) for m in g}
             _attach(groups, index, best, damaged)
 
-        _cleanup_progress["phase"] = "Bilder je Schreibweise werden gezählt"
+        _cleanup_phase("counting_assets")
         _cleanup_progress["total"] = sum(len(g) for g in groups)
         done = 0
         plan = []
@@ -641,7 +638,7 @@ async def _merge_apply(*_ignored):
     Sidecars first, Immich second — the same order the removal uses, because
     the sidecar is what a re-index reads back.
     """
-    from routers.api import _cleanup_progress, _cleanup_finish
+    from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
     from immich_client import list_tag_assets, tag_assets, delete_tag
     try:
         groups = list(_last_merge.get("groups") or [])
@@ -663,7 +660,7 @@ async def _merge_apply(*_ignored):
                 _cleanup_progress["current"] = i
                 if not files:
                     continue
-                _cleanup_progress["phase"] = f"Sidecars: {winner} ({i}/{len(groups)})"
+                _cleanup_phase("merging_sidecars", name=winner)
                 # Removing the winner before adding it keeps files that already
                 # carry both spellings from ending up with it twice.
                 args = [f"-Subject-={n}" for n in losers] + [
@@ -691,7 +688,7 @@ async def _merge_apply(*_ignored):
             for i, g in enumerate(groups, 1):
                 if _cancelled():
                     break
-                _cleanup_progress["phase"] = f"Immich: {g['winner']['name']} ({i}/{len(groups)})"
+                _cleanup_phase("merging_immich", name=g["winner"]["name"])
                 for loser in g["losers"]:
                     if not loser.get("id"):
                         continue

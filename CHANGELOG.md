@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.0.0 — in Arbeit (Branch umbau/dateieingabe-verarbeitung, kommt zusammen mit dem Umbau Module & Datensicherheit)
+## v3.0.0 — in Arbeit (Branch umbau/module-und-datensicherheit: Verarbeitungs-Sets, neues Design, Umbau Module & Datensicherheit)
 
 ### Neu: Verarbeitungs-Sets
 
@@ -59,6 +59,37 @@ Datei doppelt verarbeitet. Ein abgelehntes Speichern ändert nichts.
 Kategorie-Schlüssel bleiben nach dem Anlegen fest. Bisher änderte eine
 Umbenennung auch den internen Schlüssel, auf den bereits verarbeitete
 Jobs verweisen.
+
+### UI: neues Design auf allen Seiten
+
+Ein gemeinsames Design-System (`static/css/ui.css`, beschrieben in
+`docs/DESIGN.md`, zu sehen unter `/static/styleguide.html`) für hell und
+dunkel; alle Seiten darauf umgebaut: Dashboard, Duplikate, Review, Logs,
+Job-Detail, Werkzeuge, Einstellungen, Einrichtungs-Assistent, Login.
+
+- Navigationsleiste: Modul-Status als Menü mit Markierung (grün / gelb /
+  rot), Darstellung (Palette) und Einstellungen (Zahnrad) rechts; bricht
+  unter 960 px sauber in zwei Zeilen um. Neues Logo („Gipfel-M"),
+  Schriftzug als Text statt im Bild.
+- Rot nur noch für echte Fehler. Job-Status in Listen als Symbol, der
+  Probelauf als Auge daneben.
+- Logs: Wartungsaufgaben im Menü rechts der Register; der Dry-Run-Report
+  ist das dritte Register „Probelauf"; lange Meldungen klappen auf (ein
+  10 000-Zeichen-Eintrag machte die Tabelle 93 000 px breit).
+- Duplikate: Vergleichskacheln mit ausgerichteten Fakten, Empfehlung
+  hervorgehoben; Review: eine kompakte Zeile pro Datei.
+- Bestätigungen als eigenes Popup statt `confirm()`; Menüs per Tastatur
+  bedienbar. Ein Anführungszeichen im Dateinamen brach bisher die
+  Bestätigung; in den Werkzeugen landeten Tag-Namen ungeprüft als HTML.
+- Fortschrittsanzeige der Wartungsaufgaben und Werkzeuge übersetzt:
+  der Server schickt einen Phasen-Schlüssel mit Werten, die Seite zeigt
+  den Text in der eingestellten Sprache. Bisher sahen deutsche Nutzer
+  englische Schlüssel („verifying targets"), englische deutsche Sätze,
+  und der Zähler stand doppelt da („Tags löschen (3/12) (3/12)").
+- Behoben nebenbei: „Leer lassen = Standard-Prompt" stimmte nicht (ein
+  geleertes Prompt-Feld wurde ignoriert); die Bildgrösse für die KI fiel
+  beim Speichern auf 1024 zurück, wenn das Verkleinern aus war; der Login
+  war immer Deutsch und dunkel.
 
 ### Umbau: Eingänge reihen nur ein, ein Worker verarbeitet
 

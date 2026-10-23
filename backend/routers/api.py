@@ -81,7 +81,8 @@ _cleanup_progress: dict = {
     "task": None,        # "orphans" | "stale_errors" | "stuck_duplicates"
     "current": 0,
     "total": 0,
-    "phase": "",         # short status phrase ("scanning", "verifying targets", "re-queueing", ...)
+    "phase": "",         # phase key ("scanning", "verifying_targets", ...); the UI shows maintenance.phase_<key>
+    "phase_params": {},  # values for the placeholders of that text, e.g. {"name": ..., "done": ...}
     "result": None,      # final dict (counts) when done
     "done": False,
     "error": None,
@@ -94,9 +95,16 @@ def _cleanup_reset(task_name: str):
     from datetime import datetime
     _cleanup_progress = {
         "running": True, "task": task_name, "current": 0, "total": 0,
-        "phase": "starting", "result": None, "done": False, "error": None,
+        "phase": "starting", "phase_params": {}, "result": None, "done": False, "error": None,
         "started_at": datetime.now().isoformat(timespec="seconds"),
     }
+
+
+def _cleanup_phase(phase: str, **params):
+    """Set the phase key and its placeholder values together, so a new phase
+    never shows values left over from the previous one."""
+    _cleanup_progress["phase"] = phase
+    _cleanup_progress["phase_params"] = params
 
 
 def _cleanup_finish(result: dict | None = None, error: str | None = None):
@@ -138,7 +146,7 @@ async def _scan_orphans_in_background(check_immich: bool):
                 select(func.count(Job.id)).where(Job.status.in_(SETTLED_STATES))
             )
             _cleanup_progress["total"] = r.scalar() or 0
-            _cleanup_progress["phase"] = "scanning"
+            _cleanup_phase("scanning")
     except Exception:
         pass
 
@@ -422,7 +430,7 @@ async def _run_cleanup_stale_errors():
     deleted = 0
     skipped = 0
     try:
-        _cleanup_progress["phase"] = "loading error jobs"
+        _cleanup_phase("loading_error_jobs")
 
         # Step 1 — error candidates ("Datei nicht auffindbar", target=None)
         async with async_session() as session:
@@ -436,7 +444,7 @@ async def _run_cleanup_stale_errors():
             error_rows = r.fetchall()  # [(id, filename), ...]
 
         _cleanup_progress["total"] = len(error_rows)
-        _cleanup_progress["phase"] = "loading done counterparts"
+        _cleanup_phase("loading_done_counterparts")
 
         # Step 2 — for the filenames involved, fetch the latest done/duplicate
         # target_path (one bulk query, batched to stay under SQLite's IN-list
@@ -468,7 +476,7 @@ async def _run_cleanup_stale_errors():
 
         _cleanup_progress["total"] = len(rows)
         _cleanup_progress["current"] = 0
-        _cleanup_progress["phase"] = "verifying targets"
+        _cleanup_phase("verifying_targets")
 
         verified_ids = []
         for idx, (job_id, done_target) in enumerate(rows, 1):
@@ -492,7 +500,7 @@ async def _run_cleanup_stale_errors():
 
         deleted = len(verified_ids)
         if verified_ids:
-            _cleanup_progress["phase"] = "deleting"
+            _cleanup_phase("deleting")
             async with async_session() as session:
                 await session.execute(delete(Job).where(Job.id.in_(verified_ids)))
                 await session.commit()
@@ -542,7 +550,7 @@ async def _run_cleanup_stuck_duplicate_winners():
     requeued = 0
     raced = 0
     try:
-        _cleanup_progress["phase"] = "loading candidates"
+        _cleanup_phase("loading_candidates")
 
         async with async_session() as session:
             candidates = await session.execute(
@@ -555,7 +563,7 @@ async def _run_cleanup_stuck_duplicate_winners():
             jobs = candidates.scalars().all()
 
         _cleanup_progress["total"] = len(jobs)
-        _cleanup_progress["phase"] = "classifying"
+        _cleanup_phase("classifying")
 
         # Filenames that have a verified 'done' counterpart in the DB.
         filenames_with_done: set[str] = set()
@@ -585,7 +593,7 @@ async def _run_cleanup_stuck_duplicate_winners():
 
         # Reset counter so the progress bar reflects the work loop, not the scan loop.
         _cleanup_progress["current"] = 0
-        _cleanup_progress["phase"] = "re-queueing"
+        _cleanup_phase("requeueing")
 
         from pipeline.reprocess import prepare_job_for_reprocess
         for idx, job_id in enumerate(requeue_ids, 1):
@@ -611,7 +619,7 @@ async def _run_cleanup_stuck_duplicate_winners():
             if idx % 25 == 0:
                 await asyncio.sleep(0)
 
-        _cleanup_progress["phase"] = "marking done"
+        _cleanup_phase("marking_done")
         marked_done = len(done_ids)
         if done_ids:
             async with async_session() as session:
