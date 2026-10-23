@@ -29,7 +29,7 @@ async def main():
     from config import config_manager
     from pipeline import run_pipeline
     from pipeline.reprocess import prepare_job_for_reprocess
-    from sqlalchemy.orm.attributes import flag_modified
+    from test_support.seed import seed_results
     from file_operations import resolve_filename_conflict, safe_remove, sha256, resolve_filepath
     from thumbnail_utils import generate_thumbnail
     import httpx
@@ -186,9 +186,9 @@ async def main():
                     source_inbox_path="/inbox", status="duplicate",
                     target_path="/tmp/ghost_gone.jpg",
                     debug_key=f"GHOST-{ts}", file_hash=f"ghost_{ts}",
-                    phash=f"ghost_ph_{ts}", use_immich=True,
-                    step_result={"IA-01": {"file_type": "JPEG"}, "IA-02": {"status": "duplicate"}})
+                    phash=f"ghost_ph_{ts}", use_immich=True)
         session.add(ghost)
+        await seed_results(session, ghost, {"IA-01": {"file_type": "JPEG"}, "IA-02": {"status": "duplicate"}})
         await session.commit()
 
         # Try prepare_job_for_reprocess on non-existent file

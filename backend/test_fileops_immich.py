@@ -31,6 +31,7 @@ import fileops
 import immich_client as ic
 from database import async_session
 from models import FILE_OPS_GUARDS, AssetRef, FileCopy, FileOp, Job, ProcessingSet, SystemLog
+from test_support.seed import seed_results
 
 PASS = 0
 FAIL = 0
@@ -80,7 +81,7 @@ async def new_job(n, **fields) -> Job:
     fields = {"original_path": f"{ROOT}/in/fopsi_{n}.jpg", **fields}
     async with async_session() as s:
         job = Job(filename=f"fopsi_{n}.jpg", debug_key=f"{PREFIX}-{n}", status="done",
-                  set_id=SET_ID, step_result={}, **fields)
+                  set_id=SET_ID, **fields)
         s.add(job)
         await s.commit()
         JOB_IDS.append(job.id)
@@ -421,8 +422,8 @@ async def test_locked_and_purged():
     job_l = await new_job("l")
     gone, locked, ia08_locked, trashed_gone = (str(uuid.uuid4()) for _ in range(4))
     async with async_session() as s:
-        await s.execute(update(Job).where(Job.id == job_l.id).values(
-            step_result={"IA-08": {"immich_locked": True, "immich_asset_id": ia08_locked}}))
+        await seed_results(s, await s.get(Job, job_l.id),
+                           {"IA-08": {"immich_locked": True, "immich_asset_id": ia08_locked}})
         rows = [FileCopy(job_id=job_l.id, kind="immich", location=loc, state=st, verified_at=datetime.now())
                 for loc, st in ((gone, "present"), (locked, "locked"), (ia08_locked, "present"),
                                 (trashed_gone, "trashed"))]

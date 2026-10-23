@@ -24,10 +24,10 @@ from datetime import datetime
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from sqlalchemy import select
-from sqlalchemy.orm.attributes import flag_modified
 
 from database import async_session, engine
 from models import Base, Job, Config, Module
+from test_support.seed import seed_results
 
 PASS = 0
 FAIL = 0
@@ -68,7 +68,6 @@ async def test_handle_duplicate_cleanup_error():
             debug_key=f"MA-TEST-ORIG-{datetime.now().timestamp():.0f}",
             status="done",
             file_hash="abc123hash",
-            step_result={},
         )
         session.add(original)
         await session.commit()
@@ -85,7 +84,6 @@ async def test_handle_duplicate_cleanup_error():
             debug_key=f"MA-TEST-DUP-{datetime.now().timestamp():.0f}",
             status="processing",
             source_inbox_path="/inbox/test",
-            step_result={},
         )
         session.add(dup_job)
         await session.commit()
@@ -138,9 +136,9 @@ async def test_pipeline_fallback_duplicate_detection():
             debug_key=f"MA-TEST-PIPE-{datetime.now().timestamp():.0f}",
             status="queued",
             file_hash=hashlib.sha256(b"pipeline-test-data").hexdigest(),
-            step_result={"IA-01": {"status": "ok", "file_type": "JPEG", "mime_type": "image/jpeg"}},
         )
         session.add(job)
+        await seed_results(session, job, {"IA-01": {"status": "ok", "file_type": "JPEG", "mime_type": "image/jpeg"}})
         await session.commit()
         job_id = job.id
 
@@ -204,7 +202,6 @@ async def test_normal_duplicate_flow():
             debug_key=f"MA-TEST-NORIG-{datetime.now().timestamp():.0f}",
             status="done",
             file_hash=file_hash,
-            step_result={},
         )
         session.add(original)
         await session.commit()
@@ -220,9 +217,9 @@ async def test_normal_duplicate_flow():
             debug_key=f"MA-TEST-NDUP-{datetime.now().timestamp():.0f}",
             status="queued",
             file_hash=file_hash,
-            step_result={"IA-01": {"status": "ok", "file_type": "JPEG", "mime_type": "image/jpeg"}},
         )
         session.add(dup_job)
+        await seed_results(session, dup_job, {"IA-01": {"status": "ok", "file_type": "JPEG", "mime_type": "image/jpeg"}})
         await session.commit()
         job_id = dup_job.id
 
@@ -281,9 +278,9 @@ async def test_non_duplicate_continues():
             debug_key=f"MA-TEST-UNI-{datetime.now().timestamp():.0f}",
             status="queued",
             file_hash=hashlib.sha256(unique_content).hexdigest(),
-            step_result={"IA-01": {"status": "ok", "file_type": "JPEG", "mime_type": "image/jpeg"}},
         )
         session.add(job)
+        await seed_results(session, job, {"IA-01": {"status": "ok", "file_type": "JPEG", "mime_type": "image/jpeg"}})
         await session.commit()
         job_id = job.id
 
@@ -458,9 +455,9 @@ async def test_retry_job_blocks_parallel_run_pipeline():
             dry_run=False,
             use_immich=False,
             folder_tags=False,
-            step_result={"IA-01": {"status": "error", "reason": "stale"}},
         )
         s.add(j)
+        await seed_results(s, j, {"IA-01": {"status": "error", "reason": "stale"}})
         await s.commit()
         jid = j.id
 
@@ -538,9 +535,9 @@ async def test_parallel_retry_job_calls():
             dry_run=False,
             use_immich=False,
             folder_tags=False,
-            step_result={"IA-01": {"status": "error", "reason": "stale"}},
         )
         s.add(j)
+        await seed_results(s, j, {"IA-01": {"status": "error", "reason": "stale"}})
         await s.commit()
         jid = j.id
 
@@ -599,7 +596,6 @@ async def test_retry_not_circular_duplicate():
             debug_key=f"CIRC-A-{ts}",
             status="processing",
             file_hash=file_hash,
-            step_result={},
             use_immich=True,
             dry_run=False,
             folder_tags=False,
@@ -615,22 +611,22 @@ async def test_retry_not_circular_duplicate():
             debug_key=f"CIRC-B-{ts}",
             status="duplicate",
             file_hash=file_hash,
-            step_result={
-                "IA-02": {
-                    "status": "duplicate",
-                    "match_type": "exact",
-                    "original_debug_key": f"CIRC-A-{ts}",
-                },
-            },
             use_immich=True,
             dry_run=False,
             folder_tags=False,
         )
         session.add(job_b)
+        await seed_results(session, job_b, {
+            "IA-02": {
+                "status": "duplicate",
+                "match_type": "exact",
+                "original_debug_key": f"CIRC-A-{ts}",
+            },
+        })
         await session.commit()
 
         # Populate IA-01 result on job A (IA-02 reads file_hash from there)
-        job_a.step_result = {
+        await seed_results(session, job_a, {
             "IA-01": {
                 "file_type": "JPEG",
                 "mime_type": "image/jpeg",
@@ -638,9 +634,8 @@ async def test_retry_not_circular_duplicate():
                 "width": 100,
                 "height": 100,
             },
-        }
+        })
         job_a.file_hash = file_hash
-        flag_modified(job_a, "step_result")
         await session.commit()
 
         # Run IA-02 on job A (the retried job)

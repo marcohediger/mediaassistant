@@ -735,6 +735,7 @@ async def _run_cleanup_stuck_duplicate_winners():
         _cleanup_progress["current"] = 0
         _cleanup_phase("requeueing")
 
+        from pipeline.registry import MAIN
         from pipeline.reprocess import prepare_job_for_reprocess
         keys = {j.id: j.debug_key for j in jobs}
         for idx, job_id in enumerate(requeue_ids, 1):
@@ -748,7 +749,7 @@ async def _run_cleanup_stuck_duplicate_winners():
                 else:
                     moved = await prepare_job_for_reprocess(
                         session, fresh,
-                        keep_steps={"IA-01", "IA-02", "IA-03", "IA-04", "IA-05", "IA-06", "IA-07"},
+                        keep_steps={c for c in MAIN if c != "IA-08"},
                         move_file=True,
                         commit=True,
                     )

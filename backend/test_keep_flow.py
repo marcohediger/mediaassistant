@@ -21,7 +21,7 @@ async def test_keep_flow():
     from database import async_session
     from models import Job
     from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
+    from test_support.seed import seed_results
     from folder_path import folder_targets
 
     ts = int(time.time())
@@ -54,13 +54,13 @@ async def test_keep_flow():
             debug_key=f"FTE2E-ORIG-{ts}",
             file_hash=f"fte2e_orig_{ts}",
             phash="e2etest1234567890",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg_header)},
-                "IA-02": {"status": "ok"},
-                "IA-07": {"keywords_written": ["Strand"]},
-            },
         )
         session.add(orig)
+        await seed_results(session, orig, {
+            "IA-01": {"file_type": "JPEG", "file_size": len(jpeg_header)},
+            "IA-02": {"status": "ok"},
+            "IA-07": {"keywords_written": ["Strand"]},
+        })
 
         # Duplicate: has folder_tags from inbox subfolder
         dup = Job(
@@ -72,21 +72,21 @@ async def test_keep_flow():
             debug_key=f"FTE2E-DUP-{ts}",
             file_hash=f"fte2e_dup_{ts}",
             phash="e2etest1234567890",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg_header),
-                          "gps": True, "gps_lat": 39.57, "gps_lon": 2.65},
-                "IA-02": {
-                    "status": "duplicate",
-                    "match_type": "similar",
-                    "phash_distance": 2,
-                    "original_debug_key": f"FTE2E-ORIG-{ts}",
-                    "original_path": orig_path,
-                    "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"],
-                },
-                "IA-07": {"keywords_written": ["Palmen", "Hotel"]},
-            },
         )
         session.add(dup)
+        await seed_results(session, dup, {
+            "IA-01": {"file_type": "JPEG", "file_size": len(jpeg_header),
+                      "gps": True, "gps_lat": 39.57, "gps_lon": 2.65},
+            "IA-02": {
+                "status": "duplicate",
+                "match_type": "similar",
+                "phash_distance": 2,
+                "original_debug_key": f"FTE2E-ORIG-{ts}",
+                "original_path": orig_path,
+                "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"],
+            },
+            "IA-07": {"keywords_written": ["Palmen", "Hotel"]},
+        })
         await session.commit()
 
         orig_id = orig.id
@@ -167,8 +167,7 @@ async def test_keep_flow():
         if merge_notes or kept_folder_tags:
             kept_sr["IA-01"] = kept_ia01
             kept_sr["IA-07"] = kept_ia07
-            kept_job.step_result = kept_sr
-            flag_modified(kept_job, "step_result")
+            await seed_results(session, kept_job, kept_sr)
 
         check("Merge: Keywords vom Original übernommen",
               "Strand" in (kept_ia07.get("keywords_written") or []),
@@ -184,8 +183,7 @@ async def test_keep_flow():
         sr["IA-02"] = {"status": "skipped", "reason": "kept via duplicate review"}
         if old_ia02.get("folder_tags"):
             sr["IA-02"]["folder_tags"] = old_ia02["folder_tags"]
-        kept_job.step_result = sr
-        flag_modified(kept_job, "step_result")
+        await seed_results(session, kept_job, sr)
 
         check("Skip-Overwrite: folder_tags überlebt",
               sr["IA-02"].get("folder_tags") is not None,
@@ -229,7 +227,7 @@ async def test_not_duplicate_flow():
     from database import async_session
     from models import Job
     from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
+    from test_support.seed import seed_results
     from folder_path import folder_targets
     from pipeline.reprocess import prepare_job_for_reprocess
 
@@ -258,17 +256,17 @@ async def test_not_duplicate_flow():
             # its content is the job's own (a made-up hash reads as a foreign file).
             file_hash=__import__("hashlib").sha256(jpeg_header).hexdigest(),
             phash="nd_e2etest_1234",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg_header)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "match_type": "exact",
-                    "original_debug_key": "SOME-ORIG",
-                    "folder_tags": ["Urlaub", "Griechenland", "Urlaub Griechenland"],
-                },
-            },
         )
         session.add(job)
+        await seed_results(session, job, {
+            "IA-01": {"file_type": "JPEG", "file_size": len(jpeg_header)},
+            "IA-02": {
+                "status": "duplicate",
+                "match_type": "exact",
+                "original_debug_key": "SOME-ORIG",
+                "folder_tags": ["Urlaub", "Griechenland", "Urlaub Griechenland"],
+            },
+        })
         await session.commit()
         job_id = job.id
         job_dk = job.debug_key
@@ -328,8 +326,7 @@ async def test_not_duplicate_flow():
             # File doesn't exist — just check the in-memory path
             sr = dict(job.step_result or {})
             sr["IA-02"] = skip_result
-            job.step_result = sr
-            flag_modified(job, "step_result")
+            await seed_results(session, job, sr)
 
             check("In-memory: IA-02 hat folder_tags",
                   sr["IA-02"].get("folder_tags") == ["Urlaub", "Griechenland", "Urlaub Griechenland"],

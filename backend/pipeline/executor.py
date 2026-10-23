@@ -1,7 +1,7 @@
 """The executor: runs the modules of one job (docs/UMBAU_MODULE_AUSFUEHRUNG.md 3.1).
 
-``run_pipeline`` stays the only entry (claim, adopt, prepared source, end
-of the run); this module runs the modules in between:
+``run_pipeline`` stays the only entry (claim, prepared source, end of the
+run); this module runs the modules in between:
 
 - Pipeline run: every main module whose current run is not finished (a
   resumed run skips the finished ones), in the order of
@@ -53,7 +53,8 @@ from system_logger import log_error, log_info, log_warning
 
 logger = logging.getLogger("mediaassistant.pipeline")
 
-NON_CRITICAL = frozenset({"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"})
+# A failure of these only warns (pipeline run); of a critical one it fails the job.
+NON_CRITICAL = frozenset(MAIN) - CRITICAL
 _VOLATILE = frozenset({"cached", "file_op", "notes", "resumed"})
 
 
@@ -730,7 +731,6 @@ async def finish_rerun(ctx: Ctx) -> dict:
     warnings, parameters gone, the item done / unchanged / failed /
     deferred — one transaction. Returns the item summary."""
     import reruns
-    from models import MODULE_CODES
     session, job, rr = ctx.session, ctx.job, ctx.rerun
     cur = await runs.current_runs(session, job.id)
     ran, changed, restored = [], [], []
@@ -755,7 +755,7 @@ async def finish_rerun(ctx: Ctx) -> dict:
     else:
         status = prev
     view = job.step_result or {}
-    warn = [c for c in MODULE_CODES if isinstance(view.get(c), dict) and view[c].get("status") in ("error", "warning")]
+    warn = [c for c in registry.ORDER if isinstance(view.get(c), dict) and view[c].get("status") in ("error", "warning")]
     prev_error = rr.get("prev_error")
     if warn:
         message = f"Warnungen in: {', '.join(warn)}"

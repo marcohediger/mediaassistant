@@ -198,6 +198,7 @@ class FileOp(Base):
         Index("idx_file_ops_job", "job_id", "id"),
         Index("idx_file_ops_state", "state", "created_at"),
         Index("idx_file_ops_copy", "copy_id"),
+        Index("idx_file_ops_dst_copy", "dst_copy_id"),
         # At most one open operation that changes or removes a given source:
         # a second one fails on insert instead of racing the first.
         Index("uq_file_ops_open_src", "src_kind", "src", unique=True,
@@ -299,6 +300,10 @@ class AssetRef(Base):
 # Module runs: one row per run of a pipeline module (written by runs.py only)
 # ---------------------------------------------------------------------------
 
+# The codes the schema accepts (CHECK constraint in database.py). The module
+# register (pipeline/registry.py ORDER) is the source of the order and of what
+# each module is; the schema cannot import the pipeline package, so this stays
+# a copy that test_executor.py checks against the register.
 MODULE_CODES = tuple(f"IA-{n:02d}" for n in range(1, 12))
 # Statuses of a finished run; a run is also queued, running or superseded.
 RUN_RESULT_STATUSES = ("ok", "warning", "error", "skipped", "dry_run", "duplicate")
@@ -315,8 +320,10 @@ class ModuleRun(Base):
     """
     __tablename__ = "module_runs"
     __table_args__ = (
-        Index("idx_module_runs_job", "job_id", "module", "id"),
-        Index("idx_module_runs_status", "status"),
+        # Every query names the job; the rowid the index carries orders by id.
+        # No index on status: no query filters by it alone (database.py drops
+        # the former one).
+        Index("idx_module_runs_job", "job_id"),
         Index("uq_module_runs_current", "job_id", "module", unique=True,
               sqlite_where=text("status <> 'superseded'")),
         {"sqlite_autoincrement": True},

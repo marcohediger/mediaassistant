@@ -27,10 +27,10 @@ async def main():
     from database import async_session
     from models import Job
     from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
     from config import config_manager
     from pipeline import run_pipeline, reset_job_for_retry, retry_job
     from pipeline.reprocess import prepare_job_for_reprocess
+    from test_support.seed import seed_results
     from file_operations import safe_remove, safe_remove_with_log, sha256, resolve_filepath
     from immich_client import asset_exists, get_asset_albums, get_asset_info
 
@@ -84,15 +84,15 @@ async def main():
         orig = Job(filename=os.path.basename(p1), original_path=p1,
                    source_inbox_path="/inbox", status="done", target_path=p1,
                    debug_key=f"DEEP-E2-ORIG-{ts}", file_hash=f"e2o_{ts}",
-                   phash=f"e2ph_{ts}", use_immich=True,
-                   step_result={"IA-01": {"file_type": "JPEG"}, "IA-02": {"status": "ok"}})
+                   phash=f"e2ph_{ts}", use_immich=True)
         dup = Job(filename=os.path.basename(p2), original_path=p2,
                   source_inbox_path="/inbox", status="duplicate", target_path=p2,
                   debug_key=f"DEEP-E2-DUP-{ts}", file_hash=f"e2d_{ts}",
-                  phash=f"e2ph_{ts}", use_immich=True,
-                  step_result={"IA-01": {"file_type": "JPEG"},
-                               "IA-02": {"status": "duplicate", "original_debug_key": f"DEEP-E2-ORIG-{ts}"}})
+                  phash=f"e2ph_{ts}", use_immich=True)
         session.add_all([orig, dup])
+        await seed_results(session, orig, {"IA-01": {"file_type": "JPEG"}, "IA-02": {"status": "ok"}})
+        await seed_results(session, dup, {"IA-01": {"file_type": "JPEG"},
+                                          "IA-02": {"status": "duplicate", "original_debug_key": f"DEEP-E2-ORIG-{ts}"}})
         await session.commit()
 
         # "Keep this" on the ORIGINAL (already done) — should be a no-op
@@ -184,16 +184,16 @@ async def main():
         orig = Job(filename=os.path.basename(p1), original_path=p1,
                    source_inbox_path="/inbox", status="done", target_path=p1,
                    debug_key=f"DEEP-E6-ORIG-{ts}", file_hash=f"e6o_{ts}",
-                   phash=f"e6ph_{ts}", use_immich=True,
-                   step_result={"IA-01": {"file_type": "JPEG"}, "IA-02": {"status": "ok"}})
+                   phash=f"e6ph_{ts}", use_immich=True)
         dup = Job(filename="gone.jpg", original_path="/tmp/gone_e6.jpg",
                   source_inbox_path="/inbox", status="duplicate",
                   target_path="/library/error/duplicates/gone_e6.jpg",
                   debug_key=f"DEEP-E6-DUP-{ts}", file_hash=f"e6d_{ts}",
-                  phash=f"e6ph_{ts}", use_immich=True,
-                  step_result={"IA-01": {"file_type": "JPEG"},
-                               "IA-02": {"status": "duplicate", "original_debug_key": f"DEEP-E6-ORIG-{ts}"}})
+                  phash=f"e6ph_{ts}", use_immich=True)
         session.add_all([orig, dup])
+        await seed_results(session, orig, {"IA-01": {"file_type": "JPEG"}, "IA-02": {"status": "ok"}})
+        await seed_results(session, dup, {"IA-01": {"file_type": "JPEG"},
+                                          "IA-02": {"status": "duplicate", "original_debug_key": f"DEEP-E6-ORIG-{ts}"}})
         await session.commit()
 
         # Keep the dup (whose file is gone) — should not crash
@@ -311,16 +311,16 @@ async def main():
         ja = Job(filename=os.path.basename(p1), original_path=p1,
                  source_inbox_path="/inbox", status="duplicate", target_path=p1,
                  debug_key=f"DEEP-E12-A-{ts}", file_hash=f"e12a_{ts}",
-                 phash=f"e12ph_{ts}", use_immich=False,
-                 step_result={"IA-01": {"file_type": "JPEG"},
-                              "IA-02": {"status": "duplicate"}})
+                 phash=f"e12ph_{ts}", use_immich=False)
         jb = Job(filename=os.path.basename(p2), original_path=p2,
                  source_inbox_path="/inbox", status="duplicate", target_path=p2,
                  debug_key=f"DEEP-E12-B-{ts}", file_hash=f"e12b_{ts}",
-                 phash=f"e12ph_{ts}", use_immich=False,
-                 step_result={"IA-01": {"file_type": "JPEG"},
-                              "IA-02": {"status": "duplicate"}})
+                 phash=f"e12ph_{ts}", use_immich=False)
         session.add_all([ja, jb])
+        await seed_results(session, ja, {"IA-01": {"file_type": "JPEG"},
+                                         "IA-02": {"status": "duplicate"}})
+        await seed_results(session, jb, {"IA-01": {"file_type": "JPEG"},
+                                         "IA-02": {"status": "duplicate"}})
         await session.commit()
 
         ja_id, jb_id = ja.id, jb.id

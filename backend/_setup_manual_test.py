@@ -70,7 +70,7 @@ async def main():
     from database import async_session
     from models import Job
     from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
+    from test_support.seed import seed_results
     from config import config_manager
     from pipeline import run_pipeline
 
@@ -150,12 +150,12 @@ async def main():
             debug_key=f"MANUAL-Original-ROT-{ts}",
             file_hash=f"manual_orig_{ts}", phash=group_phash,
             use_immich=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst0)},
-                "IA-02": {"status": "ok"},
-            },
         )
         session.add(orig)
+        await seed_results(session, orig, {
+            "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst0)},
+            "IA-02": {"status": "ok"},
+        })
         created_jobs.append(orig.debug_key)
 
         # Dup 1 (BLAU) — Ferien Mallorca
@@ -168,16 +168,16 @@ async def main():
             debug_key=f"MANUAL-Dup-BLAU-{ts}",
             file_hash=f"manual_dup1_{ts}", phash=group_phash,
             use_immich=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst1)},
-                "IA-02": {
-                    "status": "duplicate", "match_type": "similar", "phash_distance": 3,
-                    "original_debug_key": orig.debug_key,
-                    "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"],
-                },
-            },
         )
         session.add(dup1)
+        await seed_results(session, dup1, {
+            "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst1)},
+            "IA-02": {
+                "status": "duplicate", "match_type": "similar", "phash_distance": 3,
+                "original_debug_key": orig.debug_key,
+                "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"],
+            },
+        })
         created_jobs.append(dup1.debug_key)
 
         # Dup 2 (GRÜN) — Urlaub Spanien
@@ -190,16 +190,16 @@ async def main():
             debug_key=f"MANUAL-Dup-GRUEN-{ts}",
             file_hash=f"manual_dup2_{ts}", phash=group_phash,
             use_immich=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst2)},
-                "IA-02": {
-                    "status": "duplicate", "match_type": "similar", "phash_distance": 4,
-                    "original_debug_key": orig.debug_key,
-                    "folder_tags": ["Urlaub", "Spanien", "Urlaub Spanien"],
-                },
-            },
         )
         session.add(dup2)
+        await seed_results(session, dup2, {
+            "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst2)},
+            "IA-02": {
+                "status": "duplicate", "match_type": "similar", "phash_distance": 4,
+                "original_debug_key": orig.debug_key,
+                "folder_tags": ["Urlaub", "Spanien", "Urlaub Spanien"],
+            },
+        })
         created_jobs.append(dup2.debug_key)
         await session.commit()
 
@@ -219,12 +219,12 @@ async def main():
             debug_key=f"MANUAL-NoFT-GELB-{ts}",
             file_hash=f"manual_noft_{ts}", phash=f"noft_{ts}",
             use_immich=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst3)},
-                "IA-02": {"status": "duplicate", "match_type": "exact"},
-            },
         )
         session.add(job3)
+        await seed_results(session, job3, {
+            "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst3)},
+            "IA-02": {"status": "duplicate", "match_type": "exact"},
+        })
         created_jobs.append(job3.debug_key)
         await session.commit()
     print(f"  ✅ GELB = Duplikat ohne Album-Badge")
@@ -241,15 +241,15 @@ async def main():
             debug_key=f"MANUAL-Deep-LILA-{ts}",
             file_hash=f"manual_deep_{ts}", phash=f"deep_{ts}",
             use_immich=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst4)},
-                "IA-02": {
-                    "status": "duplicate", "match_type": "similar",
-                    "folder_tags": ["Reisen", "2026", "Griechenland", "Reisen 2026 Griechenland"],
-                },
-            },
         )
         session.add(job4)
+        await seed_results(session, job4, {
+            "IA-01": {"file_type": "JPEG", "file_size": os.path.getsize(dst4)},
+            "IA-02": {
+                "status": "duplicate", "match_type": "similar",
+                "folder_tags": ["Reisen", "2026", "Griechenland", "Reisen 2026 Griechenland"],
+            },
+        })
         created_jobs.append(job4.debug_key)
         await session.commit()
     print(f"  ✅ LILA = 📁 Reisen 2026 Griechenland")

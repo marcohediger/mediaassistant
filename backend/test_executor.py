@@ -7,6 +7,8 @@ the finalizers); the main modules are stand-ins put into
 ``pipeline.MAIN_STEPS`` (by assignment and by index — read at run time),
 except where the real IA-03 is the point.
 
+0. The module register is the one source of the module order and of the
+   critical modules (job_view, reprocess, executor, pipeline lists).
 1. Order: IA-03 next to IA-04 after IA-02, IA-05 after both, IA-07/IA-08
    one after the other and last; current_step only ever the main path's.
 2. Switch pipeline.parallel_modules off: strictly one after the other.
@@ -113,7 +115,7 @@ async def create_set():
         return ps.id
 
 
-async def new_job(set_id, step_result=None, status="queued", gps=False):
+async def new_job(set_id, status="queued", gps=False):
     global _N
     _N += 1
     from PIL import Image
@@ -127,8 +129,7 @@ async def new_job(set_id, step_result=None, status="queued", gps=False):
     async with async_session() as s:
         job = Job(filename=os.path.basename(path), original_path=path, debug_key=f"{TAG}-{_N:02d}", status=status,
                   source_label=f"{TAG}", source_inbox_path=f"{SANDBOX}/inbox", folder_tags=False, dry_run=False,
-                  use_immich=False, set_id=set_id, file_hash=sha256_file(path), step_result=dict(step_result or {}),
-                  retry_count=0)
+                  use_immich=False, set_id=set_id, file_hash=sha256_file(path), retry_count=0)
         s.add(job)
         await s.commit()
         CREATED_JOBS.append(job.id)
@@ -150,6 +151,32 @@ async def sample_current_step(jid, stop: asyncio.Event, out: list):
         async with async_session() as s:
             out.append((await s.execute(select(Job.current_step).where(Job.id == jid))).scalar())
         await asyncio.sleep(0.02)
+
+
+# ---------------------------------------------------------------------------
+# 0: the module register is the one source of order and criticality
+# ---------------------------------------------------------------------------
+
+async def test_register_single_source(_set_id=None):
+    section("0. Modulregister als einzige Quelle für Reihenfolge und kritische Module")
+    import job_view
+    import models
+    import pipeline
+    from pipeline import executor, registry, reprocess
+    report("job_view liest Reihenfolge und kritische Module aus dem Register",
+           job_view.MODULES is registry.ORDER and job_view.CRITICAL is registry.CRITICAL)
+    report("reprocess ohne eigene Reihenfolge (Kaskade beim Zurücksetzen über registry.MAIN)",
+           not hasattr(reprocess, "_PIPELINE_ORDER"))
+    report("Pipeline: MAIN_STEPS / FINALIZERS nach dem Register geteilt",
+           tuple(c for c, _ in pipeline.STEPS) == registry.ORDER
+           and tuple(c for c, _ in pipeline.MAIN_STEPS) == registry.MAIN
+           and tuple(c for c, _ in pipeline.FINALIZERS) == registry.FINALIZER_CODES,
+           f"{[c for c, _ in pipeline.MAIN_STEPS]} {[c for c, _ in pipeline.FINALIZERS]}")
+    report("Ausführer: nicht kritisch = Hauptmodule ohne die kritischen",
+           executor.NON_CRITICAL == frozenset(registry.MAIN) - registry.CRITICAL
+           and executor.NON_CRITICAL == frozenset({"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}))
+    report("Schema (models.MODULE_CODES, kann das Paket pipeline nicht importieren) stimmt mit dem Register",
+           models.MODULE_CODES == registry.ORDER, f"{models.MODULE_CODES}")
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +561,8 @@ async def main():
     parallel = await config_manager.get("pipeline.parallel_modules")
     try:
         set_id = await create_set()
-        for fn in (test_order, test_side_session, test_limits, test_parking, test_watchdog):
+        for fn in (test_register_single_source, test_order, test_side_session, test_limits, test_parking,
+                   test_watchdog):
             try:
                 await fn(set_id)
             except Exception as exc:

@@ -80,7 +80,7 @@ class ModuleSpec:
     side_session: bool = False               # nur IA-03
     fp_version: int = 1
 ```
-Dazu `dependents(code, hints=False)`, `fingerprint(code, job, view, cfg)`, `settings_snapshot(session, job)`. `job_view.CRITICAL` (`job_view.py:52`) und `reprocess._PIPELINE_ORDER` (`reprocess.py:500-503`) lesen künftig hier.
+Dazu `dependents(code, hints=False)`, `fingerprint(code, job, view, cfg)`, `settings_snapshot(session, job)`. `job_view` (Reihenfolge, `CRITICAL`), `reprocess` (Kaskade beim Zurücksetzen), der Ausführer (`NON_CRITICAL`) und `pipeline.MAIN_STEPS`/`FINALIZERS` lesen hier (Schritt 7); `models.MODULE_CODES` bleibt als Liste des Schemas, `test_executor.py` prüft sie gegen das Register.
 
 ## 2. Neu ausführen: Semantik
 
@@ -121,7 +121,7 @@ IA-04, IA-05, IA-06 laufen nicht; IA-05 wird „veraltet" angezeigt, wenn sich d
 |---|---|---|---|
 | Ablage | immer (IA-07/IA-08) | eigenes Exemplar am Ablageort (`reprocess.own_local_copy`, `reprocess.py:251-260`): vorhanden, Grösse wie im Register; den Inhalt prüft fileops bei jeder Operation (`_write_part` mit `sha256_before`, `fileops.py:341-356`). Kein Umzug. Fehlt es → `no_copy` | Ablagepfad |
 | Immich, kein Modul liest die Datei | nein | keine; Asset geprüft (`fileops.verify`: vorhanden, nicht im Papierkorb) → sonst `asset_missing` | `immich:<asset_id>` — sonst nähme IA-08 eine fremde Datei am alten Inbox-Pfad als Quelle und legte sie in den Papierkorb (`ia08:735`, `:777-780`; R-01) |
-| Immich, Datei nötig (IA-01, IA-04/05/06, „ersetzen") | ja | eigenes lokales Exemplar mit dem SHA-256 des Assets, sonst `fileops.download` in eine **eindeutige** Arbeitskopie in `reprocess/` (`fileops.py:931-969`, R-03), registriert als `work` | Arbeitskopie |
+| Immich, Datei nötig (IA-01, IA-04/05/06, „ersetzen") | ja | eigenes lokales Exemplar mit dem SHA-256 des Assets, sonst `fileops.download` in eine **eindeutige** Arbeitskopie in `reprocess/` (`fileops.py:931-969`, R-03), registriert als `work`; jeder Download trägt die Dateizeit des Assets (`fileModifiedAt`, `immich_client.download_asset`), IA-01 liest ohne EXIF-Datum also dasselbe Datum wie zuvor | Arbeitskopie |
 | Probelauf (Datei in der Inbox) | ja | Inbox-Datei an Ort und Stelle | Inbox-Pfad |
 
 „Datei nötig" wird vorsichtig bestimmt: gewählte Module plus alle, die die Kaskade erreichen *könnte*.
@@ -134,7 +134,7 @@ Aufräumen: IA-08 entfernt die Arbeitskopie nach geprüfter Übergabe wie heute 
 | Ablage, direkt | IA-07 | `write_metadata` an Ort und Stelle (atomar); entfernt `_previous_keywords_written − neu` aus Keywords/Subject, TagsList, HierarchicalSubject; Beschreibung überschrieben |
 | Ablage, Sidecar | IA-07 | Sidecar daneben ergänzt; alte eigene Stichwörter raus; Beschreibung ersetzt, wenn sie `_previous_description_written` ist, sonst bleibt sie (Benutzer) |
 | Ablage | IA-08, Ordner gleich | keine Verschiebung (`ia08:673-679`), Sidecar bleibt |
-| Ablage | IA-08, Ordner anders (`{CITY}`, `{COUNTRY}`, Datum, Kategorie, Basis-Pfad) | `fileops.move` (nie überschreiben, `+N`), Sidecar zieht mit |
+| Ablage | IA-08, Ordner anders (`{CITY}`, `{COUNTRY}`, Datum, Kategorie, Basis-Pfad) | `fileops.move` (nie überschreiben, `+N`), Sidecar zieht mit; leer gewordene alte Ordner gehen bis unter den Basis-Pfad (`fileops.prune_empty_dirs`: nie der Basis-Pfad, nichts ausserhalb, nichts im Papierkorb, kein Eingang, kein Ordner mit fremden Dateien; nur Logzeile, kein Protokolleintrag) |
 | Ablage | Kategorie wird `unknown` | Ordner `unknown/…`, Status `review` |
 | Immich, API (Vorgabe) | IA-07 | keine Datei; Ergebnis `write_mode: "immich_api"`, `keywords_written`, `description_written`, `file_unchanged: true` |
 | Immich, API | IA-08 | Zweig „gleiche Bytes" (`ia08:868-890`): Tags hinzu, eigene alte weg (`_retry_previous_immich_tags`), Beschreibung nur über eigene alte (`ia08:378-397`), Alben nur hinzu; kein Upload, keine Quelle entfernen |
@@ -217,7 +217,7 @@ Gesetzt bei der Vorbereitung aus den aktuellen IA-07-/IA-08-Läufen, notiert in 
 
 ### 3.1 Ablauf pro Job
 
-`run_pipeline` bleibt der einzige Einstieg (Claim, `adopt`, `_prepare_source`, Abschluss unverändert); die Schleife `__init__:189-326` zieht nach `pipeline/executor.py`:
+`run_pipeline` bleibt der einzige Einstieg (Claim, `_prepare_source`, Abschluss unverändert); die Schleife `__init__:189-326` zieht nach `pipeline/executor.py`:
 
 ```
 plan = registry.plan(job, current_runs, rerun=params.get("_rerun"))
@@ -277,7 +277,7 @@ Heute laufen höchstens so viele Jobs wie KI-Slots; lädt einer zu Immich hoch, 
 
 | Absturz während | danach | Wiederaufnahme |
 |---|---|---|
-| Vorbereitung vor dem Commit | Job `processing`, alte Läufe gültig, evtl. Arbeitskopie registriert | `requeue_interrupted_jobs` (`recovery.py:117-169`) → nichts offen → Status neu; Auftrag `preparing → pending` beim Start des Zuführers; nächste Vorbereitung findet die Arbeitskopie |
+| Vorbereitung vor dem Commit | Job `processing` ohne `_rerun`, alte Läufe gültig, Auftrag `preparing` mit dem Status von vorher (im Commit des Claims), evtl. Arbeitskopie registriert | `requeue_interrupted_jobs` → `rerun.release_cut_short`: Job zurück auf den Status von vorher (kein Pipeline-Lauf, der ihn neu aggregierte — ein Review-Job kam sonst als `done` zurück —, `retry_count` bleibt); Auftrag `preparing → pending` beim Start des Zuführers; nächste Vorbereitung findet die Arbeitskopie |
 | IA-03 fertig, IA-04 läuft | IA-03 `ok`, IA-04 `running` | IA-03 nicht neu; IA-04 als „unterbrochen" ersetzt (`runs.py:247-248`) und neu |
 | IA-03 läuft, IA-04 fertig | umgekehrt | IA-03 neu |
 | vor dem Kaskaden-Entscheid | Vorgänger `ok` | Entscheid aus den Läufen neu berechnet, gleiches Ergebnis |

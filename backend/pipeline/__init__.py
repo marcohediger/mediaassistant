@@ -15,7 +15,7 @@ from database import async_session
 from file_operations import sha256 as _sha256
 from models import Job
 from system_logger import log_error, log_info, log_warning
-from pipeline import reprocess
+from pipeline import registry, reprocess
 from pipeline import step_ia01_exif, step_ia02_duplicates, step_ia03_geocoding, step_ia04_convert, step_ia05_ai, step_ia06_ocr, step_ia07_exif_write, step_ia08_sort, step_ia09_notify, step_ia10_cleanup, step_ia11_log
 from pipeline.reprocess import run_params  # noqa: F401  (steps read their run parameters here)
 from pipeline.step_ia03_geocoding import GeocodingConnectionError
@@ -105,13 +105,11 @@ STEPS = [
 ]
 
 
-FINALIZERS = [
-    ("IA-09", step_ia09_notify.execute),
-    ("IA-10", step_ia10_cleanup.execute),
-    ("IA-11", step_ia11_log.execute),
-]
+# Main modules and finalizers as the module register divides them (the
+# executor reads both lists at run time; tests replace entries).
+FINALIZERS = [s for s in STEPS if s[0] in registry.FINALIZER_CODES]
 
-MAIN_STEPS = [s for s in STEPS if s[0] not in {"IA-09", "IA-10", "IA-11"}]
+MAIN_STEPS = [s for s in STEPS if s[0] in registry.MAIN]
 
 # What IA-05 stands for when it failed: later modules read these fields.
 _IA05_FALLBACK = {
@@ -168,11 +166,6 @@ async def _run_pipeline(job_id: int):
         job = await session.get(Job, job_id)
         if not job:
             return
-
-        # A step_result written outside runs.py (tests, old tools) becomes
-        # runs first; from here on the runs decide what is done.
-        await runs.adopt(session, job)
-        await session.commit()
 
         if reprocess.PREPARE_SOURCE in runs.params_of(job):
             # A retry dropped the old results and was cut short before its

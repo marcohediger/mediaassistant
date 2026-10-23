@@ -71,7 +71,7 @@ async def main():
     from database import async_session
     from models import Job
     from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
+    from test_support.seed import seed_results
     from config import config_manager
     from pipeline import run_pipeline, reset_job_for_retry
     from pipeline.reprocess import prepare_job_for_reprocess
@@ -108,16 +108,16 @@ async def main():
         orig = Job(filename=os.path.basename(orig_path), original_path=orig_path,
                    source_inbox_path="/inbox", status="done", target_path=orig_path,
                    debug_key=f"NFL-D1-ORIG-{ts}", file_hash=f"d1orig_{ts}",
-                   phash=f"d1ph_{ts}", use_immich=has_immich,
-                   step_result={"IA-01": {"file_type": "JPEG"}, "IA-02": {"status": "ok"}})
+                   phash=f"d1ph_{ts}", use_immich=has_immich)
         dup = Job(filename=os.path.basename(dup_path), original_path=dup_path,
                   source_inbox_path="/inbox", status="duplicate", target_path=dup_path,
                   debug_key=f"NFL-D1-DUP-{ts}", file_hash=f"d1dup_{ts}",
-                  phash=f"d1ph_{ts}", use_immich=has_immich,
-                  step_result={"IA-01": {"file_type": "JPEG"},
-                               "IA-02": {"status": "duplicate", "original_debug_key": f"NFL-D1-ORIG-{ts}",
-                                         "folder_tags": ["TestAlbum"]}})
+                  phash=f"d1ph_{ts}", use_immich=has_immich)
         session.add_all([orig, dup])
+        await seed_results(session, orig, {"IA-01": {"file_type": "JPEG"}, "IA-02": {"status": "ok"}})
+        await seed_results(session, dup, {"IA-01": {"file_type": "JPEG"},
+                                          "IA-02": {"status": "duplicate", "original_debug_key": f"NFL-D1-ORIG-{ts}",
+                                                    "folder_tags": ["TestAlbum"]}})
         await session.commit()
 
         # Simulate "Keep this" on the duplicate
@@ -151,11 +151,11 @@ async def main():
         nd_job = Job(filename=os.path.basename(nd_path), original_path=nd_path,
                      source_inbox_path="/inbox", status="duplicate", target_path=nd_path,
                      debug_key=f"NFL-D3-{ts}", file_hash=_content_hash(nd_path),
-                     phash=f"d3ph_{ts}", use_immich=has_immich,
-                     step_result={"IA-01": {"file_type": "JPEG"},
-                                  "IA-02": {"status": "duplicate",
-                                            "folder_tags": ["Urlaub"]}})
+                     phash=f"d3ph_{ts}", use_immich=has_immich)
         session.add(nd_job)
+        await seed_results(session, nd_job, {"IA-01": {"file_type": "JPEG"},
+                                             "IA-02": {"status": "duplicate",
+                                                       "folder_tags": ["Urlaub"]}})
         await session.commit()
 
         old_ia02 = (nd_job.step_result or {}).get("IA-02") or {}
@@ -189,9 +189,9 @@ async def main():
         err_job = Job(filename=os.path.basename(err_path), original_path=err_path,
                       source_inbox_path="/inbox", status="error", target_path=err_path,
                       debug_key=f"NFL-A1-{ts}", use_immich=has_immich,
-                      error_message="simulated error",
-                      step_result={"IA-01": {"file_type": "JPEG"}})
+                      error_message="simulated error")
         session.add(err_job)
+        await seed_results(session, err_job, {"IA-01": {"file_type": "JPEG"}})
         await session.commit()
         err_id = err_job.id
 
@@ -212,9 +212,9 @@ async def main():
                     source_inbox_path="/inbox", status="error",
                     target_path="/tmp/ghost_gone.jpg",
                     debug_key=f"NFL-A2-{ts}", use_immich=False,
-                    error_message="file was deleted",
-                    step_result={"IA-01": {"file_type": "JPEG"}})
+                    error_message="file was deleted")
         session.add(ghost)
+        await seed_results(session, ghost, {"IA-01": {"file_type": "JPEG"}})
         await session.commit()
         ghost_id = ghost.id
 
@@ -555,8 +555,6 @@ async def main():
                 debug_key=f"NFL-K1-ORIG-{ts}",
                 file_hash=_sha(orig_path_k1), phash=f"k1ph_{ts}",
                 use_immich=True,
-                step_result={"IA-01": {"file_type": "JPEG"},
-                             "IA-02": {"status": "ok"}},
             )
             dup_job = Job(
                 filename=os.path.basename(dup_path_k1),
@@ -566,12 +564,14 @@ async def main():
                 debug_key=f"NFL-K1-DUP-{ts}",
                 file_hash=_sha(dup_path_k1), phash=f"k1ph_{ts}",
                 use_immich=True,
-                step_result={"IA-01": {"file_type": "JPEG"},
-                             "IA-02": {"status": "duplicate",
-                                       "original_debug_key": f"NFL-K1-ORIG-{ts}",
-                                       "folder_tags": []}},
             )
             session.add_all([orig_job, dup_job])
+            await seed_results(session, orig_job, {"IA-01": {"file_type": "JPEG"},
+                                                   "IA-02": {"status": "ok"}})
+            await seed_results(session, dup_job, {"IA-01": {"file_type": "JPEG"},
+                                                  "IA-02": {"status": "duplicate",
+                                                            "original_debug_key": f"NFL-K1-ORIG-{ts}",
+                                                            "folder_tags": []}})
             await session.commit()
             dup_id, orig_id = dup_job.id, orig_job.id
 
@@ -641,10 +641,6 @@ async def main():
                 debug_key=f"NFL-K2-BEST-{ts}",
                 file_hash=_sha(new_content_path), phash=f"k2ph_{ts}",
                 use_immich=True,
-                step_result={"IA-01": {"file_type": "JPEG"},
-                             "IA-02": {"status": "duplicate",
-                                       "original_debug_key": f"NFL-K2-DON-{ts}",
-                                       "folder_tags": []}},
             )
             donor_k2 = Job(
                 filename=f"__nfl_k2_donor_{ts}.jpg",
@@ -655,10 +651,14 @@ async def main():
                 debug_key=f"NFL-K2-DON-{ts}",
                 file_hash=donor_hash_k2, phash=f"k2ph_{ts}",
                 use_immich=True,
-                step_result={"IA-01": {"file_type": "JPEG"},
-                             "IA-02": {"status": "ok"}},
             )
             session.add_all([best_k2, donor_k2])
+            await seed_results(session, best_k2, {"IA-01": {"file_type": "JPEG"},
+                                                  "IA-02": {"status": "duplicate",
+                                                            "original_debug_key": f"NFL-K2-DON-{ts}",
+                                                            "folder_tags": []}})
+            await seed_results(session, donor_k2, {"IA-01": {"file_type": "JPEG"},
+                                                   "IA-02": {"status": "ok"}})
             await session.commit()
             best_k2_id, donor_k2_id = best_k2.id, donor_k2.id
 

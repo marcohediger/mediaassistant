@@ -9,6 +9,10 @@ pipeline module, jobs.step_result as the derived view.
    finished job are dropped, of a queued/processing job kept as job values;
    the view equals the old JSON for every job; a second start changes
    nothing; the guards refuse changes to a finished run and every delete.
+   After every startup: the index set of module_runs and file_ops,
+   journal_size_limit on a pooled connection, the WAL cut back to 0 while
+   the pool is open (also 1b: a new database and one with the former
+   module_runs indexes).
 2. The same on a copy of a real database (path argument; copied with the
    sqlite backup API into /app/data/, removed afterwards): row counts,
    statuses, the view of every job, idempotency and the runtime.
@@ -52,6 +56,7 @@ from models import (Base, Job, LibraryCategory, ModuleRun, ProcessingSet, Sortin
                     MODULE_RUNS_GUARDS)
 from sets import seed_set_defaults
 from test_support.invariants import delete_test_jobs, sha256_file
+from test_support.seed import seed_results
 
 TS = int(time.time())
 TAG = f"MRUN{TS}"
@@ -191,7 +196,9 @@ def expected_view(status, step_result):
 
 
 async def run_startup_migration(path) -> dict:
-    """What init_db does at startup, on `path`; returns the counts and times."""
+    """What init_db does at startup, on `path`, then the WAL checkpoint of
+    main.lifespan while the pool is still open; returns counts, times, the
+    WAL size before/after and journal_size_limit of a pooled connection."""
     timing = {}
     real = database._migrate_module_runs
 
@@ -203,6 +210,7 @@ async def run_startup_migration(path) -> dict:
         return counts
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+    sqlalchemy.event.listen(engine.sync_engine, "connect", database._set_sqlite_pragmas)  # as the app's engine
     started = time.monotonic()
     try:
         with patched(database, "_migrate_module_runs", timed):
@@ -212,9 +220,65 @@ async def run_startup_migration(path) -> dict:
                 commit_from = time.monotonic()
         timing["commit_s"] = time.monotonic() - commit_from
         timing["total_s"] = time.monotonic() - started
+        timing["wal_before"], timing["wal_after"] = await database.truncate_wal(engine)
+        async with engine.connect() as conn:
+            timing["journal_size_limit"] = (await conn.execute(sqlalchemy.text("PRAGMA journal_size_limit"))).scalar()
     finally:
         await engine.dispose()
     return timing
+
+
+# After the startup on any database (docs/UMBAU_MODULE.md, Migration):
+# {index: (columns, unique, partial)}
+EXPECTED_INDEXES = {
+    "module_runs": {"idx_module_runs_job": (["job_id"], 0, 0),
+                    "uq_module_runs_current": (["job_id", "module"], 1, 1)},
+    "file_ops": {"idx_file_ops_job": (["job_id", "id"], 0, 0), "idx_file_ops_state": (["state", "created_at"], 0, 0),
+                 "idx_file_ops_copy": (["copy_id"], 0, 0), "idx_file_ops_dst_copy": (["dst_copy_id"], 0, 0),
+                 "uq_file_ops_open_src": (["src_kind", "src"], 1, 1)},
+}
+
+
+def indexes_of(path, table) -> dict:
+    con = sqlite3.connect(path)
+    try:
+        # index_list: (seq, name, unique, origin, partial); origin 'c' = CREATE INDEX
+        return {r[1]: ([c[2] for c in con.execute(f"PRAGMA index_info('{r[1]}')")], r[2], r[4])
+                for r in con.execute(f"PRAGMA index_list('{table}')") if r[3] == "c"}
+    finally:
+        con.close()
+
+
+def check_storage(label, path, timing):
+    """Index set of module_runs and file_ops, journal_size_limit, WAL cut back."""
+    for table, expected in EXPECTED_INDEXES.items():
+        got = indexes_of(path, table)
+        report(f"{label}: Indizes auf {table} wie erwartet", got == expected, "" if got == expected else f"{got}")
+    report(f"{label}: journal_size_limit einer Pool-Verbindung 64 MiB",
+           timing.get("journal_size_limit") == database.JOURNAL_SIZE_LIMIT, f"{timing.get('journal_size_limit')}")
+    report(f"{label}: WAL nach dem Start abgeschnitten (Pool offen)", timing.get("wal_after") == 0,
+           f"{timing.get('wal_before', 0) / 1e6:.1f} MB → {timing.get('wal_after', 0) / 1e6:.1f} MB, "
+           f"Datei {os.path.getsize(path) / 1e6:.1f} MB")
+
+
+async def scenario_indexes(work):
+    section("1b. Indizes und WAL: neue Datenbank, Datenbank mit den früheren Indizes")
+    path = os.path.join(work, "fresh.db")
+    check_storage("Neue DB", path, await run_startup_migration(path))
+    # A database from before: module_runs indexed on (job_id, module, id)
+    # and on status, file_ops without the dst_copy_id index.
+    con = sqlite3.connect(path)
+    con.executescript("""
+        DROP INDEX idx_module_runs_job;
+        CREATE INDEX idx_module_runs_job ON module_runs (job_id, module, id);
+        CREATE INDEX idx_module_runs_status ON module_runs (status);
+        DROP INDEX idx_file_ops_dst_copy;""")
+    con.close()
+    check_storage("DB mit früheren Indizes", path, await run_startup_migration(path))
+    async with database.engine.connect() as conn:
+        limit = (await conn.execute(sqlalchemy.text("PRAGMA journal_size_limit"))).scalar()
+    report("App-Engine: journal_size_limit einer Pool-Verbindung 64 MiB", limit == database.JOURNAL_SIZE_LIMIT,
+           f"{limit}")
 
 
 def load_state(path):
@@ -368,6 +432,7 @@ async def scenario_legacy(work):
     timing = await run_startup_migration(path)
     counts = timing.get("counts")
     report("Alt-DB: Migration gelaufen", counts is not None, f"{counts}")
+    check_storage("Alt-DB", path, timing)
     check_counts("Alt-DB", path, originals, counts)
     check_views("Alt-DB", path, originals)
     con = sqlite3.connect(path)
@@ -416,6 +481,7 @@ async def scenario_copy(src, work):
            f"Commit {timing['commit_s']:.1f} s, ganzer Start-Umbau {timing['total_s']:.1f} s")
     report("Kopie: schnell genug (Übernahme unter 60 s)", timing["module_runs_s"] < 60,
            f"{timing['module_runs_s']:.1f} s")
+    check_storage("Kopie", path, timing)
     check_counts("Kopie", path, originals, counts)
     started = time.monotonic()
     check_views("Kopie", path, originals)
@@ -483,8 +549,10 @@ async def create_job(path, *, set_id, inbox, step_result=None, status="queued", 
                   status=status, source_label=f"{TAG} Eingang", source_inbox_path=inbox, folder_tags=False,
                   dry_run=False, use_immich=False, set_id=set_id,
                   file_hash=sha256_file(path) if os.path.isfile(path) else None,
-                  step_result=dict(step_result or {}), retry_count=0, **extra)
+                  retry_count=0, **extra)
         s.add(job)
+        if step_result:
+            await seed_results(s, job, step_result)
         await s.commit()
         CREATED_JOBS.append(job.id)
         return job.id
@@ -500,14 +568,12 @@ async def job_runs(job_id):
         return await runs.all_runs(s, job_id)
 
 
-async def write_step_result(job_id, sr):
-    """What tests and old tools do: write step_result directly (runs.adopt takes it over)."""
-    from sqlalchemy.orm.attributes import flag_modified
+async def seed_job(job_id, state):
+    """Give the job pre-filled results and job values (test_support.seed)."""
     async with async_session() as s:
-        job = await s.get(Job, job_id)
-        job.step_result = sr
-        flag_modified(job, "step_result")
+        changed = await seed_results(s, await s.get(Job, job_id), state)
         await s.commit()
+        return changed
 
 
 async def run_pipeline(job_id):
@@ -610,20 +676,19 @@ async def test_api(box_inbox, set_id):
               and taker.step_result.get("IA-03") == source.result)
     report("copy_run: Lauf eines anderen Jobs übernommen (copied, copied_from_run_id, gleiches Ergebnis)", ok)
 
-    # A direct step_result write is taken over (adopt)
-    await write_step_result(jid, {"IA-01": {"file_type": "JPEG"}, "IA-03": {"city": "Thun"}, "_q": True})
+    # Pre-filled state (test_support.seed = apply with trigger 'migrated')
+    state = {"IA-01": {"file_type": "JPEG"}, "IA-03": {"city": "Thun"}, "_q": True}
+    took = await seed_job(jid, state)
     async with async_session() as s:
         job = await s.get(Job, jid)
-        took = await runs.adopt(s, job)
-        await s.commit()
         cur = {m: runs.snapshot(r) for m, r in (await runs.current_runs(s, jid)).items()}
         params = runs.params_of(job)
-        again = await runs.adopt(s, job)
+        again = await seed_results(s, job, state)
         await s.rollback()
-    report("adopt: direkt geschriebenes step_result wird zu Läufen (migrated) und Job-Werten",
-           took and cur["IA-01"].trigger == "migrated" and cur["IA-03"].result == {"city": "Thun"}
-           and params == {"_q": True} and not again,
-           f"{ {m: (r.trigger, r.attempt) for m, r in cur.items()} }")
+    report("apply (migrated): vorbefüllter Zustand wird zu Läufen (migrated) und Job-Werten, ein zweites Mal ändert nichts",
+           took == ["IA-01", "IA-03"] and cur["IA-01"].trigger == "migrated" and cur["IA-03"].result == {"city": "Thun"}
+           and params == {"_q": True} and again == [],
+           f"{took} { {m: (r.trigger, r.attempt) for m, r in cur.items()} } again={again}")
 
 
 async def test_pipeline(box, set_id):
@@ -657,7 +722,7 @@ async def test_pipeline(box, set_id):
            ok and job.status == "queued" and all(r.status == "superseded" for r in rows)
            and len(rows) == len(first_ids) and not {k for k in (job.step_result or {}) if k in MODULE_CODES},
            f"ok={ok} status={job.status} view={job.step_result}")
-    await write_step_result(jid, dict(job.step_result or {}, **pre_results()))
+    await seed_job(jid, dict(job.step_result or {}, **pre_results()))
     with patched(reprocess, "REPROCESS_DIR", box["reprocess"]):
         await run_pipeline(jid)
     job = await get_job(jid)
@@ -752,10 +817,6 @@ async def test_keep_copies(box, set_id):
                                                    "match_type": "exact"},
                                          "IA-09": {"status": "skipped"}, "IA-10": {"count": 0},
                                          "IA-11": {"logged": True}})
-    # The kept job's step_result is a direct write: take it over, as run_pipeline would.
-    async with async_session() as s:
-        await runs.adopt(s, await s.get(Job, kept))
-        await s.commit()
     donor_runs = {r.module: r.id for r in await job_runs(donor) if r.status != "superseded"}
     async with async_session() as s:
         kept_job = await s.get(Job, kept)
@@ -862,6 +923,7 @@ async def main():
     os.makedirs(work)
     try:
         await scenario_legacy(work)
+        await scenario_indexes(work)
         if len(sys.argv) > 1:
             await scenario_copy(sys.argv[1], work)
         for name in os.listdir(work):

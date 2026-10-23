@@ -3,9 +3,11 @@ import os
 import re
 import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from models import Base, Module, InboxDirectory, FILE_OPS_GUARDS, MODULE_CODES, MODULE_RUNS_GUARDS, RUN_RESULT_STATUSES
+from models import (Base, Module, InboxDirectory, ModuleRun, FILE_OPS_GUARDS, MODULE_CODES, MODULE_RUNS_GUARDS,
+                    RUN_RESULT_STATUSES)
 
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")
+JOURNAL_SIZE_LIMIT = 64 * 1024 * 1024
 
 engine = create_async_engine(
     f"sqlite+aiosqlite:///{DATABASE_PATH}",
@@ -31,6 +33,10 @@ def _set_sqlite_pragmas(dbapi_conn, connection_record):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=600000")
+    # The WAL keeps the size of the largest transaction it ever held while a
+    # connection is open (the pool never closes them): cut it back to 64 MiB
+    # whenever a checkpoint resets it.
+    cursor.execute(f"PRAGMA journal_size_limit={JOURNAL_SIZE_LIMIT}")
     cursor.close()
 
 DEFAULT_MODULES = [
@@ -139,11 +145,22 @@ async def _migrate_columns(conn):
         "CREATE INDEX IF NOT EXISTS idx_rerun_items_job ON rerun_items(job_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_rerun_items_open_job ON rerun_items(job_id) "
         "WHERE state IN ('pending', 'preparing', 'queued', 'running')",
+        # Trash reason of a copy (job_view): copy_id OR dst_copy_id.
+        "CREATE INDEX IF NOT EXISTS idx_file_ops_dst_copy ON file_ops(dst_copy_id)",
+        # No query filters module runs by status alone.
+        "DROP INDEX IF EXISTS idx_module_runs_status",
         # The file-operation ledger is append-only (see models.FileOp).
         *FILE_OPS_GUARDS,
     ]
     for sql in indexes:
         await conn.execute(sqlalchemy.text(sql))
+    # idx_module_runs_job was (job_id, module, id); on (job_id) alone it is
+    # half the size, and the rowid it carries still orders by id.
+    job_index = [r[2] for r in (await conn.execute(sqlalchemy.text(
+        "PRAGMA index_info('idx_module_runs_job')"))).all()]
+    if job_index and job_index != ["job_id"]:
+        await conn.execute(sqlalchemy.text("DROP INDEX idx_module_runs_job"))
+        await conn.execute(sqlalchemy.text("CREATE INDEX idx_module_runs_job ON module_runs (job_id)"))
 
     await _rebuild_library_categories(conn)
     await _jobs_autoincrement(conn)
@@ -272,6 +289,13 @@ async def _migrate_module_runs(conn) -> dict | None:
     status = (f"CASE WHEN e.type = 'object' AND json_extract(e.value, '$.status') IN ({statuses}) "
               "THEN json_extract(e.value, '$.status') "
               "WHEN e.type = 'object' AND json_extract(e.value, '$._skipped') THEN 'skipped' ELSE 'ok' END")
+    # Into an empty table the indexes are built once afterwards (packed
+    # pages, about 5 MB less on the live data). With runs already there
+    # they stay: the NOT EXISTS below would scan the table for every row.
+    bulk = (await conn.execute(t("SELECT 1 FROM module_runs LIMIT 1"))).first() is None
+    if bulk:
+        for index in ModuleRun.__table__.indexes:
+            await conn.execute(t(f'DROP INDEX IF EXISTS "{index.name}"'))
     inserted = (await conn.execute(t(f"""
         INSERT INTO module_runs (job_id, module, attempt, "trigger", status, result, error, finished_at)
         SELECT j.id, e.key, 1, 'migrated', {status},
@@ -288,6 +312,9 @@ async def _migrate_module_runs(conn) -> dict | None:
         WHERE {is_object} AND e.key IN ({modules})
           AND NOT EXISTS (SELECT 1 FROM module_runs r WHERE r.job_id = j.id AND r.module = e.key)
         ORDER BY j.id"""))).rowcount
+    if bulk:
+        for index in ModuleRun.__table__.indexes:
+            await conn.run_sync(index.create)
 
     kept = dropped = other = 0
     rows = (await conn.execute(t(
@@ -377,6 +404,26 @@ async def init_db():
             if not existing:
                 session.add(Module(name=name, enabled=enabled))
         await session.commit()
+
+
+async def truncate_wal(eng=None) -> tuple[int, int]:
+    """Give the WAL's disk space back, once after the startup migrations.
+
+    A one-time migration writes its whole transaction into the WAL (on the
+    live data about 550 MB, the sets migration another 250 MB). The pool
+    keeps its connections open, so the file would keep that size until the
+    app stops. Returns the WAL size in bytes before and after.
+    """
+    eng = eng or engine
+    wal = f"{eng.url.database}-wal"
+    before = os.path.getsize(wal) if os.path.exists(wal) else 0
+    async with eng.connect() as conn:
+        busy, frames, done = (await conn.execute(sqlalchemy.text("PRAGMA wal_checkpoint(TRUNCATE)"))).one()
+    after = os.path.getsize(wal) if os.path.exists(wal) else 0
+    logging.getLogger("mediaassistant.database").info(
+        "WAL checkpoint after startup: %.1f MB -> %.1f MB (busy=%d, frames=%d, checkpointed=%d)",
+        before / 1e6, after / 1e6, busy, frames, done)
+    return before, after
 
 
 async def seed_inbox_from_env():

@@ -2832,3 +2832,51 @@ def prune_empty_dirs_blocking(start_dir: str, stop_at: str) -> list[str]:
         removed.append(current)
         current = os.path.dirname(current)
     return removed
+
+
+async def prune_empty_dirs(job, start_dir: str, stop_at: str, *, actor: str) -> list[str]:
+    """Remove the folders a move left empty: from start_dir (the folder the
+    file came from) upwards, up to (not including) stop_at — e.g. after IA-08
+    filed a library file into another folder, up to the set's base path.
+
+    What stays, always: stop_at itself and everything outside it; anything
+    in the trash (``.papierkorb``); every input folder and library base
+    path of any set and the job's own inbox (an inbox may lie inside a
+    library; the climb ends below it); every folder that holds anything but
+    system junk (prune_empty_dirs_blocking — a file arriving meanwhile ends
+    the climb as well). An empty folder carries no content, so there is no
+    ledger or register row; the removed folders are logged. A failure is
+    logged and never raised: the move it follows is done. Returns the
+    removed folders.
+    """
+    from models import InboxDirectory, ProcessingSet
+    if not start_dir or not stop_at:
+        return []
+    jref = await _job_ref(job)
+    start, stop = os.path.realpath(start_dir), os.path.realpath(stop_at)
+    if start == stop or os.path.commonpath([start, stop]) != stop:
+        return []
+    if TRASH_DIRNAME in os.path.relpath(start, stop).split(os.sep):
+        return []
+    try:
+        async with async_session() as session:
+            kept = {p for (p,) in (await session.execute(select(InboxDirectory.path))).all() if p}
+            kept |= {p for (p,) in (await session.execute(select(ProcessingSet.library_base_path))).all() if p}
+            inbox = (await session.execute(select(Job.source_inbox_path).where(Job.id == jref.id))).scalar()
+        if inbox:
+            kept.add(inbox)
+        # The climb ends below the innermost of them that holds start_dir.
+        holding = [p for p in map(os.path.realpath, kept)
+                   if os.path.commonpath([p, stop]) == stop and os.path.commonpath([p, start]) == p]
+        stop = max([stop, *holding], key=len)
+        if start == stop:
+            return []
+        removed = await asyncio.to_thread(prune_empty_dirs_blocking, start, stop)
+    except Exception as exc:
+        await log_warning(LOG_SOURCE, f"{jref.debug_key} Leere Ordner nicht entfernt",
+                          f"{start_dir} (bis {stop_at}, {actor}): {_describe(exc)}")
+        return []
+    if removed:
+        await log_info(LOG_SOURCE, f"{jref.debug_key} Leere Ordner entfernt",
+                       f"{', '.join(removed)} (bis {stop}, {actor})")
+    return removed

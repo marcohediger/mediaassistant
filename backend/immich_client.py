@@ -797,7 +797,27 @@ async def download_asset(asset_id: str, target_path: str, *, api_key: str | None
                 async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
                     f.write(chunk)
 
+    _apply_file_time(file_path, asset_info.get("fileModifiedAt"))
     return file_path
+
+
+def _apply_file_time(path: str, iso: str | None) -> None:
+    """Give a downloaded original the file time Immich keeps for its asset.
+
+    Otherwise the download's mtime is the moment of the download, and IA-01,
+    which falls back to the file time for a photo without an EXIF date, read
+    a new date from every download (a rerun of IA-01 on a work copy then
+    cascaded into IA-08). upload_asset sends the file's mtime as
+    fileModifiedAt, so a file MediaAssistant uploaded gets back the time it
+    had in the inbox; a phone upload the time the phone sent.
+    """
+    if not iso:
+        return
+    try:
+        stamp = datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+        os.utime(path, (os.stat(path).st_atime, stamp))
+    except (ValueError, OSError) as exc:
+        logger.warning("download %s: file time %r not applied: %s", path, iso, exc)
 
 
 async def get_asset_original(asset_id: str, *, api_key: str | None = None) -> tuple[bytes, str] | None:

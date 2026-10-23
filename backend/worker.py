@@ -208,7 +208,14 @@ async def _requeue_or_fail(row, cutoff: datetime | None) -> None:
     """Stale job with nothing running: back to the queue, or error.
 
     With `cutoff` the transition is atomic against a heartbeat: a job whose
-    updated_at moved since the check is left alone."""
+    updated_at moved since the check is left alone. A job a rerun
+    preparation claimed and never finished goes back to its status instead
+    (pipeline.rerun.release_cut_short)."""
+    from pipeline import rerun as rerun_plan
+    async with async_session() as session:
+        job = await session.get(Job, row.id)
+        if job is not None and await rerun_plan.release_cut_short(session, job, cutoff=cutoff):
+            return
     retry = (row.retry_count or 0) + 1
     sr = dict(row.step_result or {})
     resumable = reprocess.PREPARE_SOURCE in sr  # run_pipeline finishes a cut-short retry

@@ -61,7 +61,6 @@ os.environ.setdefault("DATABASE_PATH", "/app/data/mediaassistant.db")
 
 import httpx
 from sqlalchemy import delete, or_, select, update
-from sqlalchemy.orm.attributes import flag_modified
 
 import immich_client
 from config import config_manager
@@ -69,6 +68,7 @@ from database import async_session
 from models import Job, LibraryCategory, ProcessingSet, SortingRule, SystemLog
 from sets import seed_set_defaults
 from test_support.invariants import FileGuard, check_no_file_lost, delete_test_jobs, is_under, sha256_file
+from test_support.seed import seed_results
 
 TS = int(time.time())
 TAG = f"DSI{TS}"
@@ -278,10 +278,11 @@ async def insert_job(*, original_path: str, set_id: int, status: str = "queued",
             debug_key=next_key(), status=status,
             source_label=extra.pop("source_label", f"{TAG} Eingang"),
             source_inbox_path=inbox, folder_tags=False, dry_run=False, use_immich=use_immich,
-            set_id=set_id, file_hash=file_hash, step_result=dict(step_result or {}),
-            retry_count=0, **extra,
+            set_id=set_id, file_hash=file_hash, retry_count=0, **extra,
         )
         s.add(job)
+        if step_result:
+            await seed_results(s, job, step_result)
         await s.commit()
         CREATED_JOBS.append(job.id)
         return job.id
@@ -324,10 +325,9 @@ async def get_job(job_id: int) -> Job | None:
 
 
 async def set_step_result(job_id: int, sr: dict):
+    """Give the job these results and job values, through runs.py (test_support.seed)."""
     async with async_session() as s:
-        job = await s.get(Job, job_id)
-        job.step_result = sr
-        flag_modified(job, "step_result")
+        await seed_results(s, await s.get(Job, job_id), sr)
         await s.commit()
 
 

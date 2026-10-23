@@ -259,6 +259,7 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_folder_structure.py` | Ordnerstruktur als Tags und Alben (`folder_path.py`, Optionen pro Set, `docs/IMMICH_ORDNERSTRUKTUR.md`) | `docker exec mediaassistant-dev python /app/test_folder_structure.py` |
 | `backend/test_jobs_autoincrement.py` | R-26: Job-IDs werden nie zweimal vergeben (Umbau von `jobs` auf AUTOINCREMENT, optional auf Live-Kopie) | `docker exec mediaassistant-dev python /app/test_jobs_autoincrement.py [kopie.db]` |
 | `backend/test_no_direct_file_ops.py` | Wächter: keine destruktive Dateioperation ausserhalb von `fileops.py` (Datei:Zeile, `ALLOWLIST`) | `docker exec mediaassistant-dev python /app/test_no_direct_file_ops.py` |
+| `backend/test_no_direct_step_result.py` | Wächter: `jobs.step_result` schreibt nur `runs.py` — meldet jede direkte Zuweisung, `Job(step_result=…)`, `flag_modified`, `.values(step_result=…)` und SQL-Text, Tests eingeschlossen (Datei:Zeile, `ALLOWLIST`) | `docker exec mediaassistant-dev python /app/test_no_direct_step_result.py` |
 | `backend/test_data_safety_local.py` | Reproducer der lokalen Datenverlust-Risiken (z. B. R-05, R-10b, ohne Immich), je Risiko ein Abschnitt; Pipeline muss pausiert sein | `docker exec mediaassistant-dev python /app/test_data_safety_local.py [R-05 …]` |
 | `backend/test_data_safety_immich.py` | Reproducer der Datenverlust-Risiken mit Immich (z. B. R-10e Absturz im Ersetzen), je Risiko ein Abschnitt; Pipeline muss pausiert sein | `docker exec mediaassistant-dev python /app/test_data_safety_immich.py [R-10e …]` |
 
@@ -433,6 +434,14 @@ Kurzfassung. Grundsätze, Datenmodell und die Risiken R-01 … R-26 stehen in
   verknüpftes Exemplar; `FileGuard` — ausserhalb der eigenen Pfade hat sich
   nichts verändert; `delete_test_jobs(…)` — Aufräumen von Test-Jobs samt
   `file_copies` und `asset_refs` (`file_ops` bleibt).
+- **`jobs.step_result` schreibt nur `runs.py`** (abgeleitete Sicht der
+  `module_runs`). Tests, die einen Job mit vorbefüllten Ergebnissen
+  brauchen, nehmen `test_support/seed.py` `seed_results(session, job,
+  zustand)`: Modul-Ergebnisse werden Läufe (Auslöser `migrated`), die
+  übrigen Schlüssel Job-Werte. Wie jeder Schreibzugriff von `runs.py` nimmt
+  das SQLites Schreibsperre: vor `fileops`, `prepare_job_for_reprocess` & Co.
+  committen. `test_no_direct_step_result.py` meldet jede direkte Zuweisung
+  mit Datei:Zeile, Tests eingeschlossen.
 - **R-26:** `jobs` hat AUTOINCREMENT, eine Job-ID wird nie zweimal vergeben
   — sonst erbte ein neuer Job Register- und Protokollzeilen eines
   gelöschten. Job löschen (Job-Seite, Review, Duplikat-Auflösung) behält
