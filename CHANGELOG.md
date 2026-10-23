@@ -2,6 +2,145 @@
 
 ## v3.0.0 — in Arbeit (Branch umbau/module-und-datensicherheit: Verarbeitungs-Sets, neues Design, Umbau Module & Datensicherheit)
 
+3.0.0 bündelt drei Umbauten: Verarbeitungs-Sets, ein neues Design und den
+Umbau „Module & Datensicherheit". Der wichtigste Teil ist der letzte:
+Dateien gehen nicht mehr verloren, weil eine Entscheidung auf einem
+veralteten Feld beruht.
+
+### Update-Hinweise
+
+- **Datenbank vorher sichern.** Der erste Start baut die Datenbank um
+  (Modul-Läufe, Protokoll, Register, Job-IDs). Ein Zurück auf 2.32.x ist
+  nicht vorgesehen.
+- **Platz und Zeit beim ersten Start**, gemessen an einer Kopie der
+  Live-Datenbank (65 982 Jobs): rund 30 Sekunden, rund 760 MB freier
+  Platz während des Umbaus. Die Datei wächst von 343 auf 548 MB; die
+  temporäre WAL-Datei wird danach auf 0 gekürzt.
+- Bestehende Jobs bleiben, wie sie sind: ihre Ergebnisse werden zu
+  Modul-Läufen „Aus Altbestand". Ins Register kommen ihre Dateien und
+  Assets, sobald sie zum ersten Mal angefasst werden; bis dahin gilt ein
+  Asset, auf das mehrere alte Jobs zeigen, als geteilt und wird nie
+  weggeräumt.
+- Das bisherige Ordner-Tags-Modul wird pro Set zu „Einzelne Tags, Wörter
+  getrennt (bisher)" plus „Ordner als Alben" — dasselbe Ergebnis wie
+  vorher.
+
+### Datensicherheit: ein Weg für jede Dateioperation, Protokoll, Papierkorb
+
+Die Datenverluste der letzten Monate (v2.28.28, v2.29.8 mit 4890
+betroffenen Gruppen, „Dieses behalten" in v2.31.0, v2.32.5) hatten eine
+gemeinsame Ursache: Ob eine Datei oder ein Asset weg darf, wurde aus
+Feldern wie `original_path`, `target_path` oder `immich_asset_id`
+geschlossen, die unterwegs überschrieben werden. Eine Bestandsaufnahme
+fand 71 zerstörerische Operationen und 26 Risiken (R-01 … R-26,
+`docs/UMBAU_MODULE_INVENTUR.md`). Für jedes gab es zuerst einen Test, der
+den Verlust auf dem alten Code zeigte; alle sind jetzt grün.
+
+- **Ein Weg:** Jede Dateioperation — verschieben, kopieren, herunterladen,
+  hochladen, ersetzen, Metadaten schreiben, löschen, lokal und in Immich —
+  läuft über `fileops.py`. Ein Wächter-Test meldet jede Stelle, die daran
+  vorbeigeht.
+- **Protokoll:** vor jeder Operation eine Absicht, danach genau ein
+  Ergebnis; nachträglich ändern oder löschen verbietet die Datenbank.
+  Beim Start werden offene Absichten gegen Platte und Immich abgeglichen,
+  bevor ein Job weiterläuft.
+- **Register aller Exemplare** mit Ort, Prüfsumme und Zustand. Gelöscht
+  wird nur ein Exemplar, das dem Job gehört, das kein anderer Job
+  mitbenutzt und von dem ein anderes, gerade geprüftes Exemplar existiert.
+- **Papierkorb statt löschen:** lokal unter `<Basis-Pfad des
+  Sets>/.papierkorb/<Datum>/<Job>/`, in Immich dessen Papierkorb (nie mehr
+  `force=True`). Geleert wird nach 30 Tagen; bis dahin lässt sich alles
+  wiederherstellen.
+- **Nie überschreiben:** Ein belegter Name bekommt einen Zähler, gleicher
+  Inhalt wird geteilt statt kopiert. Metadaten werden an einer privaten
+  Kopie geschrieben und atomar ersetzt; eine vorhandene Sidecar des
+  Nutzers wird ergänzt statt ersetzt.
+- **Duplikat-Auflösung als Plan:** alle Mitglieder werden zuerst
+  beansprucht, das behaltene Exemplar geprüft, erst dann gehen Spender in
+  den Papierkorb. Ein Absturz mittendrin wird beim Start fortgesetzt.
+- **Retry** nimmt nur noch ein eigenes, geprüftes Exemplar oder lädt das
+  eigene Asset neu — nie mehr eine fremde Datei, die zufällig am alten
+  Pfad liegt.
+- Job löschen behält die Zeile als „Gelöscht", damit Protokoll und
+  Register verknüpft bleiben; Job-IDs werden nie mehr neu vergeben (R-26:
+  SQLite gab die ID des neuesten gelöschten Jobs weiter, der neue Job
+  hätte dessen Exemplare geerbt).
+- Leere Ordner, die eine Verschiebung in der Bibliothek zurücklässt,
+  werden aufgeräumt — nie der Basis-Pfad, ein Eingang, der Papierkorb oder
+  ein Ordner mit fremden Dateien.
+
+### Neu: Verlauf pro Datei
+
+Jeder Modul-Lauf ist ein eigener Eintrag (`module_runs`) statt eines
+Felds, das der nächste Lauf überschreibt.
+
+- Dashboard und Logs: pro Datei eine Leiste mit einem Block je Modul
+  (grün, gelb, rot, grau, blau = läuft, hohl = nicht gelaufen), aufklappbar
+  mit Modul-Details, Zeitstrahl der Dateioperationen von „Erfasst" bis
+  zum Ablegen, geschriebenen Tags und neu angelegten Alben.
+  Aufräum-Operationen sind grau und eingeklappt. Die Benachrichtigung
+  (IA-09) erscheint nur, wenn sie etwas verschickt hat.
+- Job-Detail: Verlauf aller Versuche, Exemplare mit „Wiederherstellen";
+  der Zurück-Link führt auf die aufrufende Seite.
+- Werkzeuge: Papierkorb (lokal und Immich, mit Grund und Restzeit) und
+  Bestandsprüfung (vergleicht Register und Wirklichkeit, ändert nichts).
+
+### Neu: Module einzeln neu ausführen
+
+Ein Modul lässt sich für eine Datei oder für viele auf einmal neu
+ausführen (Job-Detail, Logs, Werkzeuge, pro Set) — etwa „Geocoding neu"
+für ein ganzes Set. Was davon abhängt, läuft mit; was sich nicht
+geändert hat, nicht.
+
+- Vorschau vor dem Start: welche Module laufen, was sich in Immich und in
+  der Bibliothek ändert, wie viele Dateien wandern würden (mit Warnung).
+- Immich pro Lauf wählbar: Tags und Beschreibung per API nachführen
+  (Standard) oder die Datei ersetzen.
+- Die KI läuft nur mit, wenn man es ausdrücklich wählt.
+- Module, deren Vorgänger sich seit dem letzten Lauf geändert haben,
+  sind als „veraltet" markiert.
+- Aufträge mit Fortschritt und Abbrechen; neue Dateien werden dabei nie
+  ausgehungert (höchstens die Hälfte der Plätze).
+
+### Performance: Ausführung nach Abhängigkeiten
+
+Statt fester Slots hält jeder Job nur das Betriebsmittel, das sein
+aktuelles Modul braucht (KI, Geocoding, Immich, Ablage, CPU). Mehrere
+Dateien laufen gleichzeitig (Standard: 2 × KI-Slots + 2), Geocoding läuft
+neben der Konvertierung. Gemessen mit 20 Dateien: **30 → 54 Dateien pro
+Minute**; die Grenze ist jetzt Nominatim mit einer Anfrage pro Sekunde.
+Reihenfolge, Abhängigkeiten und kritische Module stehen an einer
+einzigen Stelle (`pipeline/registry.py`).
+
+### Neu: Ordnerstruktur als Tags und Alben (pro Set)
+
+- Ordner als Tags: keine, einzelne Tags pro Ordner, einzelne Tags mit
+  getrennten Wörtern (das bisherige Verhalten) oder **verschachtelte
+  Tags** (ein Baum unter „Ordner"; ein übergeordnetes Tag zeigt alle
+  Bilder darunter).
+- Ordner als Alben: ein Album pro Ordner, mit jeder Art Tags kombinierbar.
+- Bedeutungslose Ebenen (Monat, Datum, DCIM, Kameraordner, „Photos from
+  JJJJ") fallen weg; ein reiner Jahresordner ist bei Tags eine eigene
+  Ebene, bei Alben wird er angehängt. Recherche und Messungen:
+  `docs/IMMICH_ORDNERSTRUKTUR.md`.
+
+### Fix: Immich 3.x
+
+- **Eigene Uploads wurden nicht mehr erkannt** (R-24): Immich 3.x liefert
+  kein `deviceId` mehr, der Poller holte MAs eigene Uploads als neue
+  Assets zurück. Jetzt erkennt er sie über das Register, eine offene
+  Upload-Absicht und das Metadatum `mediaassistant`.
+- **Archivierte und versteckte Assets** (z. B. die Video-Hälften von
+  Live-Fotos) wurden mitverarbeitet (R-25); der Poller fragt nur noch die
+  Zeitleiste ab.
+- Ein heruntergeladenes Original bekommt die Datei-Zeit aus Immich statt
+  der Download-Zeit. Bei Fotos ohne EXIF-Datum las IA-01 sonst bei jedem
+  Download ein neues Datum.
+- Lag der Inhalt eines Uploads schon im Immich-Papierkorb, meldete Immich
+  „duplicate" und MA löschte die lokale Quelle — die einzige Kopie ging
+  mit dem Papierkorb (R-22). IA-08 stellt das Asset jetzt zuerst wieder
+  her; andere Aufrufer brechen ab und lassen die Quelle liegen.
+
 ### Neu: Verarbeitungs-Sets
 
 Was bisher global eingestellt war, gehört jetzt zu einem **Set** — und
@@ -12,7 +151,7 @@ davon gibt es beliebig viele. Jedes Set bündelt:
 | Eingänge | beliebig viele Verzeichnisse und/oder Immich Auto-Tagging mit eigenem Zugang |
 | Zeitplan | durchgehend, Zeitfenster, geplant oder manuell, eigenes Intervall |
 | Sortier-Regeln | eigene Liste |
-| Ordner-Tags | an/aus |
+| Ordnerstruktur | als Tags (vier Arten) und/oder als Alben |
 | OCR | an/aus und Modus |
 | Metadaten | Schreibmodus (direkt/XMP-Sidecar) und Google-Takeout-JSON |
 | Ziel-Ablage | Library-Ordner oder Upload zu Immich, eigener Basis-Pfad, eigene Kategorien |
