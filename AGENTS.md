@@ -194,7 +194,7 @@ vollständige **Immich-Instanz** und alle Hilfsdienste verfügbar:
 | Container | Zugang | Zweck |
 |---|---|---|
 | `mediaassistant-dev` | `http://localhost:8000` | MA Dev (hot-reload) |
-| `immich_server` | `http://<dev-host>:2283` | Immich API + Web-UI (**v2.6.3**, Produktion läuft 3.1.0 — [Issue #48](https://<gitea-host>/MediaAssistant/ma-core/issues/48)) |
+| `immich_server` | `http://<dev-host>:2283` | Immich API + Web-UI (**v3.1.0**, wie Produktion — [Issue #48](https://<gitea-host>/MediaAssistant/ma-core/issues/48) gelöst, gemessenes Verhalten in [`docs/IMMICH_3_VERHALTEN.md`](docs/IMMICH_3_VERHALTEN.md)) |
 | `immich_machine_learning` | intern | Immich ML |
 | `immich_redis` | intern | Redis für Immich |
 | `immich_postgres` | intern | PostgreSQL für Immich |
@@ -212,7 +212,7 @@ api_key = json.loads(Fernet(key).decrypt(val.encode()).decode())
 
 **Immich Storage auf dem Host:**
 ```
-Host-Pfad:       /home/marcohediger/claude/Bilder/
+Host-Pfad:       /home/marcohediger/claude/MediaAssistant/Bilder/
 Im Container:    /data/  (immich_server)
 Asset-Pfade:     /data/library/<User>/<Year>/<Year-Month>/<filename>
 Sidecar-Pfade:   <asset_path>.xmp (falls vorhanden)
