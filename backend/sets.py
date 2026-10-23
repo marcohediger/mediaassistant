@@ -137,7 +137,7 @@ async def library_roots() -> list[str]:
     async with async_session() as session:
         paths = {os.path.normpath(p) for (p,) in (await session.execute(
             select(ProcessingSet.library_base_path))).all() if p}
-    roots = sorted(paths, key=len)
+    roots = sorted(paths, key=lambda p: (len(p), p))
     kept: list[str] = []
     for path in roots:
         if not any(path == k or path.startswith(k.rstrip(os.sep) + os.sep) for k in kept):

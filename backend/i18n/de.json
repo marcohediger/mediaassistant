@@ -743,7 +743,8 @@
     "merge_orphans": "Kaputte Schreibweisen ohne heile Entsprechung — hier lässt sich nicht erraten, was gemeint war. Sie bleiben unangetastet; entweder von Hand berichtigen oder mit dem Muster darüber löschen:",
     "subtitle": "Schlagwörter in den XMP-Sidecars und in Immich aufräumen und vereinheitlichen.",
     "presets": "Vorlagen",
-    "more": "{n} weitere"
+    "more": "{n} weitere",
+    "paths_more": "und {n} weitere"
   },
   "sets": {
     "title": "Verarbeitungs-Sets",
