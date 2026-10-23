@@ -20,16 +20,25 @@ the output stays the same:
 
 The ledger (file_ops) and register (file_copies, asset_refs) are only read
 here; every change goes through fileops.py.
+
+The timeline of a job (expanded rows, job page) starts with job_intake():
+where and when the content was taken in, from the ledger row 'register'
+the inputs write since it exists, reconstructed from the job for older
+jobs. Each ledger entry says whether it is housekeeping (is_housekeeping:
+automatic tidying up that the timeline folds away). job_labels() lists the
+tags and albums MA wrote.
 """
 import asyncio
 import math
 import os
+import re
 from datetime import datetime, timedelta
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
 from sqlalchemy import func, or_, select
 
 from database import async_session
-from models import AssetRef, FileCopy, FileOp, Job
+from models import AssetRef, FileCopy, FileOp, Job, ProcessingSet
 
 MODULES = tuple(f"IA-{n:02d}" for n in range(1, 12))
 # A failure in these modules fails the job; elsewhere it only warns
@@ -53,8 +62,18 @@ STATUS_TONES = {
 OP_ICONS = {
     "move": "arrow-right", "copy": "copy", "download": "cloud-down", "upload": "cloud-up", "transfer": "merge",
     "replace": "refresh", "write_metadata": "pencil", "trash": "trash", "restore": "retry",
-    "purge": "x-circle", "lock": "lock",
+    "purge": "x-circle", "lock": "lock", "register": "inbox",
 }
+# Housekeeping: what modules and the system tidy up on their own once the
+# content is safe elsewhere — the source after a verified upload, discarded
+# work copies and temp files, the sidecar handed over to Immich, old error
+# logs, the trash emptied after its retention. The timeline folds it away.
+# Everything a user triggered (user:…), the maintenance buttons
+# (system:cleanup_…) and every failed or reconciled operation stay in view.
+_HOUSEKEEPING_OPS = frozenset({"trash", "purge"})
+_HOUSEKEEPING_SYSTEM = frozenset({"system:immich-input", "system:papierkorb", "system:reprocess",
+                                  "system:recovery", "system:resume", "system:csv-retry"})
+INTAKE_WINDOW_S = 120  # a register row this close to the job's creation was written at intake
 OP_STATE_TONES = {"done": "is-success", "failed": "is-error", "intent": "is-info", "reconciled": "is-warning"}
 COPY_STATE_TONES = {
     "present": "is-success", "trashed": "is-warning", "missing": "is-error",
@@ -293,12 +312,21 @@ def _op_note(op: FileOp) -> str:
     return _first_line("; ".join(parts), 240)
 
 
+def is_housekeeping(op: FileOp) -> bool:
+    """Automatic tidying up by a module or the system (see _HOUSEKEEPING_OPS)."""
+    if op.state != "done" or op.op not in _HOUSEKEEPING_OPS:
+        return False
+    actor = op.actor or ""
+    return actor in MODULES or actor in _HOUSEKEEPING_SYSTEM
+
+
 def op_entry(op: FileOp, t: dict) -> dict:
     h = _h(t)
     hash_state = _hash_state(op)
     return {
         "id": op.id,
         "op": op.op,
+        "housekeeping": is_housekeeping(op),
         "op_label": h.get(f"op_{op.op}", op.op),
         "icon": OP_ICONS.get(op.op, "file"),
         "state": op.state,
@@ -372,12 +400,142 @@ def copy_entry(row: FileCopy, t: dict, *, owner_key: str | None = None, shared: 
 
 
 async def job_ledger(job_id: int, t: dict, limit: int = 200) -> list[dict]:
-    """The job's ledger rows, newest first."""
+    """The job's ledger rows, newest first. The intake row ('register') is
+    not among them: job_intake() shows it at the start of the timeline."""
     async with async_session() as session:
         rows = (await session.execute(
-            select(FileOp).where(FileOp.job_id == job_id).order_by(FileOp.id.desc()).limit(limit)
+            select(FileOp).where(FileOp.job_id == job_id, FileOp.op != "register")
+            .order_by(FileOp.id.desc()).limit(limit)
         )).scalars().all()
     return [op_entry(op, t) for op in rows]
+
+
+def _intake_source(job, actor: str | None) -> str:
+    if actor == "input:immich" or (actor is None and job.source_label == "Immich"):
+        return "immich"
+    if actor == "input:inbox" or (actor is None and job.source_inbox_path):
+        return "inbox"
+    return "other"
+
+
+def _under(path: str | None, root: str | None) -> bool:
+    if not path or not root:
+        return False
+    root = root.rstrip("/")
+    return path == root or path.startswith(root + "/")
+
+
+async def job_intake(job, t: dict) -> dict:
+    """The first entry of the timeline: when, from which input and set, where
+    and with which hash the job's content was taken in.
+
+    From the ledger row 'register' the inputs write (fileops.register_existing
+    with intake=…). A job older than that row is reconstructed from its own
+    fields: created_at, source_label, set, and the earliest register row of
+    its content where it came in (a file in its inbox, its Immich asset),
+    else the first operation on it; ``reconstructed`` says so."""
+    h = _h(t)
+    async with async_session() as session:
+        op = (await session.execute(
+            select(FileOp).where(FileOp.job_id == job.id, FileOp.op == "register")
+            .order_by(FileOp.id).limit(1))).scalar()
+        set_name = (await session.execute(
+            select(ProcessingSet.name).where(ProcessingSet.id == job.set_id))).scalar() if job.set_id else None
+        copies, ops = [], []
+        if op is None:
+            copies = (await session.execute(
+                select(FileCopy).where(FileCopy.job_id == job.id, FileCopy.kind.in_(("local", "immich")))
+                .order_by(FileCopy.id).limit(50))).scalars().all()
+            ops = (await session.execute(
+                select(FileOp).where(FileOp.job_id == job.id, FileOp.src.isnot(None))
+                .order_by(FileOp.id).limit(50))).scalars().all()
+
+    source = _intake_source(job, op.actor if op else None)
+    kind = location = sha = checksum = None
+    if op is not None:
+        kind, location, sha = op.dst_kind, op.dst, op.sha256_after
+        checksum = (op.detail or {}).get("checksum") if isinstance(op.detail, dict) else None
+        when = op.created_at
+    else:
+        when = job.created_at
+
+        def taken_in(kind_, location_, created=None) -> bool:
+            if source == "immich":
+                return kind_ == "immich"
+            if source == "inbox":
+                return kind_ == "local" and _under(location_, job.source_inbox_path)
+            return (kind_ in ("local", "immich") and created is not None and job.created_at is not None
+                    and abs((created - job.created_at).total_seconds()) <= INTAKE_WINDOW_S)
+
+        first_copy = next((c for c in copies if taken_in(c.kind, c.location, c.created_at)), None)
+        first_op = next((o for o in ops if taken_in(o.src_kind, o.src)), None)
+        if first_copy is not None:
+            kind, location, sha, checksum = first_copy.kind, first_copy.location, first_copy.sha256, first_copy.checksum
+        elif first_op is not None:
+            kind, location, sha = first_op.src_kind, first_op.src, first_op.sha256_before
+        elif source == "inbox" and _under(job.original_path, job.source_inbox_path):
+            kind, location = "local", job.original_path
+        elif source == "immich":
+            r8 = (job.step_result or {}).get("IA-08") if isinstance(job.step_result, dict) else None
+            replaced = r8.get("immich_replaced_asset") if isinstance(r8, dict) else None
+            if replaced or job.immich_asset_id:
+                kind, location = "immich", replaced or job.immich_asset_id
+        sha = sha or job.file_hash
+    if kind == "immich" and not sha and checksum:
+        hash_label, hash_value = h.get("intake_checksum", ""), checksum[:12]
+    else:
+        hash_label, hash_value = "SHA256", (sha or "")[:12]
+    source_label = h.get(f"intake_source_{source}", "") if source != "other" else (job.source_label or "")
+    return {
+        "op": "register",
+        "title": h.get("op_register", "register"),
+        "source": source,
+        "source_label": source_label,
+        "icon": {"immich": "cloud", "inbox": "inbox"}.get(source, "file"),
+        "input_name": job.source_label if source == "inbox" else None,
+        "set_name": set_name,
+        "location": short_location(kind, location),
+        "location_kind": kind,
+        "location_kind_label": _kind_label(kind, t),
+        "hash": hash_value,
+        "hash_label": hash_label if hash_value else "",
+        "actor_label": _actor_label(op.actor, t) if op else "",
+        "created_at": stamp(when),
+        "reconstructed": op is None,
+        "reconstructed_label": h.get("intake_reconstructed", "") if op is None else "",
+        "reconstructed_note": h.get("intake_reconstructed_note", "") if op is None else "",
+    }
+
+
+def job_labels(job, t: dict | None = None) -> dict:
+    """Tags and albums MA wrote for the job.
+
+    Immich target: the tags IA-08 set on the asset (immich_tags_written) and
+    the albums it added the asset to; ``created`` marks an album IA-08 had to
+    create. Otherwise the keywords IA-07 wrote into the file or sidecar. A
+    dry run shows the planned keywords (``planned``)."""
+    h = _h(t)
+    results = job.step_result if isinstance(job.step_result, dict) else {}
+    r7 = results.get("IA-07") if isinstance(results.get("IA-07"), dict) else {}
+    r8 = results.get("IA-08") if isinstance(results.get("IA-08"), dict) else {}
+    immich = (job.target_path or "").startswith("immich:") or "immich_tags_written" in r8
+    tags = r8.get("immich_tags_written") if immich else r7.get("keywords_written")
+    planned = False
+    if not tags and isinstance(r7.get("keywords_planned"), list):
+        tags, planned = r7["keywords_planned"], True
+    tags = [str(x) for x in (tags if isinstance(tags, list) else []) if x]
+    created = set(r8.get("immich_albums_created") or []) if isinstance(r8.get("immich_albums_created"), list) else set()
+    added = r8.get("immich_albums_added") if isinstance(r8.get("immich_albums_added"), list) else []
+    albums = [{"name": str(a), "created": a in created} for a in added if a]
+    where = "immich" if immich else "file"
+    return {
+        "where": where,
+        "tags": tags,
+        "tags_title": h.get(f"labels_tags_{where}", ""),
+        "planned": planned,
+        "planned_label": h.get("labels_planned", "") if planned else "",
+        "albums": albums,
+    }
 
 
 async def job_copies(job_id: int, t: dict, immich_trash_days: int = TRASH_RETENTION_DAYS) -> list[dict]:
@@ -545,3 +703,85 @@ async def unregistered_files(directory: str, limit: int = 500) -> tuple[list[dic
             entries.append({"location": path, "debug_key": owner[0] if owner else None,
                             "filename": owner[1] if owner else os.path.basename(path)})
     return entries, orphans, assigned
+
+
+# ---------------------------------------------------------------------------
+# Back link of the job page
+# ---------------------------------------------------------------------------
+
+BACK_MAX = 1500
+_JOB_PAGE = re.compile(r"^/logs/job/([A-Za-z0-9_.-]+)$")
+_LOGS_TABS = {"system": "system_log", "jobs": "job_log", "dryrun": "dryrun_tab"}
+_TOOL_PAGES = {"/tools/papierkorb": ("history", "trash_title"), "/tools/bestand": ("history", "inv_title"),
+               "/tools": ("nav", "tools")}
+_NAV_PAGES = {"/": "dashboard", "/duplicates": "duplicates", "/review": "review"}
+
+
+def _back_label(path: str, query: str, t: dict) -> str | None:
+    """Label of a page the job page may lead back to; None for any other."""
+    t = t or {}
+    if path in _NAV_PAGES:
+        return t.get("nav", {}).get(_NAV_PAGES[path], "")
+    if path in _TOOL_PAGES:
+        section, key = _TOOL_PAGES[path]
+        return t.get(section, {}).get(key, "")
+    if path == "/logs":
+        tab = (parse_qs(query).get("tab") or ["system"])[0]
+        return t.get("logs", {}).get(_LOGS_TABS[tab], "") if tab in _LOGS_TABS else None
+    match = _JOB_PAGE.match(path)
+    return match.group(1) if match else None
+
+
+def safe_back(value: str | None, debug_key: str | None = None, t: dict | None = None) -> str | None:
+    """`value` as the local path+query the job page of `debug_key` may link
+    back to, or None. Only pages of this app that lead to jobs qualify, and
+    never the job's own page: no scheme, no host, no protocol-relative
+    "//host" or "/\\host", nothing else."""
+    if not value or len(value) > BACK_MAX or not value.startswith("/") or value.startswith("//"):
+        return None
+    if any(c in value for c in "\\\r\n\t\0"):
+        return None
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc:
+        return None
+    path = unquote(parts.path)
+    if debug_key and path == f"/logs/job/{debug_key}":
+        return None
+    if _back_label(path, parts.query, t or {}) is None:
+        return None
+    return parts.path + ("?" + parts.query if parts.query else "")
+
+
+def back_link(job_key: str, *, back: str | None, referer: str | None, host: str | None,
+              list_params: dict | None = None, t: dict | None = None) -> dict:
+    """Where the back link of a job page goes, and its label.
+
+    1. ``back`` (query parameter or form field), 2. the Referer — same host
+    only, path and query; a Referer that is this job page itself passes on
+    its own ``back``. 3. Otherwise the job log with the list filters it was
+    opened with (``list_params``: page, status, q)."""
+    t = t or {}
+    target = safe_back(back, job_key, t)
+    if target is None and referer:
+        ref = urlsplit(referer)
+        if ref.scheme in ("http", "https") and host and ref.netloc.lower() == host.lower():
+            if unquote(ref.path) == f"/logs/job/{job_key}":
+                target = safe_back((parse_qs(ref.query).get("back") or [None])[0], job_key, t)
+            else:
+                target = safe_back(ref.path + ("?" + ref.query if ref.query else ""), job_key, t)
+    if target is not None:
+        parts = urlsplit(target)
+        return {"url": target, "label": _back_label(unquote(parts.path), parts.query, t), "explicit": True}
+    params = {"tab": "jobs"}
+    for key in ("page", "status", "q"):
+        value = (list_params or {}).get(key)
+        if value:
+            params[key] = value
+    return {"url": "/logs?" + urlencode(params), "label": t.get("logs", {}).get("job_log", ""),
+            "explicit": False}
+
+
+def job_page_url(job_key: str, back: str | None = None) -> str:
+    """The job page, carrying a validated back target along."""
+    target = safe_back(back, job_key)
+    return f"/logs/job/{job_key}" + (f"?back={quote(target, safe='')}" if target else "")

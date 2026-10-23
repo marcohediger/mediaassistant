@@ -1,6 +1,10 @@
 """
 Test: Keep-Flow & "Kein Duplikat" mit folder_tags — End-to-End
 Ruft die echten Router-Funktionen mit echten Dateien auf.
+
+The jobs carry the old IA-02 folder_tags (from before the raw folder was
+recorded); IA-08 takes their album from it through folder_path.folder_targets,
+with the albums option of the first set (jobs without set_id belong to it).
 """
 import asyncio, sys, os, time, shutil, json
 sys.path.insert(0, "/app")
@@ -18,7 +22,7 @@ async def test_keep_flow():
     from models import Job
     from sqlalchemy import select
     from sqlalchemy.orm.attributes import flag_modified
-    from pipeline.step_ia08_sort import _get_folder_album_names
+    from folder_path import folder_targets
 
     ts = int(time.time())
 
@@ -194,7 +198,7 @@ async def test_keep_flow():
         # Phase 3: IA-08 picks up folder_tags for Immich album
         # File is now in /library/ or /reprocess/ — not in inbox
         kept_job.original_path = "/app/data/reprocess/__ftag_e2e_dup.jpg"
-        albums = await _get_folder_album_names(kept_job)
+        albums = (await folder_targets(kept_job)).albums or None
 
         check("IA-08: Album aus IA-02 Fallback",
               albums is not None and len(albums) > 0,
@@ -226,7 +230,7 @@ async def test_not_duplicate_flow():
     from models import Job
     from sqlalchemy import select
     from sqlalchemy.orm.attributes import flag_modified
-    from pipeline.step_ia08_sort import _get_folder_album_names
+    from folder_path import folder_targets
     from pipeline.reprocess import prepare_job_for_reprocess
 
     ts = int(time.time())
@@ -316,7 +320,7 @@ async def test_not_duplicate_flow():
                   f"steps={list(sr.keys())}")
 
             # IA-08 should pick up album from IA-02 fallback
-            albums = await _get_folder_album_names(job)
+            albums = (await folder_targets(job)).albums or None
             check("IA-08: Album aus IA-02 Fallback nach 'Kein Duplikat'",
                   albums is not None and albums[0] == "Urlaub Griechenland",
                   f"albums={albums}")

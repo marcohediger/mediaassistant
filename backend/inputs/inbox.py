@@ -138,7 +138,7 @@ async def scan_set(processing_set) -> int:
                     source_label=inbox.label,
                     source_inbox_path=inbox.path,
                     set_id=ps.id,
-                    folder_tags=bool(ps.folder_tags),
+                    folder_tags=(ps.folder_tag_mode or "none") != "none" or bool(ps.folder_albums),
                     dry_run=bool(ps.dry_run),
                     use_immich=ps.target_mode == "immich",
                     immich_user_id=ps.immich_user_id,

@@ -131,15 +131,15 @@ async def log_detail(request: Request, debug_key: str):
     if not job:
         return RedirectResponse(url="/logs?tab=jobs", status_code=302)
 
-    # Build back URL preserving filter params from the list view
-    back_params = {"tab": "jobs"}
-    for key in ("page", "status", "q"):
-        val = request.query_params.get(key, "")
-        if val:
-            back_params[key] = val
-    back_url = "/logs?" + urlencode(back_params)
+    # Back to the page the job was opened from (?back=, else the Referer),
+    # else the job log with the list filters it was opened with
+    import job_view
+    t = load_lang(await config_manager.get("ui.language", DEFAULT_LANGUAGE))
+    back = job_view.back_link(debug_key, back=request.query_params.get("back"),
+                              referer=request.headers.get("referer"), host=request.headers.get("host"),
+                              list_params=request.query_params, t=t)
 
-    return await render(request, "log_detail.html", {"job": job, "back_url": back_url})
+    return await render(request, "log_detail.html", {"job": job, "back": back, "back_url": back["url"]})
 
 
 async def _dryrun_report() -> dict:

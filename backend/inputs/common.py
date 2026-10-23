@@ -162,8 +162,10 @@ async def register_job_source(job, *, file_hash=None, immich_checksum=None) -> N
     an older job's file with the same content at that path, that entry is
     stale and the new job takes the path over. Immich asset: an unverified
     copy of kind immich — the worker confirms its content when it downloads
-    the original. Only registers, nothing is moved. A failure is logged and
-    does not stop the job; fileops registers an unknown source on first use.
+    the original. Only registers, nothing is moved; the ledger gets the job's
+    intake row ("register", shown as "Erfasst" in the job's history). A
+    failure is logged and does not stop the job; fileops registers an
+    unknown source on first use.
     """
     import fileops
     from system_logger import log_warning
@@ -171,9 +173,11 @@ async def register_job_source(job, *, file_hash=None, immich_checksum=None) -> N
     path = job.original_path or ""
     try:
         if job.immich_asset_id and path.startswith(IMMICH_PENDING):
-            await fileops.register_existing(job, "immich", job.immich_asset_id, checksum=immich_checksum)
+            await fileops.register_existing(job, "immich", job.immich_asset_id, checksum=immich_checksum,
+                                            intake="input:immich")
         elif path and os.path.isfile(path):
-            await fileops.register_existing(job, "local", path, sha256=file_hash, take_over=True)
+            await fileops.register_existing(job, "local", path, sha256=file_hash, take_over=True,
+                                            intake="input:inbox")
     except Exception as e:
         logger.warning("register %s failed: %s", job.debug_key, e)
         await log_warning("filewatcher", f"{job.debug_key} Eintrag im Exemplar-Register fehlgeschlagen",

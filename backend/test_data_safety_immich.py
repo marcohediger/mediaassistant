@@ -32,14 +32,17 @@ What the test does to the dev system, and undoes in `finally`:
 - "the phone uploaded it" is an upload through upload_asset with the file's
   mtime set to the capture date (that is what fileCreatedAt carries);
 - a crash is SimulatedCrash (a BaseException) raised from a monkeypatched
-  function in this process; no container is stopped;
+  function in this process, or one of fileops' own crash points
+  (fileops._CRASH_AT, also a BaseException); no container is stopped;
 - redirects REPROCESS_DIR and CSV_RETRY_DIR into the sandbox (this process
   only), so the shared /app/data/reprocess and csv-retry stay untouched;
 - R-11 relies on the dev app's own stale watchdog (it runs every 60 s inside
   the container, also while the pipeline is paused) and waits for it;
 - disables the filewatcher module for the run and restores it;
-- removes its jobs, sets, categories, rules, the sandbox, the poller temp
-  dirs and the system_logs rows that carry its run tag or one of its asset ids.
+- removes its jobs with their file_copies / asset_refs rows (open ledger
+  intents are reconciled first; file_ops rows stay, the ledger is
+  append-only), sets, categories, rules, the sandbox, the poller temp dirs and
+  the system_logs rows that carry its run tag or one of its asset ids.
 """
 import asyncio
 import base64
@@ -64,7 +67,7 @@ from config import config_manager
 from database import async_session
 from models import Job, LibraryCategory, ProcessingSet, SortingRule, SystemLog
 from sets import seed_set_defaults
-from test_support.invariants import FileGuard, check_no_file_lost, is_under, sha256_file
+from test_support.invariants import FileGuard, check_no_file_lost, delete_test_jobs, is_under, sha256_file
 
 TS = int(time.time())
 TAG = f"DSI{TS}"
@@ -1011,19 +1014,32 @@ async def test_r10a():
 
 
 # ---------------------------------------------------------------------------
-# R-10e: crash in safe_replace_asset after the old asset is gone
+# R-10e: crash inside fileops.replace after the old asset went to the trash
 # ---------------------------------------------------------------------------
+
+async def _asset_rows(asset_id: str) -> list:
+    from models import FileCopy
+    async with async_session() as s:
+        return (await s.execute(select(FileCopy).where(
+            FileCopy.kind == "immich", FileCopy.location == asset_id).order_by(FileCopy.id))).scalars().all()
+
 
 async def test_r10e():
     risk = "R-10e"
-    from pipeline import step_ia08_sort
-    section("R-10e", "Absturz nach dem Ersetzen: altes Asset gelöscht, neue ID nicht committet",
+    import fileops
+    from models import FileOp
+    section("R-10e", "Absturz im Ersetzen: altes Asset im Papierkorb, neue ID nicht committet",
             "Job P der Immich-Eingabe (Handy-Foto, Asset X), Schreibmodus 'direct': IA-07 schreibt "
-            "Stichwörter in die heruntergeladene Datei, IA-08 ruft safe_replace_asset: Upload Y, "
-            "Metadaten kopieren, X löschen (force). Die neue ID wird erst nach dem Step committet; der "
-            "Prozess stirbt dazwischen. Beim Redeploy ist /tmp/ma_immich_* weg; der Neustart reiht P "
-            "wieder ein, der Worker lädt das Original von X erneut.",
-            "Zu jedem Zeitpunkt zeigt P auf ein vorhandenes Asset; nach dem Neustart ist P mit Y verknüpft.")
+            "Stichwörter in die heruntergeladene Datei, IA-08 ersetzt über fileops.replace: Upload Y "
+            "(geprüft, registriert), Alben/Tags übertragen, X in den Immich-Papierkorb. Der Prozess stirbt "
+            "direkt danach (fileops-Absturzpunkt 'trashed'): Papierkorb- und Ersetzen-Zeile sind offen, "
+            "P.immich_asset_id zeigt noch auf X. Neustart wie die App: offene Operationen abgleichen, P "
+            "wieder einreihen; /tmp/ma_immich_* ist weg (Redeploy), der Worker lädt neu, die Pipeline läuft "
+            "weiter.",
+            "Im Absturzmoment liegt P's Inhalt geprüft in Immich (Y, im Register als P's Exemplar) und X "
+            "wiederherstellbar im Papierkorb. Der Abgleich findet Y und führt X als 'trashed'; X lässt sich "
+            "wiederherstellen. Nach dem Neustart ist P 'done' mit einem vorhandenen Asset, und kein Asset "
+            "des Szenarios ist endgültig gelöscht.")
     box = Box("R10e")
     set_id = await create_set("R-10e", base=box.lib, write_mode="direct")
     name = f"IMG_{TAG}_10e.JPG"
@@ -1031,38 +1047,88 @@ async def test_r10e():
     x = await phone_upload(src)
     p = await poller_job(set_id, x, name, step_result=pre_results(run=("IA-07",), ai_tags=[f"{TAG}-KI"]))
     await fetch(p)
-    real_replace = step_ia08_sort.safe_replace_asset
-    new_ids: list[str] = []
-
-    async def crash_after_replace(old_id, path, **kwargs):
-        res = await real_replace(old_id, path, **kwargs)
-        new_ids.append(res.get("id"))
-        raise SimulatedCrash("old asset deleted, new asset id not committed")
 
     crashed = False
-    with patched(step_ia08_sort, "safe_replace_asset", crash_after_replace):
-        try:
-            await run_pipeline(p)
-        except SimulatedCrash:
-            crashed = True
-    if not crashed or not new_ids:
-        raise Precondition("Ersetzen/Absturz wurde nicht erreicht")
-    y = new_ids[0]
+    fileops._CRASH_AT = "trashed"
+    try:
+        await run_pipeline(p)
+    except fileops._SimulatedCrash:
+        crashed = True
+    finally:
+        fileops._CRASH_AT = None
+    async with async_session() as s:
+        ops = (await s.execute(select(FileOp).where(FileOp.job_id == p).order_by(FileOp.id))).scalars().all()
+    rep = next((o for o in ops if o.op == "replace"), None)
+    if not crashed or rep is None or not rep.dst:
+        raise Precondition(f"Absturz im Ersetzen nicht erreicht: crashed={crashed}, "
+                           f"Operationen={[(o.op, o.state) for o in ops]}")
+    y = rep.dst
     mid = await get_job(p)
-    x_state = await im_settled_state(x)
-    report(risk, "R-10e im Absturzmoment zeigt P auf ein vorhandenes Asset",
-           await im_state(mid.immich_asset_id) == "present",
-           f"P ({mid.status}): immich_asset_id={mid.immich_asset_id} → {x_state}; neues Asset Y={y}: "
-           f"{await im_state(y)}, keinem Job zugeordnet")
+    open_ops = [f"{o.op}#{o.id}" for o in ops if o.state == "intent"]
+    y_rows = [r for r in await _asset_rows(y) if r.state == "present"]
+    y_state, x_state = await im_state(y), await im_state(x)
+    report(risk, "R-10e im Absturzmoment liegt P's neuer Inhalt geprüft in Immich und im Register (Y)",
+           y_state == "present" and len(y_rows) == 1 and y_rows[0].job_id == p
+           and y_rows[0].verified_at is not None,
+           f"Y={y}: {y_state}, Register: {[(r.id, r.job_id, r.state) for r in await _asset_rows(y)]}")
+    report(risk, "R-10e im Absturzmoment liegt X im Immich-Papierkorb, nicht endgültig gelöscht",
+           x_state == "trashed", f"X={x}: {x_state}; P.immich_asset_id={mid.immich_asset_id}; "
+           f"offene Operationen: {open_ops}")
+
+    # Restart, step 1: settle the open operations against Immich.
+    settled = await fileops.reconcile_open_intents(job_ids=[p])
+    async with async_session() as s:
+        rep_after = await s.get(FileOp, rep.id)
+    x_rows = await _asset_rows(x)
+    rep_res = next((r for r in settled if r["op_id"] == rep.id), None)
+    report(risk, "R-10e der Abgleich findet das neue Asset Y (Ersetzen → abgeglichen, Ziel Y)",
+           rep_res is not None and rep_res["state"] == "reconciled" and rep_after.dst == y
+           and not [r for r in settled if r["state"] == "intent"],
+           f"Abgleich: {[(r['op'], r['state'], first_line(r['note'], 90)) for r in settled]}")
+    trashed_x = next((r for r in x_rows if r.state == "trashed"), None)
+    report(risk, "R-10e X steht danach im Register als 'trashed' (nicht als vorhanden)",
+           trashed_x is not None and not [r for r in x_rows if r.state == "present"],
+           f"Register X: {[(r.id, r.job_id, r.state) for r in x_rows]}")
+
+    # The old asset can be brought back from the trash (and is put back, so
+    # the restart below sees exactly the state the crash left).
+    restorable, detail = False, "kein Register-Eintrag 'trashed'"
+    if trashed_x is not None:
+        try:
+            await fileops.restore_asset(trashed_x.id, actor=f"test:{TAG}")
+            restorable = await im_state(x) == "present"
+            detail = f"nach Wiederherstellen: {await im_state(x)}"
+            await fileops.trash_asset(p, trashed_x.id, actor=f"test:{TAG}",
+                                      reason="Zustand nach dem Absturz wiederhergestellt", allow_last_copy=True)
+            detail += f", danach wieder {await im_state(x)}"
+        except fileops.FileOpError as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+    report(risk, "R-10e X lässt sich aus dem Immich-Papierkorb wiederherstellen", restorable, detail)
+
+    # Restart, step 2: requeue; the redeploy wiped /tmp, the worker downloads again.
     if (mid.original_path or "").startswith("/tmp/ma_immich_"):
-        shutil.rmtree(os.path.dirname(mid.original_path), ignore_errors=True)  # redeploy wipes /tmp
+        shutil.rmtree(os.path.dirname(mid.original_path), ignore_errors=True)
     await requeue_after_crash(p)
-    await fetch(p, require=False)
+    fetched = await fetch(p, require=False)
+    if fetched:
+        await run_pipeline(p)
     jp = await get_job(p)
-    report(risk, "R-10e nach dem Neustart ist P mit dem neuen Asset Y verknüpft",
-           jp.immich_asset_id == y and jp.status != "error",
-           f"P: status={jp.status} ({first_line(jp.error_message, 90)}), immich_asset_id={jp.immich_asset_id}")
-    actual(f"Y ({await im_state(y)}) ist in Immich, aber keinem Job zugeordnet; P scheitert am Download von X.")
+    final = jp.immich_asset_id
+    states = {x: await im_settled_state(x), y: await im_settled_state(y)}
+    if final and final not in states:
+        states[final] = await im_settled_state(final)
+    res = await check_no_file_lost([p])
+    report(risk, "R-10e nach dem Neustart ist P 'done' und mit einem vorhandenen, geprüften Asset verknüpft",
+           jp.status == "done" and res.ok and states.get(final) == "present",
+           f"P: status={jp.status} ({first_line(jp.error_message, 90)}), immich_asset_id={final}; {res.summary()}")
+    report(risk, "R-10e kein Asset des Szenarios ist endgültig gelöscht (X und Y vorhanden oder im Papierkorb)",
+           all(st in ("present", "trashed") for st in states.values()),
+           f"{', '.join(f'{a}: {st}' for a, st in states.items())}")
+    which = "Y (neues Asset)" if final == y else "X (altes Asset, aus dem Papierkorb zurückgeholt)" \
+        if final == x else f"{final}"
+    actual(f"im Absturzmoment: P.immich_asset_id={mid.immich_asset_id} (X {x_state}), Y {y_state}; nach dem "
+           f"Neustart zeigt P auf {which}; X: {states[x]}, Y: {states[y]}. Der Worker lädt nach dem Neustart "
+           f"P.immich_asset_id (X) herunter, nicht das Asset aus dem Protokoll.")
 
 
 # ---------------------------------------------------------------------------
@@ -1302,30 +1368,47 @@ async def _r18_case(sub_id: str, copy_fails: bool):
     await reset_job_for_retry(a)
     await prefill_after_retry(a, run=("IA-07",), ai_tags=[kw], ai_desc=mdesc)
 
-    async def copy_500(*_a, **_k):
-        raise RuntimeError("Immich copy metadata failed: HTTP 500 — Internal Server Error")
+    copy_calls: list[tuple] = []
+
+    async def copy_500(*args, **_k):
+        copy_calls.append(args)
+        raise RuntimeError("Immich copy failed: HTTP 500 — Internal Server Error")
 
     if copy_fails:
-        with patched(immich_client, "copy_asset_metadata", copy_500):
+        # fileops.replace carries albums, favorite, shared links and stack
+        # with immich_client.copy_asset_links (PUT /assets/copy, sidecar off).
+        with patched(immich_client, "copy_asset_links", copy_500):
             await run_pipeline(a)
+        if not copy_calls:
+            raise Precondition("copy_asset_links wurde nicht aufgerufen — Ersetzen nicht erreicht")
     else:
         await run_pipeline(a)
     await asyncio.sleep(15)  # index lag + the re-extraction Immich starts after the copy
     ja = await get_job(a)
     y = ja.immich_asset_id
+    if not y or y == x:
+        raise Precondition(f"kein Ersetzen: status={ja.status} immich_asset_id={y} {first_line(ja.error_message)}")
     after = await im_meta(y)
-    lost = []
-    if udesc not in after.get("description", ""):
-        lost.append(f"Beschreibung (jetzt {after.get('description')!r})")
-    if after.get("rating") != 4:
-        lost.append(f"Bewertung (jetzt {after.get('rating')})")
-    if not after.get("favorite"):
-        lost.append("Favorit")
-    if utag not in after["tags"]:
-        lost.append("Benutzer-Tag")
-    if ualbum not in after["albums"]:
-        lost.append("Album")
-    return x, y, before, after, lost, kw
+    lost = _user_meta_missing(after, udesc, utag, ualbum)
+    x_state = await im_settled_state(x)
+    lost_on_x = _user_meta_missing(await im_meta(x), udesc, utag, ualbum) if x_state == "present" else None
+    return x, y, before, after, lost, kw, ja, x_state, lost_on_x
+
+
+def _user_meta_missing(meta: dict, udesc: str, utag: str, ualbum: str) -> dict[str, str]:
+    """The user's edits (R-18) that an asset does not carry: {edit: what is there instead}."""
+    missing = {}
+    if udesc not in meta.get("description", ""):
+        missing["Beschreibung"] = f"jetzt {meta.get('description')!r}"
+    if meta.get("rating") != 4:
+        missing["Bewertung"] = f"jetzt {meta.get('rating')}"
+    if not meta.get("favorite"):
+        missing["Favorit"] = "nicht gesetzt"
+    if utag not in meta.get("tags", []):
+        missing["Benutzer-Tag"] = "fehlt"
+    if ualbum not in meta.get("albums", []):
+        missing["Album"] = "fehlt"
+    return missing
 
 
 async def test_r18():
@@ -1333,23 +1416,30 @@ async def test_r18():
     section("R-18a", "Ersetzen löscht das alte Asset, obwohl die Metadaten-Kopie fehlgeschlagen ist",
             "Asset X eines fertigen Jobs; der Benutzer hat in Immich Beschreibung, Bewertung 4, Favorit, "
             "einen Tag und ein Album gesetzt. Der Job wird erneut verarbeitet (Modus 'direct', IA-07 schreibt "
-            "neue Stichwörter → neue Bytes) → safe_replace_asset: Upload Y, copy_asset_metadata scheitert "
-            "(hier simuliert: HTTP 500), es folgt trotzdem delete_asset(X, force=True).",
-            "X bleibt, wenn die Kopie scheitert; die Benutzer-Metadaten gehen nicht verloren.")
-    x, y, before, after, lost, _kw = await _r18_case("R-18a", copy_fails=True)
-    x_state = await im_settled_state(x)
+            "neue Stichwörter → neue Bytes) → fileops.replace: Upload Y, copy_asset_links (Alben, Favorit, "
+            "Shared Links, Stack) scheitert (hier simuliert: HTTP 500). Vor dem Umbau folgte trotzdem "
+            "delete_asset(X, force=True).",
+            "X bleibt, wenn die Kopie scheitert, und der Job meldet es; keine Benutzer-Änderung geht "
+            "verloren — was Y nicht trägt, liegt am behaltenen X.")
+    x, y, before, after, lost, _kw, ja, x_state, lost_on_x = await _r18_case("R-18a", copy_fails=True)
     report(risk, "R-18a das alte Asset bleibt, wenn die Metadaten-Kopie scheitert", x_state == "present",
            f"X: {x_state}")
-    report(risk, "R-18a die Benutzer-Metadaten sind am Asset des Jobs noch vorhanden", not lost,
-           f"verloren: {lost}")
-    actual(f"vorher an X: {before}; nachher an Y={y}: {after}.")
+    gone = sorted(set(lost) & set(lost_on_x if lost_on_x is not None else lost))
+    report(risk, "R-18a jede Benutzer-Änderung ist an Y oder am behaltenen X vorhanden", not gone,
+           f"weder an Y noch an X: {gone}; an Y fehlen: {lost}; an X fehlen: {lost_on_x}")
+    ia08 = (ja.step_result or {}).get("IA-08") or {}
+    reason = str(ia08.get("reason") or "")
+    report(risk, "R-18a der Job meldet, dass X bleibt (Warnung in IA-08)",
+           ia08.get("status") == "warning" and x in reason, f"IA-08 status={ia08.get('status')}: {reason[:200]}")
+    actual(f"vorher an X: {before}; nachher an Y={y}: {after}; X ist {x_state}.")
 
     section("R-18b", "Ersetzen mit gelungener Kopie: welche Metadaten gehen trotzdem verloren (Immich 3.1)",
-            "Wie R-18a, aber copy_asset_metadata läuft echt (Immich-Standard: albums, favorite, sharedLinks, "
-            "sidecar, stack). Gemessen wird am neuen Asset Y nach 15 s: Benutzer-Beschreibung, Bewertung, "
-            "Favorit, Benutzer-Tag, Album und das frisch von MA geschriebene Stichwort.",
+            "Wie R-18a, aber copy_asset_links läuft echt (PUT /assets/copy mit sidecar=false: albums, "
+            "favorite, sharedLinks, stack; Tags, Beschreibung und Bewertung überträgt fileops selbst). "
+            "Gemessen wird am neuen Asset Y nach 15 s: Benutzer-Beschreibung, Bewertung, Favorit, "
+            "Benutzer-Tag, Album und das frisch von MA geschriebene Stichwort.",
             "Alle Benutzer-Metadaten und das neue MA-Stichwort sind an Y.")
-    x, y, before, after, lost, kw = await _r18_case("R-18b", copy_fails=False)
+    x, y, before, after, lost, kw, _ja, _xs, _lx = await _r18_case("R-18b", copy_fails=False)
     report(risk, "R-18b die Benutzer-Metadaten sind am neuen Asset", not lost, f"verloren: {lost}")
     report(risk, "R-18b das neu geschriebene MA-Stichwort ist am neuen Asset", kw in after["tags"],
            f"Tags an Y: {after['tags']}")
@@ -1594,7 +1684,13 @@ async def cleanup_immich():
 
 async def cleanup():
     async with async_session() as s:
-        await s.execute(delete(Job).where(or_(Job.id.in_(CREATED_JOBS), Job.debug_key.like(f"{TAG}-%"))))
+        ids = set(CREATED_JOBS) | set((await s.execute(
+            select(Job.id).where(Job.debug_key.like(f"{TAG}-%")))).scalars().all())
+    # Jobs with their file_copies / asset_refs (also rows of this run's assets
+    # that no job owns); ledger rows stay (append-only).
+    await delete_test_jobs(ids, locations=list(dict.fromkeys(CREATED_ASSETS)),
+                           prefixes=[SANDBOX] + TEMP_DIRS)
+    async with async_session() as s:
         if CREATED_SETS:
             await s.execute(delete(SortingRule).where(SortingRule.set_id.in_(CREATED_SETS)))
             await s.execute(delete(LibraryCategory).where(LibraryCategory.set_id.in_(CREATED_SETS)))

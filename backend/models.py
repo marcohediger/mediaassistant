@@ -145,7 +145,13 @@ class ProcessingSet(Base):
     scheduled_time = Column(Text, default="23:00")
 
     # Processing
-    folder_tags = Column(Boolean, default=False)
+    # Folder structure below the inbox (folder_path.py): as tags — none, flat
+    # (one tag per folder level) or nested ("Ordner/…") — and/or as one album
+    # per folder. Both replace folder_tags, which is only read by the
+    # one-time migration (database._migrate_columns).
+    folder_tag_mode = Column(Text, default="none")  # none / flat / nested
+    folder_albums = Column(Boolean, default=False)
+    folder_tags = Column(Boolean, default=False)  # legacy switch, superseded by the two above
     dry_run = Column(Boolean, default=False)
     ocr_enabled = Column(Boolean, default=False)
     ocr_mode = Column(Text, default="smart")  # smart = screenshots/documents only, always = every image

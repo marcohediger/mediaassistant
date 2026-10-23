@@ -235,23 +235,54 @@
                 </div>
             </section>
 
-            <!-- Folder tags -->
+            <!-- Folder structure (folder_path.py) -->
             <section class="tab-panel" role="tabpanel" id="tab-folder" aria-labelledby="tabbtn-folder" hidden>
                 <header class="panel-head">
                     <h3>{{ t.sets.tab_folder_tags }}</h3>
-                    <p>{{ t.settings.ordner_tags_desc }}</p>
+                    <p>{{ t.sets.folder_desc }}</p>
                 </header>
                 <div class="panel-body">
+                    <fieldset class="field">
+                        <legend class="field-label">{{ t.sets.folder_tag_mode }}</legend>
+                        <div class="choice-cards cards-3">
+                            {{ choice_card('set_folder_tag_mode', 'none', 'data-radio-field="folder_tag_mode"', t.sets.folder_tags_none_title, t.sets.folder_tags_none_desc) }}
+                            {{ choice_card('set_folder_tag_mode', 'flat', 'data-radio-field="folder_tag_mode"', t.sets.folder_tags_flat_title, t.sets.folder_tags_flat_desc) }}
+                            {{ choice_card('set_folder_tag_mode', 'nested', 'data-radio-field="folder_tag_mode"', t.sets.folder_tags_nested_title, t.sets.folder_tags_nested_desc) }}
+                        </div>
+                    </fieldset>
                     <div class="option-list">
-                        {{ option_switch('set-folder-tags', 'data-field="folder_tags"', t.sets.folder_tags_enable | default('Ordner-Tags für dieses Set erzeugen')) }}
+                        {{ option_switch('set-folder-albums', 'data-field="folder_albums"', t.sets.folder_albums_title, t.sets.folder_albums_desc) }}
                     </div>
-                    <div class="callout">
-                        {{ icon('info', 16) }}
-                        <div>
-                            <p class="callout-title">{{ t.settings.ordner_tags_detail_title }}</p>
-                            <div class="help-text">{{ t.settings.ordner_tags_detail | safe }}</div>
+                    {#- The example values are what folder_path.py makes of the path
+                        in folder_example_file; test_folder_structure.py checks them.
+                        Rows of the options not chosen are greyed out. -#}
+                    <div class="callout folder-example">
+                        {{ icon('folder', 16) }}
+                        <div class="folder-example-body">
+                            <p class="callout-title">{{ t.sets.folder_example_title }}</p>
+                            <p class="help-text">{{ t.sets.folder_example_file | safe }}</p>
+                            <dl class="folder-example-list">
+                                <div class="folder-example-row" data-when-tag-mode="flat">
+                                    <dt>{{ icon('metadata', 14) }}<span>{{ t.sets.folder_example_flat }}</span></dt>
+                                    <dd class="folder-example-chips"><code>Ferien</code> <code>Mallorca</code> <code>2019</code></dd>
+                                </div>
+                                <div class="folder-example-row" data-when-tag-mode="nested">
+                                    <dt>{{ icon('metadata', 14) }}<span>{{ t.sets.folder_example_tree }}</span></dt>
+                                    <dd><code>Ordner/Ferien/Mallorca/2019</code></dd>
+                                </div>
+                                <div class="folder-example-row" data-depends="folder_albums">
+                                    <dt>{{ icon('image', 14) }}<span>{{ t.sets.folder_example_album }}</span></dt>
+                                    <dd><code>Ferien Mallorca 2019</code></dd>
+                                </div>
+                            </dl>
                         </div>
                     </div>
+                    <details class="disclosure">
+                        <summary>{{ icon('info', 16) }}<span>{{ t.sets.folder_rules_title }}</span><span class="disclosure-chev">{{ icon('chevron', 16) }}</span></summary>
+                        <div class="disclosure-body">
+                            <div class="help-text">{{ t.sets.folder_rules | safe }}</div>
+                        </div>
+                    </details>
                 </div>
             </section>
 

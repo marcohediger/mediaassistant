@@ -12,7 +12,7 @@
 > docker exec mediaassistant-dev python /app/test_testplan_final.py
 > docker exec mediaassistant-dev python /app/test_ai_backends.py
 > docker exec mediaassistant-dev python /app/test_keep_flow.py
-> docker exec mediaassistant-dev python /app/test_ftag_immich.py
+> docker exec mediaassistant-dev python /app/test_folder_structure.py
 > docker exec mediaassistant-dev python /app/test_v29_stress.py
 > docker exec mediaassistant-dev python /app/test_no_file_loss.py
 > docker exec mediaassistant-dev python /app/test_immich_dedup.py

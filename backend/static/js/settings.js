@@ -254,6 +254,11 @@
     // Ziel-Ablage shows what takes effect in the chosen mode; the state keeps everything.
     $("tab-target").classList.toggle("is-immich", target === "immich");
     renderCats();
+    // The folder example greys out the tag modes not chosen.
+    const tagMode = radioValue("folder_tag_mode");
+    setDlg.querySelectorAll("[data-when-tag-mode]").forEach(function (n) {
+      n.classList.toggle("is-off", n.dataset.whenTagMode !== tagMode);
+    });
     // Controls that only matter while a switch is on are greyed out.
     setDlg.querySelectorAll("[data-depends]").forEach(function (n) {
       const on = fieldInput(n.dataset.depends).checked;
@@ -702,7 +707,7 @@
     $("set-rules-empty").hidden = rules.length > 0;
     setMeta("inputs", String(dirs.length + (immich ? 1 : 0)));
     setMeta("rules", String(rules.length));
-    setMeta("folder", "", fieldInput("folder_tags").checked ? "on" : "off");
+    setMeta("folder", "", radioValue("folder_tag_mode") !== "none" || fieldInput("folder_albums").checked ? "on" : "off");
     setMeta("ocr", "", fieldInput("ocr_enabled").checked ? "on" : "off");
 
     const badges = $("set-badges");

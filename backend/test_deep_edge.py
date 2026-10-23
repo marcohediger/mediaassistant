@@ -256,35 +256,25 @@ async def main():
     # E10: Folder-Tags mit nur Punkt-Ordner
     # ==================================================================
     print("\n── E10: Folder-Tags Edge Cases ──")
-    from pipeline.step_ia02_duplicates import _extract_folder_tags
+    from folder_path import album_name, relative_folder, tag_path
 
     # Datei direkt im Inbox (kein Subfolder)
-    j1 = Job(filename="f.jpg", original_path="/inbox/f.jpg",
-             source_inbox_path="/inbox", debug_key="FTE10-1")
-    check("E10a Flat inbox → leer", _extract_folder_tags(j1) == [])
+    check("E10a Flat inbox → leer", relative_folder("/inbox/f.jpg", "/inbox") is None)
 
     # source_inbox_path ist None
-    j2 = Job(filename="f.jpg", original_path="/inbox/Sub/f.jpg",
-             source_inbox_path=None, debug_key="FTE10-2")
-    check("E10b source_inbox_path=None → leer", _extract_folder_tags(j2) == [])
+    check("E10b source_inbox_path=None → leer", relative_folder("/inbox/Sub/f.jpg", None) is None)
 
     # original_path ist None
-    j3 = Job(filename="f.jpg", original_path=None,
-             source_inbox_path="/inbox", debug_key="FTE10-3")
-    check("E10c original_path=None → leer", _extract_folder_tags(j3) == [])
+    check("E10c original_path=None → leer", relative_folder(None, "/inbox") is None)
 
     # Datei ausserhalb Inbox (reprocess)
-    j4 = Job(filename="f.jpg", original_path="/app/data/reprocess/f.jpg",
-             source_inbox_path="/inbox", debug_key="FTE10-4")
-    ft4 = _extract_folder_tags(j4)
-    check("E10d Datei in /reprocess/ → leer (kein ..)", ft4 == [], f"ft={ft4}")
+    ft4 = relative_folder("/app/data/reprocess/f.jpg", "/inbox")
+    check("E10d Datei in /reprocess/ → leer (kein ..)", ft4 is None, f"ft={ft4}")
 
-    # Sehr tiefer Pfad
-    j5 = Job(filename="f.jpg", original_path="/inbox/A/B/C/D/E/f.jpg",
-             source_inbox_path="/inbox", debug_key="FTE10-5")
-    ft5 = _extract_folder_tags(j5)
-    check("E10e 5 Ebenen tief", len(ft5) > 5, f"ft={ft5}")
-    check("E10f kombinierter Tag am Ende", ft5[-1] == "A B C D E", f"last={ft5[-1]}")
+    # Sehr tiefer Pfad: höchstens vier Ebenen (folder_path.MAX_LEVELS)
+    rel5 = relative_folder("/inbox/A/B/C/D/E/f.jpg", "/inbox")
+    check("E10e 5 Ebenen tief → Tag-Baum auf 4 Ebenen", tag_path(rel5) == "Ordner/A/B/C/D", f"rel={rel5}")
+    check("E10f Album aus den ersten 4 Ebenen", album_name(rel5) == "A B C D", f"album={album_name(rel5)}")
 
     # ==================================================================
     # E11: validate_target_path mit symlinks

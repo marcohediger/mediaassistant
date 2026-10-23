@@ -47,8 +47,9 @@ async def main():
     from file_operations import (
         sha256, resolve_filename_conflict, safe_remove, safe_remove_with_log,
         get_duplicate_dir, resolve_filepath, sanitize_path_component,
-        validate_target_path, parse_date, is_folder_tags_active,
+        validate_target_path, parse_date,
     )
+    from folder_path import folder_options
     from models import Job
 
     # --- sha256 ---
@@ -182,15 +183,15 @@ async def main():
     no_crash("parse_date(slash)", parse_date, "2024/12/25 14:30:00")
     no_crash("parse_date(nur Datum)", parse_date, "2024:12:25")
 
-    # --- is_folder_tags_active ---
-    print("\n── is_folder_tags_active ──")
+    # --- folder_options (folder_path.py) ---
+    print("\n── folder_options ──")
     j_none = Job(filename="f.jpg", original_path="/inbox/f.jpg",
                  source_inbox_path=None, debug_key="IFTA-1")
-    await no_crash_async("is_ft_active(source=None)", is_folder_tags_active, j_none)
+    await no_crash_async("folder_options(source=None)", folder_options, j_none)
 
     j_ok = Job(filename="f.jpg", original_path="/inbox/Sub/f.jpg",
                source_inbox_path="/inbox", debug_key="IFTA-2")
-    await no_crash_async("is_ft_active(normal)", is_folder_tags_active, j_ok)
+    await no_crash_async("folder_options(normal)", folder_options, j_ok)
 
     # ==================================================================
     # safe_file.py
@@ -289,14 +290,14 @@ async def main():
     # ==================================================================
     # pipeline-spezifische Funktionen
     # ==================================================================
-    print("\n── pipeline: _extract_folder_tags ──")
-    from pipeline.step_ia02_duplicates import _extract_folder_tags, _quality_score
+    print("\n── pipeline: _folder_record ──")
+    from pipeline.step_ia02_duplicates import _folder_record, _quality_score
 
-    # _extract_folder_tags
-    no_crash("folder_tags(alles None)", _extract_folder_tags,
-             Job(filename="f", original_path=None, source_inbox_path=None, debug_key="X"))
-    no_crash("folder_tags(leer)", _extract_folder_tags,
-             Job(filename="f", original_path="", source_inbox_path="", debug_key="X"))
+    # _folder_record (IA-02's raw folder)
+    await no_crash_async("folder_record(alles None)", _folder_record,
+                         Job(filename="f", original_path=None, source_inbox_path=None, debug_key="X"))
+    await no_crash_async("folder_record(leer)", _folder_record,
+                         Job(filename="f", original_path="", source_inbox_path="", debug_key="X"))
 
     # _quality_score mit minimal Job
     j_min = Job(filename="f.jpg", debug_key="QS-1", step_result={})

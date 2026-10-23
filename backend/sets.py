@@ -1,8 +1,8 @@
 """Processing sets — defaults, the one-time migration, and lookups.
 
 A set bundles what used to be configured globally: input directories,
-schedule, sorting rules, folder tags, OCR mode, Immich auto-tagging and
-target storage. Every job remembers the set it came from, so rules,
+schedule, sorting rules, folder structure (tag tree, albums), OCR mode,
+Immich auto-tagging and target storage. Every job remembers the set it came from, so rules,
 categories and the library base path are always those of its own set.
 """
 import json
@@ -49,7 +49,7 @@ DEFAULT_RULES = [
 # not among them: a copy starts polling from now, not from the original's past.
 COPIED_FIELDS = (
     "description", "schedule_mode", "interval_s", "window_start", "window_end",
-    "scheduled_days", "scheduled_time", "folder_tags", "dry_run", "ocr_enabled", "ocr_mode",
+    "scheduled_days", "scheduled_time", "folder_tag_mode", "folder_albums", "dry_run", "ocr_enabled", "ocr_mode",
     "metadata_write_mode", "google_json",
     "target_mode", "library_base_path", "immich_user_id", "immich_input", "immich_poll",
     "immich_poll_user_id",
@@ -205,7 +205,10 @@ async def migrate_to_sets() -> None:
         last_poll = await _cfg(session, "immich.last_poll", None)
 
         # Group directories by what they do. Folder tags only ever worked when
-        # both the directory switch and the global module were on.
+        # both the directory switch and the global module were on. They made
+        # flat keywords and one album per folder, which the set keeps as tag
+        # mode "flat" plus albums (database._migrate_columns does the same
+        # for sets that existed before).
         groups: dict[tuple, list] = {}
         for row in inboxes:
             key = (bool(row.folder_tags) and folder_module, bool(row.dry_run),
@@ -223,7 +226,9 @@ async def migrate_to_sets() -> None:
                 name = " + ".join(m.label for m in members)
             ps = ProcessingSet(
                 name=name, description="", active=True, position=pos, **schedule,
-                folder_tags=folder_tags, dry_run=dry_run, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, **meta,
+                folder_tags=folder_tags, folder_tag_mode="flat" if folder_tags else "none",
+                folder_albums=folder_tags,
+                dry_run=dry_run, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, **meta,
                 target_mode="immich" if use_immich else "library",
                 library_base_path=base_path, immich_user_id=user_id,
                 immich_poll=False, immich_poll_user_id=None, immich_last_poll=None,

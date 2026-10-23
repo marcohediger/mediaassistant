@@ -333,3 +333,37 @@ geänderte Regeln später ohne Quelldatei neu anzuwenden.
    Alben an den Eltern angehängt (`Ereignis JJJJ` — ein Album pro Jahr).
 4. Bedeutungslose Ebenen (Monat, Datum, `DCIM`, Kamera-Ordner, „Photos from JJJJ")
    und doppelte Ebenen fallen bei beiden Optionen weg.
+
+### Nachtrag zu Entscheid 1 (2026-10-23)
+
+Die Tag-Hälfte ist eine **Auswahl aus drei**, nicht ein Schalter: ein
+ausgeschalteter Schalter hätte verborgen, dass bis anhin einzelne Tags entstanden.
+„Ordner als Alben" bleibt ein eigener Schalter und lässt sich mit jeder der drei
+kombinieren.
+
+## Umsetzung (2026-10-23)
+
+| Teil | Wo |
+|---|---|
+| Regeln, eine Funktion statt vier Kopien | `backend/folder_path.py` (`levels`, `tag_path`, `album_name`, `folder_targets`) |
+| Set-Felder | `folder_tag_mode` (`none` / `flat` / `nested`), `folder_albums`; `folder_tags` bleibt nur für die Migration |
+| Roher Ordner | `step_result['IA-02']['folder_path']` (relativ zum Eingang, unbereinigt); nach einem Retry aus dem Protokoll (`file_ops`) wiedergefunden. Duplikat-Zusammenführung: `donor_folder_paths` |
+| Datei/Sidecar | bei `nested`: `TagsList` und `HierarchicalSubject` mit **allen** Tags der Datei (Immich liest dann nur noch `TagsList`); `dc:subject`/IPTC `Keywords` bleiben flach |
+| Immich | `PUT /api/tags` (Upsert mit Eltern), Zuordnung per ID, Vergleich über `value` (`immich_client.tag_asset_path`/`untag_asset_path`); flache Tags werden jetzt ebenfalls über `value` gesucht |
+| Tag-Werkzeuge | Aufräumen entfernt Schlagwörter auch aus `TagsList`/`HierarchicalSubject`; Schreibweisen fasst nur flache Tags ohne Eltern und Kinder zusammen |
+
+**Regeln (fest, nicht einstellbar):** weggelassen werden `^\d{1,2}$` (Monat, Tag),
+`^\d{4}[-_.]\d{1,2}([-_.]\d{1,2})?$` (Datum), `DCIM`, DCF-Kamera-Ordner
+`^\d{3}[A-Z_][A-Z0-9_]{4}$` (`104_PANA`, `100APPLE`), `Photos from JJJJ` /
+`Fotos von JJJJ`; gleiche Nachbar-Ebenen (ohne Gross/klein) und eine Jahres-Ebene
+unter einer Ebene mit demselben Jahr fallen zusammen; Jahr bei Tags eigene Ebene,
+im Album an die Ebene davor gehängt; höchstens 4 Ebenen. Wurzel des Baums: `Ordner`.
+Album-Name: die Ebenen mit Leerzeichen verbunden, wie bisher.
+
+**Migration des alten Schalters:** `folder_tags` an → `folder_tag_mode = flat` und
+`folder_albums` an; aus → `none` und aus. Unterschied zu bisher bei „flach": eine
+Ebene ergibt ein Tag, Ordnernamen werden nicht mehr in Wörter zerlegt, und es gibt
+keinen zusätzlichen zusammengesetzten Tag (der steckt im Album-Namen). Jobs von
+vorher (nur `folder_tags` im IA-02-Ergebnis) behalten ihre alten flachen Tags und
+ihren Album-Namen.
+

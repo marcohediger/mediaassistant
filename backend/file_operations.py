@@ -347,21 +347,3 @@ def parse_date(date_str: str) -> datetime | None:
         except (ValueError, TypeError):
             continue
     return None
-
-
-# ---------------------------------------------------------------------------
-# Folder-tag check
-# ---------------------------------------------------------------------------
-
-async def is_folder_tags_active(job) -> bool:
-    """Folder tags apply when the job's set has them on — re-read at runtime.
-
-    Only files that came from a directory have a folder structure to read.
-    """
-    if not job.source_inbox_path:
-        return False
-    from database import async_session
-    from sets import get_set
-    async with async_session() as session:
-        processing_set = await get_set(session, job.set_id)
-    return bool(processing_set and processing_set.folder_tags)

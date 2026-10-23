@@ -356,13 +356,18 @@ async def main() -> int:
         for i in before["inboxes"]:
             row = con.execute("SELECT set_id FROM inbox_directories WHERE id = ?", (i[0],)).fetchone()
             s = next((x for x in sets if x["id"] == row[0]), None)
+            # The old switch made flat keywords and one album per folder: it
+            # becomes tag mode "flat" plus albums; off is "none".
             ok = s is not None and (
                 bool(s["folder_tags"]) == (bool(i[3]) and before["folder_module"])
+                and bool(s["folder_albums"]) == bool(s["folder_tags"])
+                and s["folder_tag_mode"] == ("flat" if s["folder_tags"] else "none")
                 and bool(s["dry_run"]) == bool(i[4])
                 and s["target_mode"] == ("immich" if i[5] else "library")
                 and s["immich_user_id"] == i[6])
             report(f"Verzeichnis {i[1]} → Set mit gleichem Verhalten", ok,
                    f"Set „{s['name'] if s else '?'}\": Ordner-Tags {s['folder_tags'] if s else '?'}, "
+                   f"Alben {s['folder_albums'] if s else '?'}, Ordner-Tags {s['folder_tag_mode'] if s else '?'}, "
                    f"Ziel {s['target_mode'] if s else '?'}")
             n_wrong = con.execute(
                 "SELECT COUNT(*) FROM jobs WHERE source_inbox_path = ? AND set_id IS NOT ?",
