@@ -64,7 +64,7 @@ def blob(tag: str, size: int = 4096) -> bytes:
 async def new_job(set_id, n) -> Job:
     async with async_session() as s:
         job = Job(filename=f"fops_{n}.jpg", original_path=f"{ROOT}/in/fops_{n}.jpg",
-                  debug_key=f"FOPS-{RUN}-{n}", status="done", set_id=set_id, step_result={})
+                  debug_key=f"FOPS-{RUN}-{n}", status="done", set_id=set_id)
         s.add(job)
         await s.commit()
         JOB_IDS.append(job.id)
@@ -579,6 +579,73 @@ async def test_download(set_id):
            not [n for n in os.listdir(d) if n.startswith(".fops-")])
 
 
+async def test_prune_empty_dirs(set_id):
+    print("\n── Leere Ordner nach dem Verschieben (prune_empty_dirs) ──")
+    from models import InboxDirectory
+    job = await new_job(set_id, "prune")
+
+    def mkdirs(*parts):
+        path = os.path.join(BASE, *parts)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    chain = mkdirs("prune", "a", "b")
+    write(os.path.join(chain, ".DS_Store"), b"junk")
+    write(os.path.join(chain, "@eaDir", "thumb.jpg"), b"junk")
+    removed = await fileops.prune_empty_dirs(job, chain, BASE, actor="test")
+    report("Nur Systemreste: Ordnerkette bis unter den Basis-Pfad entfernt, Basis-Pfad bleibt",
+           removed == [chain, os.path.dirname(chain), os.path.join(BASE, "prune")] and os.path.isdir(BASE),
+           f"{removed}")
+
+    keep_dir = mkdirs("prune2", "x")
+    empty = mkdirs("prune2", "x", "y")
+    write(os.path.join(keep_dir, "keep.txt"), b"vom Benutzer")
+    removed = await fileops.prune_empty_dirs(job, empty, BASE, actor="test")
+    report("Ordner mit fremder Datei bleibt (nur der leere darunter geht)",
+           removed == [empty] and read(os.path.join(keep_dir, "keep.txt")) == b"vom Benutzer", f"{removed}")
+
+    trash = mkdirs(fileops.TRASH_DIRNAME, "2026-01-01", f"FOPS-{RUN}-prune")
+    removed = await fileops.prune_empty_dirs(job, trash, BASE, actor="test")
+    report("Im Papierkorb wird nichts entfernt", removed == [] and os.path.isdir(trash), f"{removed}")
+
+    outside = os.path.join(ROOT, "ausserhalb", "leer")
+    os.makedirs(outside, exist_ok=True)
+    removed = await fileops.prune_empty_dirs(job, outside, BASE, actor="test")
+    removed_self = await fileops.prune_empty_dirs(job, BASE, BASE, actor="test")
+    report("Ausserhalb des Basis-Pfads und der Basis-Pfad selbst: nichts entfernt",
+           removed == [] and removed_self == [] and os.path.isdir(outside) and os.path.isdir(BASE),
+           f"{removed} {removed_self}")
+
+    inbox = mkdirs("eingang")
+    sub = mkdirs("eingang", "sub")
+    async with async_session() as s:
+        row = InboxDirectory(path=inbox, label=f"FOPS-{RUN}", set_id=set_id, active=False)
+        s.add(row)
+        await s.commit()
+        inbox_id = row.id
+    try:
+        removed = await fileops.prune_empty_dirs(job, sub, BASE, actor="test")
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(InboxDirectory).where(InboxDirectory.id == inbox_id))
+            await s.commit()
+    report("Eingangsordner in der Ablage bleibt (die Kette endet darunter)",
+           removed == [sub] and os.path.isdir(inbox), f"{removed}")
+
+    async with async_session() as s:
+        logs = (await s.execute(select(SystemLog.message).where(
+            SystemLog.source == "fileops", SystemLog.message.like(f"FOPS-{RUN}-prune Leere Ordner%"),
+            SystemLog.created_at >= STARTED))).scalars().all()
+    report("Entfernte Ordner protokolliert, kein Eintrag im Protokoll file_ops",
+           len(logs) == 3 and not await open_intents(job.id)
+           and not (await _ops_of(job.id)), f"{len(logs)} Logzeilen")
+
+
+async def _ops_of(job_id) -> list[FileOp]:
+    async with async_session() as s:
+        return list((await s.execute(select(FileOp).where(FileOp.job_id == job_id))).scalars().all())
+
+
 async def setup_set() -> int:
     async with async_session() as s:
         ps = ProcessingSet(name=f"FOPS-Test {RUN}", active=False, position=99999,
@@ -636,6 +703,7 @@ async def main():
         await test_foreign_and_mismatch(set_id, job_a)
         await test_write_metadata(set_id)
         await test_download(set_id)
+        await test_prune_empty_dirs(set_id)
         await test_thread_logging()
         await test_ledger_append_only(set_id)
     except Exception:

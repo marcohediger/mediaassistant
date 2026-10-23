@@ -128,7 +128,12 @@ async def requeue_interrupted_jobs() -> None:
     not resumed: the new run would act on a file whose state is unknown. It
     stays 'processing'; the stale watchdog settles the operation once it is
     older than the stale timeout and then puts the job back into the queue.
+
+    A job claimed by a rerun preparation that the restart cut short is not
+    resumed either: it goes back to the status it had
+    (pipeline.rerun.release_cut_short), and the feeder prepares its item again.
     """
+    from pipeline import rerun
     alive = await jobs_alive_elsewhere()
     query = select(Job).where(Job.status == "processing", Job.id.notin_(list(alive)))
     if _startup_at is not None:
@@ -150,6 +155,9 @@ async def requeue_interrupted_jobs() -> None:
                     "nicht erreichbar). Der Job bleibt 'processing'; die Stale-Prüfung gleicht die Operation "
                     "später ab und stellt ihn dann zurück in die Warteschlange.")
                 logger.warning("Job %s not resumed: open file operations %s", job.debug_key, open_ops[job.id])
+                continue
+            if await rerun.release_cut_short(session, job):
+                logger.info("Job %s: cut-short rerun preparation, back to %s", job.debug_key, job.status)
                 continue
             retry = (job.retry_count or 0) + 1
             if retry > MAX_RESUME_RETRIES:

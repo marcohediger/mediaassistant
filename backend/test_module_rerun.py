@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 import traceback
+from datetime import datetime, timedelta
 
 sys.path.insert(0, "/app")
 os.environ.setdefault("DATABASE_PATH", "/app/data/mediaassistant.db")
@@ -44,6 +45,7 @@ from models import (AssetRef, Job, LibraryCategory, ModuleRun, ProcessingSet, Re
                     SystemLog, MODULE_RUNS_GUARDS)
 from sets import seed_set_defaults
 from test_support.invariants import delete_test_jobs, sha256_file
+from test_support.seed import seed_results
 
 TS = int(time.time())
 TAG = f"MRR{TS}"
@@ -177,8 +179,9 @@ async def new_job(set_id, *, gps=True, status="queued", **extra):
         fields.update(extra)
         job = Job(filename=os.path.basename(path), original_path=path, debug_key=f"{TAG}-{_N:02d}",
                   status=status, source_label=f"{TAG} Eingang", source_inbox_path=f"{SANDBOX}/inbox",
-                  set_id=set_id, file_hash=sha256_file(path), step_result=pre_results(), **fields)
+                  set_id=set_id, file_hash=sha256_file(path), **fields)
         s.add(job)
+        await seed_results(s, job, pre_results())
         await s.commit()
         CREATED_JOBS.append(job.id)
         return job.id
@@ -746,45 +749,94 @@ def _const(value):
 # 8. Crash in the preparation
 # ---------------------------------------------------------------------------
 
-async def test_crash_in_preparation(set_id):
-    section("8. Absturz in der Vorbereitung")
-    import reruns
-    from pipeline import rerun as rp, run_pipeline
-    j = await done_job(set_id)
-    before = await cur(j)
-    res = await request(["IA-03"], [(await get_job(j)).debug_key])
+def _ids(current):
+    return {m: r.id for m, r in current.items()}
+
+
+async def _crash_preparation(j):
+    """A request for IA-01 whose preparation dies after the claim, before
+    its transaction (SimulatedCrash at runs.enqueue). Returns the item."""
+    from pipeline import rerun as rp
+    res = await request(["IA-01"], [(await get_job(j)).debug_key])
     item = (await items_of(res["rerun_id"]))[0]
     await rp._set_item(item.id, "pending", state="preparing")
 
     async def crash(*a, **k):
         raise SimulatedCrash("process dies before the commit")
-    crashed = False
     with patched(runs, "enqueue", crash):
         try:
             await rp.prepare(item.id)
         except SimulatedCrash:
-            crashed = True
+            return item
+    return None
+
+
+async def test_crash_in_preparation(set_id):
+    section("8. Absturz in der Vorbereitung")
+    import recovery
+    import reruns
+    import worker
+    from pipeline import run_pipeline
+    # A review job (no EXIF: category unknown) — the status the restart has
+    # to give back; a pipeline run would aggregate it to 'done'.
+    j = await done_job(set_id, gps=False)
+    job0 = await get_job(j)
+    before = await cur(j)
+    report("Vorlage: Job im Review", job0.status == "review", f"{job0.status} {job0.target_path}")
+    item = await _crash_preparation(j)
     mid = await get_job(j)
     async with async_session() as s:
-        istate = (await s.get(RerunItem, item.id)).state
-    report("Absturz: Job 'processing', alte Läufe gültig, Auftrag 'preparing'", crashed and mid.status == "processing"
-           and (await cur(j))["IA-03"].id == before["IA-03"].id and istate == "preparing", f"{mid.status} {istate}")
-    # Restart: requeue_interrupted_jobs (for this job) and the feeder's reset
-    async with async_session() as s:
-        await s.execute(update(Job).where(Job.id == j, Job.status == "processing").values(status="queued"))
-        await s.commit()
-    await run_pipeline(j)
-    n = await reruns.reset_interrupted()
+        it = await s.get(RerunItem, item.id) if item else None
+    report("Absturz: Job 'processing', alte Läufe gültig, Auftrag 'preparing' mit dem Status von vorher",
+           it is not None and mid.status == "processing" and _ids(await cur(j)) == _ids(before)
+           and it.state == "preparing" and it.prev_status == "review",
+           f"{mid.status} {it.state if it else None} prev={it.prev_status if it else None}")
+
+    # Restart: the startup recovery for this job only (every other
+    # 'processing' job counts as alive elsewhere), the worker, the feeder.
+    async def others_alive():
+        async with async_session() as s:
+            return set((await s.execute(select(Job.id).where(Job.status == "processing", Job.id != j)))
+                       .scalars().all())
+    with patched(recovery, "jobs_alive_elsewhere", others_alive):
+        await recovery.requeue_interrupted_jobs()
+    await run_pipeline(j)  # what the worker does with a queued job
+    await reruns.reset_interrupted()
     job = await get_job(j)
     async with async_session() as s:
         istate = (await s.get(RerunItem, item.id)).state
-    report("Nach dem Neustart: nichts offen → Job wieder fertig; Auftrag wieder 'pending'",
-           job.status in ("done", "review") and istate == "pending" and n >= 1
-           and (await cur(j))["IA-03"].id == before["IA-03"].id, f"{job.status} {istate}")
-    with FakeGeo("Zürich"):
-        prepared, it = await run_item(item.id)
-    report("Zweite Vorbereitung läuft durch", prepared.state == "queued" and it.state == "done",
-           f"{prepared} {it.state} {it.detail}")
+    report("Nach dem Neustart: Job zurück im Status von vorher (review), nichts gelaufen, Auftrag wieder 'pending'",
+           job.status == "review" and job.error_message == job0.error_message
+           and (job.retry_count or 0) == (job0.retry_count or 0) and _ids(await cur(j)) == _ids(before)
+           and istate == "pending",
+           f"{job.status} retry={job.retry_count} {istate} "
+           f"neu={sorted(set(_ids(await cur(j)).items()) - set(_ids(before).items()))}")
+    prepared, it = await run_item(item.id)
+    after, job = await cur(j), await get_job(j)
+    report("Zweite Vorbereitung läuft durch, einmal: IA-01 Versuch +1, Status bleibt review",
+           prepared.state == "queued" and it.state in ("done", "unchanged") and job.status == "review"
+           and after["IA-01"].attempt == before["IA-01"].attempt + 1 and after["IA-08"].id == before["IA-08"].id,
+           f"{prepared} {it.state} {it.detail} {job.status} IA-01 #{after['IA-01'].attempt}")
+
+    # The same without a restart: the stale watchdog finds the job (a
+    # preparation of a process that is gone, e.g. one whose file operation
+    # could not be settled at the start).
+    before, job0 = after, job
+    item = await _crash_preparation(j)
+    async with async_session() as s:
+        await s.execute(update(Job).where(Job.id == j).values(
+            updated_at=datetime.now() - timedelta(seconds=worker.STALE_TIMEOUT_S + 300)))
+        await s.commit()
+        row = (await s.execute(select(*worker._STALE_COLUMNS).where(Job.id == j))).one()
+    await worker._requeue_or_fail(row, datetime.now() - timedelta(seconds=worker.STALE_TIMEOUT_S))
+    job = await get_job(j)
+    async with async_session() as s:
+        istate = (await s.get(RerunItem, item.id)).state if item else None
+    report("Watchdog: Job zurück auf review, Auftrag wieder 'pending', nichts gelaufen, retry_count bleibt",
+           item is not None and job.status == "review" and istate == "pending"
+           and (job.retry_count or 0) == (job0.retry_count or 0) and _ids(await cur(j)) == _ids(before),
+           f"{job.status} retry={job.retry_count} {istate}")
+    await reruns.cancel(item.rerun_id) if item else None
 
 
 # ---------------------------------------------------------------------------

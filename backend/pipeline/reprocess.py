@@ -47,6 +47,7 @@ import runs
 from database import async_session
 from file_operations import sha256 as _sha256
 from models import AssetRef, FileCopy, FileOp, Job
+from pipeline.registry import MAIN
 from system_logger import log_info, log_warning
 
 
@@ -495,14 +496,6 @@ async def resume_prepare_source(session, job, *, actor: str = ACTOR) -> tuple[bo
     return True, notes
 
 
-# Pipeline order — used for cascade-dropping downstream steps. Mirrors
-# MAIN_STEPS in pipeline/__init__.py without importing it (avoids circular).
-_PIPELINE_ORDER = [
-    "IA-01", "IA-02", "IA-03", "IA-04", "IA-05",
-    "IA-06", "IA-07", "IA-08",
-]
-
-
 async def _reset_step_results(
     session,
     job,
@@ -549,7 +542,6 @@ async def _reset_step_results(
     Does not commit. Returns snapshots of the runs that were current before
     and are not any more (for runs.restore).
     """
-    await runs.adopt(session, job)
     before = {m: runs.snapshot(r) for m, r in (await runs.current_runs(session, job.id)).items()}
     current = {k: v for k, v in (job.step_result or {}).items() if not is_run_param(k)}
 
@@ -569,9 +561,9 @@ async def _reset_step_results(
     if matched:
         to_drop = set(matched)
         for matched_code in matched:
-            if matched_code in _PIPELINE_ORDER:
-                idx = _PIPELINE_ORDER.index(matched_code)
-                for downstream in _PIPELINE_ORDER[idx + 1:]:
+            if matched_code in MAIN:  # the main modules in pipeline order (registry)
+                idx = MAIN.index(matched_code)
+                for downstream in MAIN[idx + 1:]:
                     to_drop.add(downstream)
 
         for step_code in to_drop:

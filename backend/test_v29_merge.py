@@ -237,7 +237,7 @@ async def test_already_done_path():
     from database import async_session
     from models import Job
     from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
+    from test_support.seed import seed_results
 
     ts = int(time.time())
     print("\n── FTAG-45: Already-done direct apply path ──")
@@ -254,12 +254,6 @@ async def test_already_done_path():
             debug_key=f"V29-AD-KEPT-{ts}",
             file_hash=f"v29ad_{ts}", phash=f"v29ad_phash_{ts}",
             immich_asset_id="fake-asset-id-for-test",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {"status": "ok"},
-                "IA-07": {"keywords_written": ["Strand"]},
-                "IA-08": {"immich_tags_written": ["Strand"]},
-            },
         )
         # Donor (to be merged)
         donor = Job(
@@ -269,17 +263,23 @@ async def test_already_done_path():
             debug_key=f"V29-AD-DONOR-{ts}",
             file_hash=f"v29add_{ts}", phash=f"v29ad_phash_{ts}",
             immich_asset_id=None,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "folder_tags": ["Urlaub", "Spanien", "Urlaub Spanien"],
-                },
-                "IA-07": {"keywords_written": ["Tapas"],
-                          "description_written": "Ein schöner Tag"},
-            },
         )
         session.add_all([kept, donor])
+        await seed_results(session, kept, {
+            "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
+            "IA-02": {"status": "ok"},
+            "IA-07": {"keywords_written": ["Strand"]},
+            "IA-08": {"immich_tags_written": ["Strand"]},
+        })
+        await seed_results(session, donor, {
+            "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
+            "IA-02": {
+                "status": "duplicate",
+                "folder_tags": ["Urlaub", "Spanien", "Urlaub Spanien"],
+            },
+            "IA-07": {"keywords_written": ["Tapas"],
+                      "description_written": "Ein schöner Tag"},
+        })
         await session.commit()
         keep_key = kept.debug_key
 

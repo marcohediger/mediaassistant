@@ -5,8 +5,7 @@ This module is the only writer of
 - ``module_runs``: a run is started (``running``, with a heartbeat) and
   finished with its status and result; recorded directly when a result is
   set without executing the module (merged or copied from another job,
-  chosen by the user, taken over from the old ``step_result``); superseded
-  when a retry or a reset invalidates it.
+  chosen by the user); superseded when a retry or a reset invalidates it.
 - ``jobs.step_result``: the derived view the readers use, rebuilt in the
   same transaction as every change — for each module the result of its
   current finished run, plus the job values.
@@ -40,13 +39,13 @@ own changes. Each write first takes SQLite's write lock (it touches the job
 row), so call fileops — which writes in sessions of its own — before them
 or after the commit, never in between.
 
-Until step 7 of the rebuild some tests (and old tools) still write
-``step_result`` directly. ``adopt()`` takes such a write over as runs with
-trigger ``migrated`` — the same rule the one-time startup migration
-(``database._migrate_module_runs``) applies to the whole table.
+Nothing else writes ``step_result`` (guarded by
+``test_no_direct_step_result.py``) except the one-time startup migration
+(``database._migrate_module_runs``), which took the old results over as
+runs with trigger ``migrated``. Tests seed results with that trigger
+through ``test_support.seed`` (``apply``).
 """
 import json
-import logging
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -54,8 +53,6 @@ from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm.attributes import set_committed_value
 
 from models import Job, ModuleRun, MODULE_CODES, RUN_RESULT_STATUSES
-
-logger = logging.getLogger("mediaassistant.runs")
 
 MODULES = MODULE_CODES
 TRIGGERS = ("pipeline", "retry", "rerun", "cascade", "copied", "migrated")
@@ -419,26 +416,6 @@ async def apply(session, job, target: dict, *, trigger: str | None, sources: dic
         await _store_values(session, job, data)
         await _write_view(session, job, data)
     return changed
-
-
-async def adopt(session, job) -> bool:
-    """Take a direct write of step_result over as runs (trigger 'migrated').
-
-    The stored step_result is compared with the view the runs and job
-    values give; where they differ, the stored one was written by code that
-    does not go through this module yet (tests, old tools — step 7 removes
-    them). Its module results become runs, its other keys job values.
-    Returns True if anything was taken over."""
-    row = (await session.execute(select(Job.step_result, Job.job_data).where(Job.id == job.id))).one_or_none()
-    if row is None:
-        return False
-    stored = row[0] if isinstance(row[0], dict) else {}
-    if _canon(stored) == _canon(await _derive(session, job.id, row[1])):
-        return False
-    changed = await apply(session, job, stored, trigger="migrated")
-    logger.info("%s: step_result written outside runs.py taken over (%s)", job.debug_key,
-                ", ".join(changed) or "job values")
-    return True
 
 
 async def by_ids(session, ids) -> dict[int, ModuleRun]:

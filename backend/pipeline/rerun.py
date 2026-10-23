@@ -654,6 +654,45 @@ async def _release(job_id: int, prev_status: str) -> None:
         await session.commit()
 
 
+async def release_cut_short(session, job, *, cutoff: datetime | None = None) -> bool:
+    """A job left 'processing' by a rerun preparation that was cut short
+    goes back to the status it had, its item back to 'pending' (the feeder
+    prepares it again). True if it was one. Called at startup
+    (recovery.requeue_interrupted_jobs) and by the stale watchdog
+    (worker._requeue_or_fail, with its `cutoff`: a job touched since is
+    left alone); a preparation still running heartbeats and is never stale.
+
+    The preparation commits its claim (with the status from before, in the
+    item) first and everything else in one transaction at the end (runs,
+    run parameters, status, item). Cut short in between, the job has no run
+    parameters and its item is still 'preparing': nothing of the rerun was
+    kept, and a work copy it may have downloaded is the job's own
+    (registered), found again by the next preparation. Resumed like an
+    interrupted pipeline run instead, the job ran with nothing open and its
+    status was aggregated anew — a review job came back 'done' — and the
+    item met a queued job and was refused as busy. retry_count stays (2.6).
+    """
+    if job.status != "processing" or "_rerun" in runs.params_of(job):
+        return False
+    item = (await session.execute(select(RerunItem.id, RerunItem.prev_status).where(
+        RerunItem.job_id == job.id, RerunItem.state == "preparing"))).first()
+    if item is None or item.prev_status not in RERUNNABLE:
+        return False
+    query = update(Job).where(Job.id == job.id, Job.status == "processing")
+    if cutoff is not None:
+        query = query.where(Job.updated_at < cutoff)
+    res = await session.execute(query.values(status=item.prev_status))
+    if res.rowcount != 1:
+        return False  # nothing changed; the caller goes on as without
+    await session.execute(update(RerunItem).where(RerunItem.id == item.id, RerunItem.state == "preparing")
+                          .values(state="pending"))
+    await session.commit()
+    await log_info("rerun", f"{job.debug_key} Vorbereitung für Neu ausführen unterbrochen — "
+                            f"Job zurück auf '{item.prev_status}'",
+                   f"{job.filename}: nichts vom Neu ausführen übernommen; der Auftrag wird neu vorbereitet")
+    return True
+
+
 async def _asset_ok(job) -> tuple[bool, str]:
     """The job's asset is present in Immich (not trashed). (ok, note)."""
     import immich_client
@@ -738,12 +777,18 @@ async def prepare(item_id: int) -> Prepared:
         if prev not in RERUNNABLE:
             return await refuse(_STATUS_REFUSED.get(prev, "busy"))
         # Atomic claim, like a retry: only one caller takes a finished job.
+        # The status it had goes into the item in the same commit: a restart
+        # that cuts the preparation short hands it back from there
+        # (release_cut_short).
         claim = await session.execute(update(Job).where(Job.id == job_id, Job.status == prev)
                                       .values(status="processing"))
+        if claim.rowcount == 1:
+            await session.execute(update(RerunItem).where(RerunItem.id == item_id,
+                                                          RerunItem.state == "preparing")
+                                  .values(prev_status=prev))
         await session.commit()
     if claim.rowcount != 1:
         return await refuse("busy")
-    await _set_item(item_id, "preparing", prev_status=prev)
 
     async with pipeline._running(job_id, "rerun"):
         try:
@@ -767,9 +812,6 @@ async def _prepare_claimed(item_id, request, job_id, prev, modules, options) -> 
     from pipeline import reprocess
     async with async_session() as session:
         job = await session.get(Job, job_id)
-        # A step_result written outside runs.py becomes runs first.
-        await runs.adopt(session, job)
-        await session.commit()
     key = job.debug_key
 
     # Binding checks (2.5)

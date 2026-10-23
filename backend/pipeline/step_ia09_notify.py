@@ -23,9 +23,10 @@ async def execute(job, session) -> dict:
         from sqlalchemy import select
         import runs
         from models import ModuleRun
+        from pipeline.registry import FINALIZER_CODES
         rows = (await session.execute(select(ModuleRun.module, ModuleRun.result).where(
             ModuleRun.job_id == job.id, ModuleRun.id > int(rerun.get("base") or 0),
-            ModuleRun.module.notin_(("IA-09", "IA-10", "IA-11"))).order_by(ModuleRun.id))).all()
+            ModuleRun.module.notin_(FINALIZER_CODES)).order_by(ModuleRun.id))).all()
         for step_code, result in rows:
             if runs.result_status(result) == "error":
                 errors.append(f"[{step_code}] {result.get('reason', 'unbekannt')}")

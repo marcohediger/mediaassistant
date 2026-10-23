@@ -47,13 +47,11 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 from sqlalchemy import func, or_, select
 
 from database import async_session
+from fileops import TRASH_RETENTION_DAYS
 from models import AssetRef, FileCopy, FileOp, Job, ModuleRun, ProcessingSet, RUN_RESULT_STATUSES
-
-MODULES = tuple(f"IA-{n:02d}" for n in range(1, 12))
-# A failure in these modules fails the job; elsewhere it only warns
-# (pipeline/__init__.py: non_critical steps and the finalizers).
-CRITICAL = frozenset({"IA-01", "IA-07", "IA-08"})
-TRASH_RETENTION_DAYS = 30  # fileops.TRASH_RETENTION_DAYS; not imported to keep this module light
+# The module register is the one source of the module order and of which
+# modules are critical (a failure there fails the job; elsewhere it only warns).
+from pipeline.registry import CRITICAL, ORDER as MODULES
 
 STATUS_TONES = {
     "ok": ("is-success", "check-circle"),
@@ -716,12 +714,17 @@ async def trash_entries(t: dict, *, kind: str | None = None, offset: int = 0, li
                 select(Job.id, Job.debug_key, Job.filename).where(Job.id.in_(job_ids)))).all()}
         reasons: dict[int, FileOp] = {}
         if ids:
+            # The state is checked here, not in SQL: with it SQLite takes the
+            # state index and reads every finished operation of the ledger
+            # instead of the two copy-id indexes.
             ops = (await session.execute(
-                select(FileOp).where(FileOp.op == "trash", FileOp.state == "done",
+                select(FileOp).where(FileOp.op == "trash",
                                      or_(FileOp.dst_copy_id.in_(ids), FileOp.copy_id.in_(ids)))
                 .order_by(FileOp.id)
             )).scalars().all()
             for op in ops:
+                if op.state != "done":
+                    continue
                 for cid in (op.dst_copy_id, op.copy_id):
                     if cid in ids:
                         reasons[cid] = op

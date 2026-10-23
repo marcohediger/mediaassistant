@@ -36,11 +36,11 @@ sys.path.insert(0, "/app")
 os.environ.setdefault("DATABASE_PATH", "/app/data/mediaassistant.db")
 
 from sqlalchemy import select
-from sqlalchemy.orm.attributes import flag_modified
 
 from config import config_manager
 from database import async_session
 from models import Job
+from test_support.seed import seed_results
 from pipeline import run_pipeline, reset_job_for_retry
 from immich_client import delete_asset
 
@@ -164,7 +164,6 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
                 use_immich=True,
-                step_result={},
             )
             session.add(job)
             await session.commit()
@@ -214,8 +213,7 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
                 "quality": "unbekannt",
                 "confidence": 0.0,
             }
-            job.step_result = sr
-            flag_modified(job, "step_result")
+            await seed_results(session, job, sr)
             job.error_message = "Warnungen in: IA-05"
             # The first run set original_path to wherever IA-08 left it; for
             # the retry-from-inbox scenario we point it back to the inbox.
@@ -376,7 +374,6 @@ async def _run_filestorage_test(source_heic: str, *, mode: str = "direct"):
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
                 use_immich=False,  # ← file-storage path, no Immich
-                step_result={},
             )
             session.add(job)
             await session.commit()
@@ -417,8 +414,7 @@ async def _run_filestorage_test(source_heic: str, *, mode: str = "direct"):
                 "mood": "", "people_count": 0, "quality": "unbekannt",
                 "confidence": 0.0,
             }
-            job.step_result = sr
-            flag_modified(job, "step_result")
+            await seed_results(session, job, sr)
             job.error_message = "Warnungen in: IA-05"
             await session.commit()
 
@@ -573,23 +569,23 @@ async def _run_error_retry_test(source_heic: str, *, mode: str = "direct",
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
                 use_immich=use_immich,
-                step_result={
-                    "IA-01": {
-                        "make": "Apple", "model": "iPhone", "date": "2022:12:01 12:00:00",
-                        "gps_lat": None, "gps_lon": None, "gps": False,
-                        "software": None, "width": 4032, "height": 3024,
-                        "file_type": "HEIC", "mime_type": "image/heic",
-                        "orientation": 1, "has_exif": True, "file_size": 1889263,
-                    },
-                    "IA-02": {"status": "ok", "phash": None},
-                    "IA-07": ia07_result,
-                    "IA-08": {
-                        "status": "error",
-                        "reason": f"RuntimeError: synthetic IA-08 fail for {scenario_id}",
-                    },
-                },
             )
             session.add(job)
+            await seed_results(session, job, {
+                "IA-01": {
+                    "make": "Apple", "model": "iPhone", "date": "2022:12:01 12:00:00",
+                    "gps_lat": None, "gps_lon": None, "gps": False,
+                    "software": None, "width": 4032, "height": 3024,
+                    "file_type": "HEIC", "mime_type": "image/heic",
+                    "orientation": 1, "has_exif": True, "file_size": 1889263,
+                },
+                "IA-02": {"status": "ok", "phash": None},
+                "IA-07": ia07_result,
+                "IA-08": {
+                    "status": "error",
+                    "reason": f"RuntimeError: synthetic IA-08 fail for {scenario_id}",
+                },
+            })
             await session.commit()
             job_id = job.id
 
@@ -738,7 +734,6 @@ async def _run_immich_only_retry_test(source_heic: str):
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
                 use_immich=True,
-                step_result={},
             )
             session.add(job)
             await session.commit()
@@ -769,8 +764,7 @@ async def _run_immich_only_retry_test(source_heic: str):
                 "type": "unknown", "tags": [], "description": "", "mood": "",
                 "people_count": 0, "quality": "unbekannt", "confidence": 0.0,
             }
-            job.step_result = sr
-            flag_modified(job, "step_result")
+            await seed_results(session, job, sr)
             job.error_message = "Warnungen in: IA-05"
             job.original_path = inbox_path  # the now-empty spot
             await session.commit()
@@ -865,7 +859,6 @@ async def _run_stuck_state_retry_test(source_heic: str):
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
                 use_immich=True,
-                step_result={},
             )
             session.add(job)
             await session.commit()
@@ -920,8 +913,7 @@ async def _run_stuck_state_retry_test(source_heic: str):
                 "immich_tags_written": ["unknown", "STUCK_STALE_GEO", "Persönliches Foto"],
                 "immich_tags_failed": [],
             }
-            job.step_result = sr
-            flag_modified(job, "step_result")
+            await seed_results(session, job, sr)
             # ← KEY DIFFERENCE from _run_stale_warning_state_retry_test:
             # error_message is None. No "Warnungen in: IA-05" hint.
             job.error_message = None
@@ -1040,7 +1032,6 @@ async def _run_stale_warning_state_retry_test(source_heic: str):
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
                 use_immich=True,
-                step_result={},
             )
             session.add(job)
             await session.commit()
@@ -1082,8 +1073,7 @@ async def _run_stale_warning_state_retry_test(source_heic: str):
                 "immich_tags_written": ["unknown", "STALE_GEO_TAG", "Persönliches Foto"],
                 "immich_tags_failed": [],
             }
-            job.step_result = sr
-            flag_modified(job, "step_result")
+            await seed_results(session, job, sr)
             # The poison pill: error_message still says IA-05 had a warning,
             # even though step_result.IA-05 is a clean success.
             job.error_message = "Warnungen in: IA-05"
@@ -1270,9 +1260,9 @@ async def _run_truly_missing_test():
                 source_label="Default Inbox",
                 source_inbox_path=INBOX,
                 use_immich=True,
-                step_result={"IA-01": {"status": "error", "reason": "stale"}},
             )
             session.add(job)
+            await seed_results(session, job, {"IA-01": {"status": "error", "reason": "stale"}})
             await session.commit()
             job_id = job.id
 

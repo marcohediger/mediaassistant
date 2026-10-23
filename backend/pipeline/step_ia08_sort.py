@@ -343,7 +343,8 @@ def _set_mtime(path: str, iso: str) -> bool:
 
     upload_asset sends the file's mtime as fileCreatedAt, which Immich uses
     as the capture date when the file has no EXIF date. A file downloaded
-    from Immich has the download time as mtime (R-19c).
+    from Immich carries the asset's fileModifiedAt (download_asset), which
+    for a phone upload may differ from fileCreatedAt (R-19c).
     """
     try:
         stamp = datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
@@ -668,7 +669,7 @@ async def _execute(job, session) -> dict:
             previous_descriptions=previous_descriptions, api_only=api_only)
     else:
         result = await _to_library(job, category=category, target_dir=target_dir,
-                                   wished_path=wished_path, sidecar_path=sidecar_path)
+                                   wished_path=wished_path, sidecar_path=sidecar_path, base_path=base_path)
     if manual_category:
         result["manual_review"] = True
 
@@ -695,7 +696,7 @@ async def _rule_skip_in_rerun(session, rerun: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _to_library(job, *, category: str, target_dir: str, wished_path: str,
-                      sidecar_path: str | None) -> dict:
+                      sidecar_path: str | None, base_path: str) -> dict:
     key = job.debug_key
     src = job.original_path
     source_dir = os.path.dirname(src)
@@ -760,6 +761,10 @@ async def _to_library(job, *, category: str, target_dir: str, wished_path: str,
                 result["sidecar_path"] = placed_sc
 
     await _prune_inbox_dirs(job, source_dir)
+    # A library file filed into another folder (a rerun, 2.4): the folders
+    # it left empty go, up to the set's base path (an inbox inside the
+    # library is left to the line above; fileops keeps inputs and the trash).
+    await fileops.prune_empty_dirs(job, source_dir, base_path, actor="IA-08")
     result["target_path"] = target_path
     return result
 

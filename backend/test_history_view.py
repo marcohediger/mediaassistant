@@ -44,6 +44,7 @@ from config import config_manager
 from database import async_session
 from i18n import load_lang
 from models import FILE_OPS_GUARDS, AssetRef, FileCopy, FileOp, Job, ProcessingSet, SystemLog
+from test_support.seed import seed_results
 
 PASS = 0
 FAIL = 0
@@ -476,9 +477,9 @@ async def setup() -> tuple[int, Job]:
         s.add(ps)
         await s.commit()
         job = Job(filename="hist_a.jpg", original_path=f"{LIB}/hist_a.jpg", target_path=f"{LIB}/hist_a.jpg",
-                  debug_key=f"HIST-{RUN}-1", status="done", set_id=ps.id,
-                  step_result={"IA-01": {"file_type": "JPEG"}, "IA-08": {"target_path": f"{LIB}/hist_a.jpg"}})
+                  debug_key=f"HIST-{RUN}-1", status="done", set_id=ps.id)
         s.add(job)
+        await seed_results(s, job, {"IA-01": {"file_type": "JPEG"}, "IA-08": {"target_path": f"{LIB}/hist_a.jpg"}})
         await s.commit()
         JOB_IDS.append(job.id)
         return ps.id, job

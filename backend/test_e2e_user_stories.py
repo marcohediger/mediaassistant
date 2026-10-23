@@ -627,7 +627,7 @@ async def test_us6_shared_asset_keep():
     from database import async_session
     from models import Job
     from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
+    from test_support.seed import seed_results
 
     dup_dir = "/library/error/duplicates"
     os.makedirs(dup_dir, exist_ok=True)
@@ -647,13 +647,13 @@ async def test_us6_shared_asset_keep():
             # The donor's hash is that of its own file: the resolution moves
             # a donor's file to the trash only when its content checks out.
             file_hash=sha256(dup_path),
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": 100},
-                "IA-02": {"status": "duplicate", "match_type": "exact",
-                          "original_debug_key": job1.debug_key},
-            },
         )
         session.add(poller_job)
+        await seed_results(session, poller_job, {
+            "IA-01": {"file_type": "JPEG", "file_size": 100},
+            "IA-02": {"status": "duplicate", "match_type": "exact",
+                      "original_debug_key": job1.debug_key},
+        })
         await session.commit()
         poller_id = poller_job.id
         CLEANUP_JOBS.append(poller_id)
@@ -764,7 +764,7 @@ async def test_us8_not_duplicate():
         from database import async_session
         from models import Job
         from sqlalchemy import select
-        from sqlalchemy.orm.attributes import flag_modified
+        from test_support.seed import seed_results
         from pipeline.reprocess import prepare_job_for_reprocess
         from pipeline import run_pipeline
 
@@ -774,8 +774,10 @@ async def test_us8_not_duplicate():
 
             sr = dict(job.step_result or {})
             sr["IA-02"] = {"status": "skipped", "reason": "not a duplicate (e2e)"}
-            job.step_result = sr
-            flag_modified(job, "step_result")
+            await seed_results(session, job, sr)
+            # The seed holds SQLite's write lock; fileops (in the reprocess
+            # below) writes in sessions of its own.
+            await session.commit()
 
             dup_path = job.target_path or job.original_path
             if dup_path and not dup_path.startswith("immich:") and os.path.exists(dup_path):
@@ -1458,6 +1460,17 @@ async def test_us16_rerun_immich_work_copy():
         check("US16-06 IA-01 Versuch 2 (rerun), Auftrag beendet", after["IA-01"].trigger == "rerun"
               and after["IA-01"].id != before["IA-01"].id and item.state in ("done", "unchanged"),
               f"item={item.state} {item.reason} {item.detail}")
+        # The photo has no EXIF date: IA-01 falls back to the file time. A
+        # download carries the asset's fileModifiedAt (set by the phone
+        # upload above), not the moment of the download — in the poller's
+        # first run as in the rerun's work copy, so nothing cascades.
+        date0 = str((before["IA-01"].result or {}).get("date") or "")
+        date1 = str((after["IA-01"].result or {}).get("date") or "")
+        check("US16-06b ohne EXIF-Datum: Datum = Dateizeit aus Immich (2025-06-15), auch nach dem Neu ausführen",
+              date0.startswith("2025:06:15") and date1 == date0, f"{date0!r} -> {date1!r}")
+        check("US16-06c gleiches Datum: IA-08 nicht kaskadiert, Auftrag unchanged",
+              after["IA-08"].id == before["IA-08"].id and item.state == "unchanged",
+              f"IA-08 {before['IA-08'].id} -> {after['IA-08'].id} ({after['IA-08'].trigger}); item={item.state}")
         # The work copy goes after the hand-over: IA-08 (when it ran) or IA-10.
         removal = [o for o in ops if o.src == work and o.op != "download"]
         check("US16-07 file_ops.run_id gesetzt (das Entfernen der Arbeitskopie gehört zum Lauf des Moduls)",
@@ -1509,6 +1522,13 @@ async def test_us17_rerun_library_city():
             if not ok_first:
                 continue
             status_before = job.status
+            old_dir, base = os.path.dirname(first), f"{E2E_ROOT}/lib_us17{label}"
+            # The sidecar case: a file of the user's next to ours keeps the
+            # old folder from being removed.
+            note = os.path.join(old_dir, "notiz.txt") if label == "sidecar" else None
+            if note:
+                with open(note, "w") as f:
+                    f.write("vom Benutzer")
             with FakeGeo("Zürich"):
                 rid, item, prepared = await rerun_job(job_id, ["IA-03"])
             job = await get_job(job_id)
@@ -1522,6 +1542,14 @@ async def test_us17_rerun_library_city():
             else:
                 check(f"US17-{label}-03 Datei umgezogen, target_path nachgeführt",
                       "/Zürich/" in now and os.path.isfile(now) and not os.path.exists(first), f"{first} -> {now}")
+                left = sorted(os.listdir(old_dir)) if os.path.isdir(old_dir) else None
+                if note:
+                    check(f"US17-{label}-03b alter Ordner mit fremder Datei bleibt, die Datei unberührt",
+                          left == ["notiz.txt"] and open(note).read() == "vom Benutzer", f"{old_dir}: {left}")
+                else:
+                    check(f"US17-{label}-03b leerer alter Ordner entfernt, Kategorie-Ordner und Basis-Pfad bleiben",
+                          left is None and os.path.isdir(os.path.dirname(old_dir)) and os.path.isdir(base),
+                          f"{old_dir}: {left}")
             if mode == "sidecar":
                 check(f"US17-{label}-04 Sidecar zog mit", os.path.isfile(now + ".xmp")
                       and not os.path.exists(first + ".xmp"), now + ".xmp")
@@ -1702,8 +1730,9 @@ async def test_us18_parallel_and_crash():
         job_id = await queued_job(set_id, heic, f"E2E-US18-{TS}")
         from database import async_session
         from models import Job
+        from test_support.seed import seed_results
         async with async_session() as s:
-            (await s.get(Job, job_id)).step_result = {"IA-02": {"status": "skipped", "reason": "E2E US-18"}}
+            await seed_results(s, await s.get(Job, job_id), {"IA-02": {"status": "skipped", "reason": "E2E US-18"}})
             await s.commit()
 
         geo = FakeGeo("Bern")

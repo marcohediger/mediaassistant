@@ -223,6 +223,21 @@ Kopie der Live-DB (66 000 Jobs → rund 700 000 Modul-Läufe):
 4. `reprocess/` (live 18 362 Verweise): die Bestandsprüfung ordnet jede Datei
    einem Job zu oder meldet sie als herrenlos — gelöscht wird nichts automatisch.
 
+**Platz und Dauer beim ersten Start von 3.0** (gemessen auf einer Kopie der
+Live-DB, 2026-10-23): Die Datenbank wächst von 343 auf 548 MB. Die Grösse
+bestimmt das Umkopieren von `jobs` (R-26, AUTOINCREMENT); `module_runs`
+(228 MB Tabelle, 19 MB Indizes) füllt den dabei frei gewordenen Platz. Die
+Ergebnisse stehen bis zum Umbau der Lesestellen doppelt da (`module_runs.result`
+und `jobs.step_result`, je 163 MB). Während der Migration liegt zusätzlich ein
+WAL von 552 MB auf der Platte. Es braucht also **rund 760 MB freien Platz**
+(etwa das 2,2-Fache der alten DB). Das WAL ist vorübergehend:
+`journal_size_limit` (64 MiB) stutzt es nach dem nächsten Checkpoint, und
+`database.truncate_wal()` schneidet es am Ende des Starts auf 0. Ohne das
+behielte der offene Verbindungs-Pool die 552 MB bis zum nächsten Neustart.
+Dauer auf dem Dev-Rechner: `init_db` 25 s (davon `jobs` umkopieren 11 s,
+Übernahme in `module_runs` 8–12 s), Sets-Migration 5 s. Auf einem NAS ist mit
+einem Mehrfachen zu rechnen.
+
 ## Reihenfolge auf dem Branch
 
 | # | Schritt | fertig, wenn |
