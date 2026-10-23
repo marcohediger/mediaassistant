@@ -42,9 +42,18 @@
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: var(--ui-mono); font-size: var(--ui-fs-xs); color: var(--text-muted);
 }
-.dash-jobs .dash-col-step,
 .dash-jobs .dash-col-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dash-jobs .cell-msg { max-width: 24rem; font-size: var(--ui-fs-sm); }
+
+/* Narrower: the message gives way first, so the module blocks keep their room */
+@media (max-width: 1100px) {
+    .dash-jobs .cell-msg { max-width: 16rem; }
+    .dash-job { max-width: 16rem; }
+}
+@media (max-width: 900px) {
+    .dash-jobs .cell-msg { max-width: 9rem; }
+    .dash-job { max-width: 13rem; }
+}
 
 /* ── Phone ──────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
@@ -55,21 +64,19 @@
     .dash-stats .ui-stat-value { font-size: 1.375rem; }
     .dash-stats .dash-throughput { grid-column: 1 / -1; }
 
-    /* Both tables become lists: cells placed on a small grid per row */
-    .dash-sets, .dash-sets tbody,
-    .dash-jobs, .dash-jobs tbody { display: block; }
-    .dash-sets tr, .dash-jobs tr {
+    /* The sets table becomes a list: cells placed on a small grid per row */
+    .dash-sets, .dash-sets tbody { display: block; }
+    .dash-sets tr {
         display: grid; column-gap: 0.6rem; row-gap: 0.3rem; align-items: center;
         border-bottom: 1px solid var(--ui-line);
     }
-    .dash-sets tbody tr:last-child, .dash-jobs tbody tr:last-child { border-bottom: 0; }
-    .dash-sets td, .dash-sets tbody th,
-    .dash-jobs td, .dash-jobs tbody th {
+    .dash-sets tbody tr:last-child { border-bottom: 0; }
+    .dash-sets td, .dash-sets tbody th {
         display: block; height: auto; min-width: 0; padding: 0 !important; border: 0;
     }
     /* The 1 % column widths of the desktop table would squeeze the grid cells */
-    .dash-sets tr > *, .dash-jobs tr > * { width: auto !important; }
-    .dash-sets tbody tr:hover > *, .dash-jobs tbody tr:hover > * { background: none; }
+    .dash-sets tr > * { width: auto !important; }
+    .dash-sets tbody tr:hover > * { background: none; }
 
     /* Set: name, queue, pencil — inputs below the name */
     .dash-sets tr { grid-template-columns: minmax(0, 1fr) auto auto; padding: 0.6rem 0.5rem 0.7rem 0.9rem; }
@@ -83,22 +90,41 @@
     .dash-set-inputs { gap: 0.3rem 1rem; }
     /* An empty queue is not worth the room next to the name */
     .dash-sets .dash-set-queue:not(:has(.ui-badge)) { display: none; }
+}
 
-    /* Job: status, file, time — the message below the file, step hidden */
+/* Recent jobs become a list already below 820 px (the module blocks need
+   their room): status, file, time, chevron — blocks and message below */
+@media (max-width: 820px) {
+    .dash-jobs, .dash-jobs tbody { display: block; }
     .dash-jobs thead {
         position: absolute; width: 1px; height: 1px; overflow: hidden;
         clip: rect(0, 0, 0, 0); white-space: nowrap;
     }
-    .dash-jobs tr { grid-template-columns: auto minmax(0, 1fr) auto; padding: 0.6rem 0.9rem; }
+    .dash-jobs tr {
+        display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
+        column-gap: 0.6rem; row-gap: 0.3rem; align-items: center;
+        padding: 0.6rem 0.5rem 0.6rem 0.9rem; border-bottom: 1px solid var(--ui-line);
+    }
+    .dash-jobs tbody tr:last-child { border-bottom: 0; }
+    .dash-jobs td, .dash-jobs tbody th {
+        display: block; height: auto; min-width: 0; padding: 0 !important; border: 0;
+    }
+    .dash-jobs tr > * { width: auto !important; }
+    .dash-jobs tbody tr:hover > * { background: none; }
     .dash-jobs .ui-col-icon { grid-column: 1; grid-row: 1; }
     .dash-jobs tbody th { grid-column: 2; grid-row: 1; }
     .dash-jobs .dash-col-time { grid-column: 3; grid-row: 1; align-self: start; font-size: var(--ui-fs-xs); line-height: 1.6; }
-    .dash-jobs .dash-col-step { display: none; }
+    .dash-jobs .hist-col-toggle { grid-column: 4; grid-row: 1; align-self: start; margin-top: -0.2rem; }
+    .dash-jobs .dash-col-mods { grid-column: 2 / -1; grid-row: 2; }
     .dash-jobs .cell-msg {
-        grid-column: 2 / -1; grid-row: 2; max-width: none;
+        grid-column: 2 / -1; grid-row: 3; max-width: none; padding-right: 0.4rem !important;
         white-space: normal; overflow-wrap: anywhere;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     }
     .dash-jobs .cell-msg:empty { display: none; }
     .dash-job { max-width: none; }
+    /* The expanded row spans the card */
+    .dash-jobs tr.hist-detail { display: block; padding: 0; }
+    .dash-jobs tr.hist-detail > td { display: block; }
+    .dash-jobs tr.hist-row.is-open { border-bottom-color: transparent; background: var(--ui-row-hover); }
 }

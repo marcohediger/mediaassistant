@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ job.debug_key }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/logs.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/logs.css?v={{ version }}">
+<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
 {% block content %}
 {% from "_status.html" import status_badge with context %}
+{% from "_modules.html" import module_bar, history_strings with context %}
 {% macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
@@ -41,6 +43,15 @@
         </form>
     </div>
 </div>
+
+{# One block per module (job_view.module_blocks); app.js (initJobHistory) keeps it current #}
+<section class="ui-card job-modules" aria-labelledby="job-modules-title">
+    <div class="job-modules-head">
+        <h2 class="job-modules-title" id="job-modules-title">{{ t.history.modules }}</h2>
+        <span class="job-modules-desc">{{ t.history.modules_desc }}</span>
+    </div>
+    {{ module_bar(job) }}
+</section>
 
 {% set filepath = job.target_path or job.original_path %}
 {% set is_immich = filepath and filepath.startswith('immich:') %}
@@ -145,6 +156,19 @@
             <div class="ui-empty-inline job-steps-empty">{{ icon('clock') }}<span>{{ t.job_detail.no_steps }}</span></div>
             {% endfor %}
         </div>
+
+        {# File operations from the ledger (file_ops), newest first; filled by app.js #}
+        <section class="job-history" aria-labelledby="job-history-title">
+            <div class="ui-section-head">
+                <div class="ui-section-head-text">
+                    <h2 class="ui-section-title" id="job-history-title">{{ t.history.history_title }} <span class="ui-count" id="job-ops-count" hidden></span></h2>
+                    <p class="ui-section-desc">{{ t.history.history_desc }}</p>
+                </div>
+            </div>
+            <div class="ui-card job-history-body" id="job-ops" aria-busy="true">
+                <span class="ui-skeleton hist-skel"></span><span class="ui-skeleton hist-skel"></span>
+            </div>
+        </section>
     </section>
 
     <aside class="job-aside">
@@ -155,11 +179,23 @@
                     <dt>{{ t.job_detail.original }}{% if '/inbox' in (job.original_path or '') %} <span class="job-kv-note">({{ t.job_detail.inbox_temp }})</span>{% endif %}</dt>
                     <dd><code class="ui-path job-path{{ ' is-empty' if not job.original_path else '' }}">{{ job.original_path or '—' }}</code></dd>
                 </div>
+                {# A dry run keeps its would-be target in the IA-08 step result only #}
+                {% set ia08 = job.step_result.get('IA-08') if job.dry_run and job.step_result is mapping else none %}
+                {% set planned = ia08.get('target_path') if ia08 is mapping and not job.target_path else none %}
                 <div class="ui-kv-row">
-                    <dt>{{ t.job_detail.target }}</dt>
-                    <dd><code class="ui-path job-path{{ ' is-empty' if not job.target_path else '' }}" data-field="target_path">{{ job.target_path or '—' }}</code></dd>
+                    <dt>{{ t.job_detail.target }}{% if planned %} <span class="job-kv-note">({{ t.sets.dry_run_short }})</span>{% endif %}</dt>
+                    <dd><code class="ui-path job-path{{ ' is-empty' if not (job.target_path or planned) else '' }}" data-field="target_path"{% if planned %} data-planned="1"{% endif %}>{{ job.target_path or planned or '—' }}</code></dd>
                 </div>
             </dl>
+        </section>
+
+        {# Copies of the file from the register (file_copies); restore for trashed ones #}
+        <section class="ui-card" aria-labelledby="job-copies-title">
+            <div class="ui-card-head"><h2 class="ui-card-title" id="job-copies-title">{{ icon('layers') }}{{ t.history.copies_title }} <span class="ui-count" id="job-copies-count" hidden></span></h2></div>
+            <div class="job-copies-body">
+                <div id="job-copies-alert"></div>
+                <div id="job-copies"><span class="ui-skeleton hist-skel"></span><span class="ui-skeleton hist-skel"></span></div>
+            </div>
         </section>
 
         <section class="ui-card">
@@ -183,4 +219,5 @@
         {% endif %}
     </aside>
 </div>
+{{ history_strings() }}
 {% endblock %}

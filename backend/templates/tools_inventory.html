@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}{{ t.history.inv_title }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
+{% block content %}
+{% from "_modules.html" import history_strings with context %}
+{% set h = t.history %}
+{% macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
+
+<div class="ui-page-head">
+    <div class="ui-page-head-text">
+        <a class="ui-page-back" href="/tools">{{ icon('chevron-left') }}{{ h.back_tools }}</a>
+        <h1 class="ui-page-title">{{ h.inv_title }} <span class="ui-badge ui-badge-lg is-success">{{ icon('eye', 12) }}{{ h.inv_read_only }}</span></h1>
+        <p class="ui-page-sub">{{ h.inv_sub }}</p>
+    </div>
+</div>
+
+<section class="ui-card inv-card" aria-labelledby="inv-card-title">
+    <div class="ui-card-head">
+        <span class="ui-icon-tile is-accent">{{ icon('database', 18) }}</span>
+        <div class="ui-card-head-text">
+            <h2 class="ui-card-title" id="inv-card-title">{{ h.inv_title }}</h2>
+            <p class="ui-card-desc" id="inv-last">{{ h.inv_never_title }}</p>
+        </div>
+        <div class="ui-card-actions inv-actions">
+            <button type="button" class="ui-btn ui-btn-secondary" id="inv-cancel" hidden>{{ icon('x') }}{{ h.inv_cancel }}</button>
+            <button type="button" class="ui-btn ui-btn-primary" id="inv-start">{{ icon('play') }}{{ h.inv_start }}</button>
+        </div>
+    </div>
+    <div class="inv-progress" id="inv-progress" hidden>
+        <div class="ui-progress-meta">
+            <strong id="inv-progress-title">{{ h.inv_running }}</strong>
+            <span class="ui-tabular" id="inv-progress-count"></span>
+        </div>
+        <div class="ui-progress" id="inv-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+             aria-labelledby="inv-progress-title"><div class="ui-progress-bar"></div></div>
+    </div>
+    <p class="inv-meta" id="inv-state" role="status" aria-live="polite"></p>
+</section>
+
+<div id="inv-result" aria-live="polite"></div>
+
+{{ history_strings() }}
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const H = MA.history;
+    const T = H.text;
+    const DISCREPANCY = ["missing", "mismatch", "immich_missing", "immich_trashed", "reprocess_orphan"];
+    const TONES = {missing: "is-error", mismatch: "is-error", immich_missing: "is-error", immich_trashed: "is-warning",
+                   reprocess_orphan: "is-warning", locked: "is-violet", recovered: "is-success",
+                   reprocess_unregistered: "is-info", unchecked: "is-neutral"};
+    const startBtn = document.getElementById("inv-start");
+    const cancelBtn = document.getElementById("inv-cancel");
+    const stateEl = document.getElementById("inv-state");
+    const progress = document.getElementById("inv-progress");
+    const bar = document.getElementById("inv-progress-bar");
+    const result = document.getElementById("inv-result");
+    let polling = null;
+    let shownRun = null;
+    let typeFilter = "";
+
+    const pad = (n) => String(n).padStart(2, "0");
+    function when(iso) {
+        const d = iso ? new Date(iso) : null;
+        if (!d || isNaN(d)) return iso || "";
+        return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    function duration(s) {
+        s = Math.round(s || 0);
+        return s < 60 ? T("inv_seconds", {n: s}) : T("inv_minutes", {m: Math.floor(s / 60), s: s % 60});
+    }
+
+    function stat(label, value, tone, icon) {
+        const box = H.el("div", "ui-stat is-compact" + (tone ? " " + tone : ""));
+        box.append(H.iconEl("span", "ui-stat-label", icon, label, 16), H.el("span", "ui-stat-value", String(value)));
+        return box;
+    }
+
+    function findingsTable(items, label) {
+        const card = H.el("div", "ui-table-card");
+        const table = H.el("table", "ui-table inv-table");
+        table.setAttribute("aria-label", label);
+        const head = H.el("thead");
+        const hr = H.el("tr");
+        [["col_type", "inv-c-type"], ["col_file", "inv-c-file"], ["col_where", "inv-c-where"], ["col_detail", "inv-c-detail"]].forEach(function (c) {
+            const th = H.el("th", "", T(c[0]));
+            th.scope = "col";
+            hr.appendChild(th);
+        });
+        head.appendChild(hr);
+        const body = H.el("tbody");
+        items.forEach(function (f) {
+            const tr = H.el("tr");
+            const type = H.el("td", "inv-c-type inv-type");
+            type.appendChild(H.badge(T("inv_type_" + f.type) || f.type, TONES[f.type] || ""));
+            const file = H.el("th", "inv-c-file");
+            file.scope = "row";
+            const fileBox = H.el("div", "inv-file");
+            const name = f.filename || (f.location || "").split("/").pop();
+            const strong = H.el("strong", "", name);
+            strong.title = name;
+            fileBox.appendChild(strong);
+            if (f.debug_key) {
+                const a = H.el("a", "trash-key ui-link", f.debug_key);
+                a.href = "/logs/job/" + encodeURIComponent(f.debug_key);
+                fileBox.appendChild(a);
+            } else {
+                fileBox.appendChild(H.el("span", "trash-key", T("no_job")));
+            }
+            file.appendChild(fileBox);
+            const where = H.el("td", "inv-c-where inv-where");
+            if (f.kind) where.appendChild(H.badge(T("kind_" + f.kind) || f.kind));
+            where.appendChild(document.createTextNode(" "));
+            where.appendChild(H.el("code", "ui-path", f.location || ""));
+            const detail = H.el("td", "inv-c-detail inv-detail", T("inv_desc_" + f.type));
+            if (f.detail) detail.appendChild(H.el("span", "trash-actor", f.detail));
+            tr.append(type, file, where, detail);
+            body.appendChild(tr);
+        });
+        table.append(head, body);
+        card.appendChild(table);
+        return card;
+    }
+
+    function section(title, count, content, extra) {
+        const sec = H.el("section", "ui-section inv-section");
+        const head = H.el("div", "ui-section-head");
+        const text = H.el("div", "ui-section-head-text");
+        const h2 = H.el("h2", "ui-section-title", title);
+        h2.appendChild(H.el("span", "ui-count", String(count)));
+        text.appendChild(h2);
+        head.appendChild(text);
+        sec.appendChild(head);
+        if (extra) sec.appendChild(extra);
+        sec.appendChild(content);
+        return sec;
+    }
+
+    function renderLast(last) {
+        shownRun = last ? last.finished_at : null;
+        const lastEl = document.getElementById("inv-last");
+        if (!last) {
+            lastEl.textContent = T("inv_never_title");
+            const card = H.el("div", "ui-card");
+            const box = H.el("div", "ui-empty");
+            box.append(H.iconEl("span", "ui-empty-icon", "database", null, 22),
+                H.el("p", "ui-empty-title", T("inv_never_title")), H.el("p", "ui-empty-text", T("inv_never_text")));
+            card.appendChild(box);
+            result.replaceChildren(card);
+            return;
+        }
+        lastEl.textContent = T("inv_last", {when: when(last.finished_at), duration: duration(last.duration_s)})
+            + (last.partial ? " · " + T("inv_last_partial") : "");
+        const parts = [];
+        if (last.cancelled) {
+            const note = H.iconEl("div", "ui-alert ui-alert-sm is-warning inv-section", "alert-triangle", null, 16);
+            note.setAttribute("role", "status");
+            const body = H.el("div", "ui-alert-body");
+            body.appendChild(H.el("p", "ui-alert-text", T("inv_cancelled")));
+            note.appendChild(body);
+            parts.push(note);
+        }
+        const stats = H.el("div", "ui-stats inv-stats");
+        stats.append(
+            stat(T("inv_checked"), last.checked, "", "search"),
+            stat(T("inv_ok"), last.ok, "is-success", "check-circle"),
+            stat(T("inv_found"), last.discrepancies, last.discrepancies ? "is-error" : "", "alert-triangle"),
+            stat(T("inv_unchecked"), last.unchecked, last.unchecked ? "is-warning" : "", "wifi-off"),
+            stat(T("inv_skipped"), last.skipped, "", "pause-circle"));
+        parts.push(stats);
+
+        const findings = last.findings || [];
+        const bad = findings.filter((f) => DISCREPANCY.includes(f.type));
+        const info = findings.filter((f) => !DISCREPANCY.includes(f.type));
+        if (!last.discrepancies) {
+            const card = H.el("div", "ui-card");
+            const box = H.el("div", "ui-empty");
+            box.append(H.iconEl("span", "ui-empty-icon is-success", "check-circle", null, 22),
+                H.el("p", "ui-empty-title", T("inv_none_title")), H.el("p", "ui-empty-text", T("inv_none_text")));
+            card.appendChild(box);
+            parts.push(card);
+        } else {
+            // Filter by type when more than one kind of discrepancy was found
+            const types = Array.from(new Set(bad.map((f) => f.type)));
+            if (!types.includes(typeFilter)) typeFilter = "";
+            let seg = null;
+            if (types.length > 1) {
+                seg = H.el("div", "ui-segmented inv-filter");
+                seg.setAttribute("role", "group");
+                seg.setAttribute("aria-label", T("col_type"));
+                [""].concat(types).forEach(function (type) {
+                    const b = H.el("button", "ui-seg", type ? T("inv_type_" + type) : T("filter_all"));
+                    b.type = "button";
+                    b.setAttribute("aria-pressed", type === typeFilter ? "true" : "false");
+                    const n = type ? (last.by_type[type] || 0) : last.discrepancies;
+                    b.appendChild(H.el("span", "ui-count", String(n)));
+                    b.addEventListener("click", function () { typeFilter = type; renderLast(last); });
+                    seg.appendChild(b);
+                });
+            }
+            const shown = typeFilter ? bad.filter((f) => f.type === typeFilter) : bad;
+            const content = H.el("div", "ui-stack ui-stack-sm");
+            content.appendChild(findingsTable(shown, T("inv_found")));
+            if (last.truncated || bad.length < last.discrepancies) {
+                content.appendChild(H.el("p", "ui-hint", T("inv_truncated", {n: bad.length})));
+            }
+            parts.push(section(T("inv_found"), last.discrepancies, content, seg));
+        }
+        if (info.length) parts.push(section(T("inv_info"), info.length, findingsTable(info, T("inv_info"))));
+        result.replaceChildren(...parts);
+    }
+
+    function showRunning(p) {
+        startBtn.disabled = true;
+        startBtn.setAttribute("aria-busy", "true");
+        cancelBtn.hidden = false;
+        progress.hidden = false;
+        const known = p.phase === "copies" && p.total > 0;
+        const pct = known ? Math.min(100, Math.round(p.current / p.total * 100)) : 0;
+        bar.classList.toggle("is-indeterminate", !known);
+        bar.firstElementChild.style.width = known ? pct + "%" : "";
+        if (known) bar.setAttribute("aria-valuenow", String(pct)); else bar.removeAttribute("aria-valuenow");
+        document.getElementById("inv-progress-count").textContent = known ? pct + " %" : "";
+        stateEl.textContent = p.phase === "copies" ? T("inv_phase_copies", {done: p.current, total: p.total})
+            : T("inv_phase_" + (p.phase || "starting"));
+    }
+
+    function showIdle() {
+        startBtn.disabled = false;
+        startBtn.removeAttribute("aria-busy");
+        cancelBtn.hidden = true;
+        cancelBtn.disabled = false;
+        progress.hidden = true;
+        stateEl.textContent = "";
+    }
+
+    async function poll() {
+        try {
+            const resp = await fetch("/api/history/inventory/status", {headers: {"Accept": "application/json"}});
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            const p = await resp.json();
+            if (p.running) {
+                showRunning(p);
+                if (!polling) polling = setInterval(poll, 1000);
+                if (shownRun === undefined) renderLast(p.last);
+                return;
+            }
+            if (polling) { clearInterval(polling); polling = null; }
+            showIdle();
+            if (p.error) {
+                stateEl.textContent = T("inv_failed", {error: p.error});
+            }
+            if (shownRun === undefined || (p.last && p.last.finished_at !== shownRun) || (!p.last && shownRun)) renderLast(p.last);
+        } catch (err) {
+            stateEl.textContent = T("load_failed") + " (" + err.message + ")";
+        }
+    }
+
+    startBtn.addEventListener("click", async function () {
+        startBtn.disabled = true;
+        try {
+            const resp = await fetch("/api/history/inventory/start", {method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}});
+            if (resp.status === 409) {
+                stateEl.textContent = T("inv_busy");
+            } else if (!resp.ok) {
+                startBtn.disabled = false;
+                stateEl.textContent = T("inv_failed", {error: "HTTP " + resp.status});
+                return;
+            }
+            showRunning({phase: "starting"});
+            if (!polling) polling = setInterval(poll, 1000);
+        } catch (err) {
+            startBtn.disabled = false;
+            stateEl.textContent = T("inv_failed", {error: err.message});
+        }
+    });
+    cancelBtn.addEventListener("click", function () {
+        cancelBtn.disabled = true;
+        fetch("/api/history/inventory/cancel", {method: "POST", credentials: "same-origin"});
+    });
+
+    shownRun = undefined;
+    poll();
+});
+</script>
+{% endblock %}

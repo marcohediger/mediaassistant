@@ -1,0 +1,282 @@
+/* Module blocks, expanded rows, ledger timeline, copies, trash and inventory
+ * check (data-safety rebuild, docs/UMBAU_MODULE.md "Oberfläche").
+ * Loaded by dashboard.html, logs.html, log_detail.html, tools_trash.html and
+ * tools_inventory.html after style.css and ui.css. Only theme variables and
+ * --ui-* tokens; light-theme values follow the dark ones via the variables.
+ * The markup comes from templates/_modules.html and app.js (hist* helpers). */
+
+/* ═══ Module strip: eleven small blocks, one per module ═══════════════ */
+.mod-strip {
+    display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 3px;
+    vertical-align: middle; line-height: 0;
+}
+.mod-b {
+    --mod-tone: var(--text-muted);
+    flex: none; display: block; width: 0.6rem; height: 0.85rem;
+    border-radius: 2px; background: var(--mod-tone);
+}
+.mod-b[data-s="ok"] { --mod-tone: var(--success); }
+.mod-b[data-s="running"] { --mod-tone: var(--info); animation: ui-pulse 1.4s ease-in-out infinite; }
+.mod-b[data-s="warning"],
+.mod-b[data-s="duplicate"] { --mod-tone: var(--warning); }
+.mod-b[data-s="error"] { --mod-tone: var(--error); }
+.mod-b[data-s="skipped"] { --mod-tone: color-mix(in srgb, var(--text-muted) 55%, transparent); }
+/* Not run / waiting: outline only; dry run: dashed blue; outdated: dashed grey */
+.mod-b:is([data-s="not_run"], [data-s="queued"], [data-s="dry_run"], [data-s="superseded"]) {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mod-tone) 70%, transparent);
+}
+.mod-b[data-s="dry_run"] { --mod-tone: var(--info); box-shadow: none; border: 1.5px dashed var(--mod-tone); }
+.mod-b[data-s="superseded"] { box-shadow: none; border: 1.5px dashed color-mix(in srgb, var(--text-muted) 70%, transparent); }
+
+/* ═══ Expandable rows (dashboard, job log) ═══════════════════════════ */
+.hist-col-mods { width: 1%; white-space: nowrap; }
+.hist-col-toggle { width: 1%; }
+.ui-table td.hist-col-toggle { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.hist-toggle .ui-i { transition: transform 0.2s; }
+.hist-toggle[aria-expanded="true"] .ui-i { transform: rotate(180deg); }
+.hist-toggle[aria-expanded="true"] { color: var(--text); }
+tr.hist-row { cursor: pointer; }
+tr.hist-row.is-open > * { background: var(--ui-row-hover); border-bottom-color: transparent; }
+
+/* The detail row: one cell across the table, the panel inside */
+.ui-table tr.hist-detail > td {
+    height: auto; padding: 0 !important; white-space: normal;
+    background: var(--ui-row-hover); color: var(--text);
+}
+.ui-table tbody tr.hist-detail:hover > td { background: var(--ui-row-hover); }
+.hist-panel {
+    padding: 0.35rem 1.1rem 1rem; font-size: var(--ui-fs-sm); line-height: 1.5;
+    cursor: default;
+    /* The panel takes the width the table already has and never widens it */
+    contain: inline-size;
+}
+.hist-panel-grid {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem 1.5rem; align-items: start;
+}
+.hist-panel-side { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.hist-panel-foot { display: flex; justify-content: flex-end; margin-top: 0.75rem; }
+.hist-panel-state { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0; color: var(--text-muted); }
+.hist-panel-state.is-error { color: var(--ui-err-text); }
+
+.hist-sec { min-width: 0; }
+.hist-sec-title {
+    display: flex; align-items: center; gap: 0.45rem;
+    margin: 0 0 0.45rem; font-size: var(--ui-fs-xs); font-weight: 600; letter-spacing: 0.01em;
+    color: var(--text-muted);
+}
+.hist-sec-empty { margin: 0; font-size: var(--ui-fs-sm); color: var(--text-muted); }
+
+/* Module list: icon, code, name, detail */
+.hist-mods {
+    margin: 0; padding: 0; list-style: none;
+    background: var(--bg-card); border: 1px solid var(--ui-card-border); border-radius: var(--ui-radius);
+}
+.hist-mod {
+    display: grid; grid-template-columns: auto 3rem minmax(0, 11rem) minmax(0, 1fr) auto;
+    align-items: center; gap: 0 0.6rem; min-height: 2.1rem; padding: 0.25rem 0.75rem;
+}
+.hist-mod + .hist-mod { border-top: 1px solid var(--ui-line); }
+.hist-mod > .ui-status { gap: 0; }
+.hist-mod-code { font-family: var(--ui-mono); font-size: var(--ui-fs-xs); font-weight: 600; color: var(--primary); }
+.hist-mod-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.hist-mod-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.hist-mod-meta { font-size: var(--ui-fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hist-mod[data-s="not_run"] :is(.hist-mod-label, .hist-mod-code) { color: var(--text-muted); }
+
+/* ═══ Ledger timeline ════════════════════════════════════════════════ */
+.hist-ops { position: relative; margin: 0; padding: 0; list-style: none; }
+.hist-op { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 0.7rem; padding-bottom: 0.85rem; }
+.hist-op:last-child { padding-bottom: 0; }
+/* The line between the icons */
+.hist-op:not(:last-child)::before {
+    content: ""; position: absolute; left: calc(0.875rem - 0.5px); top: 1.95rem; bottom: 0.15rem;
+    width: 1px; background: var(--ui-line);
+}
+.hist-op-body { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; padding-top: 0.2rem; }
+.hist-op-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem 0.5rem; min-width: 0; }
+.hist-op-title { font-weight: 600; color: var(--text); }
+.hist-op-time { margin-left: auto; font-size: var(--ui-fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hist-op-path { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.25rem 0.4rem; min-width: 0; }
+.hist-op-path .ui-path { font-size: var(--ui-fs-xs); }
+.hist-op-path .ui-badge { height: 1.2rem; font-size: 0.65rem; }
+.hist-op-arrow { color: var(--text-muted); }
+.hist-op-meta { display: flex; flex-wrap: wrap; gap: 0.15rem 0.85rem; font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.hist-op-meta .ui-cell-meta { gap: 0.3rem; }
+.hist-op-meta .is-ok { color: var(--ui-ok-text); }
+.hist-op-meta .is-changed { color: var(--ui-info-text); }
+.hist-op-error { margin: 0; font-size: var(--ui-fs-xs); color: var(--ui-err-text); overflow-wrap: anywhere; }
+
+/* ═══ Copies ═════════════════════════════════════════════════════════ */
+.hist-copies { display: flex; flex-direction: column; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.hist-copy {
+    display: flex; flex-direction: column; gap: 0.3rem; min-width: 0;
+    padding: 0.6rem 0.75rem; background: var(--bg-card);
+    border: 1px solid var(--ui-card-border); border-radius: var(--ui-radius);
+}
+.hist-copy-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.6rem; min-width: 0; }
+.hist-copy-head .ui-status { font-size: var(--ui-fs-sm); }
+.hist-copy-meta { font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.hist-copy-head .hist-copy-meta:last-child { margin-left: auto; }
+.hist-copy .ui-path { font-size: var(--ui-fs-xs); }
+.hist-copy-trash { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem 0.75rem; font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.hist-copy-trash .ui-btn { margin-left: auto; }
+.hist-copy[data-state="trashed"] { border-color: color-mix(in srgb, var(--warning) 40%, var(--ui-card-border)); }
+.hist-copy[data-state="missing"] { border-color: color-mix(in srgb, var(--error) 40%, var(--ui-card-border)); }
+.hist-copy:is([data-state="moved"], [data-state="deleted"]) { background: transparent; }
+.hist-copies-wrap { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.hist-copies-past > summary {
+    display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0;
+    font-size: var(--ui-fs-xs); font-weight: 500; color: var(--text-muted); cursor: pointer; list-style: none;
+    border-radius: var(--ui-radius-xs);
+}
+.hist-copies-past > summary::-webkit-details-marker { display: none; }
+.hist-copies-past > summary::before { content: "▸"; font-size: 0.7rem; transition: transform 0.15s; }
+.hist-copies-past[open] > summary::before { transform: rotate(90deg); }
+.hist-copies-past > summary:hover { color: var(--text); }
+.hist-copies-past > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.hist-copies-past > .hist-copies { margin-top: 0.4rem; }
+
+/* ═══ Job detail: module bar, history, copies card ═══════════════════ */
+.job-modules { margin: 0 0 1.25rem; padding: 0.75rem 0.9rem 0.7rem; }
+.job-modules-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.55rem; }
+.job-modules-title { margin: 0; font-size: var(--ui-fs-sm); font-weight: 600; color: var(--text); }
+.job-modules-desc { font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.mod-bar { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 0.35rem; }
+.mod-cell {
+    display: flex; flex-direction: column; align-items: stretch; gap: 0.3rem; min-width: 0;
+    margin: 0; padding: 0.3rem 0.2rem 0.25rem; font: inherit; color: var(--text-muted);
+    background: none; border: 0; border-radius: var(--ui-radius-sm); cursor: pointer;
+}
+.mod-cell:hover { background: var(--ui-hover); color: var(--text); }
+.mod-cell:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.mod-cell .mod-b { width: 100%; height: 0.55rem; border-radius: 3px; }
+.mod-cell-code { font-family: var(--ui-mono); font-size: var(--ui-fs-2xs); font-weight: 600; text-align: center; white-space: nowrap; }
+.mod-cell-code .mod-cell-pre { opacity: 0.7; }
+.mod-cell[data-s="error"] .mod-cell-code { color: var(--ui-err-text); }
+.mod-cell[data-s="warning"] .mod-cell-code,
+.mod-cell[data-s="duplicate"] .mod-cell-code { color: var(--ui-warn-text); }
+.mod-cell[data-s="running"] .mod-cell-code { color: var(--ui-info-text); }
+.ui-step.is-flash > summary { box-shadow: inset 0 0 0 2px var(--primary); }
+
+.job-history { margin-top: 2rem; }
+.job-history-body { padding: 1rem 1.1rem; }
+.job-copies-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.9rem 1rem 1rem; }
+.job-copies-body > .ui-alert { margin: 0; }
+.job-copies-body > :empty { display: none; }
+.hist-skel { height: 0.9rem; margin: 0.35rem 0; }
+.hist-skel + .hist-skel { width: 70%; }
+
+/* ═══ Werkzeuge entries ══════════════════════════════════════════════ */
+.tools-safety { margin-bottom: 0.25rem; }
+.tools-safety .ui-card { display: flex; align-items: flex-start; gap: 0.85rem; padding: 1rem 1.1rem; }
+.tools-safety-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; flex: 1 1 auto; }
+.tools-safety-title { margin: 0; font-size: var(--ui-fs-md); font-weight: 600; color: var(--text); }
+.tools-safety-desc { margin: 0; font-size: var(--ui-fs-sm); color: var(--text-muted); line-height: 1.5; }
+.tools-safety-meta { margin-top: 0.25rem; }
+.tools-safety .ui-card > .ui-i { flex: none; align-self: center; color: var(--text-muted); }
+
+/* ═══ Trash page ═════════════════════════════════════════════════════ */
+.trash-toolbar { margin-bottom: 1rem; }
+.trash-table .trash-name { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; max-width: 20rem; }
+.trash-table .trash-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 600; }
+.trash-table .trash-key { font-family: var(--ui-mono); font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.trash-table .trash-where { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; min-width: 0; max-width: 22rem; }
+.trash-table .trash-where .ui-path { font-size: var(--ui-fs-xs); }
+.trash-table .trash-reason { max-width: 18rem; white-space: normal; overflow-wrap: anywhere; font-size: var(--ui-fs-sm); }
+.trash-table .trash-actor { display: block; font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.trash-table .trash-when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trash-alert { margin-bottom: 1rem; }
+
+/* ═══ Inventory check ════════════════════════════════════════════════ */
+.inv-card .ui-card-head { flex-wrap: wrap; justify-content: flex-start; gap: 0.75rem 0.85rem; border-bottom: 0; }
+.inv-card .ui-icon-tile { align-self: flex-start; margin-top: 0.1rem; }
+.inv-card .ui-card-head-text { flex: 1 1 14rem; }
+.inv-actions { gap: 0.5rem 0.6rem; }
+.inv-meta { margin: 0; padding: 0 1.25rem 1rem; font-size: var(--ui-fs-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.inv-meta:empty { display: none; }
+.inv-progress { padding: 0.9rem 1.25rem 0.75rem; border-top: 1px solid var(--ui-line); }
+.inv-stats { margin: 1.25rem 0; grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr)); }
+.inv-section { margin-top: 1.5rem; }
+.inv-table .inv-type { white-space: nowrap; }
+.inv-table .inv-file { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; max-width: 18rem; }
+.inv-table .inv-file strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 600; }
+.inv-table .inv-where .ui-path { font-size: var(--ui-fs-xs); }
+.inv-table .inv-where { max-width: 24rem; white-space: normal; }
+.inv-table .inv-detail { min-width: 12rem; max-width: 26rem; white-space: normal; font-size: var(--ui-fs-sm); }
+.inv-filter { margin-bottom: 0.85rem; }
+
+/* ═══ Narrow screens ═════════════════════════════════════════════════ */
+@media (max-width: 960px) {
+    .hist-panel-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+    .mod-cell-code .mod-cell-pre { display: none; }
+}
+@media (max-width: 600px) {
+    .hist-panel { padding: 0.25rem 0.9rem 0.9rem; }
+    .hist-mod { grid-template-columns: auto 2.6rem minmax(0, 1fr); padding: 0.35rem 0.6rem; }
+    .hist-mod-detail { grid-column: 3; white-space: normal; overflow-wrap: anywhere; font-size: var(--ui-fs-xs); }
+    .hist-mod-detail:empty { display: none; }
+    .hist-mod-meta { grid-column: 3; }
+    .hist-op-time { margin-left: 0; flex-basis: 100%; }
+    .mod-bar { gap: 0.2rem; }
+    .mod-cell { padding-left: 0; padding-right: 0; }
+    .job-modules { padding: 0.65rem 0.6rem 0.6rem; }
+    .job-modules-desc { display: none; }
+
+    /* Trash and inventory tables become cards */
+    .trash-table, .trash-table tbody, .inv-table, .inv-table tbody { display: block; }
+    .trash-table thead, .inv-table thead {
+        position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
+    }
+    .trash-table tr, .inv-table tr {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem;
+        padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--ui-line);
+    }
+    .trash-table tbody tr:last-child, .inv-table tbody tr:last-child { border-bottom: 0; }
+    .trash-table td, .trash-table tbody th, .inv-table td, .inv-table tbody th {
+        display: block; width: auto; height: auto; min-width: 0; padding: 0 !important; border: 0;
+    }
+    .trash-table tbody tr:hover > *, .inv-table tbody tr:hover > * { background: none; }
+    /* The 1 % width of the actions column would squeeze the button */
+    .trash-table tr > *, .inv-table tr > * { width: auto !important; }
+    .trash-table .trash-c-file { flex: 1 1 0; }
+    .trash-table .trash-name, .trash-table .trash-where, .trash-table .trash-reason { max-width: none; }
+    .trash-table .trash-c-where, .trash-table .trash-c-reason { flex: 1 1 100%; }
+    .trash-table .trash-c-when { order: 4; font-size: var(--ui-fs-xs); }
+    .trash-table .trash-c-left { order: 5; margin-right: auto; }
+    .trash-table .trash-c-actions { order: 6; flex: none; }
+    .trash-table .trash-c-when, .trash-table .trash-c-left { flex: none; }
+    .inv-table .inv-c-file { flex: 1 1 0; }
+    .inv-table .inv-file { max-width: none; }
+    .inv-table .inv-c-where, .inv-table .inv-c-detail { flex: 1 1 100%; }
+    .inv-table .inv-where, .inv-table .inv-detail { max-width: none; min-width: 0; }
+}
+
+/* ═══ Job log (logs.html, tab "Verarbeitungs-Log") ═══════════════════ */
+/* The module blocks took the place of the step column; the source label
+   (on the job page and in the expanded row's copies) makes room for the
+   chevron, so the table still fits its card at full width. */
+.logs-table-jobs .lc-mods { width: 1%; }
+.logs-table-jobs .lc-source { display: none; }
+.logs-table-jobs .logs-path { max-width: 10rem; }
+.ui-table td.hist-col-toggle { padding-left: 0.25rem; }
+@media (max-width: 1100px) {
+    .logs-table-jobs .lc-target { display: none; }
+}
+@media (max-width: 960px) {
+    .logs-table-jobs .logs-name { max-width: 12rem; }
+    .logs-table-jobs .cell-msg { max-width: 180px; }
+}
+@media (max-width: 600px) {
+    /* Card per row: status, name, time, chevron / module blocks / message */
+    .logs-table-jobs .lc-time { order: 2; }
+    .logs-table-jobs .lc-toggle { order: 3; margin: -0.2rem -0.4rem 0 0; }
+    .logs-table-jobs .lc-mods { order: 4; flex: 1 1 100%; width: auto; }
+    .logs-table-jobs tr.hist-detail { display: block; padding: 0; }
+    .logs-table-jobs tr.hist-detail > td { display: block; width: 100%; }
+    .logs-table-jobs tr.hist-row.is-open { border-bottom-color: transparent; background: var(--ui-row-hover); }
+    .logs-table-jobs .logs-name { max-width: 100%; }
+    .logs-table-jobs .cell-msg { max-width: none; }
+}
