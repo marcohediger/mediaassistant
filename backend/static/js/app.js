@@ -246,7 +246,9 @@
   function histOps(ops) {
     if (!ops || !ops.length) return histEl("p", "hist-sec-empty", histText("ops_empty"));
     const ol = histEl("ol", "hist-ops");
-    for (const op of ops) {
+    // The API lists the newest operations first (and caps the count there);
+    // shown oldest first, the timeline follows the order of the modules.
+    for (const op of ops.slice().reverse()) {
       const li = histEl("li", "hist-op");
       li.dataset.state = op.state;
       const tile = histIconEl("span", "ui-icon-tile ui-icon-tile-sm " + op.tone, op.icon, null, 14);
