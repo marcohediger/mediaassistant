@@ -120,6 +120,11 @@
 - **IA07-01:** AI-Tags werden als Keywords geschrieben
 - **IA07-02:** AI-Source (Herkunft) wird als Keyword geschrieben
 - **IA07-03:** Geocoding-Daten (Land, Stadt etc.) als Keywords
+
+> IA07-04 … IA07-09 beschreiben den früheren festen Ordner-Tag-Schalter. Seit 3.0 sind die
+> Ordner-Optionen pro Set, siehe [`docs/IMMICH_ORDNERSTRUKTUR.md`](docs/IMMICH_ORDNERSTRUKTUR.md)
+> (Tests: `test_folder_structure.py`).
+
 - **IA07-04:** Ordner-Tags: Einzelwörter + zusammengesetzter Tag (z.B. `Ferien/Mallorca 2025/` → `Ferien`, `Mallorca`, `2025`, `Ferien Mallorca 2025`)
 - **IA07-05:** Ordner-Tags: Einfacher Ordner → nur Ordnername als Tag (z.B. `Geburtstag/` → `Geburtstag`)
 - **IA07-06:** Ordner-Tags: Tief verschachtelt mit Umlauten (z.B. `Ferien/Nänikon 2026/Tag 3/` → 6 Tags)
@@ -195,7 +200,7 @@
 - **PE-03:** Fehler-Datei nach error/ verschoben mit.log Datei (Traceback, Debug-Key, Zeitpunkt)
 - **PE-04:** Voller Traceback in error_message, step_result und System-Log
 - **PE-05:** Retry: fehlgeschlagener Job kann erneut verarbeitet werden (POST /api/job/{key}/retry)
-- **PE-06:** Job Delete: Job aus DB gelöscht, Datei aus error/ entfernt (POST /api/job/{key}/delete)
+- **PE-06:** Job Delete (POST /api/job/{key}/delete): eigene Exemplare über fileops in den Papierkorb (30 Tage), Immich-Assets bleiben in Immich, `original_path` wird nie angefasst; die Zeile bleibt mit Status `deleted` (Protokoll behält seinen Job, R-26). Job `queued`/`processing` → abgelehnt (JSON: 409)
 - **PE-07:** Duplikat erkannt → Pipeline stoppt nach IA-02, Finalizer laufen
 - **PE-08:** Korruptes Video → Warnungen, E-Mail-Benachrichtigung, kein Crash
 - **PE-09:** Job in "processing" nach Crash → max. 3 Retry-Versuche, danach Status "error" (MAX_RETRIES=3, retry_count in DB)
@@ -253,13 +258,13 @@
 - **WEB-36b:** Drei Buttons: Re-Evaluate Qualität / Batch-Clean (diese Seite) / Batch-Clean Alle
 - **WEB-37b:** Batch-Clean merged Metadaten (GPS, Datum, Keywords, Description) von schlechteren
 - **WEB-38b:** Batch-Clean promoted Duplikate: Analyse-Steps kopiert, reprocess + IA-07/08
-- **WEB-39b:** "Dieses behalten" merged Metadaten vor dem Löschen
+- **WEB-39b:** "Dieses behalten" merged Metadaten, bevor die Spender in den Papierkorb gehen
 - **WEB-40b:** "Dieses behalten" injiziert IA-02=skipped (kein Re-Duplicate)
 - **WEB-41b:** pHash vergleicht nur innerhalb Medientyp (Bilder vs Bilder, Videos vs Videos)
 - **WEB-42b:** Quality-Score: Format > Dateigrösse(log) > Pixel > Metadaten > Original-Bias
 - **WEB-43:** "Dieses behalten" bei Shared-Asset-Gruppe (2 Jobs, gleiche immich_asset_id) → Asset bleibt in Immich erhalten, kein Datenverlust
 - **WEB-44:** Batch-Clean bei Shared-Asset-Gruppe → Asset bleibt in Immich erhalten, kein Datenverlust
-- **WEB-45:** "Dieses behalten" bei Gruppe mit unterschiedlichen immich_asset_ids → nur Donor-Asset wird gelöscht, Kept-Asset bleibt
+- **WEB-45:** "Dieses behalten" bei Gruppe mit unterschiedlichen immich_asset_ids → nur Donor-Asset geht in den Immich-Papierkorb, Kept-Asset bleibt
 - **WEB-46:** "Dieses behalten" auf Immich-Duplicate (status=duplicate, hat immich_asset_id) → Asset-ID wird an kept Job transferiert
 - **WEB-47:** Batch-Clean: Donor-Hashes (file_hash, phash) werden gelöscht → kein falscher Match bei zukünftigen Imports
 - **WEB-48:** _resolve_duplicate_group: Analysis-Kopie (IA-03..06) vom Original → kein unnötiger AI-Re-Run
@@ -483,6 +488,10 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 > Testet die Weitergabe von Inbox-Ordnerstruktur als Album-Name durch
 > die Pipeline — insbesondere bei Duplikaten, wo die Datei aus dem Inbox
 > verschoben wird und der Pfad nicht mehr verfügbar ist.
+>
+> **Stand 3.0:** Die Einträge beschreiben den alten Code (`_extract_folder_tags`,
+> `_get_folder_album_names`), den `folder_path.py` ersetzt. Die Ordner-Optionen sind pro
+> Set, siehe [`docs/IMMICH_ORDNERSTRUKTUR.md`](docs/IMMICH_ORDNERSTRUKTUR.md).
 
 - **FTAG-01:** `_extract_folder_tags` extrahiert Ordner-Parts + kombinierten Tag aus Inbox-Subfolder-Pfad
 - **FTAG-02:** `_extract_folder_tags` bei flachem Inbox (keine Subfolder) → leere Liste
@@ -520,7 +529,13 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 
 ### v2.29.5 Daten-Merge bei Duplikat-Auflösung (FTAG-34+)
 
-- **FTAG-34:** Keep this (already done): Donor-Alben via `get_asset_albums()` abgefragt vor Löschung
+> **Stand 3.0:** Die Auflösung beansprucht alle Mitglieder (`resolving`), prüft das behaltene
+> Exemplar und legt erst dann die Exemplare der Spender über fileops in den Papierkorb (Set bzw.
+> Immich); die Spender bleiben als Zeile mit Status `deleted`. Ordner werden als rohe Pfade
+> zusammengeführt (IA-02 `donor_folder_paths`), Tags und Alben daraus bestimmt das Set des
+> behaltenen Jobs (siehe [`docs/IMMICH_ORDNERSTRUKTUR.md`](docs/IMMICH_ORDNERSTRUKTUR.md)).
+
+- **FTAG-34:** Keep this (already done): Donor-Alben via `get_asset_albums()` abgefragt, bevor der Donor in den Papierkorb geht
 - **FTAG-35:** Keep this (already done): Donor-Alben via `add_asset_to_albums()` auf Kept-Asset zugewiesen
 - **FTAG-36:** Keep this (already done): neue Tags via `tag_asset()` auf Kept-Asset geschrieben
 - **FTAG-37:** Keep this (already done): Description via `update_asset_description()` übernommen (wenn Kept leer)
@@ -1027,7 +1042,7 @@ Eingangs-Status: `status='error'` ODER `status='done' + error_message='Warnungen
 | D5 | "Kein Duplikat" wenn Datei im library/duplicates/ verschwunden ist | – | duplicate | ⚠️ **Lücke** (sollte jetzt sauber abbrechen analog zu R15) |
 | D6 | **Shared-Asset Keep:** 2 Jobs mit gleicher immich_asset_id → Keep löscht Asset NICHT | Immich | done+duplicate | **KRITISCH** — v2.29.7 Datenverlust-Bug |
 | D7 | **Shared-Asset Batch-Clean:** wie D6 aber via Batch-Clean → Asset bleibt | Immich | done+duplicate | **KRITISCH** |
-| D8 | **Verschiedene Assets Keep:** 2 Jobs mit verschiedener immich_asset_id → Donor-Asset gelöscht, Kept-Asset bleibt | Immich | done+duplicate | ⚠️ **Lücke** |
+| D8 | **Verschiedene Assets Keep:** 2 Jobs mit verschiedener immich_asset_id → Donor-Asset im Immich-Papierkorb, Kept-Asset bleibt | Immich | done+duplicate | ⚠️ **Lücke** |
 | D9 | **Asset-ID Transfer:** Kept=duplicate (ohne asset_id), Donor=done (mit asset_id) → best bekommt asset_id | Immich | duplicate | ⚠️ **Lücke** |
 | D10 | **Hash-Clearing:** Nach Keep/Batch-Clean sind file_hash+phash der Donors NULL | – | duplicate | ⚠️ **Lücke** |
 | D11 | **Analysis-Kopie:** Kept=duplicate, Donor hat IA-05 → IA-03..06 werden kopiert, kein AI-Re-Run | Immich | duplicate | ⚠️ **Lücke** |

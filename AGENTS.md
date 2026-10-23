@@ -25,6 +25,9 @@
 5. **Dev muss alle Live-Szenarien abdecken.** Wenn ein Bug auf live
    gefunden wird, MUSS er auf dev reproduzierbar sein, **bevor** der
    Fix gemacht wird. "Geht nur in production" ist kein gültiger Grund.
+6. **Dateioperationen nur über `backend/fileops.py`.** Nie direkt
+   `os.remove`, `shutil.move`, `safe_move`, `delete_asset` & Co. Siehe
+   "Datensicherheit (ab 3.0)" unten.
 
 ## Repo-Layout
 
@@ -45,7 +48,9 @@ MediaAssistant/
 │   │   └── common.py           # create_job_safe, scan_directory, IMMICH_PENDING
 │   ├── worker.py               # DER Pipeline-Worker — einziger Ort, der run_pipeline startet
 │   ├── recovery.py             # Einmaliges beim Start: Wiederaufnahme, Einmal-Migrationen
-│   ├── safe_file.py            # safe_move(): copy → verify hash → delete
+│   ├── fileops.py              # DER Weg für Dateioperationen: Protokoll, Register, Papierkorb
+│   ├── job_view.py             # Sicht auf einen Job (module_blocks, Verlauf) — nur lesend
+│   ├── safe_file.py            # safe_move(): copy → verify hash → delete (nur noch Baustein von fileops)
 │   ├── ai_backends.py          # Loadbalancer für mehrere OpenAI-kompat. Endpunkte
 │   ├── immich_client.py        # REST-Client für Immich
 │   ├── system_logger.py        # log_info/warning/error → system_logs Tabelle
@@ -75,7 +80,8 @@ MediaAssistant/
 │   ├── version.py              # VERSION-String + DATE
 │   ├── test_duplicate_fix.py   # Race-Conditions + Duplikat-Tests (26 Tests)
 │   ├── test_retry_file_lifecycle.py  # Retry-File-Lifecycle (37+ Asserts, real Immich)
-│   └── test_testplan_final.py  # Testplan-Smoketest (60 Asserts, UI-Erreichbarkeit)
+│   ├── test_testplan_final.py  # Testplan-Smoketest (60 Asserts, UI-Erreichbarkeit)
+│   └── test_support/           # invariants.py: check_no_file_lost, FileGuard, delete_test_jobs
 ├── data/                       # Mounts ./data → /app/data im Container
 │   ├── mediaassistant.db       # Dev-DB (SQLite)
 │   └── reprocess/              # Internes Arbeitsverzeichnis für Retry
@@ -88,6 +94,7 @@ MediaAssistant/
 ├── docker-compose.local.yml    # gitignored — lokale Overrides
 ├── docs/
 │   ├── DESIGN.md               # Design-System: Tokens, Regeln, Bausteine (ui-*) — vor UI-Arbeit lesen
+│   ├── UMBAU_MODULE.md         # Umbau "Module & Datensicherheit" (3.0): Grundsätze, Datenmodell, Risiken
 │   └── sorting-flow.md
 ├── CHANGELOG.md                # Pflicht: jedem Release ein Eintrag
 ├── REQUIREMENTS.md             # Original-Spec, eher historisch
@@ -245,6 +252,15 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_ai_backends.py` | AI-Backend-Loadbalancer | `docker exec mediaassistant-dev python /app/test_ai_backends.py` |
 | `backend/test_startup_imports.py` | Startpfad importierbar (Release-Vorstufe) | `docker exec mediaassistant-dev python /app/test_startup_imports.py` |
 | `backend/test_sets_migration.py` | Migration in Sets auf Kopien (Dev, Live-Kopie, `neu`, `mehrfach:<db>`) | `docker exec mediaassistant-dev python /app/test_sets_migration.py [quelle]` |
+| `backend/test_fileops.py` | `fileops` lokal: Protokoll, Register, Papierkorb, nichts überschreiben, Abgleich nach Absturz | `docker exec mediaassistant-dev python /app/test_fileops.py` |
+| `backend/test_fileops_immich.py` | `fileops` gegen echtes Immich: Upload, geteilte Assets, Papierkorb, Wiederherstellen, Ersetzen, Abgleich, Start-Verdrahtung | `docker exec mediaassistant-dev python /app/test_fileops_immich.py` |
+| `backend/test_immich_trash.py` | Immich-3.x-Papierkorb: in den Papierkorb statt löschen, wiederherstellen, Zustand erkennen, Upload einer Datei im Papierkorb | `docker exec mediaassistant-dev python /app/test_immich_trash.py` |
+| `backend/test_history_view.py` | `job_view.module_blocks`, Verlauf, Exemplare, `/api/history/*`, Wiederherstellen, Bestandsprüfung, Zurück-Link | `docker exec mediaassistant-dev python /app/test_history_view.py` |
+| `backend/test_folder_structure.py` | Ordnerstruktur als Tags und Alben (`folder_path.py`, Optionen pro Set, `docs/IMMICH_ORDNERSTRUKTUR.md`) | `docker exec mediaassistant-dev python /app/test_folder_structure.py` |
+| `backend/test_jobs_autoincrement.py` | R-26: Job-IDs werden nie zweimal vergeben (Umbau von `jobs` auf AUTOINCREMENT, optional auf Live-Kopie) | `docker exec mediaassistant-dev python /app/test_jobs_autoincrement.py [kopie.db]` |
+| `backend/test_no_direct_file_ops.py` | Wächter: keine destruktive Dateioperation ausserhalb von `fileops.py` (Datei:Zeile, `ALLOWLIST`) | `docker exec mediaassistant-dev python /app/test_no_direct_file_ops.py` |
+| `backend/test_data_safety_local.py` | Reproducer der lokalen Datenverlust-Risiken (z. B. R-05, R-10b, ohne Immich), je Risiko ein Abschnitt; Pipeline muss pausiert sein | `docker exec mediaassistant-dev python /app/test_data_safety_local.py [R-05 …]` |
+| `backend/test_data_safety_immich.py` | Reproducer der Datenverlust-Risiken mit Immich (z. B. R-10e Absturz im Ersetzen), je Risiko ein Abschnitt; Pipeline muss pausiert sein | `docker exec mediaassistant-dev python /app/test_data_safety_immich.py [R-10e …]` |
 
 ### Pflicht-Vorstufe: startet die App überhaupt?
 
@@ -379,6 +395,51 @@ Zahlen** — keine personenbezogenen Daten, keine echten Datei-Inhalte.
   temporär deaktivieren (`Module.enabled=False`) und am Ende
   restaurieren.
 
+## Datensicherheit (ab 3.0)
+
+Kurzfassung. Grundsätze, Datenmodell und die Risiken R-01 … R-26 stehen in
+[`docs/UMBAU_MODULE.md`](docs/UMBAU_MODULE.md).
+
+- **Jede Dateioperation geht durch `backend/fileops.py`** — verschieben,
+  kopieren, herunterladen, hochladen, ersetzen, Metadaten schreiben,
+  löschen, lokal und in Immich. `test_no_direct_file_ops.py` meldet jede
+  direkte Verwendung von `os.remove`, `shutil.move`, `safe_move`,
+  `delete_asset`, `download_asset` & Co. mit Datei:Zeile; Ausnahmen nur
+  begründet in dessen `ALLOWLIST`.
+- **Protokoll, Register, Verweise.** `file_ops` ist das Protokoll: eine
+  Zeile `intent` vor der Operation, genau einmal `done`, `failed` oder
+  `reconciled`; Trigger verbieten Löschen und Ändern. `file_copies` ist das
+  Register aller Exemplare (Ort, SHA-256, Zustand, zuletzt geprüft) —
+  Löschentscheide lesen nur das Register, nie `original_path`.
+  `asset_refs` hält Jobs, die ein Exemplar mitbenutzen; ein geteiltes Asset
+  wird nie weggeräumt.
+- **Papierkorb statt löschen.** Lokal
+  `<Basis-Pfad des Sets>/.papierkorb/<Datum>/<debug_key>/<Datei>`, nach 30
+  Tagen von der täglichen `trash_maintenance` geleert (Zeile `purge` im
+  Protokoll). In Immich der Papierkorb von Immich (`force=false`), nie
+  `force=True`. Weg darf ein Exemplar nur, wenn ein anderes, jetzt
+  geprüftes desselben Inhalts existiert und kein anderer Job darauf verweist.
+- **Abgleich beim Start.** `recovery.reconcile_file_operations()` gleicht
+  offene `intent`-Zeilen gegen Platte und Immich ab, bevor der Worker
+  startet; erst danach werden unterbrochene Jobs eingereiht. Ein Schritt,
+  der nach einem Absturz neu läuft, holt sein schon erledigtes Ergebnis über
+  `fileops.last_result()` (IA-08 und der Worker-Download nach einem
+  abgebrochenen Ersetzen in Immich, R-10e).
+- **Eine Quelle für die Ansicht.** Vorlagen und Skripte lesen den Status
+  der Module nur über `job_view.module_blocks()` (direkt oder über
+  `routers/history.py`), nie `jobs.step_result` selbst.
+- **Test-Helfer in `backend/test_support/invariants.py`:**
+  `check_no_file_lost(job_ids, …)` — jeder Job hat noch ein geprüftes,
+  verknüpftes Exemplar; `FileGuard` — ausserhalb der eigenen Pfade hat sich
+  nichts verändert; `delete_test_jobs(…)` — Aufräumen von Test-Jobs samt
+  `file_copies` und `asset_refs` (`file_ops` bleibt).
+- **R-26:** `jobs` hat AUTOINCREMENT, eine Job-ID wird nie zweimal vergeben
+  — sonst erbte ein neuer Job Register- und Protokollzeilen eines
+  gelöschten. Job löschen (Job-Seite, Review, Duplikat-Auflösung) behält
+  die Zeile mit Status `deleted`. Tests löschen Jobs nur über
+  `delete_test_jobs`. Rest: `debug_key` zählt nach einem Neustart vom
+  höchsten vorhandenen Schlüssel weiter.
+
 ## Logging-Pflicht: Vor UND Nach jeder destruktiven Aktion
 
 > Jede Operation die Daten verändert oder löscht MUSS **vor** und
@@ -404,6 +465,11 @@ except Exception as exc:
 - Pipeline Duplikat-Erkennung (IA-02 Verschiebung in Duplikat-Ordner)
 
 **Gilt NICHT für:** Reine Lese-Operationen, DB-Queries, Config-Reads.
+
+Seit 3.0 laufen die Datei- und Asset-Operationen oben über `fileops`, das
+Absicht und Ergebnis selbst ins Protokoll `file_ops` schreibt. Die Pflicht
+bleibt für alles, was der Aufrufer darum herum tut (Status-Änderungen,
+Duplikat-Auflösung, Entscheide, *warum* etwas weg darf).
 
 Kein `except: pass` bei destruktiven Aktionen. Fehler müssen geloggt
 werden — auch wenn die Aktion optional ist.
@@ -440,10 +506,12 @@ Nur Dateien, die der Immich-Poller heruntergeladen hat
 Dateien mit `immich_asset_id` als Lösch-Trigger nehmen — das war der
 Live-Bug v2.28.28.
 
-### `safe_move` ist nicht `os.rename`
-`safe_move(src, dst)` macht copy → SHA256-verify → delete. Sicher gegen
-Stromausfall und Filesystem-Glitches. Niemals durch `shutil.move()` oder
-`os.rename` ersetzen.
+### Verschieben nur über `fileops.move`, nie `os.rename`
+`fileops.move(job, src, dst, …)` kopiert, prüft den SHA-256 am Ziel, trägt
+Ziel und Protokoll ein und entfernt erst dann die Quelle; es überschreibt
+nie eine vorhandene Datei. `safe_move` (copy → verify → delete) ist nur
+noch ein Baustein darunter. Niemals durch `shutil.move()`, `os.rename`
+oder einen direkten `safe_move` ersetzen.
 
 ### Pipeline-Auto-Pause
 `AIConnectionError` und `GeocodingConnectionError` setzen
@@ -639,7 +707,7 @@ Mantra:
 
 Weitere Details siehe `CHANGELOG.md`.
 
-## Duplikat-System (v2.28.44–v2.28.66)
+## Duplikat-System (seit v2.28.44, Auflösung ab 3.0)
 
 ### Quality-Score (`_quality_score()` in `step_ia02_duplicates.py`)
 Vergleichbarer Tuple-Score für Duplikat-Paare:
@@ -653,37 +721,68 @@ Vergleichbarer Tuple-Score für Duplikat-Paare:
 - **Job-ID:** negativ → älterer Job (Original) gewinnt bei Gleichstand
 
 ### Batch-Clean Quality (`POST /api/duplicates/batch-clean-quality`)
-- Verarbeitet exakte SHA256 UND pHash-100% Matches
+- Verarbeitet exakte SHA256-, RAW+JPG- und pHash-0-Treffer
 - Behält pro Gruppe den besten Quality-Score
-- Merged Metadaten (GPS, Datum, Keywords, Description) von schlechteren
-- Behaltene Duplikate: Analyse-Steps vom Original kopiert → nur IA-07/08 läuft
-- `prepare_job_for_reprocess` verschiebt Datei korrekt
-- IA-02 wird als `skipped` injiziert (folder_tags erhalten)
+- Merged Metadaten (GPS, Datum, Keywords, Description, Ordner, Alben) von schlechteren
+- Gleicher Kern wie "Dieses behalten": `_resolve_duplicate_group` (siehe unten)
 
-### Vollständiger Daten-Merge (v2.29.5)
+### Auflösung einer Gruppe (ab 3.0: beanspruchen, prüfen, Papierkorb)
 
-Beim Auflösen einer Duplikatgruppe (Keep this / Batch-Clean) werden
-**alle Informationen aller aufgelösten Assets** auf das Ziel übertragen.
+`routers/duplicates.py` `_resolve_duplicate_group` — für "Dieses
+behalten" und Batch-Clean gleich, in fester Reihenfolge (R-04, R-09, R-10a):
+
+1. **Beanspruchen:** alle Mitglieder atomar von ihrem gesehenen Status auf
+   `resolving` (`UPDATE … WHERE status = gesehen`), der Plan steht in
+   `step_result['resolving']`. Ist ein Mitglied `queued`, `processing` oder
+   schon `resolving`, wird nichts angefasst. Der Start wird geloggt, bevor
+   sich etwas ändert.
+2. **Prüfen:** Das behaltene Exemplar muss jetzt verifizierbar sein
+   (Register, sonst die alten Felder beim ersten Zugriff registriert).
+   Fehlt es, wird nichts gelöscht und der Anspruch zurückgegeben.
+3. **Spender in den Papierkorb:** ihre eigenen Exemplare über `fileops`
+   (Set-Papierkorb bzw. Immich-Papierkorb), Sidecar mit; ein Asset, das der
+   behaltene Job oder ein Job ausserhalb der Gruppe nutzt, bleibt.
+4. **Behaltener Job:** ein behaltenes Duplikat kommt über
+   `prepare_job_for_reprocess` nach `reprocess/` und in die Warteschlange
+   (IA-03 … IA-06 vom Analyse-Spender übernommen, IA-02 als `skipped`
+   injiziert, IA-07 schreibt neu, IA-08 legt ab). Ein behaltenes Original
+   (`done`/`review`) bekommt Tags, Ordner, Alben und — nur wo der Nutzer
+   keine eigene geschrieben hat — die Beschreibung direkt in Immich
+   (`_apply_merge_in_immich`).
+5. **Endzustand in einem Commit:** Spender bekommen Status `deleted`
+   (`error_message` "Duplicate deleted (…). Kept: …", `file_hash`, `phash`,
+   `immich_asset_id`, `target_path` geleert); die Zeile bleibt (R-26). Ein
+   Spender, dessen Exemplar `fileops` nicht wegräumen konnte, behält seinen
+   Status.
+
+Stürzt die App dazwischen ab, bleiben die Mitglieder `resolving` mit ihrem
+Plan; `resume_interrupted_resolutions()` (Start und Duplikat-Seite) führt
+ihn erneut aus — jeder Schritt darf zweimal laufen.
+
+### Vollständiger Daten-Merge (`_merge`)
+
+Beim Auflösen werden GPS, Datum, Stichwörter, Beschreibung, Ordner und
+Alben aller Spender auf den behaltenen Job übertragen.
 
 **IA-02 step_result Felder:**
-- `folder_tags` — gemergte Folder-Tags aller Members (für Keywords)
-- `own_album` — Album-Name des behaltenen Jobs (vor Merge gesichert)
-- `donor_albums` — Alben der gelöschten Donors (aus Immich abgefragt)
+- `folder_path` — roher relativer Inbox-Ordner des behaltenen Jobs
+- `donor_folder_paths` — rohe relative Ordner der Spender. Ordner werden
+  als Pfade zusammengeführt, nicht als fertige Tags; was daraus wird
+  (Tags, Alben), entscheidet das Set des behaltenen Jobs beim Schreiben
+  (`folder_path.folder_targets()`). Die Ordner-Optionen sind pro Set,
+  siehe [`docs/IMMICH_ORDNERSTRUKTUR.md`](docs/IMMICH_ORDNERSTRUKTUR.md).
+- `donor_albums` — Alben der Spender-Assets (Alben des Nutzers, kommen
+  unabhängig von den Ordner-Optionen mit)
+- `folder_tags`, `own_album` — nur noch von Jobs aus der Zeit vor
+  `folder_path`
 
-**Donor-Album Fallback-Kette:**
-1. `get_asset_albums()` — Donor hat Immich-Asset
-2. `IA-08.immich_albums_added` — Donor lief durch Pipeline
-3. `folder_tags[-1]` — Donor war Duplikat (nie hochgeladen)
+**Spender-Alben, Fallback-Kette:**
+1. `get_asset_albums()` — Spender hat ein Immich-Asset
+2. `IA-08.immich_albums_added` — Spender lief durch die Pipeline
+3. `folder_tags[-1]` — alter Spender ohne `folder_path`, nur wenn das Set
+   Ordner-Alben will
 
-**Zwei Pfade:**
-- **Reprocess (kept was duplicate):** Pipeline läuft IA-03..08.
-  `_get_folder_album_names()` liest `own_album` + `donor_albums` aus IA-02.
-- **Already-done (kept was original):** Kein Pipeline-Re-run. Tags,
-  Alben, Description werden direkt via Immich API angewendet
-  (`tag_asset`, `add_asset_to_albums`, `update_asset_description`).
-
-**Wichtig:** Album-Namen fliessen auch in `keywords_written` (IA-07),
-damit sie als Immich-Tags UND File-Keywords geschrieben werden.
+Was übernommen wurde, steht in `step_result['dup_merge']` (R-20).
 
 ### CSV-Retry Input (`/app/data/csv-retry/`)
 - CSV mit `filename`-Spalte → Filewatcher erkennt → passende Jobs auf `queued`
