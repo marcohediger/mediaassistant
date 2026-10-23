@@ -10,3 +10,15 @@ docker-compose.local.yml
 # Postgres data directory must never reach the public repository.
 Bilder/
 immich/
+# Personal test photos, inventories and stray databases: never in the
+# public repository (migration_scan.db holds the real NAS paths).
+Testbilder/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+# Separate tool repositories checked out next to the code (own .git each)
+ma-*/
+# Leftovers of file operations should a test ever point into the repo
+.fops-*
+.papierkorb/
