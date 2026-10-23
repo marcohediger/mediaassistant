@@ -513,3 +513,11 @@ Dazu `test_module_rerun.py` (Prüfungen 2.5, Vorschau-Zählungen, Kaskade auto/a
 9. „Veraltet" doppelt: ersetzte Läufe → „Ersetzt" (Vorschlag)?
 10. OCR „immer" parallel zur KI: jetzt nicht (Vorschlag)?
 11. IA-09 meldet beim Neu-Ausführen nur dessen Fehler (Vorschlag)?
+
+## 8. Entscheide (2026-10-23)
+
+1. **Immich: pro Lauf wählbar.** Vorgabe „nur Tags und Beschreibung über die API" (gleiche Asset-ID, kein Download); im Dialog umschaltbar auf „Datei ersetzen" (neue Asset-ID, altes Asset in Immichs Papierkorb).
+2. **KI läuft nicht automatisch mit.** IA-05 wird „veraltet" angezeigt; Schalter „KI-Analyse auch neu" im Dialog.
+3. **Massenläufe dürfen Ablage-Dateien verschieben**, wenn sich der Zielordner ändert — mit Warnung und Zählung in der Vorschau, sicher über fileops.
+4. **Gleichzeitige Jobs automatisch:** `2 × KI-Slots + 2`, keine Einstellung in der Oberfläche; eigene Grenzen für KI, Geocoding (1/s) und Immich.
+5. Für die übrigen offenen Fragen gelten die Vorschläge aus Abschnitt 7 (Review-Kategorie bleibt; Alben/Archiv nicht zurücknehmen; Fehler-Jobs → „Erneut verarbeiten"; ein Massenauftrag gleichzeitig, Einzeljobs immer; ersetzte Läufe heissen „Ersetzt"; OCR nicht parallel zur KI; IA-09 meldet nur Fehler des Neu-Ausführens).
