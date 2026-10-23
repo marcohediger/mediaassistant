@@ -124,7 +124,6 @@
     "first_ids": "First IDs: {ids}",
     "reloading": "The page will reload.",
     "task_running": "{task} running …",
-    "task_starting": "Starting …",
     "cleanup_done": "Cleanup finished.",
     "cleanup_failed": "Cleanup failed: {error}",
     "cleanup_failed_http": "Cleanup failed: HTTP {status}",
@@ -959,5 +958,27 @@
     "logged_out": "You have been signed out.",
     "button": "Sign in with SSO",
     "denied": "Access denied. Your account is not authorised."
+  },
+  "maintenance": {
+    "phase_starting": "Starting …",
+    "phase_scanning": "Checking jobs for missing files",
+    "phase_loading_error_jobs": "Loading error jobs",
+    "phase_loading_done_counterparts": "Looking up finished counterparts",
+    "phase_verifying_targets": "Checking where the counterparts are stored",
+    "phase_deleting": "Deleting stale error jobs",
+    "phase_loading_candidates": "Loading candidates",
+    "phase_classifying": "Sorting candidates",
+    "phase_requeueing": "Re-queueing jobs",
+    "phase_marking_done": "Marking jobs as done",
+    "phase_reading_sidecars": "Reading sidecars",
+    "phase_collecting_matches": "Collecting matches",
+    "phase_reading_immich_tags": "Reading Immich tags",
+    "phase_removing_keywords": "Removing keywords from the sidecars",
+    "phase_untagging": "Removing assignments of \"{name}\" ({done} so far)",
+    "phase_deleting_empty_tags": "Deleting empty tags in Immich",
+    "phase_deleting_tags": "Deleting tags in Immich",
+    "phase_counting_assets": "Counting pictures per spelling",
+    "phase_merging_sidecars": "Switching sidecars to \"{name}\"",
+    "phase_merging_immich": "Merging Immich tags into \"{name}\""
   }
 }
