@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import subprocess
 
@@ -7,6 +8,9 @@ from config import config_manager
 TEMP_DIR = os.path.join(os.path.dirname(os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")), "tmp")
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp"}
+MAX_FRAMES = 50
+
+logger = logging.getLogger("mediaassistant.pipeline.ia04")
 
 
 async def execute(job, session) -> dict:
@@ -18,6 +22,10 @@ async def execute(job, session) -> dict:
         return {"converted": False, "reason": "format natively supported"}
 
     await asyncio.to_thread(os.makedirs, TEMP_DIR, exist_ok=True)
+    # Converters write with "overwrite" semantics (ffmpeg -y, "wb"); only
+    # this job's own leftovers can sit at these names, and they go first.
+    await discard_temp_files(job, _own_temp_paths(job.debug_key), actor="IA-04",
+                             reason="Rest eines früheren Laufs vor neuer Konvertierung")
     temp_path = os.path.join(TEMP_DIR, f"{job.debug_key}.jpg")
 
     try:
@@ -54,10 +62,11 @@ async def execute(job, session) -> dict:
             if not thumbnail_enabled:
                 return {"converted": False, "reason": "video thumbnail disabled"}
             num_frames = await config_manager.get("video.thumbnail_frames", 8)
-            num_frames = max(1, min(int(num_frames), 50))
+            num_frames = max(1, min(int(num_frames), MAX_FRAMES))
             scale_pct = await config_manager.get("video.thumbnail_scale", 50)
             paths = await _extract_video_frames(filepath, job, num_frames, int(scale_pct))
             if paths:
+                await _register_temp(job, paths)
                 return {
                     "converted": True,
                     "temp_path": paths[0],
@@ -69,32 +78,72 @@ async def execute(job, session) -> dict:
             return {"converted": False, "reason": f"no conversion for {ext}"}
 
         if os.path.exists(temp_path):
+            await _register_temp(job, [temp_path])
             return {"converted": True, "temp_path": temp_path}
     except Exception as e:
-        # Cleanup temp files on error
-        from file_operations import safe_remove
-        for f in _glob_temp_files(job.debug_key):
-            safe_remove(f)
-        import logging
-        logging.getLogger("mediaassistant.pipeline.ia04").warning(
-            "%s HEIC/convert fallback fehlgeschlagen: %s", job.debug_key, e
-        )
+        await discard_temp_files(job, _own_temp_paths(job.debug_key), actor="IA-04",
+                                 reason="Konvertierung fehlgeschlagen")
+        logger.warning("%s HEIC/convert fallback fehlgeschlagen: %s", job.debug_key, e)
         return {"converted": False, "reason": f"conversion failed: {e}"}
 
     return {"converted": False, "reason": "conversion produced no output"}
 
 
-def _glob_temp_files(debug_key: str) -> list[str]:
-    """Find all temp files for a debug key (single + multi-frame)."""
-    files = []
-    base = os.path.join(TEMP_DIR, f"{debug_key}.jpg")
-    if os.path.exists(base):
-        files.append(base)
-    for i in range(1, 51):
-        p = os.path.join(TEMP_DIR, f"{debug_key}_{i:02d}.jpg")
-        if os.path.exists(p):
-            files.append(p)
-    return files
+def _own_temp_paths(debug_key: str) -> list[str]:
+    """Every name IA-04 may give a temp file of this job (single + multi-frame)."""
+    names = [f"{debug_key}.jpg"] + [f"{debug_key}_{i:02d}.jpg" for i in range(1, MAX_FRAMES + 1)]
+    return [os.path.join(TEMP_DIR, n) for n in names]
+
+
+def _named_for(debug_key: str, path: str) -> bool:
+    """A temp path is this job's by construction: TEMP_DIR + a name built from its debug key."""
+    return os.path.abspath(path) in {os.path.abspath(p) for p in _own_temp_paths(debug_key)}
+
+
+async def _register_temp(job, paths: list[str]) -> None:
+    """Record the temp files in the copy register (kind temp), so cleanup can
+    tell this job's files from those another job's result points at."""
+    import fileops
+    for path in paths:
+        try:
+            await fileops.register_existing(job, "temp", path)
+        except Exception as exc:
+            # Not fatal: IA-10 still recognises the file by its name.
+            logger.warning("%s temp file %s not registered: %s", job.debug_key, path, exc)
+
+
+async def discard_temp_files(job, paths, *, actor: str, reason: str) -> tuple[list, list, list]:
+    """Remove this job's temp files through fileops.discard.
+
+    Only files the register lists as this job's (kind temp), or unregistered
+    files whose name was built from this job's debug key, are removed. A
+    path from another job — e.g. an IA-04 result copied from a duplicate
+    donor — is left alone. Returns (removed, kept, failed); never raises.
+    """
+    import fileops
+    removed, kept, failed = [], [], []
+    try:
+        own = {c.location: c for c in await fileops.copies(job) if c.kind == "temp"}
+    except Exception as exc:
+        return removed, kept, [f"Register nicht lesbar: {type(exc).__name__}: {exc}"]
+    for path in paths or []:
+        if not path:
+            continue
+        path = os.path.abspath(path)
+        if not await asyncio.to_thread(os.path.lexists, path):
+            continue
+        row = own.get(path)
+        try:
+            if row is None:
+                if not _named_for(job.debug_key, path):
+                    kept.append(path)
+                    continue
+                row = await fileops.register_existing(job, "temp", path)
+            await fileops.discard(job, row.id, actor=actor, reason=reason)
+            removed.append(path)
+        except Exception as exc:
+            failed.append(f"{path}: {type(exc).__name__}: {exc}")
+    return removed, kept, failed
 
 
 async def _extract_video_frames(video_path: str, job, num_frames: int, scale_pct: int = 50) -> list[str]:
