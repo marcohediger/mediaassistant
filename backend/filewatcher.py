@@ -73,6 +73,9 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
     await repair_immich_poll_cursor()
 
     worker_task = asyncio.create_task(pipeline_worker(shutdown_event))
+    # Rerun requests: prepared next to the worker, after the requeue above.
+    import reruns
+    feeder_task = asyncio.create_task(reruns.feeder(shutdown_event))
     last_csv = 0.0
 
     while not shutdown_event.is_set():
@@ -108,8 +111,9 @@ async def start_filewatcher(shutdown_event: asyncio.Event):
         except asyncio.TimeoutError:
             pass
 
-    worker_task.cancel()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        pass
+    for task in (worker_task, feeder_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

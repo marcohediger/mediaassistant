@@ -20,8 +20,13 @@ Stories:
   US-8:  Kein Duplikat → volle Pipeline
   US-9:  Retry nach Fehler
   US-10: Folder-Tags → Album in Immich
+  US-11 … US-14: pHash-Duplikat, Keep mit Tag-Merge, Batch-Clean
+  US-15: Neu ausführen: Geocoding neu → Immich-Tags (API), US-15b gleicher Ort
+  US-16: Neu ausführen: Immich-Job ohne lokale Kopie (Arbeitskopie), Variante "ersetzen"
+  US-17: Neu ausführen: Ablage, Geocoding neu, Vorlage mit {CITY}
+  US-18 … US-20: Ausführung nach Abhängigkeiten (parallel, Grenzen, kein doppelter Lauf)
 """
-import asyncio, sys, os, time, shutil, random, hashlib
+import asyncio, contextlib, sys, os, time, shutil, random, hashlib
 sys.path.insert(0, "/app")
 os.environ.setdefault("DATABASE_PATH", "/app/data/mediaassistant.db")
 
@@ -129,7 +134,7 @@ async def get_immich_albums(asset_id):
 
 async def create_and_run_job(filename, original_path, *, use_immich=True,
                              source_inbox_path=INBOX, folder_tags=False,
-                             immich_user_id=None):
+                             immich_user_id=None, set_id=None):
     """Create a job and run the full pipeline. Returns job_id."""
     from database import async_session
     from models import Job
@@ -148,6 +153,7 @@ async def create_and_run_job(filename, original_path, *, use_immich=True,
             immich_user_id=immich_user_id,
             folder_tags=folder_tags,
             file_hash=file_hash,
+            set_id=set_id,
             debug_key=f"E2E-{TS}-{random.randint(1000, 9999)}",
         )
         session.add(job)
@@ -1138,6 +1144,858 @@ async def test_us14_batch_clean_page():
 
 
 # ══════════════════════════════════════════════════════════════
+# Neu ausführen (US-15 … US-17): helpers
+# ══════════════════════════════════════════════════════════════
+E2E_SETS: list[int] = []
+E2E_RERUNS: list[int] = []
+E2E_TAGS: list[str] = []
+E2E_ALBUMS: list[str] = []
+
+
+async def e2e_set(name, *, target_mode, write_mode, template=None):
+    """A processing set of the stories' own (base path in the sandbox).
+    `template` ("{key}" = category key) replaces every category's path."""
+    from database import async_session
+    from models import LibraryCategory, ProcessingSet
+    from sets import seed_set_defaults
+    from sqlalchemy import select
+    async with async_session() as s:
+        ps = ProcessingSet(name=f"E2E {name} {TS}", description="test_e2e_user_stories", active=False,
+                           position=9700 + len(E2E_SETS), schedule_mode="manual", folder_tags=False,
+                           dry_run=False, ocr_enabled=False, metadata_write_mode=write_mode, google_json=False,
+                           target_mode=target_mode, library_base_path=f"{E2E_ROOT}/lib_{name}",
+                           immich_input=False, immich_poll=False)
+        s.add(ps)
+        await s.flush()
+        seed_set_defaults(s, ps.id)
+        await s.flush()
+        if template:
+            for cat in (await s.execute(select(LibraryCategory).where(LibraryCategory.set_id == ps.id))).scalars():
+                cat.path_template = template.replace("{key}", cat.key)
+        await s.commit()
+        E2E_SETS.append(ps.id)
+        return ps.id
+
+
+async def set_write_mode(set_id, mode):
+    from database import async_session
+    from models import ProcessingSet
+    async with async_session() as s:
+        ps = await s.get(ProcessingSet, set_id)
+        ps.metadata_write_mode = mode
+        await s.commit()
+
+
+def add_gps(path, lat=46.948, lon=7.447):
+    """GPS and a camera in the file, so IA-03 has something to do."""
+    import subprocess
+    subprocess.run(["exiftool", "-overwrite_original", "-q", f"-GPSLatitude={lat}", "-GPSLatitudeRef=N",
+                    f"-GPSLongitude={lon}", "-GPSLongitudeRef=E", "-Make=E2E", "-Model=Rerun",
+                    "-DateTimeOriginal=2025:06:15 10:00:00", path], check=True, capture_output=True)
+
+
+class FakeGeo:
+    """Geocoding answers without Nominatim: the town the story wants."""
+
+    def __init__(self, city):
+        self.city = city
+        self.calls = 0
+        self._saved = {}
+
+    async def _answer(self, *args, **kwargs):
+        self.calls += 1
+        return {"country": "Schweiz", "state": self.city, "city": self.city, "suburb": "",
+                "display_name": f"{self.city}, Schweiz"}
+
+    def __enter__(self):
+        from pipeline import step_ia03_geocoding as geo
+        for name in ("_reverse_nominatim", "_reverse_photon", "_reverse_google"):
+            self._saved[name] = getattr(geo, name)
+            setattr(geo, name, self._answer)
+        geo._geo_cache.clear()
+        return self
+
+    def __exit__(self, *exc):
+        from pipeline import step_ia03_geocoding as geo
+        for name, fn in self._saved.items():
+            setattr(geo, name, fn)
+        geo._geo_cache.clear()
+
+
+async def rerun_job(job_id, modules, **options):
+    """What the feeder and the worker do for a single-job request: create
+    it, prepare it, run the job. Returns (request id, item, prepared)."""
+    import reruns
+    from database import async_session
+    from models import RerunItem
+    from pipeline import rerun as rerun_plan, run_pipeline
+    from sqlalchemy import select
+    job = await get_job(job_id)
+    res = await reruns.create({"modules": modules, "target": {"kind": "jobs", "keys": [job.debug_key]},
+                               "options": options})
+    rid = res["rerun_id"]
+    E2E_RERUNS.append(rid)
+    async with async_session() as s:
+        item_id = (await s.execute(select(RerunItem.id).where(RerunItem.rerun_id == rid))).scalar()
+    await rerun_plan._set_item(item_id, "pending", state="preparing")
+    prepared = await rerun_plan.prepare(item_id)
+    if prepared.state == "queued":
+        await run_pipeline(job_id)
+    async with async_session() as s:
+        item = await s.get(RerunItem, item_id)
+    return rid, item, prepared
+
+
+async def current_runs_of(job_id):
+    import runs
+    from database import async_session
+    async with async_session() as s:
+        return {m: runs.snapshot(r) for m, r in (await runs.current_runs(s, job_id)).items()}
+
+
+async def rerun_state(rid):
+    from database import async_session
+    from models import Rerun
+    async with async_session() as s:
+        return (await s.get(Rerun, rid)).state
+
+
+def file_keywords(path):
+    import json as _json
+    import subprocess
+    out = subprocess.run(["exiftool", "-json", "-Keywords", "-Subject", "-TagsList", "-ImageDescription", path],
+                         capture_output=True)
+    data = (_json.loads(out.stdout or b"[]") or [{}])[0]
+    words = []
+    for k in ("Keywords", "Subject", "TagsList"):
+        v = data.get(k)
+        words += [str(x) for x in (v if isinstance(v, list) else [v] if v else [])]
+    return words, str(data.get("ImageDescription") or "")
+
+
+async def asset_description(asset_id):
+    info = await asset_json(asset_id) or {}
+    return ((info.get("exifInfo") or {}).get("description") or "")
+
+
+async def ledger_ops(job_id, since_id=0):
+    from database import async_session
+    from models import FileOp
+    from sqlalchemy import select
+    async with async_session() as s:
+        return list((await s.execute(select(FileOp).where(FileOp.job_id == job_id, FileOp.id > since_id)
+                                     .order_by(FileOp.id))).scalars().all())
+
+
+async def last_op_id():
+    from database import async_session
+    from models import FileOp
+    from sqlalchemy import func, select
+    async with async_session() as s:
+        return (await s.execute(select(func.coalesce(func.max(FileOp.id), 0)))).scalar()
+
+
+class RerunStage:
+    """Pipeline paused (the app's worker and feeder keep out) and geocoding
+    on for a rerun story; restored afterwards."""
+
+    async def __aenter__(self):
+        from config import config_manager
+        self.paused = await config_manager.get("pipeline.paused", False)
+        self.geo = await config_manager.is_module_enabled("geocoding")
+        await config_manager.set("pipeline.paused", True)
+        await config_manager.set_module_enabled("geocoding", True)
+        return self
+
+    async def __aexit__(self, *exc):
+        from config import config_manager
+        await config_manager.set("pipeline.paused", self.paused)
+        await config_manager.set_module_enabled("geocoding", self.geo)
+
+
+# ══════════════════════════════════════════════════════════════
+# US-15 / US-15b: Geocoding neu → Immich-Tags über die API
+# ══════════════════════════════════════════════════════════════
+async def test_us15_rerun_geocoding_immich():
+    print("\n-- US-15: Neu ausführen: Geocoding neu -> Immich-Tags (API) --")
+    from immich_client import tag_asset
+    from pipeline import rerun as rerun_plan
+    from test_support.invariants import check_no_file_lost
+    import job_view
+    async with RerunStage():
+        set_id = await e2e_set("us15", target_mode="immich", write_mode="direct")
+        path = f"{INBOX}/__e2e_us15_{TS}.jpg"
+        make_unique_jpg(path)
+        add_gps(path)
+        CLEANUP_FILES.append(path)
+        with FakeGeo("Bern"):
+            job_id = await create_and_run_job(f"__e2e_us15_{TS}.jpg", path, use_immich=True, set_id=set_id)
+        job = await get_job(job_id)
+        check("US15-01 Erstlauf done, Asset in Immich", job.status in ("done", "review") and bool(job.immich_asset_id),
+              f"status={job.status} {job.error_message}")
+        if not job.immich_asset_id:
+            return
+        asset_id = job.immich_asset_id
+        CLEANUP_ASSETS.append(asset_id)
+        tags0 = await get_immich_tags(asset_id)
+        check("US15-02 Erstlauf: Tag 'Bern' in Immich", "Bern" in tags0, f"tags={tags0}")
+        user_tag = f"E2E-Benutzer-{TS}"
+        E2E_TAGS.append(user_tag)
+        await tag_asset(asset_id, user_tag)
+        before = await current_runs_of(job_id)
+        status_before = job.status
+        op0 = await last_op_id()
+
+        with FakeGeo("Zürich"):
+            rid, item, prepared = await rerun_job(job_id, ["IA-03"])
+        job = await get_job(job_id)
+        after = await current_runs_of(job_id)
+        check("US15-03 Vorbereitung angenommen, Auftrag done", prepared.state == "queued" and item.state == "done"
+              and await rerun_state(rid) == "done", f"prep={prepared} item={item.state} {item.reason} {item.detail}")
+        check("US15-04 IA-03 Versuch 2 mit Auslöser rerun",
+              after["IA-03"].attempt == before["IA-03"].attempt + 1 and after["IA-03"].trigger == "rerun",
+              f"#{after['IA-03'].attempt} {after['IA-03'].trigger}")
+        check("US15-05 IA-07 und IA-08 neu mit Auslöser cascade",
+              after["IA-07"].trigger == "cascade" and after["IA-08"].trigger == "cascade"
+              and after["IA-07"].id != before["IA-07"].id and after["IA-08"].id != before["IA-08"].id,
+              f"IA-07 {after['IA-07'].trigger} IA-08 {after['IA-08'].trigger}")
+        check("US15-06 IA-05 nicht neu (KI nicht verlangt)", after["IA-05"].id == before["IA-05"].id)
+        rows = (await job_view.job_runs([job_id]))[job_id]
+        stale = (await rerun_plan.stale_modules([job], {job_id: rows}))[job_id]
+        blocks = {b["module"]: b for b in job_view.module_blocks(job, {}, runs=rows, stale=stale)}
+        check("US15-07 IA-05 als veraltet angezeigt, IA-03/07/08 nicht",
+              blocks["IA-05"]["stale"] and not blocks["IA-03"]["stale"] and not blocks["IA-07"]["stale"]
+              and not blocks["IA-08"]["stale"], f"stale={sorted(stale)}")
+        check("US15-08 gleiche Asset-ID, Status wie vorher", job.immich_asset_id == asset_id
+              and job.status == status_before, f"{job.immich_asset_id} {job.status}")
+        tags = await get_immich_tags(asset_id)
+        check("US15-09 'Zürich' da, 'Bern' weg, Benutzer-Tag bleibt",
+              "Zürich" in tags and "Bern" not in tags and user_tag in tags, f"tags={tags}")
+        desc = await asset_description(asset_id)
+        check("US15-10 Beschreibung neu", "Zürich" in desc and "Bern" not in desc, desc)
+        ops = await ledger_ops(job_id, op0)
+        check("US15-11 kein Download, keine Datei angefasst", not [o for o in ops if o.op in ("download", "upload",
+                                                                                              "replace", "move")],
+              f"{[(o.op, o.state) for o in ops]}")
+        res = await check_no_file_lost([job_id])
+        check("US15-12 Invariante: keine Datei verloren", res.ok, res.summary())
+        check("US15-13 Laufparameter entfernt", not [k for k in (job.step_result or {}) if k.startswith("_")],
+              f"{[k for k in (job.step_result or {}) if k.startswith('_')]}")
+
+        print("\n-- US-15b: Neu ausführen: gleicher Ort --")
+        before = after
+        with FakeGeo("Zürich"):
+            rid, item, prepared = await rerun_job(job_id, ["IA-03"])
+        after = await current_runs_of(job_id)
+        ran = sorted(m for m in after if after[m].id != before.get(m, after[m]).id)
+        check("US15b-01 nur IA-03 und die Abschluss-Module neu", ran == ["IA-03", "IA-09", "IA-10", "IA-11"]
+              or ran == ["IA-03", "IA-10", "IA-11"], f"neu={ran}")
+        check("US15b-02 Auftrag unchanged", item.state == "unchanged" and await rerun_state(rid) == "done",
+              f"item={item.state} {item.summary}")
+        tags = await get_immich_tags(asset_id)
+        check("US15b-03 Tags unverändert", "Zürich" in tags and user_tag in tags and "Bern" not in tags, f"{tags}")
+
+
+# ══════════════════════════════════════════════════════════════
+# US-16: Immich-Job ohne lokale Kopie (Handy-Upload)
+# ══════════════════════════════════════════════════════════════
+async def test_us16_rerun_immich_work_copy():
+    print("\n-- US-16: Neu ausführen: Immich-Job ohne lokale Kopie --")
+    from database import async_session
+    from immich_client import add_asset_to_albums, get_asset_state
+    from models import Job
+    from pipeline import reprocess
+    from test_support.invariants import check_no_file_lost
+    from worker import _run_job
+    async with RerunStage():
+        set_id = await e2e_set("us16", target_mode="immich", write_mode="sidecar")
+        name = f"__e2e_us16_{TS}.jpg"
+        path = f"{E2E_ROOT}/{name}"
+        make_unique_jpg(path)
+        CLEANUP_FILES.append(path)
+        asset_id = await phone_upload(path, "us16")
+        check("US16-01 Handy-Upload in Immich", bool(asset_id))
+        if not asset_id:
+            return
+        from inputs.common import IMMICH_PENDING
+        async with async_session() as s:
+            j = Job(filename=name, original_path=f"{IMMICH_PENDING}{asset_id}", source_label="Immich",
+                    status="queued", use_immich=True, immich_asset_id=asset_id, set_id=set_id,
+                    debug_key=f"E2E-US16-{TS}")
+            s.add(j)
+            await s.commit()
+            job_id = j.id
+            CLEANUP_JOBS.append(job_id)
+        await _run_job(job_id, name, f"E2E-US16-{TS}")
+        job = await get_job(job_id)
+        dl = job.original_path or ""
+        check("US16-02 Poller-Job fertig, Temp-Kopie weg", job.status in ("done", "review")
+              and dl.startswith("/tmp/ma_immich_") and not os.path.exists(dl), f"{job.status} {dl}")
+        album = f"E2E-Album-{TS}"
+        E2E_ALBUMS.append(album)
+        await add_asset_to_albums(asset_id, [album])
+
+        # Someone else's file with the same name in reprocess/
+        os.makedirs(reprocess.REPROCESS_DIR, exist_ok=True)
+        foreign = os.path.join(reprocess.REPROCESS_DIR, name)
+        with open(foreign, "wb") as f:
+            f.write(b"fremde Datei " + str(TS).encode())
+        CLEANUP_FILES.append(foreign)
+        foreign_hash = sha256(foreign)
+        op0 = await last_op_id()
+        before = await current_runs_of(job_id)
+
+        rid, item, prepared = await rerun_job(job_id, ["IA-01"])
+        job = await get_job(job_id)
+        after = await current_runs_of(job_id)
+        ops = await ledger_ops(job_id, op0)
+        downloads = [o for o in ops if o.op == "download"]
+        work = downloads[0].dst if downloads else None
+        check("US16-03 Download in eine eigene Arbeitskopie", len(downloads) == 1 and downloads[0].state == "done"
+              and work and work != foreign and work.startswith(reprocess.REPROCESS_DIR), f"{work}")
+        check("US16-04 fremde Datei unberührt", os.path.isfile(foreign) and sha256(foreign) == foreign_hash)
+        check("US16-05 Arbeitskopie danach weg", work is not None and not os.path.exists(work), f"{work}")
+        check("US16-06 IA-01 Versuch 2 (rerun), Auftrag beendet", after["IA-01"].trigger == "rerun"
+              and after["IA-01"].id != before["IA-01"].id and item.state in ("done", "unchanged"),
+              f"item={item.state} {item.reason} {item.detail}")
+        # The work copy goes after the hand-over: IA-08 (when it ran) or IA-10.
+        removal = [o for o in ops if o.src == work and o.op != "download"]
+        check("US16-07 file_ops.run_id gesetzt (das Entfernen der Arbeitskopie gehört zum Lauf des Moduls)",
+              len(removal) == 1 and removal[0].actor in ("IA-08", "IA-10")
+              and removal[0].run_id == after[removal[0].actor].id,
+              f"{[(o.op, o.actor, o.run_id) for o in ops]}")
+        check("US16-08 gleiche Asset-ID", job.immich_asset_id == asset_id)
+
+        print("\n-- US-16 Variante: Datei ersetzen (direkt) --")
+        await set_write_mode(set_id, "direct")
+        rid, item, prepared = await rerun_job(job_id, ["IA-07"], immich="replace")
+        job = await get_job(job_id)
+        new_id = job.immich_asset_id
+        if new_id and new_id != asset_id:
+            CLEANUP_ASSETS.append(new_id)
+        check("US16-09 neue Asset-ID", bool(new_id) and new_id != asset_id and item.state == "done",
+              f"{asset_id} -> {new_id}; item={item.state} {item.reason} {item.detail}")
+        if new_id and new_id != asset_id:
+            check("US16-10 altes Asset im Papierkorb", await get_asset_state(asset_id) == "trashed")
+            albums = await get_immich_albums(new_id)
+            check("US16-11 Alben übernommen", album in albums, f"{albums}")
+        res = await check_no_file_lost([job_id])
+        check("US16-12 Invariante: keine Datei verloren", res.ok, res.summary())
+
+
+# ══════════════════════════════════════════════════════════════
+# US-17: Ablage — Geocoding neu, Vorlage mit {CITY}
+# ══════════════════════════════════════════════════════════════
+async def test_us17_rerun_library_city():
+    print("\n-- US-17: Neu ausführen: Ablage, Geocoding neu, Vorlage mit {CITY} --")
+    from test_support.invariants import check_no_file_lost
+    async with RerunStage():
+        cases = [("direct", "{key}/{CITY}/"), ("sidecar", "{key}/{CITY}/"), ("plain", "{key}/")]
+        for label, template in cases:
+            mode = "sidecar" if label == "sidecar" else "direct"
+            set_id = await e2e_set(f"us17{label}", target_mode="library", write_mode=mode, template=template)
+            path = f"{INBOX}/__e2e_us17_{label}_{TS}.jpg"
+            make_unique_jpg(path)
+            add_gps(path)
+            CLEANUP_FILES.append(path)
+            with FakeGeo("Bern"):
+                job_id = await create_and_run_job(os.path.basename(path), path, use_immich=False, set_id=set_id)
+            job = await get_job(job_id)
+            first = job.target_path or ""
+            CLEANUP_FILES.append(first)
+            ok_first = job.status in ("done", "review") and os.path.isfile(first)
+            check(f"US17-{label}-01 Erstlauf in der Ablage", ok_first
+                  and (label == "plain" or "/Bern/" in first), f"{job.status} {first} {job.error_message}")
+            if not ok_first:
+                continue
+            status_before = job.status
+            with FakeGeo("Zürich"):
+                rid, item, prepared = await rerun_job(job_id, ["IA-03"])
+            job = await get_job(job_id)
+            now = job.target_path or ""
+            CLEANUP_FILES.append(now)
+            words, _desc = file_keywords(now + ".xmp" if mode == "sidecar" else now)
+            check(f"US17-{label}-02 Auftrag done, Status wie vorher", item.state == "done"
+                  and job.status == status_before, f"item={item.state} {item.reason} {item.detail} {job.status}")
+            if label == "plain":
+                check(f"US17-{label}-03 ohne {{CITY}}: Pfad gleich", now == first and os.path.isfile(now), now)
+            else:
+                check(f"US17-{label}-03 Datei umgezogen, target_path nachgeführt",
+                      "/Zürich/" in now and os.path.isfile(now) and not os.path.exists(first), f"{first} -> {now}")
+            if mode == "sidecar":
+                check(f"US17-{label}-04 Sidecar zog mit", os.path.isfile(now + ".xmp")
+                      and not os.path.exists(first + ".xmp"), now + ".xmp")
+            check(f"US17-{label}-05 alte Stichwörter nicht mehr in {'der Sidecar' if mode == 'sidecar' else 'der Datei'}",
+                  "Zürich" in words and "Bern" not in words, f"{words}")
+            res = await check_no_file_lost([job_id])
+            check(f"US17-{label}-06 Invariante: keine Datei verloren", res.ok, res.summary())
+
+
+# ══════════════════════════════════════════════════════════════
+# Ausführung nach Abhängigkeiten (US-18 … US-20): helpers
+# ══════════════════════════════════════════════════════════════
+class StoryCrash(BaseException):
+    """The process dies here (the pipeline's except Exception does not catch it)."""
+
+
+def noise_jpg(path, w=320, h=240):
+    """Random pixels: unique SHA-256 and pHash, also against old dev data."""
+    from PIL import Image
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Image.frombytes("RGB", (w, h), os.urandom(w * h * 3)).save(path, "JPEG", quality=90)
+    return path
+
+
+@contextlib.contextmanager
+def replaced_step(code, fn):
+    """A stand-in for one main module (pipeline.MAIN_STEPS is read at run time)."""
+    import pipeline
+    idx = next(i for i, (c, _) in enumerate(pipeline.MAIN_STEPS) if c == code)
+    real = pipeline.MAIN_STEPS[idx]
+    pipeline.MAIN_STEPS[idx] = (code, fn)
+    try:
+        yield real[1]
+    finally:
+        pipeline.MAIN_STEPS[idx] = real
+
+
+def ai_stand_in(delay=0.0, stats=None):
+    """IA-05 without the AI; `stats` counts how many run at once."""
+    async def ia05(job, session):
+        if stats is not None:
+            stats["now"] = stats.get("now", 0) + 1
+            stats["max"] = max(stats.get("max", 0), stats["now"])
+        try:
+            await asyncio.sleep(delay)
+        finally:
+            if stats is not None:
+                stats["now"] -= 1
+        return {"type": "", "tags": ["Stand-in"], "source": "", "description": "", "mood": "", "people_count": 0,
+                "quality": "gut", "confidence": 0.9, "nsfw": False}
+    return ia05
+
+
+class FakeNominatim:
+    """Nominatim behind the real throttle (_reverse_nominatim → _throttle →
+    here): records when each request went out and how many at once."""
+
+    def __init__(self, delay=0.0):
+        self.delay, self.times, self.now, self.max = delay, [], 0, 0
+
+    async def get(self, url, params, headers=None, max_attempts=4):
+        self.times.append(time.monotonic())
+        self.now += 1
+        self.max = max(self.max, self.now)
+        try:
+            await asyncio.sleep(self.delay)
+        finally:
+            self.now -= 1
+
+        class Resp:
+            status_code = 200
+
+            def json(self_inner):
+                return {"address": {"country": "Schweiz", "state": "Bern", "city": "Bern"},
+                        "display_name": "Bern, Schweiz"}
+        return Resp()
+
+    def __enter__(self):
+        from pipeline import step_ia03_geocoding as geo
+        self._old = geo._http_get_with_retry
+        geo._http_get_with_retry = self.get
+        geo._geo_cache.clear()
+        return self
+
+    def __exit__(self, *exc):
+        from pipeline import step_ia03_geocoding as geo
+        geo._http_get_with_retry = self._old
+        geo._geo_cache.clear()
+
+
+class ConfigStage:
+    """Config values for a story, restored afterwards (missing keys removed)."""
+
+    def __init__(self, **values):
+        self.values = {k.replace("__", "."): v for k, v in values.items()}
+
+    async def __aenter__(self):
+        from config import config_manager
+        import resources
+        self.old = {k: await config_manager.get(k) for k in self.values}
+        for k, v in self.values.items():
+            await config_manager.set(k, v)
+        resources.forget_sizes()
+        return self
+
+    async def __aexit__(self, *exc):
+        import sqlalchemy
+        from config import config_manager
+        from database import async_session
+        import resources
+        for k, v in self.old.items():
+            if v is None:
+                async with async_session() as s:
+                    await s.execute(sqlalchemy.text("DELETE FROM config WHERE key = :k"), {"k": k})
+                    await s.commit()
+            else:
+                await config_manager.set(k, v)
+        resources.forget_sizes()
+
+
+async def queued_job(set_id, path, debug_key):
+    return await insert_job(os.path.basename(path), path, debug_key, status="queued", use_immich=False,
+                            set_id=set_id, source_inbox_path=INBOX, file_hash=sha256(path))
+
+
+async def runs_of(job_id):
+    import runs
+    from database import async_session
+    async with async_session() as s:
+        return [runs.snapshot(r) for r in await runs.all_runs(s, job_id)]
+
+
+async def wait_done(ids, timeout=300):
+    from database import async_session
+    from models import Job
+    from sqlalchemy import select
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        async with async_session() as s:
+            open_ = (await s.execute(select(Job.id).where(Job.id.in_(ids),
+                                                         Job.status.in_(("queued", "processing"))))).scalars().all()
+        if not open_:
+            return True
+        await asyncio.sleep(0.2)
+    return False
+
+
+def overlapping(rows):
+    """Runs of one module that overlap in time (start/finish)."""
+    by = {}
+    for r in rows:
+        if r.started_at and r.finished_at:
+            by.setdefault(r.module, []).append((r.started_at, r.finished_at))
+    bad = []
+    for module, spans in by.items():
+        spans.sort()
+        bad += [module for a, b in zip(spans, spans[1:]) if b[0] < a[1]]
+    return bad
+
+
+# ══════════════════════════════════════════════════════════════
+# US-18: IA-03 neben IA-04, Absturz in IA-04 nach Ende von IA-03
+# ══════════════════════════════════════════════════════════════
+async def test_us18_parallel_and_crash():
+    print("\n-- US-18: IA-03 parallel zu IA-04, Absturz in IA-04, Wiederaufnahme --")
+    import subprocess
+    from pipeline import run_pipeline
+    async with RerunStage(), ConfigStage(pipeline__parallel_modules=True):
+        set_id = await e2e_set("us18", target_mode="library", write_mode="direct")
+        # A real HEIC (the container has no HEVC encoder): the lifecycle
+        # test's source, made unique; IA-02 is pre-filled, so an earlier
+        # run's copy is no duplicate.
+        heic = f"{INBOX}/__e2e_us18_{TS}.heic"
+        shutil.copy2("/app/data/__source_lifecycle.HEIC", heic)  # an iPhone photo with GPS
+        with open(heic, "ab") as f:
+            f.write(os.urandom(64))
+        CLEANUP_FILES.append(heic)
+        job_id = await queued_job(set_id, heic, f"E2E-US18-{TS}")
+        from database import async_session
+        from models import Job
+        async with async_session() as s:
+            (await s.get(Job, job_id)).step_result = {"IA-02": {"status": "skipped", "reason": "E2E US-18"}}
+            await s.commit()
+
+        geo = FakeGeo("Bern")
+        original_answer = geo._answer
+
+        async def slow_answer(*a, **k):
+            await asyncio.sleep(2)
+            return await original_answer(*a, **k)
+        geo._answer = slow_answer
+
+        async def crash_after_ia03(job, session):
+            # IA-04 runs while IA-03 waits for its answer; the process dies
+            # in IA-04 right after IA-03 has finished.
+            for _ in range(100):
+                await asyncio.sleep(0.1)
+                ia03 = [r for r in await runs_of(job.id) if r.module == "IA-03"]
+                if ia03 and ia03[-1].status == "ok":
+                    break
+            raise StoryCrash("Absturz in IA-04")
+
+        crashed = False
+        with geo, replaced_step("IA-04", crash_after_ia03), replaced_step("IA-05", ai_stand_in()):
+            try:
+                await run_pipeline(job_id)
+            except StoryCrash:
+                crashed = True
+        rows = await runs_of(job_id)
+        r3 = [r for r in rows if r.module == "IA-03"]
+        r4 = [r for r in rows if r.module == "IA-04"]
+        mid = await get_job(job_id)
+        check("US18-01 Absturz in IA-04: IA-03 fertig (ok), IA-04 'running', Job 'processing'",
+              crashed and r3 and r3[-1].status == "ok" and r4 and r4[-1].status == "running"
+              and mid.status == "processing", f"{[(r.module, r.status) for r in rows]} {mid.status}")
+        check("US18-02 IA-03 und IA-04 liefen gleichzeitig", r3 and r4 and r4[-1].started_at < r3[-1].finished_at,
+              f"IA-03 {r3[-1].started_at:%H:%M:%S.%f}–{r3[-1].finished_at:%H:%M:%S.%f}, "
+              f"IA-04 ab {r4[-1].started_at:%H:%M:%S.%f}" if r3 and r4 else "")
+
+        # Restart: requeue_interrupted_jobs for this job, then the worker
+        from sqlalchemy import update
+        async with async_session() as s:
+            await s.execute(update(Job).where(Job.id == job_id, Job.status == "processing")
+                            .values(status="queued", retry_count=Job.retry_count + 1))
+            await s.commit()
+        with FakeGeo("Bern"), replaced_step("IA-05", ai_stand_in()):
+            await run_pipeline(job_id)
+        job = await get_job(job_id)
+        rows = await runs_of(job_id)
+        cur = {r.module: r for r in rows if r.status != "superseded"}
+        r4_all = [r for r in rows if r.module == "IA-04"]
+        check("US18-03 Wiederaufnahme: IA-03 Versuch 1 bleibt, IA-04 Versuch 2, Job done",
+              job.status in ("done", "review") and cur["IA-03"].attempt == 1 and cur["IA-04"].attempt == 2
+              and r4_all[0].status == "superseded" and "unterbrochen" in (r4_all[0].error or ""),
+              f"{job.status} {job.error_message} IA-03 #{cur['IA-03'].attempt} IA-04 #{cur['IA-04'].attempt}")
+        check("US18-04 HEIC konvertiert (IA-04 echt) und abgelegt", (job.step_result or {}).get("IA-04", {}).get("converted")
+              and os.path.isfile(job.target_path or ""), f"{job.target_path}")
+        CLEANUP_FILES.append(job.target_path or "")
+
+
+# ══════════════════════════════════════════════════════════════
+# US-19: Grenzen und Durchsatz
+# ══════════════════════════════════════════════════════════════
+THROUGHPUT = {}
+
+
+async def _limit_run(set_id, n, label, *, ai_delay=0.5):
+    """n library jobs through a worker of the test's own; returns
+    (seconds, stats, ids)."""
+    import pipeline
+    from worker import pipeline_worker
+    ids = []
+    for i in range(n):
+        path = noise_jpg(f"{INBOX}/__e2e_us19_{label}_{i}_{TS}.jpg")
+        # each job its own place: no geocoding cache hit, every one asks
+        add_gps(path, lat=46.0 + i * 0.01, lon=7.0 + i * 0.01)
+        CLEANUP_FILES.append(path)
+        ids.append(await queued_job(set_id, path, f"E2E-US19-{label}-{i}-{TS}"))
+    ai = {}
+    jobs = {"max": 0}
+    stop = asyncio.Event()
+
+    async def sample():
+        while not stop.is_set():
+            jobs["max"] = max(jobs["max"], len([j for j in pipeline._ACTIVE_RUNS if j in ids]))
+            await asyncio.sleep(0.02)
+    nominatim = FakeNominatim()
+    with nominatim, replaced_step("IA-05", ai_stand_in(ai_delay, ai)):
+        sampler = asyncio.create_task(sample())
+        start = time.monotonic()
+        worker_task = asyncio.create_task(pipeline_worker(stop, job_ids=ids, ignore_pause=True))
+        finished = await wait_done(ids)
+        seconds = time.monotonic() - start
+        stop.set()
+        await worker_task
+        await sampler
+    gaps = [b - a for a, b in zip(nominatim.times, nominatim.times[1:])]
+    return seconds, {"finished": finished, "ai_max": ai.get("max", 0), "geo_max": nominatim.max,
+                     "jobs_max": jobs["max"], "geo_calls": len(nominatim.times),
+                     "geo_gap_min": min(gaps) if gaps else None}, ids
+
+
+async def test_us19_limits():
+    print("\n-- US-19: Grenzen (KI 1, Nominatim 1/s, 6 Jobs) und Durchsatz --")
+    async with RerunStage(), ConfigStage(ai__slots=1, pipeline__max_jobs=6, pipeline__parallel_modules=True,
+                                         pipeline__geo_slots=0, geo__provider="nominatim"):
+        set_id = await e2e_set("us19", target_mode="library", write_mode="direct")
+        seconds, st, ids = await _limit_run(set_id, 8, "lim")
+        statuses = [(await get_job(j)).status for j in ids]
+        for j in ids:
+            CLEANUP_FILES.append((await get_job(j)).target_path or "")
+        check("US19-01 alle 8 Jobs fertig", st["finished"] and all(s in ("done", "review") for s in statuses),
+              f"{statuses}")
+        check("US19-02 höchstens 1 IA-05 gleichzeitig (ai.slots = 1)", st["ai_max"] == 1, f"{st}")
+        check("US19-03 höchstens 1 Geocoding gleichzeitig, Abstand ≥ 1,1 s",
+              st["geo_max"] == 1 and st["geo_calls"] == 8 and st["geo_gap_min"] is not None
+              and st["geo_gap_min"] >= 1.09, f"{st}")
+        check("US19-04 höchstens 6 Jobs gleichzeitig, mehr als einer", 1 < st["jobs_max"] <= 6, f"{st}")
+        rows = [r for j in ids for r in await runs_of(j)]
+        check("US19-05 keine überlappenden Läufe eines Moduls je Job",
+              not [j for j in ids if overlapping([r for r in rows if r.job_id == j])])
+
+        # Throughput: 20 jobs each, as before step 6 (one job per AI slot,
+        # strictly one module after the other), and with the limits.
+        results = {}
+        for label, cfg in (("vorher", {"pipeline__max_jobs": 1, "pipeline__parallel_modules": False}),
+                           ("ohne_parallel", {"pipeline__parallel_modules": False}),
+                           ("mit_parallel", {"pipeline__parallel_modules": True})):
+            async with ConfigStage(**cfg):
+                seconds, st, ids = await _limit_run(set_id, 20, label)
+            for j in ids:
+                CLEANUP_FILES.append((await get_job(j)).target_path or "")
+            results[label] = (seconds, st)
+        THROUGHPUT.update({k: round(20 / v[0] * 60, 1) for k, v in results.items()})
+        print(f"  Durchsatz (Jobs/min, 20 Jobs, KI-Attrappe 0,5 s, Nominatim 1,1 s): {THROUGHPUT}")
+        on, off = results["mit_parallel"][0], results["ohne_parallel"][0]
+        check("US19-06 20 Jobs mit parallel_modules nicht langsamer als ohne",
+              all(v[1]["finished"] for v in results.values()) and on <= off * 1.15 + 1.0,
+              f"mit {on:.1f} s, ohne {off:.1f} s, vorher {results['vorher'][0]:.1f} s")
+
+
+# ══════════════════════════════════════════════════════════════
+# US-20: kein doppelter Lauf
+# ══════════════════════════════════════════════════════════════
+async def test_us20_no_double_run():
+    print("\n-- US-20: kein doppelter Lauf --")
+    import reruns
+    import worker
+    import fileops
+    import pipeline
+    from pipeline import rerun as rerun_plan, reset_job_for_retry, run_pipeline
+    async with RerunStage():
+        set_id = await e2e_set("us20", target_mode="library", write_mode="direct")
+        reprocess_dir = f"{E2E_ROOT}/reprocess20"
+
+        async def done_job(tag):
+            path = noise_jpg(f"{INBOX}/__e2e_us20_{tag}_{TS}.jpg")
+            add_gps(path)
+            CLEANUP_FILES.append(path)
+            jid = await queued_job(set_id, path, f"E2E-US20-{tag}-{TS}")
+            with FakeGeo("Bern"), replaced_step("IA-05", ai_stand_in()):
+                await run_pipeline(jid)
+            return jid
+
+        # 1. Two starts for the same job
+        a = await done_job("a")
+        key = (await get_job(a)).debug_key
+        first = await reruns.create({"modules": ["IA-03"], "target": {"kind": "jobs", "keys": [key]}})
+        E2E_RERUNS.append(first["rerun_id"])
+        try:
+            await reruns.create({"modules": ["IA-03"], "target": {"kind": "jobs", "keys": [key]}})
+            second = None
+        except rerun_plan.RerunError as exc:
+            second = (exc.key, exc.status)
+        check("US20-01 zweiter Start desselben Jobs: 409 already_pending", second == ("already_pending", 409),
+              f"{second}")
+
+        # 2. Preparation against a retry, at the same moment
+        from database import async_session
+        from models import RerunItem
+        from pipeline import reprocess
+        from sqlalchemy import select
+        async with async_session() as s:
+            item_id = (await s.execute(select(RerunItem.id).where(RerunItem.rerun_id == first["rerun_id"]))).scalar()
+        await rerun_plan._set_item(item_id, "pending", state="preparing")
+        old_dir = reprocess.REPROCESS_DIR
+        reprocess.REPROCESS_DIR = reprocess_dir
+        try:
+            prepared, retried = await asyncio.gather(rerun_plan.prepare(item_id), reset_job_for_retry(a))
+        finally:
+            reprocess.REPROCESS_DIR = old_dir
+        check("US20-02 Vorbereitung gegen Retry: genau einer gewinnt den Claim",
+              (prepared.state == "queued") != bool(retried), f"prep={prepared.state}/{prepared.reason} retry={retried}")
+        with FakeGeo("Zürich"), replaced_step("IA-05", ai_stand_in()):
+            reprocess.REPROCESS_DIR = reprocess_dir
+            try:
+                await run_pipeline(a)
+            finally:
+                reprocess.REPROCESS_DIR = old_dir
+        job = await get_job(a)
+        CLEANUP_FILES.append(job.target_path or "")
+        check("US20-03 der Gewinner läuft durch, keine überlappenden Läufe", job.status in ("done", "review")
+              and not overlapping(await runs_of(a)), f"{job.status} {job.error_message}")
+
+        # 3. Worker against run_pipeline for one queued job
+        path = noise_jpg(f"{INBOX}/__e2e_us20_b_{TS}.jpg")
+        add_gps(path)
+        CLEANUP_FILES.append(path)
+        b = await queued_job(set_id, path, f"E2E-US20-b-{TS}")
+        with FakeGeo("Bern"), replaced_step("IA-05", ai_stand_in(0.2)):
+            await asyncio.gather(worker._run_job(b, "b", f"E2E-US20-b-{TS}"), run_pipeline(b), run_pipeline(b))
+        rows = await runs_of(b)
+        job = await get_job(b)
+        CLEANUP_FILES.append(job.target_path or "")
+        per = {}
+        for r in rows:
+            per[r.module] = per.get(r.module, 0) + 1
+        check("US20-04 Worker gegen run_pipeline: genau ein Lauf je Modul, nichts überlappt",
+              job.status in ("done", "review") and all(n == 1 for n in per.values()) and len(per) == 11
+              and not overlapping(rows), f"{job.status} {per}")
+
+        # 4. Watchdog while an upload (an open file operation) runs: not touched
+        path = noise_jpg(f"{INBOX}/__e2e_us20_c_{TS}.jpg")
+        CLEANUP_FILES.append(path)
+        c = await queued_job(set_id, path, f"E2E-US20-c-{TS}")
+        gate = asyncio.Event()
+        op = {}
+
+        async def uploading(job, session):
+            jref = await fileops._job_ref(job)
+            op["id"], _ = await fileops._begin(jref, op="upload", actor="IA-08", src_kind="local",
+                                               src=job.original_path)
+            await gate.wait()
+            await fileops._fail(op["id"], "Test: Upload abgebrochen")
+            return {"category": "test", "moved": False}
+
+        with FakeGeo("Bern"), replaced_step("IA-05", ai_stand_in()), replaced_step("IA-08", uploading):
+            task = asyncio.create_task(worker._run_job(c, "c", f"E2E-US20-c-{TS}"))
+            for _ in range(200):
+                await asyncio.sleep(0.05)
+                if op.get("id"):
+                    break
+            old_timeout = worker.STALE_TIMEOUT_S
+            worker.STALE_TIMEOUT_S = 0.3
+            try:
+                await asyncio.sleep(0.5)
+                await worker.recover_stale_jobs({task}, {c: task})
+            finally:
+                worker.STALE_TIMEOUT_S = old_timeout
+            mid = await get_job(c)
+            check("US20-05 Watchdog bei laufendem Upload: Job läuft weiter (nicht zurückgestellt, nicht abgebrochen)",
+                  mid.status == "processing" and not task.done() and (mid.retry_count or 0) == 0,
+                  f"{mid.status} task_done={task.done()}")
+            gate.set()
+            await task
+        job = await get_job(c)
+        check("US20-06 danach normal beendet", job.status in ("done", "review"), f"{job.status} {job.error_message}")
+
+
+async def cleanup_rerun_stories():
+    """Requests, items and sets of the rerun stories; the user tag and the album."""
+    import httpx
+    from database import async_session
+    from immich_client import delete_tag, get_immich_config, list_tags
+    from models import LibraryCategory, ProcessingSet, Rerun, RerunItem, SortingRule
+    from sqlalchemy import delete, select
+    async with async_session() as s:
+        ids = set(E2E_RERUNS)
+        if CLEANUP_JOBS:
+            ids |= set((await s.execute(select(RerunItem.rerun_id).where(
+                RerunItem.job_id.in_(CLEANUP_JOBS)))).scalars().all())
+        if ids:
+            await s.execute(delete(RerunItem).where(RerunItem.rerun_id.in_(ids)))
+            await s.execute(delete(Rerun).where(Rerun.id.in_(ids)))
+        if E2E_SETS:
+            await s.execute(delete(SortingRule).where(SortingRule.set_id.in_(E2E_SETS)))
+            await s.execute(delete(LibraryCategory).where(LibraryCategory.set_id.in_(E2E_SETS)))
+            await s.execute(delete(ProcessingSet).where(ProcessingSet.id.in_(E2E_SETS)))
+        await s.commit()
+    try:
+        for t in await list_tags():
+            if t.get("value") in E2E_TAGS:
+                await delete_tag(t["id"])
+        if E2E_ALBUMS:
+            url, key = await get_immich_config()
+            async with httpx.AsyncClient(timeout=30) as c:
+                for a in (await c.get(f"{url}/api/albums", headers={"x-api-key": key})).json():
+                    if a.get("albumName") in E2E_ALBUMS:
+                        await c.delete(f"{url}/api/albums/{a['id']}", headers={"x-api-key": key})
+    except Exception as exc:
+        print(f"  cleanup: rerun tags/albums: {exc}")
+
+
+# ══════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════
 async def main():
@@ -1175,7 +2033,16 @@ async def main():
         test_us12_keep_with_tag_merge,
         test_us13_batch_clean_all,
         test_us14_batch_clean_page,
+        test_us15_rerun_geocoding_immich,
+        test_us16_rerun_immich_work_copy,
+        test_us17_rerun_library_city,
+        test_us18_parallel_and_crash,
+        test_us19_limits,
+        test_us20_no_double_run,
     ]
+    wanted = [a.lower() for a in sys.argv[1:]]
+    if wanted:
+        tests = [t for t in tests if any(t.__name__.startswith(f"test_{w}_") for w in wanted)]
     try:
         for test_fn in tests:
             try:
@@ -1187,6 +2054,7 @@ async def main():
         await config_manager.set_module_enabled("filewatcher", was_enabled)
         await restore_set_folder_tags()
         await cleanup()
+        await cleanup_rerun_stories()
 
     # Summary
     print("\n" + "=" * 60)

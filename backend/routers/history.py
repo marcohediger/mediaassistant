@@ -93,7 +93,10 @@ async def job_history(debug_key: str):
     if job is None:
         return JSONResponse({"error": "not_found"}, status_code=404)
     t = await _t()
-    blocks = job_view.module_blocks(job, t, runs=(await job_view.job_runs([job.id]))[job.id])
+    from pipeline import rerun as rerun_plan
+    job_runs = (await job_view.job_runs([job.id]))[job.id]
+    stale = (await rerun_plan.stale_modules([job], {job.id: job_runs})).get(job.id)
+    blocks = job_view.module_blocks(job, t, runs=job_runs, stale=stale)
     return {
         "debug_key": job.debug_key,
         "filename": job.filename,
@@ -105,6 +108,7 @@ async def job_history(debug_key: str):
         "ops": await job_view.job_ledger(job.id, t),
         "copies": await job_view.job_copies(job.id, t, await immich_trash_days()),
         "labels": job_view.job_labels(job, t),
+        "rerun": await rerun_plan.job_info(job),
     }
 
 
@@ -118,9 +122,11 @@ async def modules_of(keys: str = ""):
     async with async_session() as session:
         jobs = (await session.execute(select(Job).where(Job.debug_key.in_(wanted)))).scalars().all()
     runs = await job_view.job_runs([job.id for job in jobs])
+    from pipeline import rerun as rerun_plan
+    stale = await rerun_plan.stale_modules(jobs, runs)
     out = {}
     for job in jobs:
-        blocks = job_view.module_blocks(job, t, runs=runs[job.id])
+        blocks = job_view.module_blocks(job, t, runs=runs[job.id], stale=stale.get(job.id))
         out[job.debug_key] = {"signature": job_view.job_signature(job), "modules": blocks,
                               "summary": job_view.strip_summary(blocks, t)}
     return {"jobs": out}

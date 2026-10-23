@@ -39,6 +39,7 @@ reason IA-08 runs with ``no_autoflush``).
 """
 import asyncio
 import base64
+import contextvars
 import errno
 import hashlib
 import logging
@@ -63,6 +64,10 @@ from system_logger import log_error, log_info, log_warning
 logger = logging.getLogger("mediaassistant.fileops")
 
 LOG_SOURCE = "fileops"
+# The module run an operation belongs to, when the caller names none: the
+# executor sets it around every module (pipeline/executor.py), so each
+# ledger row of a step carries its run (file_ops.run_id).
+CURRENT_RUN_ID: contextvars.ContextVar = contextvars.ContextVar("fileops_current_run_id", default=None)
 LOCAL_KINDS = frozenset({"local", "work", "temp", "sidecar", "takeout_json"})
 KINDS = LOCAL_KINDS | {"immich"}
 TRASH_DIRNAME = ".papierkorb"
@@ -511,6 +516,8 @@ async def _begin(jref: _JobRef, *, op, actor, src_kind, src, dst_kind=None, dst_
                  run_id=None, register_src=None, part_suffix=None, tmp_dir=False,
                  detail: dict | None = None) -> tuple[int, dict]:
     """Write the intent row; returns (op id, detail). Raises FileOpBusy."""
+    if run_id is None:
+        run_id = CURRENT_RUN_ID.get()
     async with async_session() as session:
         try:
             if register_src is not None:
@@ -563,8 +570,8 @@ async def _fail(op_id: int, error: str, **values) -> None:
 async def _refused(jref, op, actor, src_kind, src, copy_id, problem, reason=None) -> int:
     """Record a refusal: a ledger row that was never an intent."""
     async with async_session() as session:
-        entry = FileOp(job_id=jref.id, op=op, src_kind=src_kind, src=src, copy_id=copy_id,
-                       actor=actor, reason=reason, state="failed", error=problem,
+        entry = FileOp(job_id=jref.id, run_id=CURRENT_RUN_ID.get(), op=op, src_kind=src_kind, src=src,
+                       copy_id=copy_id, actor=actor, reason=reason, state="failed", error=problem,
                        finished_at=datetime.now())
         session.add(entry)
         await session.commit()

@@ -6,8 +6,9 @@ import os
 import time
 import traceback
 from datetime import datetime
-from sqlalchemy import update, or_, and_
+from sqlalchemy import and_, case, func, or_, update
 import fileops
+import resources
 import runs
 from config import config_manager
 from database import async_session
@@ -40,9 +41,10 @@ HEARTBEAT_S = 30
 
 
 def active_runs() -> dict[int, dict]:
-    """{job id: {"kind", "step", "step_since" (monotonic)}} of the work
-    running in this process right now."""
-    return {job_id: dict(info) for job_id, info in _ACTIVE_RUNS.items()}
+    """{job id: {"kind", "step", "step_since" (monotonic), "steps"}} of the
+    work running in this process right now; "steps" = {module: since} of
+    every module running now (the main path's and a side task's)."""
+    return {job_id: dict(info, steps=dict(info.get("steps") or {})) for job_id, info in _ACTIVE_RUNS.items()}
 
 
 async def _heartbeat(job_id: int) -> None:
@@ -63,7 +65,7 @@ async def _heartbeat(job_id: int) -> None:
 @contextlib.asynccontextmanager
 async def _running(job_id: int, kind: str):
     """Register work for a job in this process and keep its heartbeat going."""
-    _ACTIVE_RUNS[job_id] = {"kind": kind, "step": None, "step_since": time.monotonic()}
+    _ACTIVE_RUNS[job_id] = {"kind": kind, "step": None, "step_since": time.monotonic(), "steps": {}}
     beat = asyncio.create_task(_heartbeat(job_id))
     try:
         yield
@@ -72,10 +74,21 @@ async def _running(job_id: int, kind: str):
         _ACTIVE_RUNS.pop(job_id, None)
 
 
-def _mark_step(job_id: int, step_code: str) -> None:
+def _mark_step(job_id: int, step_code: str, side: bool = False) -> None:
+    """A module starts: `step` is the main path's (as before), `steps`
+    holds every module running now (watchdog per module run)."""
     info = _ACTIVE_RUNS.get(job_id)
     if info is not None:
-        info["step"], info["step_since"] = step_code, time.monotonic()
+        now = time.monotonic()
+        info.setdefault("steps", {})[step_code] = now
+        if not side:
+            info["step"], info["step_since"] = step_code, now
+
+
+def _unmark_step(job_id: int, step_code: str) -> None:
+    info = _ACTIVE_RUNS.get(job_id)
+    if info is not None:
+        (info.get("steps") or {}).pop(step_code, None)
 
 STEPS = [
     ("IA-01", step_ia01_exif.execute),
@@ -128,17 +141,21 @@ async def run_pipeline(job_id: int):
 
 
 async def _run_pipeline(job_id: int):
+    from pipeline import executor, registry
     async with async_session() as session:
         # Atomic claim: only one caller can transition queued -> processing.
         # Prevents the race where multiple entry points (worker, retry_job,
         # immich_poll, duplicates router) start the same job in parallel,
         # which previously caused IA-07 "already exists" and IA-08
         # "file disappeared" errors when two pipelines wrote/uploaded the
-        # same file concurrently.
+        # same file concurrently. A rerun keeps the job's started_at.
+        now = datetime.now()
         claim = await session.execute(
             update(Job)
             .where(Job.id == job_id, Job.status == "queued")
-            .values(status="processing", started_at=datetime.now())
+            .values(status="processing",
+                    started_at=case((func.json_extract(Job.job_data, "$._rerun").is_(None), now),
+                                    else_=Job.started_at))
         )
         await session.commit()
         if claim.rowcount == 0:
@@ -178,179 +195,40 @@ async def _run_pipeline(job_id: int):
         # pipeline.run_params(job).
         params = runs.params_of(job)
         setattr(job, reprocess.RUN_PARAMS_ATTR, params)
+        # What the modules' inputs are compared with (fingerprints).
+        try:
+            snap = await registry.settings_snapshot(session, job)
+        except Exception as exc:  # a missing fingerprint only means "unknown"
+            logger.warning("%s: settings for fingerprints not readable: %s", job.debug_key, exc)
+            snap = None
+        await session.commit()
         # Resume: a module whose current run is finished (an error run too)
         # is not run again; an interrupted 'running' one is (runs.start).
-        current = await runs.current_runs(session, job_id)
-        pipeline_failed = False
+        ctx = executor.Ctx(session=session, job=job, params=params, snap=snap,
+                           current=await runs.current_runs(session, job_id),
+                           rerun=params.get("_rerun"), order=resources.next_job_order())
+        if ctx.rerun is not None:
+            await executor.start_rerun(ctx)
 
         # Main pipeline steps (IA-01 to IA-08)
-        duplicate_detected = False
-        early_skip = False
-        for step_code, step_fn in MAIN_STEPS:
-            if runs.is_done(current.get(step_code)):
-                continue
+        await executor.run_main(ctx)
+        pipeline_failed, duplicate_detected = ctx.pipeline_failed, ctx.duplicate
+        if ctx.parked:
+            await _park(session, job, ctx)
+            return
 
-            # Early skip check: after IA-01, evaluate sorting rules to detect
-            # "skip" targets BEFORE IA-07 writes tags (which changes the hash
-            # and would cause infinite re-processing loops).
-            if step_code == "IA-02" and not early_skip:
-                try:
-                    from pipeline.step_ia08_sort import _match_sorting_rules
-                    exif = (job.step_result or {}).get("IA-01", {})
-                    file_type = (exif.get("file_type") or "").upper()
-                    mime = exif.get("mime_type", "")
-                    is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
-                    rule_cat = await _match_sorting_rules(
-                        os.path.basename(job.original_path), exif, session, is_video=is_video,
-                        set_id=job.set_id,
-                    )
-                    if rule_cat == "skip":
-                        job.status = "skipped"
-                        await runs.record(session, job, "IA-08",
-                                          {"status": "skipped", "reason": "excluded by sorting rule (early check)"},
-                                          params=params)
-                        await session.commit()
-                        early_skip = True
-                        break
-                except Exception as e:
-                    logger.warning("Early skip check failed: %s", e)
-
-            job.current_step = step_code
-            _mark_step(job_id, step_code)
-            run = await runs.start(session, job, step_code, params=params)
-            await session.commit()
-            run_open = True
-
-            async def close(result, error=None):
-                # The step's result ends its run; after the run is closed (a
-                # check after the step failed) a new run replaces it.
-                nonlocal run_open
-                if run_open:
-                    await runs.finish(session, job, run, result, error=error)
-                    run_open = False
-                else:
-                    await runs.record(session, job, step_code, result, error=error, params=params)
-
-            try:
-                result = await step_fn(job, session)
-                await close(result)
-                await session.commit()
-
-                # IA-02: If duplicate detected, skip remaining main steps
-                if step_code == "IA-02" and isinstance(result, dict) and result.get("status") == "duplicate":
-                    duplicate_detected = True
-                    break
-
-                # IA-08: If file excluded by sorting rule, skip remaining steps
-                if step_code == "IA-08" and job.status == "skipped":
-                    break
-
-                # Post-IA-04: Video pHash duplicate check (frames now available).
-                # It overrules IA-02: a new IA-02 run.
-                if step_code == "IA-04":
-                    from pipeline.step_ia02_duplicates import execute_video_phash
-                    vphash_result = await execute_video_phash(job, session)
-                    if vphash_result and vphash_result.get("status") == "duplicate":
-                        await runs.record(session, job, "IA-02", vphash_result, params=params)
-                        await session.commit()
-                        duplicate_detected = True
-                        break
-
-            except runs.RunSuperseded:
-                raise
-            except Exception as e:
-                # Service-outage exceptions: auto-pause the entire pipeline
-                # so we don't bulldoze through hundreds of files producing
-                # garbage results while a backend is down. The health_watcher
-                # will auto-resume once the backend is reachable again.
-                if isinstance(e, (AIConnectionError, GeocodingConnectionError)):
-                    reason = "ai_unreachable" if isinstance(e, AIConnectionError) else "geo_unreachable"
-                    tb = traceback.format_exc()
-                    await config_manager.set("pipeline.paused", True)
-                    await config_manager.set("pipeline.auto_paused_reason", reason)
-                    await config_manager.set("pipeline.auto_paused_at", datetime.now().isoformat(timespec="seconds"))
-                    await log_error(
-                        "pipeline",
-                        f"Service down — Pipeline AUTO-PAUSIERT ({reason})",
-                        (
-                            f"Job {job.debug_key} bei {step_code}: {type(e).__name__}: {e}\n\n"
-                            f"Die Pipeline wurde automatisch pausiert. Der health_watcher "
-                            f"prüft alle 30 Sekunden ob das Backend wieder erreichbar ist und "
-                            f"setzt die Pipeline dann automatisch fort.\n\n{tb}"
-                        ),
-                    )
-                    job.status = "error"
-                    job.error_message = f"[{step_code}] {reason} — Pipeline auto-pausiert: {type(e).__name__}: {e}"
-                    error_result = {
-                        "status": "error",
-                        "reason": f"{type(e).__name__}: {e}",
-                        "ai_unreachable": isinstance(e, AIConnectionError),
-                        "geo_unreachable": isinstance(e, GeocodingConnectionError),
-                        "traceback": tb,
-                    }
-                    if step_code == "IA-05":
-                        error_result.update(_IA05_FALLBACK)
-                    await close(error_result)
-                    await session.commit()
-                    logger.error(f"{job.debug_key} Service down at {step_code}: pipeline auto-paused ({reason})")
-                    pipeline_failed = True
-                    break
-
-                non_critical = {"IA-02", "IA-03", "IA-04", "IA-05", "IA-06"}
-                if step_code in non_critical:
-                    tb = traceback.format_exc()
-                    await log_warning("pipeline", f"{job.debug_key} {step_code} skipped", f"{type(e).__name__}: {e}\n\n{tb}")
-                    # IA-02: If file was already moved as duplicate before the error,
-                    # treat it as a successful duplicate detection (don't continue pipeline)
-                    if step_code == "IA-02" and job.status == "duplicate":
-                        await close({"status": "duplicate", "note": f"detected but cleanup failed: {type(e).__name__}: {e}"},
-                                    error=f"{type(e).__name__}: {e}\n\n{tb}")
-                        await session.commit()
-                        duplicate_detected = True
-                        break
-                    error_result = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
-                    if step_code == "IA-05":
-                        error_result.update(_IA05_FALLBACK)
-                    await close(error_result, error=f"{type(e).__name__}: {e}\n\n{tb}")
-                    await session.commit()
-                    continue
-                # Critical step failed — mark error, then run finalizers
-                tb = traceback.format_exc()
-                job.status = "error"
-                job.error_message = f"[{step_code}] {type(e).__name__}: {e}\n\n{tb}"
-                await close({"status": "error", "reason": f"{type(e).__name__}: {e}", "traceback": tb})
-                await session.commit()
-                await log_error("pipeline", f"{job.debug_key} Error at {step_code}", f"{type(e).__name__}: {e}\n\n{tb}")
-                logger.error(f"{job.debug_key} Error at {step_code}: {e}")
-                pipeline_failed = True
-                break
-
-        # Move failed file to error/ immediately (before finalizers)
-        if pipeline_failed:
+        # Move failed file to error/ immediately (before finalizers) — never
+        # in a rerun, which keeps the file where it is (2.6).
+        if pipeline_failed and ctx.rerun is None:
             await _move_to_error(job, session)
 
         # Finalizers (IA-09, IA-10, IA-11) — always run, even after critical errors
-        for step_code, step_fn in FINALIZERS:
-            if runs.is_done(current.get(step_code)):
-                continue
-            job.current_step = step_code
-            _mark_step(job_id, step_code)
-            run = await runs.start(session, job, step_code, params=params)
-            await session.commit()
-            try:
-                result = await step_fn(job, session)
-            except Exception as e:
-                tb = traceback.format_exc()
-                await log_warning(
-                    "pipeline",
-                    f"{job.debug_key} {step_code} übersprungen",
-                    f"{type(e).__name__}: {e}\n\n{tb}",
-                )
-                await runs.finish(session, job, run, {"status": "error", "reason": f"{type(e).__name__}: {e}"},
-                                  error=f"{type(e).__name__}: {e}\n\n{tb}")
-            else:
-                await runs.finish(session, job, run, result)
-            await session.commit()
+        await executor.run_finalizers(ctx)
+
+        if ctx.rerun is not None:
+            await executor.finish_rerun(ctx)
+            gc.collect()
+            return
 
         # The run is over: its parameters must not reach the next one (R-12).
         await runs.set_values(session, job, clear_params=True)
@@ -407,6 +285,23 @@ async def _run_pipeline(job_id: int):
         gc.collect()
 
 
+async def _park(session, job, ctx) -> None:
+    """A service the next module needs is down (auto-pause): the job goes
+    back to the queue — atomically, finished runs and run parameters stay —
+    and goes on from there after the pause (3.5). No finalizers yet."""
+    from models import RerunItem
+    res = await session.execute(update(Job).where(Job.id == job.id, Job.status == "processing")
+                                .values(status="queued"))
+    rerun = ctx.rerun
+    if rerun is not None:
+        await session.execute(update(RerunItem).where(RerunItem.id == rerun.get("item"),
+                                                      RerunItem.state == "running").values(state="queued"))
+    await session.commit()
+    if res.rowcount:
+        await log_info("pipeline", f"{job.debug_key} wartet: {ctx.parked} — weiter nach dem Fortsetzen",
+                       f"{job.filename}: beendete Module bleiben, der Job steht wieder in der Warteschlange")
+
+
 async def _move_to_error(job, session):
     """Move the file of a failed run into <set base>/error/, with its .xmp
     sidecar (R-17b), and write a .log next to it.
@@ -440,8 +335,9 @@ async def _move_to_error(job, session):
     name = await asyncio.to_thread(reprocess._free_name, error_dir, os.path.basename(src), key)
     await log_info("pipeline", f"{key} Datei wird nach error/ verschoben", f"{src} → {error_dir}/ ({reason})")
     try:
-        res = await fileops.move(job, src, os.path.join(error_dir, name), actor="pipeline:error",
-                                 kind="local", expected_sha256=expected)
+        async with resources.use("io"):
+            res = await fileops.move(job, src, os.path.join(error_dir, name), actor="pipeline:error",
+                                     kind="local", expected_sha256=expected)
     except fileops.FileOpError as exc:
         await log_warning("pipeline", f"{key} Verschieben nach error/ fehlgeschlagen",
                           f"{src}: {exc} — die Datei bleibt, wo sie ist")

@@ -29,6 +29,10 @@ Rules
   as done, exactly like a present error result did before. A ``running``
   run that the job's new claim holder finds was interrupted: it is
   superseded and the module runs again.
+- A run can be queued before it starts (``enqueue``): a rerun or its
+  cascade (trigger ``rerun`` / ``cascade``), or a module waiting for its
+  resource limit. ``start`` claims it atomically and stores the module's
+  ``inputs_fingerprint`` (pipeline/registry.py).
 
 The functions take the caller's session and the job (an ORM object of that
 session) and do not commit; the caller commits the run together with its
@@ -222,15 +226,21 @@ async def _trigger_for(session, job_id: int, module: str) -> str:
     return "retry" if earlier else "pipeline"
 
 
-async def start(session, job, module: str, *, params: dict | None = None) -> ModuleRun:
+async def start(session, job, module: str, *, params: dict | None = None,
+                fingerprint: str | None = None, trigger: str | None = None) -> ModuleRun:
     """Start a run of `module` (status running, heartbeat set).
 
     Only the holder of the job's claim calls this (run_pipeline). A queued
     run is claimed atomically; a running one is a leftover of an
     interrupted run and is superseded. The trigger is 'pipeline' for the
     first run of the module, 'retry' after earlier ones (a queued run
-    keeps its own).
+    keeps its own, a run that replaces an interrupted rerun or cascade run
+    keeps that one's); `trigger` overrides it for a new run. `fingerprint`
+    is what the module's inputs hash to now (pipeline.registry), stored
+    with the run.
     """
+    if trigger is not None and trigger not in TRIGGERS:
+        raise ValueError(f"unknown trigger {trigger!r}")
     now = await _lock(session, job)
     cur = (await current_runs(session, job.id)).get(module)
     run_params = dict(params) if params else None
@@ -238,7 +248,8 @@ async def start(session, job, module: str, *, params: dict | None = None) -> Mod
         res = await session.execute(update(ModuleRun).where(
             ModuleRun.id == cur.id, ModuleRun.status == "queued").values(
             status="running", started_at=now, heartbeat_at=now,
-            params={**(cur.params or {}), **(run_params or {})} or None)
+            params={**(cur.params or {}), **(run_params or {})} or None,
+            inputs_fingerprint=fingerprint)
             .execution_options(synchronize_session=False))
         if res.rowcount != 1:
             raise RunSuperseded(f"{module}: queued run #{cur.id} was taken meanwhile")
@@ -246,10 +257,40 @@ async def start(session, job, module: str, *, params: dict | None = None) -> Mod
                                       .execution_options(populate_existing=True))).scalar_one()
     if cur is not None and cur.status == "running":
         await _supersede_ids(session, [cur.id], now, INTERRUPTED)
+        if trigger is None and cur.trigger in ("rerun", "cascade"):
+            trigger = cur.trigger
     elif cur is not None:
         raise ValueError(f"{module} of job {job.id} is done (run #{cur.id}); supersede it first")
-    return await _insert(session, job.id, module, trigger=await _trigger_for(session, job.id, module),
-                         status="running", params=run_params, started_at=now, heartbeat_at=now)
+    return await _insert(session, job.id, module, trigger=trigger or await _trigger_for(session, job.id, module),
+                         status="running", params=run_params, started_at=now, heartbeat_at=now,
+                         inputs_fingerprint=fingerprint)
+
+
+async def enqueue(session, job, module: str, *, trigger: str | None, params: dict | None = None):
+    """Queue a new run of `module` (rerun, cascade; or a module waiting for
+    its resource limit, trigger None = the pipeline's rule): the current
+    finished run is superseded, a running one is closed as interrupted, a
+    queued one stays. Returns (the queued run, snapshot of the finished run
+    it replaced or None)."""
+    if trigger is not None and trigger not in TRIGGERS:
+        raise ValueError(f"unknown trigger {trigger!r}")
+    now = await _lock(session, job)
+    cur = (await current_runs(session, job.id)).get(module)
+    if trigger is None:
+        trigger = cur.trigger if cur is not None and cur.status == "running" \
+            and cur.trigger in ("rerun", "cascade") else await _trigger_for(session, job.id, module)
+    old = None
+    if cur is not None and cur.status == "queued":
+        return cur, None
+    if cur is not None and cur.status == "running":
+        await _supersede_ids(session, [cur.id], now, INTERRUPTED)
+    elif cur is not None:
+        old = snapshot(cur)
+        await _supersede_ids(session, [cur.id], now, "ersetzt (neu ausführen)")
+    run = await _insert(session, job.id, module, trigger=trigger, status="queued",
+                        params=dict(params) if params else None)
+    await _write_view(session, job)
+    return run, old
 
 
 async def finish(session, job, run: ModuleRun, result, *, error: str | None = None) -> ModuleRun:
@@ -270,7 +311,8 @@ async def finish(session, job, run: ModuleRun, result, *, error: str | None = No
 async def record(session, job, module: str, result, *, trigger: str | None = None,
                  copied_from_run_id: int | None = None,
                  error: str | None = None, params: dict | None = None,
-                 started_at: datetime | None = None, finished_at: datetime | None = None) -> ModuleRun:
+                 started_at: datetime | None = None, finished_at: datetime | None = None,
+                 fingerprint: str | None = None) -> ModuleRun:
     """Set the result of `module` without running it: a new finished run
     that supersedes the current one (merged or copied data, a result the
     user chose, a check inside the pipeline that overrules an earlier
@@ -287,7 +329,7 @@ async def record(session, job, module: str, result, *, trigger: str | None = Non
     run = await _insert(session, job.id, module, trigger=trigger, status=result_status(result),
                         result=result, error=error if error is not None else result_error(result),
                         params=dict(params) if params else None, copied_from_run_id=copied_from_run_id,
-                        started_at=started_at, finished_at=finished_at or now)
+                        started_at=started_at, finished_at=finished_at or now, inputs_fingerprint=fingerprint)
     await _write_view(session, job)
     return run
 
@@ -312,19 +354,21 @@ async def supersede(session, job, modules=None, *, reason: str | None = None) ->
     return before
 
 
-async def restore(session, job, superseded: list) -> list[ModuleRun]:
+async def restore(session, job, superseded: list, *, trigger: str = "retry") -> list[ModuleRun]:
     """Make superseded results current again (a reset that could not go
-    ahead): a copy of each finished one, trigger 'retry', copied_from_run_id
-    = the original. `superseded`: snapshots (supersede's return value).
-    Modules that have a current run meanwhile are left."""
+    ahead, a rerun whose new result is no result): a copy of each finished
+    one, `trigger` ('retry'; a rerun uses 'copied'), copied_from_run_id =
+    the original, its fingerprint kept. `superseded`: snapshots (supersede's
+    return value). Modules that have a current run meanwhile are left."""
     cur = await current_runs(session, job.id)
     restored = []
     for old in superseded:
         if old.module in cur or old.result is None and old.finished_at is None:
             continue
-        restored.append(await record(session, job, old.module, old.result, trigger="retry",
+        restored.append(await record(session, job, old.module, old.result, trigger=trigger,
                                      copied_from_run_id=old.id, error=old.error, params=old.params,
-                                     started_at=old.started_at, finished_at=old.finished_at))
+                                     started_at=old.started_at, finished_at=old.finished_at,
+                                     fingerprint=getattr(old, "inputs_fingerprint", None)))
     return restored
 
 
@@ -395,6 +439,33 @@ async def adopt(session, job) -> bool:
     logger.info("%s: step_result written outside runs.py taken over (%s)", job.debug_key,
                 ", ".join(changed) or "job values")
     return True
+
+
+async def by_ids(session, ids) -> dict[int, ModuleRun]:
+    """Runs by id (e.g. the ones a rerun superseded)."""
+    ids = [i for i in ids if i]
+    if not ids:
+        return {}
+    rows = (await session.execute(select(ModuleRun).where(ModuleRun.id.in_(ids))
+                                  .execution_options(populate_existing=True))).scalars().all()
+    return {r.id: r for r in rows}
+
+
+async def running(session, job_id: int) -> list[ModuleRun]:
+    """The job's runs that are running now."""
+    return list((await session.execute(select(ModuleRun).where(
+        ModuleRun.job_id == job_id, ModuleRun.status == "running").order_by(ModuleRun.id)
+        .execution_options(populate_existing=True))).scalars().all())
+
+
+async def supersede_running(session, job, *, reason: str) -> list:
+    """Close every running run of the job as superseded (watchdog). Returns
+    their snapshots."""
+    now = await _lock(session, job)
+    rows = [snapshot(r) for r in await running(session, job.id)]
+    await _supersede_ids(session, [r.id for r in rows], now, reason)
+    await _write_view(session, job)
+    return rows
 
 
 async def heartbeat(session, job_id: int) -> None:

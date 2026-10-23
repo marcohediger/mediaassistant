@@ -23,7 +23,8 @@ async def execute(job, session) -> dict:
     step_results = job.step_result or {}
     result = {"removed": [], "trashed": [], "kept": [], "failed": []}
 
-    for part in (_cleanup_temp_files, _cleanup_poller_copy, _cleanup_sidecar, _cleanup_takeout_json):
+    for part in (_cleanup_temp_files, _cleanup_poller_copy, _cleanup_sidecar, _cleanup_takeout_json,
+                 _cleanup_rerun_copy):
         try:
             await part(job, step_results, result)
         except Exception as exc:
@@ -175,6 +176,28 @@ async def _cleanup_takeout_json(job, step_results, result):
         await log_info("IA-10", f"{job.debug_key} Takeout-JSON im Papierkorb, Angaben nicht in die Datei geschrieben",
                        f"{json_path} → {res.location} — IA-07 lief nicht oder schrieb keine Takeout-Angaben "
                        f"(Status {job.status}); aus dem Papierkorb wiederherstellbar")
+
+
+async def _cleanup_rerun_copy(job, step_results, result):
+    """The work copy a rerun downloaded from Immich (pipeline/rerun.py),
+    when IA-08 did not take it away: only exactly that copy (its register
+    id from the run parameters), only through fileops.discard — which
+    requires the asset it came from to verify in Immich right now."""
+    import fileops
+    from pipeline.reprocess import run_params
+    rerun = run_params(job).get("_rerun")
+    source = rerun.get("source") if isinstance(rerun, dict) else None
+    if not isinstance(source, dict) or source.get("kind") != "work" or not source.get("copy_id"):
+        return
+    own = {c.id: c for c in await fileops.copies(job)}
+    row = own.get(source["copy_id"])
+    if row is None or row.kind != "work":
+        return  # gone already (IA-08 removed it after the hand-over)
+    try:
+        await fileops.discard(job, row.id, actor="IA-10", reason="Arbeitskopie des Neu-Ausführens")
+        result["removed"].append(row.location)
+    except fileops.FileOpRefused as exc:
+        result["kept"].append(f"{row.location} ({exc})")
 
 
 async def _remove_empty_poller_dirs(job, result):

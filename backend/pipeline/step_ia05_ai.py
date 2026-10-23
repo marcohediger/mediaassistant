@@ -231,7 +231,9 @@ async def execute(job, session) -> dict:
     step_results = job.step_result or {}
     exif = step_results.get("IA-01", {})
     geo = step_results.get("IA-03", {})
-    filename = os.path.basename(job.original_path)
+    # The file's own name: original_path may be a work copy
+    # ("name_<debug_key>.jpg") or, in a rerun, an Immich reference.
+    filename = job.filename or os.path.basename(job.original_path)
     file_size_kb = os.path.getsize(filepath) / 1024
 
     # Statische Regel vorab auswerten für Kontext
