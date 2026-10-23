@@ -125,15 +125,15 @@ async def main():
     # --- resolve_filepath ---
     print("\n── resolve_filepath ──")
     j = Job(filename="f.jpg", original_path=None, target_path=None, debug_key="RF-1", step_result={})
-    no_crash("resolve_filepath(alles None)", resolve_filepath, j)
+    await no_crash_async("resolve_filepath(alles None)", resolve_filepath, j)
 
     j2 = Job(filename="f.jpg", original_path="/nonexistent", target_path="/also_gone",
              debug_key="RF-2", step_result={})
-    no_crash("resolve_filepath(nichts existiert)", resolve_filepath, j2)
+    await no_crash_async("resolve_filepath(nichts existiert)", resolve_filepath, j2)
 
     j3 = Job(filename="f.jpg", original_path="/tmp", target_path=None,
              debug_key="RF-3", step_result={"IA-04": {"temp_path": "/tmp/also_nope"}})
-    no_crash("resolve_filepath(nur Verzeichnis)", resolve_filepath, j3)
+    await no_crash_async("resolve_filepath(nur Verzeichnis)", resolve_filepath, j3)
 
     # --- sanitize_path_component ---
     print("\n── sanitize_path_component ──")

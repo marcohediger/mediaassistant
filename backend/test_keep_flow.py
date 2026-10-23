@@ -250,7 +250,9 @@ async def test_not_duplicate_flow():
             status="duplicate",
             target_path=dup_path,
             debug_key=f"FTE2E-ND-{ts}",
-            file_hash=f"fte2e_nd_{ts}",
+            # The real hash of the file: the reprocess takes a file only if
+            # its content is the job's own (a made-up hash reads as a foreign file).
+            file_hash=__import__("hashlib").sha256(jpeg_header).hexdigest(),
             phash="nd_e2etest_1234",
             step_result={
                 "IA-01": {"file_type": "JPEG", "file_size": len(jpeg_header)},

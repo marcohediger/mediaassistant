@@ -749,7 +749,10 @@ async def test_r04():
         raise Precondition("X liess sich nicht löschen")
     progress = await batch_clean_own_groups()
     jo, jd = await get_job(o), await get_job(d)
-    res = await check_no_file_lost([o, d], guard=reg, search_roots=box.search)
+    # O's only copy X was deleted by the user before the batch clean: O has
+    # nothing left to be linked to, whatever the batch clean does. What it
+    # must not do is delete D's file, the last copy of the recording.
+    res = await check_no_file_lost([o, d], guard=reg, search_roots=box.search, deleted_ok=[o])
     report(risk, "R-04a die Aufnahme existiert nach dem Batch-Clean noch", res.ok, res.summary())
     actual(f"Batch-Clean: behalten={progress.get('kept')}, gelöscht={progress.get('deleted')}; behalten "
            f"wurde O ({jo.status}, Asset X: missing); D's Datei {where(d_file)} existiert: "
@@ -852,7 +855,6 @@ async def test_r08():
 
 async def test_r09():
     risk = "R-09"
-    from pipeline import step_ia08_sort
     box = Box("R09")
     set_id = await create_set("R-09", base=box.lib)
     reg = registry()
@@ -874,7 +876,9 @@ async def test_r09():
                          src=make_variant(o_path, box.side("handy", name)), match_type="similar", distance=2)
     jk = await get_job(k)
     gate, entered = asyncio.Event(), asyncio.Event()
-    real_up = step_ia08_sort.safe_upload_asset
+    # Held where every upload passes: immich_client.upload_asset (IA-08 reaches
+    # it through fileops.upload).
+    real_up = immich_client.upload_asset
 
     async def slow_upload(path, *args, **kwargs):
         if not entered.is_set():
@@ -884,7 +888,7 @@ async def test_r09():
 
     t1 = None
     status_mid = file_after_keep = None
-    with patched(step_ia08_sort, "safe_upload_asset", slow_upload):
+    with patched(immich_client, "upload_asset", slow_upload):
         try:
             t1 = asyncio.create_task(run_pipeline(o))
             await asyncio.wait_for(entered.wait(), 60)
@@ -919,9 +923,9 @@ async def test_r09():
     reg.register(o, o_path)
 
     async def immich_down(*_a, **_k):
-        raise RuntimeError("safe_upload_asset failed after 3 attempts: Immich upload failed: HTTP 502 — Bad Gateway")
+        raise RuntimeError("Immich upload failed: HTTP 502 — Bad Gateway")
 
-    with patched(step_ia08_sort, "safe_upload_asset", immich_down):
+    with patched(immich_client, "upload_asset", immich_down):
         await run_pipeline(o)
     jo = await get_job(o)
     if jo.status != "error" or not has_file(jo.target_path):
@@ -1087,7 +1091,9 @@ async def test_r11():
     key = (await get_job(j)).debug_key
     gate, entered = asyncio.Event(), asyncio.Event()
     active, peak = [0], [0]
-    real_up = step_ia08_sort.safe_upload_asset
+    # Held where every upload passes: immich_client.upload_asset (IA-08 reaches
+    # it through fileops.upload, whose ledger intent is open meanwhile).
+    real_up = immich_client.upload_asset
 
     async def long_upload(file_path, *args, **kwargs):
         first = not entered.is_set()
@@ -1103,7 +1109,7 @@ async def test_r11():
 
     t1 = None
     status = by = "?"
-    with patched(step_ia08_sort, "safe_upload_asset", long_upload):
+    with patched(immich_client, "upload_asset", long_upload):
         try:
             t1 = asyncio.create_task(run_pipeline(j))
             await asyncio.wait_for(entered.wait(), 60)
@@ -1115,11 +1121,29 @@ async def test_r11():
                     await s.commit()
                 print("  … warte auf den Watchdog der Dev-App (bis 150 s)")
                 t_try = datetime.now()
-                status = await wait_status(j, {"queued", "error"}, timeout=150)
+                # The pipeline's heartbeat refreshes updated_at every 30 s; to show the
+                # watchdog a job that looks stale, keep setting it back while waiting.
+                deadline = time.monotonic() + 150
+                while True:
+                    status = (await get_job(j)).status
+                    if status in ("queued", "error") or time.monotonic() > deadline:
+                        break
+                    if any("nicht zurückgestellt" in m for m, _ in await logs_since(t_try, [key])):
+                        break
+                    async with async_session() as s:
+                        await s.execute(update(Job).where(Job.id == j, Job.status == "processing")
+                                        .values(updated_at=datetime.now() - timedelta(minutes=20)))
+                        await s.commit()
+                    await asyncio.sleep(2)
                 await asyncio.sleep(3)  # the watchdog commits first and logs afterwards
+                status = (await get_job(j)).status
                 logs = await logs_since(t_try - timedelta(seconds=1), [key])
                 if any("stale recovery" in m for m, _ in logs):
                     by = "Stale-Watchdog"
+                    break
+                if status == "processing" and any("nicht zurückgestellt" in m for m, _ in logs):
+                    # The watchdog looked at J and left it alone (it saw the step running).
+                    by = "Stale-Watchdog: läuft noch, nicht zurückgestellt"
                     break
                 if status != "queued" or not any("Job resumed" in m for m, _ in logs):
                     by = "?"
@@ -1134,7 +1158,7 @@ async def test_r11():
             if t1:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(t1, 180)
-    if status not in ("queued", "error"):
+    if status not in ("queued", "error") and not by.startswith("Stale-Watchdog"):
         raise Precondition(f"Watchdog der Dev-App hat J nicht angefasst (status={status}); läuft der Worker?")
     jj = await get_job(j)
     report(risk, "R-11 ein Job mit laufendem Step wird nicht zurückgestellt", status != "queued",
@@ -1180,7 +1204,9 @@ async def test_r14():
     await keep(jp.debug_key, jd.debug_key)
     await run_pipeline(p)
     jp, jd = await get_job(p), await get_job(d)
-    if jp.status != "done" or jp.immich_asset_id != x or jd.immich_asset_id != x or jd.target_path:
+    # A resolved donor no longer names the asset it shared with the kept job
+    # (fileops would count it as a user of X for ever); None is the safe state.
+    if jp.status != "done" or jp.immich_asset_id != x or jd.immich_asset_id not in (x, None) or jd.target_path:
         raise Precondition(f"Ausgangslage nicht erreicht: P={jp.status}/{jp.immich_asset_id}, "
                            f"D={jd.status}/{jd.immich_asset_id}/{jd.target_path}")
     c_path = make_jpeg(jd.original_path)
@@ -1431,9 +1457,15 @@ async def test_r20():
     jk = await get_job(k)
     await keep(jk.debug_key, jo.debug_key)
     jk = await get_job(k)
-    stored = kw_o in (((jk.step_result or {}).get("IA-07") or {}).get("keywords_written") or [])
+    # Where the kept job holds them: IA-07 (if it is kept) or the explicit merge
+    # record dup_merge. A kept duplicate's IA-07 must run again — it writes the
+    # metadata into the kept file — so the record is what carries them there.
+    sr_k = jk.step_result or {}
+    stored = (kw_o in ((sr_k.get("IA-07") or {}).get("keywords_written") or [])
+              or kw_o in ((sr_k.get("dup_merge") or {}).get("keywords") or []))
     report(risk, "R-20 nach dem Behalten sind die Spender-Stichwörter im behaltenen Job festgehalten", stored,
-           f"IA-07 in K's step_result: {(jk.step_result or {}).get('IA-07')!r}; Schlüssel: {sorted(jk.step_result or {})}")
+           f"IA-07 in K's step_result: {sr_k.get('IA-07')!r}; dup_merge: {sr_k.get('dup_merge')!r}; "
+           f"Schlüssel: {sorted(sr_k)}")
     await run_pipeline(k)
     await asyncio.sleep(3)
     jk = await get_job(k)
