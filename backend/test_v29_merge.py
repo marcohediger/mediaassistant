@@ -151,7 +151,7 @@ async def test_no_folder_words_as_keywords():
     keywords unless the set wants flat folder tags."""
     from routers.duplicates import _merge
     print("\n── FTAG-42: legacy folder words of a donor ──")
-    for mode in ("nested", "flat"):
+    for mode in ("nested", "flat", "legacy"):
         set_id = await _make_set(mode=mode, albums=True)
         kept = _job("KW-KEPT", set_id, path="/library/error/duplicates/k.jpg",
                     ia02={"status": "duplicate", "folder_path": "MyAlbum"}, ia07={"keywords_written": ["Strand"]})
@@ -163,8 +163,9 @@ async def test_no_folder_words_as_keywords():
         check(f"FTAG-42a ({mode}) donor's own keyword taken over",
               "Tempel" in m.keywords and "Tempel" in m.taken_keywords, f"{m.keywords}")
         words = {"Reise", "Japan", "Reise Japan"} & set(m.keywords)
-        check(f"FTAG-42b ({mode}) donor's folder words {'kept' if mode == 'flat' else 'not taken over'}",
-              (words == {"Reise", "Japan", "Reise Japan"}) if mode == "flat" else not words, f"{m.keywords}")
+        single = mode in ("flat", "legacy")
+        check(f"FTAG-42b ({mode}) donor's folder words {'kept' if single else 'not taken over'}",
+              (words == {"Reise", "Japan", "Reise Japan"}) if single else not words, f"{m.keywords}")
         check(f"FTAG-42c ({mode}) donor's album stays an album", m.donor_albums == ["Reise Japan"], f"{m.donor_albums}")
 
 
@@ -181,17 +182,24 @@ async def test_options_gate():
             ("nested", False, ["Ordner/A/B", "Ordner/C"], [], ["Best of"]),
             ("flat", False, [], ["A", "B", "C"], ["Best of"]),
             ("none", True, [], [], ["A B", "C", "Best of"]),
-            ("flat", True, [], ["A", "B", "C"], ["A B", "C", "Best of"])):
+            ("flat", True, [], ["A", "B", "C"], ["A B", "C", "Best of"]),
+            ("legacy", True, [], ["A", "B", "A B", "C"], ["A B", "C", "Best of"])):
         set_id = await _make_set(mode=mode, albums=albums)
         t = await folder_targets(_job("OPT", set_id, path="/library/x.jpg", status="done", ia02=dict(ia02)))
         check(f"FTAG-43 mode={mode} albums={albums}",
               t.tag_paths == want_paths and t.flat_tags == want_flat and t.albums == want_albums, f"{t}")
-    set_id = await _make_set(mode="flat", albums=False)
-    legacy = _job("OPT-LEG", set_id, path="/app/data/reprocess/x.jpg", status="queued",
-                  ia02={"status": "skipped", "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"]})
-    t = await folder_targets(legacy)
-    check("FTAG-43e flat, job from before the raw folder: its old flat tags",
-          t.flat_tags == ["Ferien", "Mallorca", "Ferien Mallorca"], f"{t}")
+    for mode in ("flat", "legacy"):
+        set_id = await _make_set(mode=mode, albums=False)
+        legacy = _job("OPT-LEG", set_id, path="/app/data/reprocess/x.jpg", status="queued",
+                      ia02={"status": "skipped", "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"]})
+        t = await folder_targets(legacy)
+        check(f"FTAG-43e {mode}, job from before the raw folder: its old flat tags",
+              t.flat_tags == ["Ferien", "Mallorca", "Ferien Mallorca"], f"{t}")
+    set_id = await _make_set(mode="legacy", albums=True)
+    t = await folder_targets(_job("OPT-LEGA", set_id, path="/inbox/Fest/2019/07/x.jpg", status="queued",
+                                  ia02={"status": "ok"}))
+    check("FTAG-43f legacy: old words, combined tag, old album name",
+          t.flat_tags == ["Fest", "2019", "07", "Fest 2019 07"] and t.albums == ["Fest 2019 07"], f"{t}")
     set_id = await _make_set(mode="nested", albums=True)
     immich_job = _job("OPT-IMM", set_id, path="/tmp/ma_immich_x/f.jpg", status="done", inbox=None,
                       ia02={"status": "ok", "folder_path": "A"})

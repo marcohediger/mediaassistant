@@ -941,9 +941,9 @@ async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _
             notes.append("date")
 
         # A donor's old flat folder keywords stay keywords only while the
-        # kept job's set wants flat folder tags; otherwise its folder comes
-        # along as a path only (and becomes whatever the set says).
-        d_legacy = set() if options.flat else set(d02.get("folder_tags") or [])
+        # kept job's set wants flat (or legacy) folder tags; otherwise its
+        # folder comes along as a path only (and becomes whatever the set says).
+        d_legacy = set() if options.single else set(d02.get("folder_tags") or [])
         new_keywords = [k for k in (d07.get("keywords_written") or [])
                         if k and k not in keywords and k not in d_legacy]
         if new_keywords:

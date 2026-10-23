@@ -278,7 +278,6 @@ dialog.modal .option-desc:empty { display: none; }
 /* ── Choice cards (radio groups) ────────────────────────────────────── */
 dialog.modal .choice-cards { display: grid; gap: 0.75rem; }
 dialog.modal .cards-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-dialog.modal .cards-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 dialog.modal .cards-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 dialog.modal .choice-card { position: relative; display: block; margin: 0; cursor: pointer; }
 dialog.modal .choice-card input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
@@ -352,7 +351,7 @@ dialog.modal .help-text b { color: var(--text); font-weight: 600; }
 dialog.modal .folder-example-body { min-width: 0; flex: 1; }
 dialog.modal .folder-example-list { margin: 0.6rem 0 0; display: grid; gap: 0.4rem; }
 dialog.modal .folder-example-row {
-    display: grid; grid-template-columns: 11rem minmax(0, 1fr);
+    display: grid; grid-template-columns: 13rem minmax(0, 1fr);
     gap: 0.75rem; align-items: baseline;
 }
 dialog.modal .folder-example-row dt {
@@ -362,6 +361,7 @@ dialog.modal .folder-example-row dt {
 dialog.modal .folder-example-row dt .ico { color: var(--text-muted); flex: none; }
 dialog.modal .folder-example-row dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 dialog.modal .folder-example-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+dialog.modal .folder-example-none { color: var(--text-muted); }
 dialog.modal .folder-example code { overflow-wrap: anywhere; }
 @media (max-width: 560px) {
     dialog.modal .folder-example-row { grid-template-columns: minmax(0, 1fr); gap: 0.15rem; }
@@ -682,8 +682,7 @@ dialog.modal :is(.editor-scroll, .modal-body) { scrollbar-width: thin; scrollbar
     dialog.modal .field-grid,
     dialog.modal .field-grid-name { grid-template-columns: minmax(0, 1fr); }
     dialog.modal .field-grid-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    dialog.modal .cards-2,
-    dialog.modal .cards-3 { grid-template-columns: minmax(0, 1fr); }
+    dialog.modal .cards-2 { grid-template-columns: minmax(0, 1fr); }
     dialog.modal .choice-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     dialog.modal .option-row { gap: 1.5rem; padding: 0.85rem 1rem 0.85rem 0.9rem; }
     dialog.modal div.option-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }

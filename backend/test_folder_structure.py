@@ -9,12 +9,14 @@ Parts:
      year, device/YYYY/MM, device/messenger/date, DCIM/104_PANA, "Photos from
      YYYY", duplicated levels, the year level per option, the depth limit,
      the relative folder of a file — and the example the set editor shows.
+     Legacy mode against a verbatim copy of the old code (git 94095c6):
+     same tags and album name, byte for byte.
   M  The one-time mapping of the old folder_tags switch
-     (database._migrate_columns) on a copy of the dev database: on -> flat
+     (database._migrate_columns) on a copy of the dev database: on -> legacy
      tags + albums, off -> none; a second start changes nothing.
   S  The set API: tag mode and albums are saved and served, an unknown mode
      is refused; an editor page loaded before the update (sends folder_tags)
-     still means flat tags + albums.
+     still means legacy tags + albums.
   T  Tag tools: a keyword is found and removed in Subject, TagsList and
      HierarchicalSubject of a sidecar; spelling merges leave nested values alone.
   W  What IA-07 writes as TagsList: nothing for a file without one and
@@ -29,8 +31,10 @@ Parts:
      E2 no tags, albums only: album per rule, no folder tags at all;
      E3 nested only, library target, sidecar mode: the sidecar carries
         TagsList and HierarchicalSubject, dc:subject stays flat;
-     E4 flat + albums (the migrated switch): one flat tag per cleaned level
-        in Immich and in the file's keywords, no tree, album per rule;
+     E4 flat + albums: one flat tag per cleaned level in Immich and in the
+        file's keywords, no tree, album per rule;
+     E6 legacy + albums (the migrated switch): exactly the old word tags and
+        the old album name, in the file and in Immich;
      E5 a duplicate from another folder kept (reprocess): the kept asset
         carries both folders as nested tags and is in both albums.
 
@@ -170,9 +174,73 @@ def part_rules():
     check("R-50 editor example: tag tree shown as computed",
           f"<code>{tag_path(rel)}</code>" in tpl, f"{rel} -> {tag_path(rel)}")
     check("R-51 editor example: album shown as computed",
-          f"<code>{album_name(rel)}</code>" in tpl, f"{rel} -> {album_name(rel)}")
+          f'<code data-album-for="cleaned">{album_name(rel)}</code>' in tpl, f"{rel} -> {album_name(rel)}")
     flat = " ".join(f"<code>{t}</code>" for t in tag_levels(rel))
     check("R-52 editor example: single tags shown as computed", flat in tpl, f"{rel} -> {flat}")
+    from folder_path import legacy_album_name, legacy_tags
+    old = " ".join(f"<code>{t}</code>" for t in legacy_tags(rel))
+    check("R-53 editor example: old word tags shown as computed", old in tpl, f"{rel} -> {old}")
+    check("R-54 editor example: old album name shown as computed",
+          f'<code data-album-for="legacy" hidden>{legacy_album_name(rel)}</code>' in tpl, f"{legacy_album_name(rel)}")
+
+    # Legacy mode = the old code, byte for byte (references copied below).
+    legacy_cases = [
+        "Kategorie/Ereignis 2007", "Geraet/2019/07", "Geraet/Messenger/2019-07-14",
+        "Kategorie/Ereignis/DCIM/104_PANA", "Kategorie/Photos from 2019", "Kategorie/X 2007/X 2007",
+        "Fest/2019", "Kategorie/Ereignis 2007/2007", "Fest/2019/Umzug", "2019/Ferien", "Person/Ort",
+        "A/B/C/D/E/F", "Ferien  Doppelt/Ort", "Höhlen/Übersee", "🏔️ Berge", "Mein Album", "X/X/X",
+        "Ferien/Mallorca/2019/07/DCIM/104_PANA",
+    ]
+    for i, rel in enumerate(legacy_cases):
+        path = f"/inbox/{rel}/f.jpg"
+        job = SimpleNamespace(source_inbox_path="/inbox", original_path=path)
+        mine_rel = relative_folder(path, "/inbox")
+        check(f"R-6{i:02d} legacy tags = old code: {rel!r}",
+              legacy_tags(mine_rel) == _old_extract_folder_tags(job),
+              f"{legacy_tags(mine_rel)} vs {_old_extract_folder_tags(job)}")
+        check(f"R-7{i:02d} legacy album = old code: {rel!r}",
+              legacy_album_name(mine_rel) == _old_folder_album(job),
+              f"{legacy_album_name(mine_rel)!r} vs {_old_folder_album(job)!r}")
+    for path in ("/inbox/f.jpg", "/app/data/reprocess/f.jpg"):
+        job = SimpleNamespace(source_inbox_path="/inbox", original_path=path)
+        check(f"R-80 no folder, as before: {path}", legacy_tags(relative_folder(path, "/inbox")) == []
+              == _old_extract_folder_tags(job) and legacy_album_name(relative_folder(path, "/inbox")) is None)
+
+
+# Verbatim from git 94095c6, backend/pipeline/step_ia02_duplicates.py — the
+# reference for legacy mode. IA-07 produced the same list in the same order.
+def _old_extract_folder_tags(job) -> list[str]:
+    if not job.source_inbox_path or not job.original_path:
+        return []
+    try:
+        rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
+    except ValueError:
+        return []
+    if not rel or rel == "." or rel.startswith(".."):
+        return []
+    folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
+    if not folder_parts:
+        return []
+
+    tags = []
+    for part in folder_parts:
+        for word in part.split():
+            if word and word not in tags:
+                tags.append(word)
+    combined = " ".join(folder_parts)
+    if combined not in tags:
+        tags.append(combined)
+    return tags
+
+
+# The path part of the old IA-08 _get_folder_album_names (git 94095c6).
+def _old_folder_album(job):
+    rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
+    if rel and rel != "." and not rel.startswith(".."):
+        parts = [p for p in rel.split(os.sep) if p and p != "."]
+        if parts:
+            return " ".join(parts)
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -212,12 +280,12 @@ def part_migration():
         rows = {n: (t, a, f) for n, t, a, f in con.execute(
             "SELECT name, folder_tag_mode, folder_albums, folder_tags FROM processing_sets "
             "WHERE name LIKE 'P7M-%'")}
-        check("M-02 old switch on -> flat tags + albums", rows.get("P7M-on") == ("flat", 1, 1), f"{rows}")
+        check("M-02 old switch on -> legacy tags + albums", rows.get("P7M-on") == ("legacy", 1, 1), f"{rows}")
         check("M-03 old switch off -> no tags, no albums", rows.get("P7M-off") == ("none", 0, 0), f"{rows}")
         others = con.execute(
             "SELECT COUNT(*) FROM processing_sets WHERE name NOT LIKE 'P7M-%' AND ("
             "COALESCE(folder_albums, 0) != COALESCE(folder_tags, 0) OR folder_tag_mode != "
-            "CASE WHEN folder_tags = 1 THEN 'flat' ELSE 'none' END)").fetchone()[0]
+            "CASE WHEN folder_tags = 1 THEN 'legacy' ELSE 'none' END)").fetchone()[0]
         check("M-04 every other set: same mapping", others == 0, f"{others} abweichend")
         con.execute("UPDATE processing_sets SET folder_tag_mode = 'nested', folder_albums = 0 WHERE name = 'P7M-on'")
         con.commit()
@@ -245,7 +313,7 @@ async def part_set_api(std_id: int):
     async with httpx.AsyncClient(base_url="http://localhost:8000", timeout=30) as c:
         body = (await c.get(f"/settings/sets/{set_id}")).json()["set"]
         check("S-01 options served", pick(body) == {"folder_tag_mode": "none", "folder_albums": False}, f"{pick(body)}")
-        for mode in ("flat", "nested"):
+        for mode in ("flat", "legacy", "nested"):
             body.update(folder_tag_mode=mode, folder_albums=True)
             r = await c.put(f"/settings/sets/{set_id}", json=body)
             saved = r.json().get("set") or {}
@@ -260,8 +328,8 @@ async def part_set_api(std_id: int):
         old.update(folder_tags=True)
         r = await c.put(f"/settings/sets/{set_id}", json=old)
         saved = r.json().get("set") or {}
-        check("S-04 an old editor page (folder_tags on) means flat tags + albums",
-              r.status_code == 200 and pick(saved) == {"folder_tag_mode": "flat", "folder_albums": True}, f"{pick(saved)}")
+        check("S-04 an old editor page (folder_tags on) means legacy tags + albums",
+              r.status_code == 200 and pick(saved) == {"folder_tag_mode": "legacy", "folder_albums": True}, f"{pick(saved)}")
     from sets import COPIED_FIELDS
     check("S-05 a copied set takes both options",
           "folder_tag_mode" in COPIED_FIELDS and "folder_albums" in COPIED_FIELDS)
@@ -597,6 +665,38 @@ async def story_e4(std_id):
     check("E4-07 album named per rule", want_album in albums, f"{albums}")
 
 
+async def story_e6(std_id):
+    print("\n-- E6: legacy tags + albums (the migrated switch) --")
+    from folder_path import legacy_album_name, legacy_tags
+    from immich_client import get_asset_albums
+    cat = f"P7Leg{TS}"
+    inbox = os.path.join(SANDBOX, "inbox6")
+    set_id = await create_set(f"P7-E6-{TS}", std_id, mode="legacy", albums=True, inbox=inbox)
+    rel = f"{cat}/Fest{TS} Umzug{TS}/2019/07"
+    path = os.path.join(inbox, rel, "p7_e6.jpg")
+    make_jpg(path)
+    want = _old_extract_folder_tags(SimpleNamespace(source_inbox_path=inbox, original_path=path))
+    want_album = _old_folder_album(SimpleNamespace(source_inbox_path=inbox, original_path=path))
+    check("E6-00 reference: old words and combined tag", want == legacy_tags(rel)
+          and want_album == legacy_album_name(rel) == f"{cat} Fest{TS} Umzug{TS} 2019 07", f"{want} {want_album}")
+    CLEANUP_ALBUMS.append(want_album)
+    existing = set(await tags_by_value())
+    CLEANUP_FLAT_TAGS.extend(t for t in want if t not in existing)
+    job = await run_file(set_id, inbox, path)
+    sr = job.step_result or {}
+    check("E6-01 job done", job.status == "done", f"{job.status} {job.error_message or ''}")
+    kw = (sr.get("IA-07") or {}).get("keywords_written") or []
+    check("E6-02 the file's keywords start with the old folder tags, in order", kw[:len(want)] == want, f"{kw}")
+    check("E6-03 no tag path written", not (sr.get("IA-07") or {}).get("tag_paths_written"))
+    if not job.immich_asset_id:
+        return
+    tags = await asset_tags(job.immich_asset_id)
+    check("E6-04 the old folder tags in Immich (numbers included)", all(t in tags for t in want), f"{tags}")
+    check("E6-05 no tag tree", not any(str(t).startswith("Ordner/") for t in tags), f"{tags}")
+    albums = await get_asset_albums(job.immich_asset_id)
+    check("E6-06 album with the old name (month kept)", want_album in albums, f"{albums}")
+
+
 async def story_e5(std_id):
     print("\n-- E5: a duplicate from another folder kept (reprocess) --")
     from immich_client import get_asset_albums
@@ -743,6 +843,7 @@ async def main():
             await story_e3(std_id)
             await story_e4(std_id)
             await story_e5(std_id)
+            await story_e6(std_id)
     finally:
         await cleanup()
 

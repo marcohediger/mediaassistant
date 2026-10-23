@@ -24,7 +24,7 @@ SCHEDULE_MODES = {"continuous", "manual", "window", "scheduled"}
 OCR_MODES = {"smart", "always"}
 WRITE_MODES = {"direct", "sidecar"}
 TARGET_MODES = {"library", "immich"}
-FOLDER_TAG_MODES = {"none", "flat", "nested"}
+FOLDER_TAG_MODES = {"none", "flat", "legacy", "nested"}
 RULE_CONDITIONS = {"filename_contains", "filename_pattern", "exif_expression", "extension"}
 MEDIA_TYPES = {None, "image", "video"}
 _TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -243,10 +243,10 @@ async def save_set(request: Request, set_id: int):
                 or data.get("metadata_write_mode") not in WRITE_MODES:
             return _fail(await _t("err_schedule"))
         # An editor page loaded before the update still sends the old switch,
-        # which meant flat folder tags and one album per folder.
+        # which meant the old folder tags and one album per folder.
         tag_mode = data.get("folder_tag_mode")
         if tag_mode is None and "folder_tags" in data:
-            tag_mode = "flat" if data.get("folder_tags") else "none"
+            tag_mode = "legacy" if data.get("folder_tags") else "none"
         if (tag_mode or "none") not in FOLDER_TAG_MODES:
             return _fail(await _t("err_folder_tag_mode"))
         tag_mode = tag_mode or "none"

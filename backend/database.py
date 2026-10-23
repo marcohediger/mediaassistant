@@ -100,12 +100,12 @@ async def _migrate_columns(conn):
         await conn.execute(sqlalchemy.text(
             "UPDATE processing_sets SET immich_input = CASE WHEN immich_poll = 1 "
             "OR immich_poll_user_id IS NOT NULL THEN 1 ELSE 0 END"))
-    # The old switch made flat keywords and one album per folder. Its sets
-    # keep both: flat tags and albums (same names, so existing albums are
-    # reused). Nested tags are new and stay off until chosen.
+    # The old switch made word keywords and one album per folder. Its sets
+    # keep exactly that: tag mode "legacy" (folder_path.legacy_tags) and
+    # albums named the old way, so existing albums are reused.
     if ("processing_sets", "folder_tag_mode") in added:
         await conn.execute(sqlalchemy.text(
-            "UPDATE processing_sets SET folder_tag_mode = CASE WHEN folder_tags = 1 THEN 'flat' ELSE 'none' END"))
+            "UPDATE processing_sets SET folder_tag_mode = CASE WHEN folder_tags = 1 THEN 'legacy' ELSE 'none' END"))
     if ("processing_sets", "folder_albums") in added:
         await conn.execute(sqlalchemy.text(
             "UPDATE processing_sets SET folder_albums = CASE WHEN folder_tags = 1 THEN 1 ELSE 0 END"))
