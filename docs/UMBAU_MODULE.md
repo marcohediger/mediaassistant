@@ -253,6 +253,12 @@ einem Mehrfachen zu rechnen.
 
 Schritte 1 und 2 bringen den grössten Sicherheitsgewinn und kommen deshalb zuerst.
 
+**Stand 2026-10-23:** Schritte 0 … 7 erledigt; Release-Gate komplett grün
+(28 Suiten, alle Risiken sicher, E2E 137/137, Startpfad am gebauten Image),
+siehe `TESTRESULTS.md`, Spalte v3.0.0. Nach 3.0 offen: Modul-Ergebnisse nur
+noch einmal speichern (Leser von `jobs.step_result` auf `runs.current` umstellen,
+spart auf der Live-Kopie rund 220 MB).
+
 ## Neue E2E-Stories (Auswahl)
 
 - **Fremde Datei am alten Pfad** (R-01): erledigter Immich-Job, neue gleichnamige
