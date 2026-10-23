@@ -132,6 +132,13 @@ async def _migrate_columns(conn):
         # endpoints — both look up jobs by filename in batches.
         "CREATE INDEX IF NOT EXISTS idx_job_filename ON jobs(filename)",
         "CREATE INDEX IF NOT EXISTS idx_job_set_status ON jobs(set_id, status)",
+        # Rerun requests (models.Rerun / RerunItem); create_all makes them
+        # with a new table, these cover a table made before an index existed.
+        "CREATE INDEX IF NOT EXISTS idx_reruns_state ON reruns(state, id)",
+        "CREATE INDEX IF NOT EXISTS idx_rerun_items_rerun ON rerun_items(rerun_id, state)",
+        "CREATE INDEX IF NOT EXISTS idx_rerun_items_job ON rerun_items(job_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_rerun_items_open_job ON rerun_items(job_id) "
+        "WHERE state IN ('pending', 'preparing', 'queued', 'running')",
         # The file-operation ledger is append-only (see models.FileOp).
         *FILE_OPS_GUARDS,
     ]
@@ -170,6 +177,10 @@ async def _register_autoincrement(conn):
     await _ensure_autoincrement(conn, "asset_refs")
     await _ensure_autoincrement(conn, "module_runs", referencing=[
         ("module_runs", "copied_from_run_id"), ("file_ops", "run_id")])
+    # Rerun requests and their items are referenced by job values (_rerun)
+    # and by each other: never hand an id out twice either.
+    await _ensure_autoincrement(conn, "reruns", referencing=[("rerun_items", "rerun_id")])
+    await _ensure_autoincrement(conn, "rerun_items")
 
 
 async def _ensure_autoincrement(conn, table: str, referencing=()):

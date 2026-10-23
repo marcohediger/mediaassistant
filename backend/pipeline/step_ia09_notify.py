@@ -14,12 +14,26 @@ async def execute(job, session) -> dict:
     if not server or not recipient:
         return {"status": "skipped", "reason": "not configured"}
 
-    # Collect errors from previous steps
-    step_results = job.step_result or {}
+    # Collect errors from previous steps — in a rerun only of the modules
+    # that ran in it (also those whose old result was put back).
     errors = []
-    for step_code, result in step_results.items():
-        if isinstance(result, dict) and result.get("status") == "error":
-            errors.append(f"[{step_code}] {result.get('reason', 'unbekannt')}")
+    from pipeline.reprocess import run_params
+    rerun = run_params(job).get("_rerun")
+    if isinstance(rerun, dict):
+        from sqlalchemy import select
+        import runs
+        from models import ModuleRun
+        rows = (await session.execute(select(ModuleRun.module, ModuleRun.result).where(
+            ModuleRun.job_id == job.id, ModuleRun.id > int(rerun.get("base") or 0),
+            ModuleRun.module.notin_(("IA-09", "IA-10", "IA-11"))).order_by(ModuleRun.id))).all()
+        for step_code, result in rows:
+            if runs.result_status(result) == "error":
+                errors.append(f"[{step_code}] {result.get('reason', 'unbekannt')}")
+    else:
+        step_results = job.step_result or {}
+        for step_code, result in step_results.items():
+            if isinstance(result, dict) and result.get("status") == "error":
+                errors.append(f"[{step_code}] {result.get('reason', 'unbekannt')}")
 
     if not errors:
         return {"status": "skipped", "reason": "no errors to report"}

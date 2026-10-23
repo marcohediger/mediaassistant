@@ -368,6 +368,8 @@ Neu `routers/reruns.py`, Präfix `/api/reruns`. Fehler: `{"ok": false, "error": 
            "modules": [{"module": "IA-03", "action": "run", "why": "selected"}]}],
  "jobs_truncated": false, "elapsed_ms": 340}
 ```
+Zusätzlich (Abstimmung mit der Oberfläche): `"targets": {"immich": n, "library": m}` — Ziel der zulässigen Jobs (die Oberfläche zeigt den Immich-Schalter nur mit Immich-Jobs). `per_module` nennt nur Module, die das Neu-Ausführen berührt (fehlend = bleibt); `action` dort ist die aktivste über alle Jobs (run > maybe > skip > keep), `count` die Zahl der Jobs mit dieser Aktion. `jobs[].source`: `local` | `work` (Download) | `none` (Immich-API).
+
 `action`: `run` | `maybe` (falls sich der Vorgänger ändert) | `keep` | `skip`. Fehler: 400 `unknown_module`, `not_standalone`, `no_modules`, `bad_target`, `bad_option`; 404 `set_not_found`; 413 `too_many_keys` (> 5000).
 
 ### 4.3 POST /api/reruns

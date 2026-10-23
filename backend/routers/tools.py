@@ -944,8 +944,16 @@ async def _start(request: Request, worker, *, require_preview: bool = False) -> 
 
 @router.get("")
 async def tools_page(request: Request):
+    from sqlalchemy import select
+    from database import async_session
+    from models import ProcessingSet
+    async with async_session() as session:
+        sets = [{"id": i, "name": n} for i, n in (await session.execute(
+            select(ProcessingSet.id, ProcessingSet.name).order_by(ProcessingSet.position, ProcessingSet.id))).all()]
     return await render(request, "tools.html", {
         "library_path": ", ".join(await library_roots()),
+        # The rerun card's set choice (Module neu ausführen für ein Set).
+        "sets": sets,
     })
 
 

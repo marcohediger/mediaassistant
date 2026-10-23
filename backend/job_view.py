@@ -23,6 +23,9 @@ gives the same status and detail:
                       attempt, trigger(_label), status(_label), tone, icon —
                       the outcome the attempt had —, started_at, finished_at,
                       duration_s, error (first line), copied_from_run_id
+        stale         the current finished run read inputs that have changed
+                      since (pipeline.registry fingerprint); only when the
+                      caller passes `stale`, else False
 
 The ledger (file_ops) and register (file_copies, asset_refs) are only read
 here; every change goes through fileops.py.
@@ -295,15 +298,20 @@ def _block(code: str, status: str, result, h: dict, steps: dict) -> dict:
     }
 
 
-def module_blocks(job, t: dict | None = None, runs=None) -> list[dict]:
+def module_blocks(job, t: dict | None = None, runs=None, stale=None) -> list[dict]:
     """The modules of `job` as blocks (see the module docstring); `runs`:
-    all module runs of the job (job_runs), else the step_result view."""
+    all module runs of the job (job_runs), else the step_result view;
+    `stale`: the modules whose current run is stale (pipeline.rerun.stale_modules)."""
     t = t or {}
     h, steps = _h(t), t.get("steps", {})
+    stale = stale or ()
     if runs is None:
         results = job.step_result if isinstance(job.step_result, dict) else {}
-        return [_block(code, _status_of(job, code, results), results.get(code), h, steps)
-                for code in MODULES if step_visible(code, results.get(code))]
+        blocks = [_block(code, _status_of(job, code, results), results.get(code), h, steps)
+                  for code in MODULES if step_visible(code, results.get(code))]
+        for block in blocks:
+            block["stale"] = block["module"] in stale
+        return blocks
 
     by_module: dict[str, list] = {}
     for run in sorted(runs, key=lambda r: r.id):
@@ -329,6 +337,7 @@ def module_blocks(job, t: dict | None = None, runs=None) -> list[dict]:
             trigger=current.trigger if current is not None else None,
             trigger_label=h.get(f"trigger_{current.trigger}", current.trigger) if current is not None else None,
             earlier=[_attempt_entry(code, r, h) for r in mod_runs if r is not current],
+            stale=finished and code in stale,
         )
         blocks.append(block)
     return blocks
@@ -357,6 +366,9 @@ def strip_summary(blocks: list[dict], t: dict | None = None) -> str:
     for b in blocks:
         counts[b["status_label"]] = counts.get(b["status_label"], 0) + 1
     summary = ", ".join(f"{n} {label}" for label, n in counts.items())
+    stale = sum(1 for b in blocks if b.get("stale"))
+    if stale:
+        summary += f", {stale} {h.get('stale', 'stale')}"
     return _fmt(h.get("strip_label", "{summary}"), summary=summary)
 
 

@@ -13,15 +13,16 @@ import time
 import traceback
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 import fileops
 import immich_client
+import resources
 import runs
 from config import config_manager
 from database import async_session
 from inputs.common import needs_immich_download
-from models import FileOp, Job
+from models import FileOp, Job, ModuleRun
 from pipeline import active_runs, reprocess, run_pipeline
 from system_logger import log_error, log_info, log_warning
 
@@ -78,6 +79,11 @@ async def fetch_immich_source(job_id: int) -> bool:
         job = await session.get(Job, job_id)
         if not job or job.status != "queued":
             return False
+        if "_rerun" in runs.params_of(job):
+            # A rerun brought its own source (pipeline/rerun.py) — or needs
+            # none. The content check below would set a polled job with the
+            # same bytes 'skipped' and supersede every run.
+            return True
         if not needs_immich_download(job):
             return True
         asset_id, user_id, debug_key = job.immich_asset_id, job.immich_user_id, job.debug_key
@@ -106,8 +112,9 @@ async def fetch_immich_source(job_id: int) -> bool:
         return await fail(str(e))
     tmp_dir = await asyncio.to_thread(tempfile.mkdtemp, prefix="ma_immich_")
     try:
-        res = await fileops.download(job_id, asset_id, tmp_dir, actor="system:immich-input",
-                                     kind="work", api_key=api_key)
+        async with resources.use("immich"):
+            res = await fileops.download(job_id, asset_id, tmp_dir, actor="system:immich-input",
+                                         kind="work", api_key=api_key)
     except Exception as e:
         await asyncio.to_thread(_rmdir_quiet, tmp_dir)
         return await fail(f"{type(e).__name__}: {e}")
@@ -205,7 +212,10 @@ async def _requeue_or_fail(row, cutoff: datetime | None) -> None:
     retry = (row.retry_count or 0) + 1
     sr = dict(row.step_result or {})
     resumable = reprocess.PREPARE_SOURCE in sr  # run_pipeline finishes a cut-short retry
-    source_gone = (not resumable and not os.path.exists(row.original_path or "")
+    # A rerun in Immich API mode works without a file ("immich:<id>").
+    rerun_without_file = isinstance(sr.get("_rerun"), dict) and \
+        (sr["_rerun"].get("source") or {}).get("kind") == "immich"
+    source_gone = (not resumable and not rerun_without_file and not os.path.exists(row.original_path or "")
                    and not (row.source_label == "Immich" and row.immich_asset_id))
     if retry > STALE_MAX_RETRIES:
         values = dict(status="error", error_message=(
@@ -223,10 +233,10 @@ async def _requeue_or_fail(row, cutoff: datetime | None) -> None:
         query = query.where(Job.updated_at < cutoff)
     async with async_session() as session:
         res = await session.execute(query.values(**values))
-        if res.rowcount == 1 and values["status"] == "queued" and row.current_step in runs.MODULES:
-            # The stuck step re-runs from scratch: its run is superseded.
-            await runs.supersede(session, await session.get(Job, row.id), [row.current_step],
-                                 reason="hing (Watchdog)")
+        if res.rowcount == 1 and values["status"] == "queued":
+            # The stuck modules re-run from scratch: every running run of the
+            # job (the main path's and a side task's) is superseded.
+            await runs.supersede_running(session, await session.get(Job, row.id), reason="hing (Watchdog)")
         await session.commit()
     if res.rowcount != 1:
         return
@@ -250,20 +260,33 @@ _STALE_COLUMNS = (Job.id, Job.debug_key, Job.filename, Job.current_step, Job.ret
                   Job.original_path, Job.source_label, Job.immich_asset_id, Job.step_result)
 
 
+def _hung(info: dict, now: float) -> bool:
+    """A module of the job has been running for STALE_TIMEOUT_S (each
+    running module counts on its own — the main path's and a side task's).
+    Waiting for a resource limit is no module running."""
+    steps = info.get("steps")
+    if steps is None:
+        return now - info["step_since"] >= STALE_TIMEOUT_S
+    return any(now - since >= STALE_TIMEOUT_S for since in steps.values())
+
+
 async def recover_stale_jobs(running: set, running_jobs: dict) -> None:
     """Put jobs back into the queue whose work has really stopped (R-11).
 
     Every pipeline run (and every retry preparation) touches its job's
     updated_at every HEARTBEAT_S, in whatever process it runs. So:
 
-    - A job running in this process is hung only if its current step has
-      run longer than STALE_TIMEOUT_S and no file operation of it is open
-      (an upload with Immich backoff or the copy of a large video may take
-      that long). A worker task is then cancelled and the job requeued once
-      the task has really ended; other work (the retry button) is left alone.
+    - A job running in this process is hung only if one of its running
+      modules (the main path's or a side task's, ``steps``) has run longer
+      than STALE_TIMEOUT_S and no file operation of it is open (an upload
+      with Immich backoff or the copy of a large video may take that long);
+      waiting for a resource limit is not running. A worker task is then
+      cancelled (its side tasks with it) and the job requeued once the task
+      has really ended; other work (the retry button) is left alone.
     - A job not running here counts as stale when nothing has touched it
-      for STALE_TIMEOUT_S. It is still left alone while a file operation of
-      it is younger than that (it runs elsewhere). Older open operations
+      for STALE_TIMEOUT_S. It is still left alone while one of its module
+      runs has a fresh heartbeat_at, or a file operation of it is younger
+      than that (it runs elsewhere). Older open operations
       belong to a process that is gone: they are settled against disk and
       Immich first (fileops.reconcile_open_intents), then the job is requeued.
     """
@@ -271,15 +294,27 @@ async def recover_stale_jobs(running: set, running_jobs: dict) -> None:
     cutoff = datetime.now() - timedelta(seconds=STALE_TIMEOUT_S)
     active = active_runs()
     hung_ids = [job_id for job_id, info in active.items()
-                if info["kind"] == "pipeline" and now - info["step_since"] >= STALE_TIMEOUT_S]
+                if info["kind"] == "pipeline" and _hung(info, now)]
     async with async_session() as session:
         stale = (await session.execute(
             select(*_STALE_COLUMNS).where(Job.status == "processing", Job.updated_at < cutoff,
                                           Job.id.notin_(list(active)))
         )).all()
+        alive: dict = {}
+        if stale:
+            # A module run with a fresh heartbeat is alive somewhere (R-11),
+            # whatever the job row says.
+            for job_id, module, beat in (await session.execute(
+                    select(ModuleRun.job_id, ModuleRun.module, ModuleRun.heartbeat_at).where(
+                        ModuleRun.job_id.in_([r.id for r in stale]), ModuleRun.status == "running",
+                        ModuleRun.heartbeat_at >= cutoff))).all():
+                alive.setdefault(job_id, []).append(f"{module} lebt (Lebenszeichen {beat:%H:%M:%S})")
         hung = (await session.execute(
             select(*_STALE_COLUMNS).where(Job.status == "processing", Job.id.in_(hung_ids))
         )).all() if hung_ids else []
+    for row in [r for r in stale if r.id in alive]:
+        await _note_still_running(row, alive[row.id])
+    stale = [r for r in stale if r.id not in alive]
     if not stale and not hung:
         return
     open_ops = await _open_operations([row.id for row in (*stale, *hung)])
@@ -334,6 +369,14 @@ async def _run_job(job_id: int, filename: str, debug_key: str):
         try:
             async with async_session() as session:
                 job = await session.get(Job, job_id)
+                rerun = job is not None and "_rerun" in runs.params_of(job)
+            if rerun:
+                # A rerun never ends in error (2.6): back to the status before.
+                from pipeline import rerun as rerun_plan
+                await rerun_plan.abort(job_id, f"{type(e).__name__}: {e}\n\n{tb}")
+                return
+            async with async_session() as session:
+                job = await session.get(Job, job_id)
                 if job and job.status == "processing":
                     job.status = "error"
                     job.error_message = f"Pipeline-Crash: {type(e).__name__}: {e}"
@@ -348,15 +391,19 @@ async def _run_job(job_id: int, filename: str, debug_key: str):
     logger.info(f"Pipeline done: {debug_key} ({filename})")
 
 
-async def pipeline_worker(shutdown_event: asyncio.Event):
-    """Background worker: continuously fills free slots with queued jobs.
+async def pipeline_worker(shutdown_event: asyncio.Event, *, job_ids=None, ignore_pause: bool = False):
+    """Background worker: continuously fills free job places with queued jobs.
 
     Instead of batch processing (start N, wait for all, repeat), this
-    worker checks every second for free slots and immediately starts
-    new jobs — keeping all slots busy with even load distribution.
-    """
-    from ai_backends import get_total_slots
+    worker checks every second for free places and immediately starts
+    new jobs. A job holds only the resource limit of the module it runs
+    (resources.py); the number of jobs at once is resources.max_jobs()
+    (pipeline.max_jobs, 0 = 2 × AI slots + 2), which protects database
+    connections and memory only.
 
+    ``job_ids`` / ``ignore_pause``: a test runs its own worker on its own
+    jobs while the app's pipeline stays paused.
+    """
     logger.info("Pipeline worker started")
     running: set[asyncio.Task] = set()
     # Map job_id → asyncio.Task so stale recovery can cancel hung tasks
@@ -395,7 +442,7 @@ async def pipeline_worker(shutdown_event: asyncio.Event):
             # queued jobs. Used by the "Pause Pipeline" UI button so the
             # user can stop the worker cleanly before docker stop, even
             # when there are already jobs in 'queued' state.
-            paused = await config_manager.get("pipeline.paused", False)
+            paused = await config_manager.get("pipeline.paused", False) and not ignore_pause
             if paused:
                 now = time.time()
                 if now - last_pause_log > 60:
@@ -409,8 +456,8 @@ async def pipeline_worker(shutdown_event: asyncio.Event):
                 await asyncio.sleep(1)
                 continue
 
-            # Fill free slots with queued jobs
-            max_concurrent = await get_total_slots()
+            # Fill free job places with queued jobs
+            max_concurrent = await resources.max_jobs()
             free_slots = max_concurrent - len(running)
 
             if free_slots > 0:
@@ -420,11 +467,14 @@ async def pipeline_worker(shutdown_event: asyncio.Event):
                     # picked up a second time. Nor is a job whose pipeline
                     # still runs in this process (R-11).
                     busy = list(running_jobs) + list(active_runs())
+                    # New files first: a job a rerun queued waits behind
+                    # every other (3.4).
+                    is_rerun = func.json_extract(Job.job_data, "$._rerun").isnot(None)
+                    query = select(Job).where(Job.status == "queued", Job.id.notin_(busy))
+                    if job_ids is not None:
+                        query = query.where(Job.id.in_(list(job_ids)))
                     result = await session.execute(
-                        select(Job).where(Job.status == "queued",
-                                          Job.id.notin_(busy))
-                        .order_by(Job.created_at).limit(free_slots)
-                    )
+                        query.order_by(is_rerun, Job.created_at).limit(free_slots))
                     new_jobs = result.scalars().all()
 
                 for job in new_jobs:

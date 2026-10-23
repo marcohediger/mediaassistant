@@ -522,20 +522,34 @@ async def _execute(job, session) -> dict:
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
 
+    rerun = params.get("_rerun") if isinstance(params.get("_rerun"), dict) else None
+    manual_category = params.get("_manual_category")
+
     # Determine category: static rules first, then AI verifies and corrects
     ai_type = ai_result.get("type", "")
+    # The wished name in the target folder is the name the file has now (a
+    # file that stays in its folder is not renamed); the rules match the
+    # job's own filename — original_path may be a work copy
+    # ("name_<debug_key>.jpg") or, in a rerun, "immich:<id>".
     filename = os.path.basename(job.original_path)
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
 
-    # 1) Static sorting rules (always evaluated first)
-    rule_category = await _match_sorting_rules(filename, exif, session, is_video=is_video,
-                                               set_id=job.set_id)
+    # 1) Static sorting rules (always evaluated first) — a category the
+    # user chose in the review comes before rules and AI (rerun).
+    rule_category = None if manual_category else await _match_sorting_rules(
+        job.filename or filename, exif, session, is_video=is_video, set_id=job.set_id)
 
     if rule_category == "skip":
+        if rerun is not None:
+            # A rerun never drops a finished job: the rule is reported, the
+            # file and its targets stay as they are.
+            return await _rule_skip_in_rerun(session, rerun)
         job.status = "skipped"
         return {"status": "skipped", "reason": "excluded by sorting rule"}
 
-    if rule_category:
+    if manual_category:
+        category = manual_category
+    elif rule_category:
         category = rule_category
     else:
         # No rule matched → default based on EXIF
@@ -546,7 +560,7 @@ async def _execute(job, session) -> dict:
             category = "personliches_video" if is_video else "personliches_foto"
 
     # 2) AI verifies ALL files — AI returns a category label
-    if ai_type:
+    if ai_type and not manual_category:
         # Validate the AI category exists in this set, by label (ignore invalid/unknown)
         from sets import find_category
         ai_cat = await find_category(session, job.set_id, label=ai_type)
@@ -629,6 +643,13 @@ async def _execute(job, session) -> dict:
 
     sidecar_mode = ia07_result.get("write_mode") == "sidecar"
     sidecar_path = ia07_result.get("sidecar_path")
+    if sidecar_path and not await asyncio.to_thread(os.path.isfile, sidecar_path):
+        # IA-07's result names where the sidecar was when it wrote it; after
+        # the file was filed (and a later rerun did not run IA-07) it lies
+        # next to the file — if the register lists it as this job's sidecar.
+        beside = os.path.abspath(job.original_path or "") + ".xmp"
+        if any(c.kind == "sidecar" and c.location == beside for c in await fileops.copies(job)):
+            sidecar_path = beside
     should_archive = lib_cat.immich_archive if lib_cat else (category.startswith("sourceless") or category == "screenshot")
 
     # The route follows the job's target (set by its input from the set:
@@ -636,15 +657,36 @@ async def _execute(job, session) -> dict:
     # never the mere presence of an immich_asset_id. A library job that
     # inherited an asset id while a duplicate was kept goes to the library (R-15).
     if job.use_immich:
+        # A rerun in API mode, or IA-07's API result: the file is unchanged,
+        # whatever IA-07 wrote last time (2.4).
+        api_only = ia07_result.get("write_mode") == "immich_api" or (
+            rerun is not None and rerun.get("immich", "api") == "api")
         result = await _to_immich(
             job, category=category, tag_keywords=tag_keywords, ia07=ia07_result,
             ai_result=ai_result, sidecar_mode=sidecar_mode, sidecar_path=sidecar_path,
             should_archive=should_archive, previous_tags=previous_immich_tags,
-            previous_descriptions=previous_descriptions)
+            previous_descriptions=previous_descriptions, api_only=api_only)
     else:
         result = await _to_library(job, category=category, target_dir=target_dir,
                                    wished_path=wished_path, sidecar_path=sidecar_path)
+    if manual_category:
+        result["manual_review"] = True
 
+    return result
+
+
+async def _rule_skip_in_rerun(session, rerun: dict) -> dict:
+    """A "skip" rule matches a finished job during a rerun: the previous
+    sorting result stays, as a warning."""
+    import runs
+    previous = {}
+    old_id = (rerun.get("superseded") or {}).get("IA-08")
+    if old_id:
+        old = (await runs.by_ids(session, [old_id])).get(old_id)
+        if old is not None and isinstance(old.result, dict):
+            previous = {k: v for k, v in old.result.items() if k not in ("status", "reason")}
+    result = dict(previous, status="warning",
+                  reason="Sortierregel 'überspringen' trifft jetzt zu — beim Neu ausführen nicht angewendet")
     return result
 
 
@@ -728,7 +770,7 @@ async def _to_library(job, *, category: str, target_dir: str, wished_path: str,
 
 async def _to_immich(job, *, category: str, tag_keywords: list[str], ia07: dict, ai_result: dict,
                      sidecar_mode: bool, sidecar_path: str | None, should_archive: bool,
-                     previous_tags: list[str], previous_descriptions: set) -> dict:
+                     previous_tags: list[str], previous_descriptions: set, api_only: bool = False) -> dict:
     api_key = await _immich_key(job)
     src = job.original_path
     source_dir = os.path.dirname(src) if src else ""
@@ -757,7 +799,7 @@ async def _to_immich(job, *, category: str, tag_keywords: list[str], ia07: dict,
             job, asset_id, src=src, src_exists=src_exists, api_key=api_key, category=category,
             tag_keywords=tag_keywords, album_names=album_names, ma_desc=ma_desc,
             sidecar_mode=sidecar_mode, sidecar_path=sidecar_path,
-            previous_tags=previous_tags, previous_descriptions=previous_descriptions)
+            previous_tags=previous_tags, previous_descriptions=previous_descriptions, api_only=api_only)
     else:
         result = await _upload(
             job, src=src, src_exists=src_exists, api_key=api_key, category=category,
@@ -833,7 +875,7 @@ async def _upload(job, *, src: str, src_exists: bool, api_key, category: str, ta
 async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_key, category: str,
                         tag_keywords: list[str], album_names, ma_desc: str, sidecar_mode: bool,
                         sidecar_path: str | None, previous_tags: list[str],
-                        previous_descriptions: set) -> dict:
+                        previous_descriptions: set, api_only: bool = False) -> dict:
     """S7: the job already has an asset (Immich input, retry, kept duplicate).
 
     Replaced only when the local file holds other bytes than the asset —
@@ -845,7 +887,13 @@ async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_k
     """
     info = await get_asset_info(asset_id, api_key=api_key)
     usable = info is not None and not info.get("isTrashed")
-    if src_exists:
+    if api_only and not src_exists:
+        # Rerun "tags and description through the API": no local file, the
+        # asset keeps its bytes (and its id).
+        if not usable:
+            raise FileNotFoundError(f"Asset {asset_id} nicht verfügbar (fehlt oder im Papierkorb)")
+        same, local_sum = True, None
+    elif src_exists:
         local_sum = await asyncio.to_thread(_sha1_b64, src)
         if info is not None:
             same = usable and info.get("checksum") == local_sum

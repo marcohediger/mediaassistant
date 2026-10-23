@@ -339,6 +339,66 @@ class ModuleRun(Base):
     heartbeat_at = Column(DateTime)  # last sign of life while running (R-11)
 
 
+# ---------------------------------------------------------------------------
+# Re-running single modules: requests and their items (written by reruns.py
+# and pipeline/rerun.py only; docs/UMBAU_MODULE_AUSFUEHRUNG.md 3.9)
+# ---------------------------------------------------------------------------
+
+RERUN_STATES = ("running", "cancelling", "cancelled", "done")
+# pending → preparing → queued → running → done / unchanged / failed;
+# refused; deferred → pending; cancelled
+RERUN_ITEM_STATES = ("pending", "preparing", "queued", "running", "done", "unchanged", "failed",
+                     "refused", "deferred", "cancelled")
+RERUN_ITEM_OPEN = ("pending", "preparing", "queued", "running")
+
+
+class Rerun(Base):
+    """One request to run modules again: a single job, a selection or a set."""
+    __tablename__ = "reruns"
+    __table_args__ = (
+        Index("idx_reruns_state", "state", "id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    finished_at = Column(DateTime)
+    actor = Column(Text, nullable=False, default="user:rerun")
+    modules = Column(JSON)  # ["IA-03", …] as chosen
+    options = Column(JSON)  # {"cascade", "hints", "immich"}
+    scope = Column(JSON)  # {"kind", "set_id", "filter", "keys", "status", "q", "count"}
+    state = Column(Text, nullable=False, default="running")  # running/cancelling/cancelled/done
+    total = Column(Integer, default=0)  # items (eligible jobs at creation)
+    refused = Column(JSON)  # {reason: {"count", "sample"}} at creation
+    single = Column(Boolean, default=False)  # one job (always allowed next to a bulk request)
+
+
+class RerunItem(Base):
+    """One job of a rerun request."""
+    __tablename__ = "rerun_items"
+    __table_args__ = (
+        Index("idx_rerun_items_rerun", "rerun_id", "state"),
+        Index("idx_rerun_items_job", "job_id"),
+        # A job is pending in at most one request at a time.
+        Index("uq_rerun_items_open_job", "job_id", unique=True,
+              sqlite_where=text("state IN ('pending', 'preparing', 'queued', 'running')")),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = Column(Integer, primary_key=True)
+    rerun_id = Column(Integer, nullable=False)
+    job_id = Column(Integer, nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    state = Column(Text, nullable=False, default="pending")
+    reason = Column(Text)  # key (refused_* / failures.reason), never text
+    module = Column(Text)  # module that failed
+    detail = Column(Text)
+    prev_status = Column(Text)
+    summary = Column(JSON)  # {"ran": [...], "changed": [...], "restored": [...]}
+    started_at = Column(DateTime)
+    finished_at = Column(DateTime)
+
+
 # Executed at startup (database._migrate_module_runs), like FILE_OPS_GUARDS.
 MODULE_RUNS_GUARDS = [
     "CREATE TRIGGER IF NOT EXISTS trg_module_runs_no_delete BEFORE DELETE ON module_runs "

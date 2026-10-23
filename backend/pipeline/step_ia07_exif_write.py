@@ -27,29 +27,45 @@ _EXIFTOOL_TIMEOUT = 30
 
 
 async def execute(job, session) -> dict:
-    """IA-07: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben."""
-    ext = os.path.splitext(job.original_path)[1].lower()
-    if ext not in WRITABLE_EXTENSIONS:
-        return {"status": "skipped", "reason": f"format {ext} not supported for in-place tag writing"}
+    """IA-07: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben.
 
-    # Detect format/extension mismatch (e.g. JPG named as .png)
+    In a rerun (run parameter ``_rerun``) the keywords and the description
+    this job wrote last time (``_previous_keywords_written``,
+    ``_previous_description_written``) are taken out where the new run no
+    longer has them. An Immich job in the rerun's API mode writes no file:
+    the result only names what IA-08 sets through the API
+    (``write_mode: "immich_api"``).
+    """
+    from pipeline.reprocess import run_params
+    params = run_params(job)
+    rerun = params.get("_rerun") if isinstance(params.get("_rerun"), dict) else None
+    api_mode = rerun is not None and bool(job.use_immich) and rerun.get("immich", "api") == "api"
+    previous_keywords = [k for k in (params.get("_previous_keywords_written") or []) if isinstance(k, str) and k]
+    previous_description = params.get("_previous_description_written") or ""
+
+    ext = os.path.splitext(job.original_path)[1].lower()
     step_results = job.step_result or {}
     exif_data = step_results.get("IA-01", {})
-    actual_type = (exif_data.get("file_type") or "").upper()
-    _EXT_TO_TYPES = {
-        ".jpg": {"JPEG"}, ".jpeg": {"JPEG"},
-        ".png": {"PNG"}, ".webp": {"WEBP"},
-        ".tiff": {"TIFF"}, ".tif": {"TIFF"},
-        ".heic": {"HEIC"}, ".heif": {"HEIF"},
-        ".dng": {"DNG"},
-        ".mp4": {"MP4"}, ".mov": {"MOV", "MP4"},
-    }
-    expected_types = _EXT_TO_TYPES.get(ext, set())
-    if actual_type and expected_types and actual_type not in expected_types:
-        return {
-            "status": "skipped",
-            "reason": f"format mismatch: file is {actual_type} but extension is {ext} — ExifTool cannot write safely",
+    if not api_mode:
+        if ext not in WRITABLE_EXTENSIONS:
+            return {"status": "skipped", "reason": f"format {ext} not supported for in-place tag writing"}
+
+        # Detect format/extension mismatch (e.g. JPG named as .png)
+        actual_type = (exif_data.get("file_type") or "").upper()
+        _EXT_TO_TYPES = {
+            ".jpg": {"JPEG"}, ".jpeg": {"JPEG"},
+            ".png": {"PNG"}, ".webp": {"WEBP"},
+            ".tiff": {"TIFF"}, ".tif": {"TIFF"},
+            ".heic": {"HEIC"}, ".heif": {"HEIF"},
+            ".dng": {"DNG"},
+            ".mp4": {"MP4"}, ".mov": {"MOV", "MP4"},
         }
+        expected_types = _EXT_TO_TYPES.get(ext, set())
+        if actual_type and expected_types and actual_type not in expected_types:
+            return {
+                "status": "skipped",
+                "reason": f"format mismatch: file is {actual_type} but extension is {ext} — ExifTool cannot write safely",
+            }
 
     ai_result = step_results.get("IA-05", {})
     ocr_result = step_results.get("IA-06", {})
@@ -107,6 +123,30 @@ async def execute(job, session) -> dict:
 
     description = " ".join(description_parts)
 
+    # Own keywords of the last run that this run no longer has (rerun).
+    stale_keywords = [k for k in dict.fromkeys(previous_keywords) if k not in keywords]
+
+    # Collect OCR text early (used by all modes)
+    ocr_text = ""
+    if ocr_result.get("has_text") and ocr_result.get("text"):
+        ocr_text = ocr_result["text"].strip()
+
+    if api_mode:
+        # Rerun of an Immich job, "tags and description through the API":
+        # no file is read or written; IA-08 takes this over into Immich.
+        if job.dry_run:
+            result = {"status": "dry_run", "keywords_planned": keywords, "description_planned": description,
+                      "tags_count": len(keywords), "write_mode": "immich_api"}
+        else:
+            result = {"keywords_written": keywords, "description_written": description,
+                      "ocr_text_written": ocr_text, "tags_count": len(keywords),
+                      "write_mode": "immich_api", "file_unchanged": True}
+            if stale_keywords:
+                result["keywords_removed"] = stale_keywords
+        if tag_paths:
+            result["tag_paths_written" if not job.dry_run else "tag_paths_planned"] = tag_paths
+        return result
+
     from sets import get_set
     processing_set = await get_set(session, job.set_id)
     write_mode = (processing_set.metadata_write_mode if processing_set else None) or "direct"
@@ -122,9 +162,10 @@ async def execute(job, session) -> dict:
 
     # TagsList: written for the tag tree, and kept in step wherever the file
     # already has one — Immich reads only TagsList then (see _tags_list).
-    tags_list, stale_tags = await asyncio.to_thread(_tags_list, look_at, keywords, tag_paths)
+    tags_list, stale_tags = await asyncio.to_thread(_tags_list, look_at, keywords, tag_paths, stale_keywords)
 
-    if not keywords and not tag_paths and not stale_tags and not description and not takeout:
+    if not keywords and not tag_paths and not stale_tags and not description and not takeout \
+            and not stale_keywords:
         result = {"status": "skipped", "reason": "no tags to write"}
         if takeout is not None:
             result["takeout_written"] = []
@@ -145,17 +186,16 @@ async def execute(job, session) -> dict:
             result["takeout_planned"] = sorted(takeout)
         return result
 
-    # Collect OCR text early (used by both modes)
-    ocr_text = ""
-    if ocr_result.get("has_text") and ocr_result.get("text"):
-        ocr_text = ocr_result["text"].strip()
-
     tag_args = _tags_list_args(tags_list, stale_tags)
     if write_mode == "sidecar":
         result = await _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout or {},
-                                      tag_args)
+                                      tag_args, stale_keywords=stale_keywords,
+                                      previous_description=previous_description)
     else:
-        result = await _write_direct(job, keywords, description, ocr_text, ext, takeout or {}, tag_args)
+        result = await _write_direct(job, keywords, description, ocr_text, ext, takeout or {}, tag_args,
+                                     stale_keywords=stale_keywords)
+    if stale_keywords:
+        result["keywords_removed"] = stale_keywords
     if takeout is not None:
         result["takeout_written"] = sorted(takeout)
     if tag_paths:
@@ -177,7 +217,8 @@ def _exiftool_write(args: list[str], error_label: str, path: str) -> None:
         raise RuntimeError(f"{error_label}: {stderr.strip()}")
 
 
-async def _write_direct(job, keywords, description, ocr_text, ext, takeout, tag_args=()):
+async def _write_direct(job, keywords, description, ocr_text, ext, takeout, tag_args=(), *,
+                        stale_keywords=()):
     """Write metadata directly into the file.
 
     Through fileops.write_metadata: exiftool edits a private copy, which then
@@ -190,11 +231,14 @@ async def _write_direct(job, keywords, description, ocr_text, ext, takeout, tag_
     import fileops
 
     args = []
-    # Write keywords — format-aware tag field selection
-    if ext in _IPTC_FORMATS:
-        args += [f"-Keywords+={kw}" for kw in keywords]
-    else:
-        args += [f"-Subject+={kw}" for kw in keywords]
+    # Write keywords — format-aware tag field selection. "-=" before "+="
+    # adds a keyword only if it is not there yet (a rerun writes again);
+    # own keywords of the last run that no longer apply go out.
+    field_name = "Keywords" if ext in _IPTC_FORMATS else "Subject"
+    for kw in stale_keywords:
+        args.append(f"-{field_name}-={kw}")
+    for kw in keywords:
+        args += [f"-{field_name}-={kw}", f"-{field_name}+={kw}"]
 
     if description:
         args.append(f"-ImageDescription={description}")
@@ -221,7 +265,8 @@ async def _write_direct(job, keywords, description, ocr_text, ext, takeout, tag_
     }
 
 
-async def _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout, tag_args=()):
+async def _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout, tag_args=(), *,
+                         stale_keywords=(), previous_description: str = ""):
     """Write metadata to the XMP sidecar, leaving the original untouched.
 
     A sidecar that already lies next to the file — supplied by the user
@@ -241,8 +286,13 @@ async def _write_sidecar(job, sidecar_path, keywords, description, ocr_text, tak
     if await asyncio.to_thread(os.path.lexists, sidecar_path):
         row = await fileops.register_existing(job, "sidecar", sidecar_path, take_over=True)
         if await asyncio.to_thread(_is_xmp, sidecar_path):
-            keep_description = bool(description) and await asyncio.to_thread(_has_description, sidecar_path)
+            # A description in the sidecar stays — unless it is the one this
+            # job wrote last time (a rerun replaces its own).
+            current = await asyncio.to_thread(_read_description, sidecar_path) if description else ""
+            keep_description = bool(current) and current not in (description, previous_description.strip())
             args = []
+            for kw in stale_keywords:
+                args.append(f"-Subject-={kw}")
             for kw in keywords:
                 args += [f"-Subject-={kw}", f"-Subject+={kw}"]  # add only if not there yet
             if description and not keep_description:
@@ -361,7 +411,8 @@ def _as_list(value) -> list[str]:
     return [str(v) for v in (value if isinstance(value, list) else [value]) if str(v).strip()]
 
 
-def _tags_list(sources: list[str], keywords: list[str], tag_paths: list[str]) -> tuple[list[str], list[str]]:
+def _tags_list(sources: list[str], keywords: list[str], tag_paths: list[str],
+               stale_keywords=()) -> tuple[list[str], list[str]]:
     """Every tag of the file as TagsList entries ("/" separates levels), and
     the folder-tree entries that no longer apply.
 
@@ -374,7 +425,8 @@ def _tags_list(sources: list[str], keywords: list[str], tag_paths: list[str]) ->
     A file that has a TagsList gets one even without a tree, or Immich would
     not see this run's keywords; folder-tree entries ("Ordner/…") the
     current rules no longer produce are removed. ([], []) when the file has
-    no TagsList and no tree is to be written.
+    no TagsList and no tree is to be written. ``stale_keywords`` (own
+    keywords of the last run, rerun) are removed as flat entries as well.
     """
     merged: dict = {}
     by_file = {e.get("SourceFile"): e for e in _exiftool_read(sources, ["TagsList", "HierarchicalSubject",
@@ -391,7 +443,8 @@ def _tags_list(sources: list[str], keywords: list[str], tag_paths: list[str]) ->
         existing = ["/".join(p.replace("/", "|") for p in h.split("|")) for h in merged["HierarchicalSubject"]]
     else:
         existing = merged.get("Keywords") or []
-    stale = [e for e in dict.fromkeys(existing) if is_tag_path(e) and e not in tag_paths]
+    gone = {k.replace("/", " - ") for k in stale_keywords} - {k.replace("/", " - ") for k in keywords}
+    stale = [e for e in dict.fromkeys(existing) if (is_tag_path(e) and e not in tag_paths) or e in gone]
     entries: list[str] = []
     for entry in [*existing, *(k.replace("/", " - ") for k in keywords), *tag_paths]:
         if entry and entry not in entries and entry not in stale:
@@ -437,10 +490,16 @@ def _is_xmp(path: str) -> bool:
 
 
 def _has_description(path: str) -> bool:
+    return bool(_read_description(path))
+
+
+def _read_description(path: str) -> str:
     for entry in _exiftool_read([path], ["Description", "ImageDescription"]):
-        if any(str(entry.get(t) or "").strip() for t in ("Description", "ImageDescription")):
-            return True
-    return False
+        for t in ("Description", "ImageDescription"):
+            text = str(entry.get(t) or "").strip()
+            if text:
+                return text
+    return ""
 
 
 def _real_date(value) -> bool:
