@@ -1,4 +1,6 @@
+import logging
 import os
+import re
 import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from models import Base, Module, InboxDirectory, FILE_OPS_GUARDS
@@ -123,6 +125,55 @@ async def _migrate_columns(conn):
         await conn.execute(sqlalchemy.text(sql))
 
     await _rebuild_library_categories(conn)
+    await _jobs_autoincrement(conn)
+
+
+async def _jobs_autoincrement(conn):
+    """Give jobs.id AUTOINCREMENT, once (R-26).
+
+    Without it SQLite hands the id of the newest deleted job to the next new
+    job, which then inherits the deleted job's register, reference and ledger
+    rows -- it could "own" copies of another file. SQLite cannot add
+    AUTOINCREMENT in place, so the table is rebuilt with every row, id and
+    index kept. The sequence starts above the highest job id any table has
+    seen, so an id already reused by the ledger cannot come back either.
+    """
+    t = sqlalchemy.text
+    sql = (await conn.execute(t(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"))).scalar()
+    if not sql or "AUTOINCREMENT" in sql.upper():
+        return
+    new_sql = re.sub(r"\bid INTEGER NOT NULL,", "id INTEGER PRIMARY KEY AUTOINCREMENT,", sql, count=1)
+    new_sql = re.sub(r",\s*PRIMARY KEY \(id\)", "", new_sql, count=1)
+    if new_sql == sql or "PRIMARY KEY (id)" in new_sql or "AUTOINCREMENT" not in new_sql:
+        raise RuntimeError("jobs: unexpected schema, AUTOINCREMENT migration aborted")
+    new_sql = new_sql.replace("CREATE TABLE jobs", "CREATE TABLE jobs_new", 1)
+
+    index_sqls = [r[0] for r in (await conn.execute(t(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='jobs' AND sql IS NOT NULL"))).all()]
+    columns = ", ".join(f'"{r[1]}"' for r in (await conn.execute(t("PRAGMA table_info(jobs)"))).all())
+    tables = {r[0] for r in (await conn.execute(t("SELECT name FROM sqlite_master WHERE type='table'"))).all()}
+    high = (await conn.execute(t("SELECT COALESCE(MAX(id), 0) FROM jobs"))).scalar()
+    for table in ("file_ops", "file_copies", "asset_refs"):
+        if table in tables:
+            high = max(high, (await conn.execute(t(f"SELECT COALESCE(MAX(job_id), 0) FROM {table}"))).scalar())
+    count = (await conn.execute(t("SELECT COUNT(*) FROM jobs"))).scalar()
+    log = logging.getLogger("mediaassistant.database")
+    # The DB log table is not usable inside this startup transaction.
+    log.warning("Umbau der Tabelle jobs (IDs nie wiederverwenden, R-26): %d Jobs, einmalig", count)
+
+    await conn.execute(t(new_sql))
+    await conn.execute(t(f"INSERT INTO jobs_new ({columns}) SELECT {columns} FROM jobs"))
+    copied = (await conn.execute(t("SELECT COUNT(*) FROM jobs_new"))).scalar()
+    if copied != count:
+        raise RuntimeError(f"jobs: copied {copied} of {count} rows, AUTOINCREMENT migration aborted")
+    await conn.execute(t("DROP TABLE jobs"))
+    await conn.execute(t("ALTER TABLE jobs_new RENAME TO jobs"))
+    for index_sql in index_sqls:
+        await conn.execute(t(index_sql))
+    await conn.execute(t("DELETE FROM sqlite_sequence WHERE name = 'jobs'"))
+    await conn.execute(t("INSERT INTO sqlite_sequence (name, seq) VALUES ('jobs', :seq)"), {"seq": high})
+    log.warning("Umbau der Tabelle jobs abgeschlossen: %d Jobs, nächste ID über %d", copied, high)
 
 
 async def _rebuild_library_categories(conn):
