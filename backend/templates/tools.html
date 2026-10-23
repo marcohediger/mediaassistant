@@ -3,6 +3,7 @@
 {% block head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/css/pages/history.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
+{% from "_rerun.html" import rerun_dialog, rerun_progress with context %}
 {% macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
@@ -151,7 +152,63 @@
     <div id="merge_result" class="tools-result"></div>
 </section>
 
+{# Run single modules again for a whole set (rerun.js, initToolsCard). The set
+   list in the settings links here with ?rerun_set=<id>#section-rerun. #}
+<section class="ui-card tools-card" id="section-rerun" aria-labelledby="rerun-tools-title">
+    <div class="ui-card-head">
+        <span class="ui-icon-tile is-accent">{{ icon('retry', 18) }}</span>
+        <div class="ui-card-head-text">
+            <h2 class="ui-card-title" id="rerun-tools-title">{{ t.rerun.tools_title }}</h2>
+            <p class="ui-card-desc">{{ t.rerun.tools_desc }}</p>
+        </div>
+    </div>
+    <div class="ui-card-body ui-form">
+        <div class="ui-fields">
+            <div class="ui-field">
+                <label class="ui-label" for="rerun-set">{{ t.rerun.tools_set }}</label>
+                <select class="ui-select" id="rerun-set" disabled><option value="">{{ t.rerun.tools_set_loading }}</option></select>
+            </div>
+            <div class="ui-field">
+                <span class="ui-label" id="rerun-tools-status-label">{{ t.rerun.tools_status }}</span>
+                <div class="ui-segmented is-block" role="radiogroup" aria-labelledby="rerun-tools-status-label">
+                    <label class="ui-seg"><input type="radio" name="rerun-tools-status" value="done"><span>{{ t.rerun.tools_status_done }}</span></label>
+                    <label class="ui-seg"><input type="radio" name="rerun-tools-status" value="done_review" checked><span>{{ t.rerun.tools_status_review }}</span></label>
+                </div>
+            </div>
+        </div>
+        <fieldset class="ui-field rerun-fieldset">
+            <legend class="ui-label">{{ t.rerun.modules_label }}</legend>
+            <div class="rerun-modules" id="rerun-tools-modules"><span class="ui-skeleton rerun-skel"></span><span class="ui-skeleton rerun-skel"></span></div>
+        </fieldset>
+        <div class="ui-option-list">
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.rerun.tools_only_stale }}</span>
+                    <span class="ui-option-desc" id="rerun-only-stale-desc">{{ t.rerun.tools_only_stale_desc }}</span>
+                </span>
+                <span class="ui-switch"><input type="checkbox" role="switch" id="rerun-only-stale" aria-describedby="rerun-only-stale-desc"><span class="ui-switch-track"></span></span>
+            </label>
+        </div>
+        <div class="ui-fields">
+            <div class="ui-field">
+                <label class="ui-label" for="rerun-from">{{ t.rerun.tools_from }} <span class="ui-opt">({{ t.common.optional }})</span></label>
+                <input class="ui-input" type="date" id="rerun-from">
+            </div>
+            <div class="ui-field">
+                <label class="ui-label" for="rerun-to">{{ t.rerun.tools_to }} <span class="ui-opt">({{ t.common.optional }})</span></label>
+                <input class="ui-input" type="date" id="rerun-to">
+            </div>
+        </div>
+        <p class="ui-hint">{{ t.rerun.tools_hint }}</p>
+    </div>
+    <div class="ui-card-foot tools-actions">
+        <button type="button" class="ui-btn ui-btn-primary" id="rerun-tools-preview" disabled>{{ icon('eye') }}{{ t.rerun.tools_preview }}</button>
+    </div>
+    {{ rerun_progress('tools-rerun-progress') }}
+</section>
+
 </div>
+{{ rerun_dialog() }}
 
 <script>
 var L = {{ t.tools | tojson }};

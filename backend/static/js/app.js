@@ -173,13 +173,21 @@
     return s;
   }
 
+  // Same text as block_title() in _modules.html; an outdated block (b.stale:
+  // a predecessor changed since) says so, and its tooltip explains it
   function histBlockTitle(b) {
-    return `${b.module} ${b.label}: ${b.status_label}` + (b.detail ? ` — ${b.detail}` : "");
+    return `${b.module} ${b.label}: ${b.status_label}` + (b.stale ? ` · ${histText("stale")}` : "")
+      + (b.detail ? ` — ${b.detail}` : "");
+  }
+
+  function histBlockTip(b) {
+    return histBlockTitle(b) + (b.stale ? "\n" + histText("stale_hint") : "");
   }
 
   function histStripHTML(blocks, summary) {
     return `<span class="mod-strip" role="img" aria-label="${dashEscAttr(summary)}">`
-      + (blocks || []).map((b) => `<span class="mod-b" data-s="${dashEscAttr(b.status)}" title="${dashEscAttr(histBlockTitle(b))}"></span>`).join("")
+      + (blocks || []).map((b) => `<span class="mod-b" data-s="${dashEscAttr(b.status)}"${b.stale ? " data-stale" : ""}`
+        + ` title="${dashEscAttr(histBlockTip(b))}"></span>`).join("")
       + `</span>`;
   }
 
@@ -235,7 +243,15 @@
       if (b.detail) detail.title = b.detail;
       li.dataset.module = b.module;
       const meta = histEl("span", "hist-mod-meta", b.duration_s != null ? histSeconds(b.duration_s) : "");
-      li.append(st, histEl("span", "hist-mod-code", b.module), histEl("span", "hist-mod-label", b.label), detail, meta);
+      const label = histEl("span", "hist-mod-label", b.label);
+      if (b.stale) {
+        li.dataset.stale = "";
+        const mark = histBadge(histText("stale"));
+        mark.classList.add("hist-badge-dashed", "hist-badge-xs", "hist-mod-stale");
+        mark.title = histText("stale_hint");
+        label.appendChild(mark);
+      }
+      li.append(st, histEl("span", "hist-mod-code", b.module), label, detail, meta);
       // "2×" opens the earlier attempts below the row
       const n = (b.earlier || []).length;
       if (n) {
@@ -803,11 +819,12 @@
       for (const b of blocks) {
         const cell = bar.querySelector(`.mod-cell[data-step="${CSS.escape(b.module)}"]`);
         if (!cell) continue;
-        const title = histBlockTitle(b);
+        const block = cell.querySelector(".mod-b");
         cell.dataset.s = b.status;
-        cell.title = title;
-        cell.querySelector(".mod-b").dataset.s = b.status;
-        cell.querySelector(".ui-sr-only").textContent = title;
+        cell.title = histBlockTip(b);
+        block.dataset.s = b.status;
+        block.toggleAttribute("data-stale", !!b.stale);
+        cell.querySelector(".ui-sr-only").textContent = histBlockTitle(b);
       }
     }
 
@@ -826,7 +843,10 @@
         if (!(b.earlier || []).length) continue;
         const box = histEl("div", "step-attempts");
         box.append(histEl("p", "step-attempts-title", histText("attempts_title")), histAttemptList(b));
-        body.prepend(box);
+        // Below the "Neu ausführen" row (rerun.js), else at the top
+        const rerunRow = body.querySelector(":scope > .step-rerun");
+        if (rerunRow) rerunRow.after(box);
+        else body.prepend(box);
       }
     }
 
@@ -840,6 +860,8 @@
         }
         return;
       }
+      // rerun.js keeps the "Neu ausführen" menu and buttons in step with every poll
+      document.dispatchEvent(new CustomEvent("ma:job-history", {detail: data}));
       const sig = JSON.stringify([data.modules, data.intake, data.ops, data.copies, data.labels]);
       if (sig === last) return;
       last = sig;
@@ -859,6 +881,8 @@
 
     refresh();
     setInterval(refresh, POLL_INTERVAL);
+    // After a start from this page (rerun.js): show the new state right away
+    document.addEventListener("ma:job-refresh", refresh);
   }
 
   function updateJobDetail(job) {

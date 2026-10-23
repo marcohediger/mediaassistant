@@ -29,6 +29,7 @@
     <symbol id="lst-i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
     <symbol id="lst-i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
     <symbol id="lst-i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
+    <symbol id="lst-i-retry" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
     <symbol id="lst-i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.79 0"/></symbol>
 </svg>
 
@@ -133,6 +134,11 @@
                                     title="{{ t.sets.edit }}" aria-label="{{ t.sets.edit }}: {{ s.name }}">
                                 <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-pencil"/></svg>
                             </button>
+                            {# Werkzeuge › "Module neu ausführen" with this set chosen #}
+                            <a class="lst-btn" href="/tools?rerun_set={{ s.id }}#section-rerun"
+                               title="{{ t.rerun.set_menu }}" aria-label="{{ t.rerun.set_menu }}: {{ s.name }}">
+                                <svg class="lst-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#lst-i-retry"/></svg>
+                            </a>
                             {% if only_set %}{% set blocked = t.sets.err_last_set %}
                             {% elif s.queue %}{% set blocked = t.sets.err_set_busy | replace('{n}', s.queue | string) %}
                             {% else %}{% set blocked = '' %}{% endif %}

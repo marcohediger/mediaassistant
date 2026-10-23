@@ -4,15 +4,20 @@
    app.js (histStripHTML, histToggleHTML) renders the same markup on live
    refresh: change both together. #}
 
+{# An outdated block (b.stale: a predecessor changed since) says so; its
+   tooltip explains it. app.js: histBlockTitle / histBlockTip. #}
 {%- macro block_title(b) -%}
-{{ b.module }} {{ b.label }}: {{ b.status_label }}{% if b.detail %} — {{ b.detail }}{% endif %}
+{{ b.module }} {{ b.label }}: {{ b.status_label }}{% if b.stale %} · {{ t.history.stale }}{% endif %}{% if b.detail %} — {{ b.detail }}{% endif %}
+{%- endmacro -%}
+{%- macro block_tip(b) -%}
+{{ block_title(b) }}{% if b.stale %}&#10;{{ t.history.stale_hint }}{% endif %}
 {%- endmacro -%}
 
 {# Eleven small blocks; one tooltip each, one summary for screen readers #}
 {% macro module_strip(job) -%}
 {%- set blocks = module_blocks(job, t) -%}
 <span class="mod-strip" role="img" aria-label="{{ strip_summary(blocks, t) }}">
-{%- for b in blocks %}<span class="mod-b" data-s="{{ b.status }}" title="{{ block_title(b) }}"></span>{% endfor -%}
+{%- for b in blocks %}<span class="mod-b" data-s="{{ b.status }}"{% if b.stale %} data-stale{% endif %} title="{{ block_tip(b) }}"></span>{% endfor -%}
 </span>
 {%- endmacro %}
 
@@ -27,8 +32,8 @@
 {%- set blocks = module_blocks(job, t) -%}
 <div class="mod-bar" id="job-module-bar" role="group" aria-label="{{ strip_summary(blocks, t) }}">
 {%- for b in blocks %}
-<button type="button" class="mod-cell" data-s="{{ b.status }}" data-step="{{ b.module }}" title="{{ block_title(b) }}">
-<span class="mod-b" data-s="{{ b.status }}"></span><span class="mod-cell-code"><span class="mod-cell-pre">IA-</span>{{ b.module[3:] }}</span><span class="ui-sr-only">{{ block_title(b) }}</span></button>
+<button type="button" class="mod-cell" data-s="{{ b.status }}" data-step="{{ b.module }}" title="{{ block_tip(b) }}">
+<span class="mod-b" data-s="{{ b.status }}"{% if b.stale %} data-stale{% endif %}></span><span class="mod-cell-code"><span class="mod-cell-pre">IA-</span>{{ b.module[3:] }}</span><span class="ui-sr-only">{{ block_title(b) }}</span></button>
 {%- endfor %}
 </div>
 {%- endmacro %}

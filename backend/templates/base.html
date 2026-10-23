@@ -122,5 +122,6 @@
     <template id="status-badges">{% for s in STATUSES %}{{ status_badge(s) }}{{ status_badge(s, icon_only=True) }}{% endfor %}</template>
     <script type="application/json" id="ui-strings">{{ {"cancel": t.common.cancel, "close": t.common.close, "ok": t.common.ok} | tojson }}</script>
     <script src="/static/js/app.js?v={{ asset_v }}"></script>
+    <script src="/static/js/rerun.js?v={{ asset_v }}"></script>
 </body>
 </html>

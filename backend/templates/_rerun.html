@@ -1,0 +1,101 @@
+{# "Neu ausführen" (run single modules again, docs/UMBAU_MODULE_AUSFUEHRUNG.md
+   section 5). Import with context:
+       {% from "_rerun.html" import rerun_dialog, rerun_progress with context %}
+   rerun_dialog() once per page that opens MA.rerun.open(); rerun_progress()
+   where a running bulk run should show. static/js/rerun.js fills both;
+   user data goes in with textContent only. #}
+
+{%- macro icon(name, size=16, cls='') -%}
+<svg class="ui-i{{ ' ' ~ cls if cls else '' }}" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro -%}
+
+{% macro rerun_dialog() -%}
+<script type="application/json" id="rerun-strings">{{ {"rerun": t.rerun, "steps": t.steps, "lang": lang | default('de')} | tojson }}</script>
+<div class="ui-toast-region" id="rerun-toasts" aria-live="polite"></div>
+<dialog class="ui-dialog is-wide rerun-dialog" id="rerun-dialog" aria-labelledby="rerun-title" aria-describedby="rerun-sub">
+    <div class="ui-dialog-shell">
+        <div class="ui-dialog-head">
+            <div class="ui-dialog-head-text">
+                <h2 class="ui-dialog-title" id="rerun-title">{{ t.rerun.dialog_title_one }}</h2>
+                <p class="ui-dialog-sub" id="rerun-sub"></p>
+            </div>
+            <button type="button" class="ui-icon-btn" data-close aria-label="{{ t.common.close }}" title="{{ t.common.close }}">{{ icon('x', 18) }}</button>
+        </div>
+        <div class="ui-dialog-body">
+            <fieldset class="ui-field rerun-fieldset">
+                <legend class="ui-label">{{ t.rerun.modules_label }}</legend>
+                <div class="rerun-modules" id="rerun-modules"><span class="ui-skeleton rerun-skel"></span><span class="ui-skeleton rerun-skel"></span></div>
+                <p class="ui-hint">{{ t.rerun.modules_hint }}</p>
+            </fieldset>
+
+            <div class="ui-field">
+                <span class="ui-label" id="rerun-cascade-label">{{ t.rerun.cascade_label }}</span>
+                <div class="ui-segmented is-block" role="radiogroup" aria-labelledby="rerun-cascade-label" aria-describedby="rerun-cascade-desc">
+                    {% for value in ('auto', 'all', 'off') %}
+                    <label class="ui-seg"><input type="radio" name="rerun-cascade" value="{{ value }}"{{ ' checked' if value == 'auto' else '' }}><span>{{ t.rerun['cascade_' ~ value] }}</span></label>
+                    {% endfor %}
+                </div>
+                <p class="ui-hint" id="rerun-cascade-desc">{{ t.rerun.cascade_auto_desc }}</p>
+            </div>
+
+            <div class="ui-option-list" id="rerun-hints-row" hidden>
+                <label class="ui-option">
+                    <span class="ui-option-text">
+                        <span class="ui-option-title">{{ t.rerun.hints_label }}</span>
+                        <span class="ui-option-desc" id="rerun-hints-desc">{{ t.rerun.hints_desc }}</span>
+                    </span>
+                    <span class="ui-switch"><input type="checkbox" role="switch" id="rerun-hints" aria-describedby="rerun-hints-desc"><span class="ui-switch-track"></span></span>
+                </label>
+            </div>
+
+            <div class="ui-field" id="rerun-immich-row" hidden>
+                <span class="ui-label" id="rerun-immich-label">{{ icon('cloud') }}{{ t.rerun.immich_label }}</span>
+                <div class="ui-segmented is-block" role="radiogroup" aria-labelledby="rerun-immich-label" aria-describedby="rerun-immich-desc">
+                    {% for value in ('api', 'replace') %}
+                    <label class="ui-seg"><input type="radio" name="rerun-immich" value="{{ value }}"{{ ' checked' if value == 'api' else '' }}><span>{{ t.rerun['immich_' ~ value] }}</span></label>
+                    {% endfor %}
+                </div>
+                <p class="ui-hint" id="rerun-immich-desc">{{ t.rerun.immich_api_desc }}</p>
+            </div>
+
+            <section class="rerun-preview" aria-labelledby="rerun-preview-title">
+                <div class="rerun-preview-head">
+                    <h3 class="rerun-preview-title" id="rerun-preview-title">{{ t.rerun.preview_title }}</h3>
+                    <span class="rerun-preview-summary" id="rerun-summary" role="status" aria-live="polite"></span>
+                </div>
+                <div class="rerun-preview-body" id="rerun-preview" aria-busy="true"></div>
+            </section>
+            <div id="rerun-error"></div>
+        </div>
+        <div class="ui-dialog-foot">
+            <button type="button" class="ui-btn ui-btn-secondary" data-close>{{ t.common.cancel }}</button>
+            <button type="button" class="ui-btn ui-btn-primary" id="rerun-run" disabled>{{ icon('retry') }}<span id="rerun-run-text">{{ t.rerun.confirm_ok }}</span></button>
+        </div>
+    </div>
+</dialog>
+{%- endmacro %}
+
+{# Progress of a run started here or still running (GET /api/reruns/active).
+   Same look as the maintenance progress on the logs page; its own slot, so
+   the two never push each other out. #}
+{% macro rerun_progress(extra='') -%}
+<div id="rerun-progress" class="ui-card rerun-progress{{ ' ' ~ extra if extra else '' }}" role="region" aria-labelledby="rerun-progress-title" hidden>
+    <div class="ui-progress-meta">
+        <strong class="rerun-progress-head">
+            <span class="rerun-progress-icon" data-f="icon">{{ icon('loader', 16, 'ui-spin') }}</span>
+            <span id="rerun-progress-title" data-f="title"></span>
+        </strong>
+        <span class="ui-tabular" data-f="counter"></span>
+    </div>
+    <div class="ui-progress" data-f="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="rerun-progress-title">
+        <div class="ui-progress-bar" data-f="bar"></div>
+    </div>
+    <div class="rerun-progress-foot">
+        <p class="rerun-progress-phase" data-f="phase"></p>
+        <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" data-f="cancel">{{ icon('x', 14) }}{{ t.rerun.cancel }}</button>
+        <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" data-f="close" hidden>{{ t.rerun.progress_close }}</button>
+    </div>
+    <div class="rerun-progress-result" data-f="result" hidden></div>
+    <span class="ui-sr-only" role="status" aria-live="polite" data-f="live"></span>
+</div>
+{%- endmacro %}
