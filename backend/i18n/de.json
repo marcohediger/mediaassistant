@@ -141,7 +141,9 @@
     "stuck_requeued": "{n} neu eingereiht (Datei vorhanden).",
     "stuck_marked": "{n} als \"done\" markiert (Datei verifiziert).",
     "stuck_skipped": "⚠️ {n} übersprungen — kein \"done\"-Gegenstück.",
-    "stuck_raced": "ℹ️ {n} inzwischen von Pipeline aufgegriffen."
+    "stuck_raced": "ℹ️ {n} inzwischen von Pipeline aufgegriffen.",
+    "task_sidecar_tags": "Tag-Aufräumen",
+    "task_tag_merge": "Schreibweisen zusammenführen"
   },
   "job_detail": {
     "back": "Zurück",
@@ -287,8 +289,6 @@
     "prev": "Vorherige Seite",
     "next": "Nächste Seite",
     "page_select": "Seite wählen",
-    "cancel": "Abbrechen",
-    "close": "Schliessen",
     "fact_exposure": "Belichtung"
   },
   "settings": {
@@ -612,8 +612,6 @@
     "preview": "Vorschau vergrössern: {name}",
     "job_details": "Job-Details",
     "empty_title": "Nichts zu prüfen",
-    "cancel": "Abbrechen",
-    "close": "Schliessen",
     "no_preview": "Keine Vorschau"
   },
   "dryrun": {
@@ -632,7 +630,10 @@
   },
   "common": {
     "yes": "Ja",
-    "no": "Nein"
+    "no": "Nein",
+    "cancel": "Abbrechen",
+    "close": "Schliessen",
+    "ok": "OK"
   },
   "tools": {
     "title": "Werkzeuge",

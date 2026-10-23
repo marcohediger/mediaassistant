@@ -217,7 +217,6 @@ dialog.modal .field-note.warn { color: var(--warning); }
 dialog.modal .field-grid {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem;
 }
-dialog.modal .field-grid .span-2 { grid-column: 1 / -1; }
 dialog.modal .field-grid-name { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); }
 dialog.modal .field-grid-compact { grid-template-columns: repeat(auto-fill, minmax(10rem, 12.5rem)); }
 
@@ -271,11 +270,10 @@ dialog.modal .option-list > :first-child { border-radius: 11px 11px 0 0; }
 dialog.modal .option-list > :last-child { border-radius: 0 0 11px 11px; }
 dialog.modal .option-list > :only-child { border-radius: 11px; }
 dialog.modal .option-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
-dialog.modal .option-row > .sw, dialog.modal .option-row > .option-control { flex: none; }
+dialog.modal .option-row > .sw { flex: none; }
 dialog.modal .option-title { font-size: 0.875rem; font-weight: 500; color: var(--text); margin: 0; cursor: inherit; }
 dialog.modal .option-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.55; max-width: 60ch; }
 dialog.modal .option-desc:empty { display: none; }
-dialog.modal .option-control { flex: none; width: 16rem; }
 
 /* ── Choice cards (radio groups) ────────────────────────────────────── */
 dialog.modal .choice-cards { display: grid; gap: 0.75rem; }
@@ -668,7 +666,6 @@ dialog.modal :is(.editor-scroll, .modal-body) { scrollbar-width: thin; scrollbar
     dialog.modal .choice-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     dialog.modal .option-row { gap: 1.5rem; padding: 0.85rem 1rem 0.85rem 0.9rem; }
     dialog.modal div.option-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }
-    dialog.modal .option-control { width: auto; }
     dialog.modal .seg-4 { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
     /* Lists become one card per entry with captions above each value. */

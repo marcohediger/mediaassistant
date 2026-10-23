@@ -28,16 +28,11 @@ router = APIRouter(prefix="/setup", dependencies=[Depends(_only_before_setup_com
 
 @router.get("")
 async def setup_index(request: Request):
-    if await config_manager.is_setup_complete():
-        return RedirectResponse(url="/", status_code=302)
     return RedirectResponse(url="/setup/step/1", status_code=302)
 
 
 @router.get("/step/{step}")
 async def setup_step(request: Request, step: int):
-    if await config_manager.is_setup_complete():
-        return RedirectResponse(url="/", status_code=302)
-
     context = {"step": step, "error": None, "success": None}
 
     if step == 1:
@@ -82,8 +77,6 @@ async def setup_step1_save(
     ai2_api_key: str = Form(""),
     ai2_model: str = Form(""),
 ):
-    if await config_manager.is_setup_complete():
-        return RedirectResponse(url="/", status_code=302)
     await config_manager.set("ai.backend_url", ai_url)
     if ai_api_key:
         await config_manager.set("ai.api_key", ai_api_key, encrypted=True)
@@ -106,8 +99,6 @@ async def setup_step1_test(
     ai2_api_key: str = Form(""),
     ai2_model: str = Form(""),
 ):
-    if await config_manager.is_setup_complete():
-        return RedirectResponse(url="/", status_code=302)
     context = {
         "step": 1,
         "ai_url": ai_url,
@@ -162,8 +153,6 @@ async def setup_step2_save(
     smtp_password: str = Form(""),
     smtp_recipient: str = Form(""),
 ):
-    if await config_manager.is_setup_complete():
-        return RedirectResponse(url="/", status_code=302)
     await config_manager.set("smtp.server", smtp_server)
     await config_manager.set("smtp.port", smtp_port)
     await config_manager.set("smtp.ssl", smtp_ssl)
@@ -180,8 +169,6 @@ async def setup_step3_save(
     library_path: str = Form(...),
     inbox_path: str = Form(...),
 ):
-    if await config_manager.is_setup_complete():
-        return RedirectResponse(url="/", status_code=302)
     # Still the default base path for sets created later.
     await config_manager.set("library.base_path", library_path)
 
