@@ -2639,3 +2639,151 @@ async def reconcile_open_intents(*, older_than_s: float = 0.0,
         await log(LOG_SOURCE, f"{key} Offene Operation abgeglichen: {entry.op} #{entry.id} → {state}", note)
         results.append({"op_id": entry.id, "op": entry.op, "state": state, "note": note})
     return results
+
+
+# ---------------------------------------------------------------------------
+# Duplicate resolution: look an asset up, hand a copy over
+# ---------------------------------------------------------------------------
+
+async def immich_copy(job, asset_id: str, *, check: bool = True) -> FileCopy:
+    """The register row of an Immich asset `job` points at.
+
+    An asset the register does not know yet is registered from the job
+    fields exactly as trash_asset() and replace() would do it (the calling
+    job owns it if its own fields name it, otherwise the first job that
+    does; the others get references). With ``check`` the row is checked
+    against Immich now (verify()); FileOpFailed when Immich cannot tell.
+    """
+    jref = await _job_ref(job)
+    row = await _resolve_asset(jref, asset_id)
+    if check:
+        row = await verify(row)
+    return row
+
+
+async def transfer(target, to_job, *, actor: str, reason: str) -> FileCopy:
+    """Make `to_job` the owner of a copy (a FileCopy, its id, or an asset id).
+
+    For the duplicate resolution: the kept job takes over the asset of a
+    donor that is resolved, so the later replace() may move it to Immich's
+    trash, and a shared asset does not stay owned by a job that no longer
+    exists. A reference of `to_job` to the copy becomes redundant and is
+    dropped; the old owner keeps none. Nothing on disk or in Immich changes:
+    one ledger row (op 'transfer'), written in the transaction of the change.
+    """
+    jref = await _job_ref(to_job)
+    if _is_asset_id(target):
+        row = await _resolve_asset(jref, target)
+    else:
+        copy_id = target.id if isinstance(target, FileCopy) else int(target)
+        async with async_session() as session:
+            row = await session.get(FileCopy, copy_id)
+        if row is None:
+            raise FileOpRefused(f"Exemplar #{copy_id} nicht gefunden")
+    async with async_session() as session:
+        cur = await session.get(FileCopy, row.id)
+        before = cur.job_id
+        if before == jref.id:
+            return cur
+        cur.job_id = jref.id
+        for ref in (await session.execute(select(AssetRef).where(
+                AssetRef.location == cur.location, AssetRef.job_id.in_([jref.id, before])
+        ))).scalars().all():
+            await session.delete(ref)
+        old_owner = await _owner_label(session, before)
+        session.add(FileOp(job_id=jref.id, op="transfer", src_kind=cur.kind, src=cur.location,
+                           dst_kind=cur.kind, dst=cur.location, copy_id=cur.id, dst_copy_id=cur.id,
+                           actor=actor, reason=reason, state="done", finished_at=datetime.now(),
+                           detail={"from_job": before}))
+        await session.commit()
+    await log_info(LOG_SOURCE, f"{jref.debug_key} Exemplar übernommen: {os.path.basename(cur.location)}",
+                   f"Exemplar #{cur.id} ({cur.kind}) von {old_owner} — {reason}")
+    return cur
+
+
+# ---------------------------------------------------------------------------
+# Helpers for IA-08 (appended): resume after a crash, empty inbox folders
+# ---------------------------------------------------------------------------
+
+async def last_result(job, ops, *, src: str | None = None, since: datetime | None = None) -> str | None:
+    """Where the newest finished operation of `job` among `ops` left its
+    content — a path or an asset id — if that copy is still present (or
+    locked); None otherwise.
+
+    For a step that runs again after a crash (R-10c): fileops commits the
+    ledger and the register itself, the step's job fields are committed
+    only after the step returned. ``src`` limits the search to operations
+    from that path, ``since`` to operations started after that time (e.g.
+    the job's last completed run, so an earlier attempt's result is not
+    taken for this one's).
+    """
+    jref = await _job_ref(job)
+    query = select(FileOp.dst_copy_id).where(
+        FileOp.job_id == jref.id, FileOp.op.in_(tuple(ops)),
+        FileOp.state.in_(("done", "reconciled")), FileOp.dst_copy_id.isnot(None))
+    if src is not None:
+        query = query.where(FileOp.src == _norm(src))
+    if since is not None:
+        query = query.where(FileOp.created_at > since)
+    async with async_session() as session:
+        copy_id = (await session.execute(query.order_by(FileOp.id.desc()).limit(1))).scalar()
+        row = await session.get(FileCopy, copy_id) if copy_id else None
+    if row is None or row.state not in ("present", "locked"):
+        return None
+    return row.location
+
+
+# System files that do not make a folder "non-empty" (Synology, macOS, Windows)
+_JUNK_FILES = frozenset({".ds_store", "thumbs.db", ".thumbs", "desktop.ini"})
+_JUNK_DIRS = frozenset({"@eadir", ".synology"})
+
+
+def _junk_entries(path: str) -> list | None:
+    """The entries of a folder if all of them are system junk, else None."""
+    entries = list(os.scandir(path))
+    for entry in entries:
+        name = entry.name.lower()
+        if entry.is_dir(follow_symlinks=False):
+            if name not in _JUNK_DIRS:
+                return None
+        elif name not in _JUNK_FILES:
+            return None
+    return entries
+
+
+def prune_empty_dirs_blocking(start_dir: str, stop_at: str) -> list[str]:
+    """Remove folders from start_dir upwards that hold nothing but system
+    junk, up to (not including) stop_at. Blocking: run it in a thread.
+
+    Only folders inside stop_at are touched, decided by path containment,
+    not by string length (R-23): a start_dir outside stop_at (e.g. a work
+    copy in reprocess/ below an /inbox) removes nothing. Only junk names
+    are deleted; a folder that is gone or holds anything else stops the
+    climb, so parallel jobs and files arriving meanwhile are safe. The
+    junk carries no content, so there is no ledger row; the caller logs
+    the returned folders.
+    """
+    if not start_dir or not stop_at:
+        return []
+    stop = os.path.realpath(stop_at)
+    current = os.path.realpath(start_dir)
+    removed: list[str] = []
+    while current != stop and os.path.commonpath([current, stop]) == stop:
+        try:
+            if not os.path.isdir(current):
+                break
+            entries = _junk_entries(current)
+            if entries is None:
+                break
+            for entry in entries:
+                name = entry.name.lower()
+                if entry.is_dir(follow_symlinks=False) and name in _JUNK_DIRS:
+                    shutil.rmtree(entry.path, ignore_errors=True)
+                elif not entry.is_dir(follow_symlinks=False) and name in _JUNK_FILES:
+                    os.remove(entry.path)
+            os.rmdir(current)  # fails if anything arrived meanwhile
+        except OSError:
+            break
+        removed.append(current)
+        current = os.path.dirname(current)
+    return removed
