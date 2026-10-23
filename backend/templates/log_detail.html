@@ -5,6 +5,7 @@
 {% block content %}
 {% from "_status.html" import status_badge with context %}
 {% from "_modules.html" import module_bar, history_strings with context %}
+{% from "_rerun.html" import rerun_dialog with context %}
 {% macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
@@ -49,17 +50,27 @@
     </div>
 </div>
 
-{# One block per module (job_view.module_blocks); app.js (initJobHistory) keeps it current #}
+{# One block per module (job_view.module_blocks); app.js (initJobHistory) keeps it current.
+   "Neu ausführen": rerun.js fills the menu from /api/reruns/modules and shows it while
+   /api/history/job says the job may run again (rerun.eligible); a pending run shows the badge. #}
+{% set filepath = job.target_path or job.original_path %}
+{% set is_immich = filepath and filepath.startswith('immich:') %}
 <section class="ui-card job-modules" aria-labelledby="job-modules-title">
     <div class="job-modules-head">
         <h2 class="job-modules-title" id="job-modules-title">{{ t.history.modules }}</h2>
         <span class="job-modules-desc">{{ t.history.modules_desc }}</span>
+        <div class="job-rerun" id="job-rerun" data-immich="{{ '1' if is_immich else '0' }}" data-filename="{{ job.filename }}" hidden>
+            <span class="ui-badge is-info" id="job-rerun-pending" hidden>{{ icon('clock', 12) }}<span data-f="text">{{ t.rerun.badge_waiting }}</span></span>
+            <div class="ui-menu-wrap" id="job-rerun-menu" hidden>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" aria-haspopup="menu" aria-expanded="false"
+                        aria-controls="job-rerun-items">{{ icon('retry', 14) }}{{ t.rerun.menu }}</button>
+                <div class="ui-menu rerun-menu" id="job-rerun-items" role="menu" aria-label="{{ t.rerun.menu_label }}" hidden></div>
+            </div>
+        </div>
     </div>
     {{ module_bar(job) }}
 </section>
 
-{% set filepath = job.target_path or job.original_path %}
-{% set is_immich = filepath and filepath.startswith('immich:') %}
 {% set immich_asset_id = filepath[7:] if is_immich else '' %}
 {% set ext = filepath.rsplit('.', 1)[-1].lower() if filepath and '.' in filepath and not is_immich else '' %}
 {% set has_preview = is_immich or ext in ('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'mts') %}
@@ -232,4 +243,5 @@
     </aside>
 </div>
 {{ history_strings() }}
+{{ rerun_dialog() }}
 {% endblock %}

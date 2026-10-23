@@ -5,6 +5,7 @@
 {% block content %}
 {% from "_status.html" import status_badge with context %}
 {% from "_modules.html" import module_strip, history_toggle, history_strings with context %}
+{% from "_rerun.html" import rerun_dialog, rerun_progress with context %}
 {% macro icon(name, size=16, cls='') -%}
 <svg class="ui-i{{ ' ' ~ cls if cls else '' }}" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
@@ -79,6 +80,8 @@
     </div>
     <p id="cleanup-progress-phase" class="logs-progress-phase"></p>
 </div>
+{# "Neu ausführen" has its own progress card (rerun.js), next to the maintenance one #}
+{{ rerun_progress() }}
 
 <script>
 const LOGS_L = {{ t.logs | tojson }};
@@ -419,6 +422,9 @@ async function cleanupOrphans(ev) {
     <table class="ui-table ui-table-compact logs-table logs-table-jobs" aria-label="{{ t.logs.job_log }}">
         <thead>
             <tr>
+                <th scope="col" class="ui-col-check lc-check">
+                    <label class="ui-check rerun-check"><input type="checkbox" id="rerun-check-page"><span class="ui-sr-only">{{ t.rerun.select_page }}</span></label>
+                </th>
                 <th scope="col" class="ui-col-icon">{{ t.logs.status }}</th>
                 <th scope="col">{{ t.logs.file }}</th>
                 <th scope="col">{{ t.logs.time }}</th>
@@ -433,6 +439,7 @@ async function cleanupOrphans(ev) {
         <tbody data-history-rows>
             {% for job in jobs %}
             <tr class="log-row log-{{ job.status }} hist-row" data-key="{{ job.debug_key }}" data-sig="{{ job_signature(job) }}">
+                <td class="ui-col-check lc-check"><label class="ui-check rerun-check"><input type="checkbox" class="rerun-row-check" value="{{ job.debug_key }}" data-name="{{ job.filename or job.debug_key }}"><span class="ui-sr-only">{{ t.rerun.select_row | replace('{name}', job.filename or job.debug_key) }}</span></label></td>
                 <td class="cell-status lc-status">{{ status_badge(job.status, icon_only=True) }}{% if job.dry_run %}{{ dry_mark() }}{% endif %}</td>
                 <th scope="row" class="lc-file">
                     <div class="ui-cell-stack">
@@ -464,6 +471,18 @@ async function cleanupOrphans(ev) {
         </tbody>
     </table>
 </div>
+{# Selection bar: sticks to the bottom while rows are selected (rerun.js).
+   "Alle … Treffer" switches to the filter as target (kind "query"). #}
+<div class="ui-card rerun-bar" id="rerun-bar" role="region" aria-label="{{ t.rerun.selection_label }}"
+     data-total="{{ total }}" data-status="{{ status_filter }}" data-q="{{ search }}" hidden>
+    <div class="ui-toolbar">
+        <span class="ui-toolbar-meta rerun-bar-count" data-f="count" aria-live="polite" tabindex="-1"></span>
+        <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" data-f="page">{{ t.rerun.select_page }}</button>
+        <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" data-f="matching" hidden></button>
+        <button type="button" class="ui-btn ui-btn-primary ui-btn-sm" data-f="run">{{ icon('retry', 14) }}{{ t.rerun.select_run }}</button>
+        <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" data-f="clear">{{ t.rerun.clear_selection }}</button>
+    </div>
+</div>
 {{ history_strings() }}
 {% else %}
 <div class="ui-card">
@@ -486,4 +505,5 @@ async function cleanupOrphans(ev) {
     {% endif %}
 </nav>
 {% endif %}
+{{ rerun_dialog() }}
 {% endblock %}

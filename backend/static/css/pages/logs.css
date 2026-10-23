@@ -84,6 +84,23 @@
     font-size: var(--ui-fs-sm);
 }
 
+/* Selection for "Neu ausführen" (rerun.js): the label fills the cell, so a
+   click next to the box does not open the row */
+.logs-table-jobs .lc-check { width: 1%; padding-right: 0; }
+.ui-table td.lc-check, .ui-table th.lc-check { padding-top: 0; padding-bottom: 0; }
+.rerun-check { display: flex; align-items: center; justify-content: center; min-width: 1.75rem; min-height: 2.25rem; margin: 0 -0.25rem; }
+.rerun-check input { margin: 0; }
+
+/* Selection bar: under the table, sticks to the bottom of the window */
+.rerun-bar {
+    position: sticky; bottom: 1rem; z-index: 30; margin: 1rem 0 0; padding: 0.55rem 0.75rem 0.55rem 1.1rem;
+    border-color: color-mix(in srgb, var(--primary) 45%, var(--ui-card-border)); box-shadow: var(--ui-shadow);
+}
+.rerun-bar .ui-toolbar { margin: 0; }
+.rerun-bar .rerun-bar-count { order: -1; margin: 0 auto 0 0; font-weight: 600; color: var(--text); }
+.rerun-bar .rerun-bar-count:focus { outline: none; }
+.rerun-bar .ui-btn[hidden] { display: none; }
+
 /* System log level: round icon like the job status icons. Only ERROR is red. */
 .log-level {
     --tone: var(--text-muted); --tone-text: var(--text-muted);
@@ -139,6 +156,14 @@
         white-space: normal; overflow-wrap: anywhere;
     }
     .logs-table .lc-msg:empty, .logs-table .lc-detail:empty { display: none; }
+    /* Checkbox and chevron keep their size; the name gives way */
+    .logs-table-jobs :is(td.lc-check, td.lc-toggle) { flex: none; width: auto; }
+    .logs-table-jobs td.lc-check { margin: -0.25rem -0.2rem -0.25rem -0.35rem; }
+    .logs-table-jobs tr.is-selected { background: var(--ui-accent-soft); }
+    .logs-table-jobs tr.is-selected > * { background: none; }
+    .rerun-bar { bottom: 0.5rem; padding: 0.6rem 0.75rem; }
+    .rerun-bar .rerun-bar-count { flex: 1 1 100%; }
+    .rerun-bar .ui-btn { flex: 1 1 auto; }
 
     /* System log: level, time, source right / message / detail */
     .logs-table-system .lc-level { order: 1; }

@@ -28,6 +28,12 @@
 }
 .mod-b[data-s="dry_run"] { --mod-tone: var(--info); box-shadow: none; border: 1.5px dashed var(--mod-tone); }
 .mod-b[data-s="superseded"] { box-shadow: none; border: 1.5px dashed color-mix(in srgb, var(--text-muted) 70%, transparent); }
+/* Outdated result (a predecessor changed since, job_view "stale"): dashed in
+   its own tone, so "OK but outdated" still reads as OK */
+.mod-b[data-stale] {
+    background: color-mix(in srgb, var(--mod-tone) 22%, transparent);
+    box-shadow: none; border: 1.5px dashed var(--mod-tone);
+}
 
 /* ═══ Expandable rows (dashboard, job log) ═══════════════════════════ */
 .hist-col-mods { width: 1%; white-space: nowrap; }
@@ -83,6 +89,7 @@ tr.hist-row.is-open > * { background: var(--ui-row-hover); border-bottom-color: 
 .hist-mod-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .hist-mod-meta { font-size: var(--ui-fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hist-mod[data-s="not_run"] :is(.hist-mod-label, .hist-mod-code) { color: var(--text-muted); }
+.hist-mod-stale { margin-left: 0.4rem; vertical-align: 1px; }
 
 /* Earlier attempts of a module (module_runs): "2×" opens them below the row,
    and the job page shows them at the top of the step result */
@@ -205,9 +212,28 @@ tr.hist-row.is-open > * { background: var(--ui-row-hover); border-bottom-color: 
 
 /* ═══ Job detail: module bar, history, copies card ═══════════════════ */
 .job-modules { margin: 0 0 1.25rem; padding: 0.75rem 0.9rem 0.7rem; }
-.job-modules-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.55rem; }
+.job-modules-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem 0.75rem; min-height: 2rem; margin: 0 0 0.55rem; }
 .job-modules-title { margin: 0; font-size: var(--ui-fs-sm); font-weight: 600; color: var(--text); }
-.job-modules-desc { font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.job-modules-desc { margin-left: auto; font-size: var(--ui-fs-xs); color: var(--text-muted); }
+
+/* "Neu ausführen" on the module card: badge while a run is pending, menu */
+.job-rerun { flex: none; display: flex; align-items: center; gap: 0.5rem; }
+.job-rerun[hidden], .job-rerun > [hidden] { display: none; }
+.rerun-menu { min-width: 17rem; }
+.rerun-menu-item { align-items: baseline; }
+.rerun-menu-code {
+    flex: none; min-width: 2.9rem;
+    font-family: var(--ui-mono); font-size: var(--ui-fs-xs); font-weight: 600; color: var(--primary);
+}
+.rerun-menu-name { flex: 1 1 auto; min-width: 0; }
+.rerun-menu-reason { flex: none; max-width: 9rem; font-size: var(--ui-fs-xs); color: var(--text-muted); white-space: normal; text-align: right; }
+.rerun-menu-reason:empty { display: none; }
+.rerun-menu-item:disabled .rerun-menu-code { color: var(--text-muted); }
+
+/* Top of a step result: "Veraltet" left, "Neu ausführen" right */
+.step-rerun { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 0.5rem; margin-top: -0.25rem; }
+.step-rerun > .step-rerun-stale { margin-right: auto; }
+.step-rerun > [hidden] { display: none; }
 .mod-bar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.35rem; }
 .mod-cell {
     display: flex; flex-direction: column; align-items: stretch; gap: 0.3rem; min-width: 0;
@@ -232,6 +258,103 @@ tr.hist-row.is-open > * { background: var(--ui-row-hover); border-bottom-color: 
 .job-copies-body > :empty { display: none; }
 .hist-skel { height: 0.9rem; margin: 0.35rem 0; }
 .hist-skel + .hist-skel { width: 70%; }
+
+/* ═══ "Neu ausführen" dialog (templates/_rerun.html, rerun.js) ══════════ */
+.rerun-fieldset { min-inline-size: 0; }
+.rerun-fieldset > legend { margin-bottom: 0.5rem; }
+.rerun-modules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+.rerun-mod {
+    display: flex; width: 100%; min-width: 0; padding: 0.6rem 0.75rem;
+    background: var(--bg-item); border: 1px solid var(--ui-line); border-radius: var(--ui-radius);
+    transition: border-color 0.15s, background 0.15s;
+}
+.rerun-mod:hover { border-color: var(--ui-border-strong); }
+.rerun-mod:has(input:checked) { border-color: color-mix(in srgb, var(--primary) 55%, transparent); background: var(--ui-accent-soft); }
+.rerun-mod:has(input:disabled) { cursor: not-allowed; opacity: 0.6; }
+.rerun-mod:has(input:disabled):hover { border-color: var(--ui-line); }
+.rerun-mod-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.rerun-mod-name { font-weight: 500; color: var(--text); }
+.rerun-mod-code { margin-right: 0.4rem; font-family: var(--ui-mono); font-size: var(--ui-fs-xs); font-weight: 600; color: var(--primary); }
+.rerun-mod-desc { font-size: var(--ui-fs-xs); line-height: 1.45; color: var(--text-muted); }
+.rerun-mod-desc.is-reason { color: var(--ui-warn-text); }
+.rerun-skel { height: 3.6rem; }
+.rerun-skel-line { width: 60%; height: 0.85rem; }
+.ui-steps .ui-step:nth-child(2n) .rerun-skel-line { width: 42%; }
+
+.rerun-preview { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.rerun-preview-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.25rem 1rem; }
+.rerun-preview-title { margin: 0; font-size: var(--ui-fs-sm); font-weight: 600; color: var(--text); }
+.rerun-preview-summary { font-size: var(--ui-fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.rerun-preview-body { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; transition: opacity 0.15s; }
+.rerun-preview-body.is-loading { opacity: 0.5; }
+.rerun-pick { padding: 0.85rem 1rem; font-size: var(--ui-fs-sm); }
+.rerun-steps .ui-step-head { flex-wrap: wrap; gap: 0.15rem 0.75rem; min-height: 2.4rem; padding: 0.35rem 0.85rem 0.35rem 0.9rem; }
+.rerun-steps .ui-step-label { flex: 1 1 8rem; }
+.rerun-steps .ui-status { gap: 0; }
+.rerun-step-meta {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 0.05rem;
+    margin-left: auto; min-width: 0; text-align: right; line-height: 1.4;
+}
+.rerun-step-skip { color: var(--ui-warn-text); }
+.rerun-act { font-weight: 600; }
+.rerun-act.is-run { color: var(--ui-info-text); }
+.rerun-act.is-skip { color: var(--ui-warn-text); }
+.rerun-act.is-keep { color: var(--ui-ok-text); }
+.rerun-step.is-untouched :is(.ui-step-label, .ui-step-code, .rerun-act) { color: var(--text-muted); font-weight: 500; }
+.rerun-step.is-untouched .ui-status { opacity: 0.6; }
+.rerun-effects { margin: 0.2rem 0 0; padding-left: 1.1rem; color: color-mix(in srgb, var(--text) 86%, var(--text-muted)); }
+.rerun-effects li + li { margin-top: 0.15rem; }
+.rerun-facts { display: flex; align-items: flex-start; gap: 0.45rem; margin: 0; font-size: var(--ui-fs-xs); color: var(--text-muted); }
+.rerun-facts > .ui-i { margin-top: 0.1rem; }
+.rerun-refused > summary {
+    display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; list-style: none;
+    font-weight: 600; color: var(--ui-tone-text); border-radius: var(--ui-radius-xs);
+}
+.rerun-refused > summary::-webkit-details-marker { display: none; }
+.rerun-refused > summary::after { content: "▸"; font-size: 0.7rem; transition: transform 0.15s; }
+.rerun-refused[open] > summary::after { transform: rotate(90deg); }
+.rerun-refused > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.rerun-refused-list { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.45rem 0 0; padding: 0; list-style: none; }
+.rerun-refused-list strong { color: var(--text); }
+.rerun-refused-sample { display: flex; flex-wrap: wrap; gap: 0.1rem 0.6rem; margin-top: 0.1rem; font-size: var(--ui-fs-xs); }
+.rerun-refused-sample .ui-link { overflow-wrap: anywhere; }
+#rerun-error:empty { display: none; }
+@media (max-width: 600px) {
+    .rerun-modules { grid-template-columns: minmax(0, 1fr); }
+    /* Long options wrap instead of scrolling the segmented control */
+    .rerun-dialog .ui-seg { height: auto; min-height: 1.75rem; padding: 0.35rem 0.5rem; white-space: normal; text-align: center; line-height: 1.25; }
+    .rerun-steps .ui-step-label { flex-basis: 6rem; }
+    .rerun-step-meta { flex-basis: 100%; align-items: flex-start; text-align: left; padding-left: calc(16px + 0.75rem); }
+}
+
+/* ═══ "Neu ausführen" progress (#rerun-progress, logs and Werkzeuge) ═══ */
+.rerun-progress { margin: 0 0 1.25rem; padding: 0.9rem 1.1rem; }
+.rerun-progress-head { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.rerun-progress-icon { display: inline-flex; flex: none; color: var(--primary); }
+.rerun-progress.is-paused .rerun-progress-icon { color: var(--ui-warn-text); }
+.rerun-progress[data-state="done"] .rerun-progress-icon { color: var(--ui-ok-text); }
+.rerun-progress[data-state="cancelled"] .rerun-progress-icon { color: var(--text-muted); }
+.rerun-progress-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 1rem; margin-top: 0.5rem; }
+.rerun-progress-phase { flex: 1 1 12rem; min-width: 0; margin: 0; font-size: var(--ui-fs-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.rerun-progress-result {
+    display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; padding-top: 0.75rem;
+    border-top: 1px solid var(--ui-line); font-size: var(--ui-fs-sm);
+}
+.rerun-progress-line { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.rerun-fails > summary {
+    display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; list-style: none;
+    font-weight: 600; color: var(--ui-err-text); border-radius: var(--ui-radius-xs);
+}
+.rerun-fails > summary::-webkit-details-marker { display: none; }
+.rerun-fails > summary::before { content: "▸"; font-size: 0.7rem; transition: transform 0.15s; }
+.rerun-fails[open] > summary::before { transform: rotate(90deg); }
+.rerun-fails > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.rerun-fails-list { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.5rem 0 0; padding: 0; list-style: none; }
+.rerun-fail { min-width: 0; padding: 0.5rem 0.7rem; background: var(--bg-item); border: 1px solid var(--ui-line); border-radius: var(--ui-radius); }
+.rerun-fail-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem 0.6rem; }
+.rerun-fail-head .ui-badge { height: 1.2rem; font-size: 0.65rem; }
+.rerun-fail-reason { color: var(--text-muted); }
+.rerun-fail-detail { margin: 0.2rem 0 0; font-size: var(--ui-fs-xs); color: var(--ui-err-text); overflow-wrap: anywhere; }
 
 /* ═══ Werkzeuge entries ══════════════════════════════════════════════ */
 .tools-safety { margin-bottom: 0.25rem; }
@@ -296,6 +419,7 @@ tr.hist-row.is-open > * { background: var(--ui-row-hover); border-bottom-color: 
     .mod-cell { padding-left: 0; padding-right: 0; }
     .job-modules { padding: 0.65rem 0.6rem 0.6rem; }
     .job-modules-desc { display: none; }
+    .job-rerun { margin-left: auto; }
 
     /* Trash and inventory tables become cards */
     .trash-table, .trash-table tbody, .inv-table, .inv-table tbody { display: block; }
