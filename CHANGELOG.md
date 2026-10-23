@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.0.0 — in Arbeit (Branch umbau/module-und-datensicherheit: Verarbeitungs-Sets, neues Design, Umbau Module & Datensicherheit)
+## v3.0.0 — 2026-10-23
 
 3.0.0 bündelt drei Umbauten: Verarbeitungs-Sets, ein neues Design und den
 Umbau „Module & Datensicherheit". Der wichtigste Teil ist der letzte:
