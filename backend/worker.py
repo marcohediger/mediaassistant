@@ -87,6 +87,17 @@ async def fetch_immich_source(job_id: int) -> bool:
         job.original_path = path
         job.file_hash = digest
         await session.commit()
+    # Register the downloaded work copy and the asset it came from, whose
+    # content is now known. Only registers; nothing is moved.
+    try:
+        import fileops
+        await fileops.register_existing(job_id, "work", path, sha256=digest, verified=True)
+        await fileops.register_existing(job_id, "immich", asset_id, sha256=digest,
+                                        size=os.path.getsize(path), verified=True)
+    except Exception as e:
+        logger.warning("register %s failed: %s", debug_key, e)
+        await log_warning("immich_poll", f"{debug_key} Eintrag im Exemplar-Register fehlgeschlagen",
+                          f"Asset {asset_id}, {path}: {type(e).__name__}: {e}")
     return True
 
 

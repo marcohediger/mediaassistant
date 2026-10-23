@@ -12,7 +12,7 @@ import hashlib
 import os
 import shutil
 
-from system_logger import log_info, log_error
+from system_logger import log_sync
 
 
 from file_operations import sha256 as _sha256  # shared implementation
@@ -76,25 +76,12 @@ def safe_move(src: str, dst: str, context: str = "") -> str:
     return dst
 
 
-# Synchronous log wrappers (safe_move runs in asyncio.to_thread)
-import asyncio
-
+# Synchronous log wrappers. safe_move runs in asyncio.to_thread, where the
+# event loop is out of reach; log_sync writes the row from the thread itself.
 
 def _log_info_sync(source: str, message: str, detail: str = ""):
-    try:
-        loop = asyncio.get_running_loop()
-        loop.call_soon_threadsafe(
-            lambda: asyncio.ensure_future(log_info(source, message, detail))
-        )
-    except RuntimeError:
-        pass
+    log_sync("INFO", source or "safe_move", message, detail)
 
 
 def _log_error_sync(source: str, message: str, detail: str = ""):
-    try:
-        loop = asyncio.get_running_loop()
-        loop.call_soon_threadsafe(
-            lambda: asyncio.ensure_future(log_error(source, message, detail))
-        )
-    except RuntimeError:
-        pass
+    log_sync("ERROR", source or "safe_move", message, detail)

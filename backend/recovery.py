@@ -14,6 +14,38 @@ logger = logging.getLogger("mediaassistant.recovery")
 MAX_RESUME_RETRIES = 3
 
 
+async def reconcile_file_operations() -> None:
+    """Settle file operations a crash left open, before the worker starts.
+
+    The ledger row of every move, upload, trash … is written as an intent
+    before the operation; one that is still open now was cut short by the
+    last shutdown. fileops compares each with the disk and Immich and ends it
+    as reconciled or failed. Must run before the worker, which would
+    otherwise start new operations on the same files. Never raises — a
+    failure here must not keep the pipeline from starting.
+    """
+    from collections import Counter
+    from fileops import reconcile_open_intents
+
+    try:
+        results = await reconcile_open_intents()
+    except Exception as e:
+        logger.exception("Reconcile of open file operations failed")
+        await log_error("fileops", "Abgleich offener Dateioperationen beim Start fehlgeschlagen",
+                        f"{type(e).__name__}: {e}")
+        return
+    if not results:
+        return
+    counts = Counter(r["state"] for r in results)
+    lines = [f"#{r['op_id']} {r['op']} → {r['state']}: {r['note']}" for r in results]
+    message = (f"Abgleich beim Start: {len(results)} offene Dateioperation(en) — "
+               f"{counts['reconciled']} abgeglichen, {counts['failed']} fehlgeschlagen, "
+               f"{counts['intent']} weiter offen")
+    log = log_warning if counts["failed"] or counts["intent"] else log_info
+    await log("fileops", message, "\n".join(lines)[:20000])
+    logger.info(message)
+
+
 async def requeue_interrupted_jobs() -> None:
     """Put jobs that were mid-pipeline at shutdown back into the queue.
 

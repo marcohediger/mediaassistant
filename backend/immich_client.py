@@ -1219,3 +1219,74 @@ async def check_connection(*, api_key: str | None = None) -> tuple[bool, str]:
         return False, "timeout"
     except Exception as e:
         return False, str(e)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for fileops (data-safety rebuild). Appended; nothing above changed.
+# ---------------------------------------------------------------------------
+
+async def copy_asset_links(from_id: str, to_id: str, *, sidecar: bool = False,
+                           api_key: str | None = None) -> dict:
+    """PUT /api/assets/copy with an explicit sidecar flag, off by default.
+
+    Carries albums, favorite, shared links and the stack from `from_id` to
+    `to_id`. With sidecar=false the target keeps its own XMP and with it its
+    tags, description, rating and date; Immich's default sidecar=true would
+    replace them by the source's (docs/IMMICH_3_VERHALTEN.md d, R-18).
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"{url}/api/assets/copy",
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json={"sourceId": from_id, "targetId": to_id, "sidecar": sidecar},
+        )
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(
+            f"Immich copy failed: HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
+    return {"status": "copied", "from": from_id, "to": to_id, "sidecar": sidecar}
+
+
+async def find_asset_by_checksum(checksum: str, *, api_key: str | None = None) -> dict | None:
+    """The asset of this account that holds content with this checksum.
+
+    `checksum` is Immich's SHA-1, base64 as in asset responses (hex works
+    too). Uses POST /api/assets/bulk-upload-check, which also reports assets
+    in the trash. Returns {"id": ..., "isTrashed": bool} or None; raises
+    when Immich cannot answer.
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{url}/api/assets/bulk-upload-check",
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json={"assets": [{"id": "probe", "checksum": checksum}]},
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Immich bulk-upload-check failed: HTTP {resp.status_code} — "
+            f"{_server_message(resp) or resp.text[:120]}")
+    for result in (resp.json() or {}).get("results") or []:
+        if result.get("reason") == "duplicate" and result.get("assetId"):
+            return {"id": result["assetId"], "isTrashed": bool(result.get("isTrashed"))}
+    return None
+
+
+async def set_asset_rating(asset_id: str, rating: int, *, api_key: str | None = None) -> None:
+    """Set an asset's rating (PUT /api/assets/{id})."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"{url}/api/assets/{asset_id}",
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json={"rating": rating},
+        )
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(
+            f"Immich rating failed: HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")

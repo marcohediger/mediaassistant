@@ -102,6 +102,7 @@ async def poll_set(processing_set) -> int:
             use_immich=True,
             immich_asset_id=asset_id,
             immich_user_id=ps.immich_poll_user_id,
+            immich_checksum=asset.get("checksum"),
         )
         if job:
             queued += 1
