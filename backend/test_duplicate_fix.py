@@ -451,7 +451,10 @@ async def test_retry_job_blocks_parallel_run_pipeline():
             debug_key="RACE-C-1",
             status="error",
             error_message="[IA-01] previous failure",
-            file_hash="c" * 64,
+            # The real hash of the (empty) file: a retry takes only a file
+            # whose content is the job's own (R-01); a made-up hash would
+            # make it a foreign file.
+            file_hash=hashlib.sha256(b"").hexdigest(),
             dry_run=False,
             use_immich=False,
             folder_tags=False,
@@ -490,13 +493,16 @@ async def test_retry_job_blocks_parallel_run_pipeline():
         result = await s.execute(
             select(SystemLog).where(SystemLog.message.like("%RACE-C-1%"))
         )
-        messages = [l.message for l in result.scalars().all()]
+        rows = result.scalars().all()
+        messages = [l.message for l in rows]
         # One pipeline run = one IA-01 error and at most one "processed" log.
         # The reprocess move before the run logs itself before and after
         # (logging rule for destructive actions) — once per run as well.
+        # (fileops' log before a move; the failed run's move to error/ is another one)
         n_err = sum("Error at IA-01" in m for m in messages)
         n_done = sum(m.endswith(" processed") for m in messages)
-        n_move = sum("safe_move → reprocess wird ausgeführt" in m for m in messages)
+        n_move = sum("Verschieben beginnt" in l.message
+                     and (l.detail or "").rstrip("/").endswith("/reprocess") for l in rows)
         report("one pipeline run only (1 IA-01 error, <=1 processed, <=1 reprocess move)",
                n_err == 1 and n_done <= 1 and n_move <= 1,
                f"errors={n_err} processed={n_done} moves={n_move} of {len(messages)} logs")
@@ -528,7 +534,7 @@ async def test_parallel_retry_job_calls():
             debug_key="RACE-D-1",
             status="error",
             error_message="[IA-01] previous failure",
-            file_hash="d" * 64,
+            file_hash=hashlib.sha256(b"").hexdigest(),  # see Test 7
             dry_run=False,
             use_immich=False,
             folder_tags=False,

@@ -1,4 +1,5 @@
 """What happens once at startup, before inputs and worker begin."""
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -6,12 +7,64 @@ from sqlalchemy import select
 
 from config import config_manager
 from database import async_session
-from models import Job, ProcessingSet
+from models import FileOp, Job, ProcessingSet
 from system_logger import log_error, log_info, log_warning
 
 logger = logging.getLogger("mediaassistant.recovery")
 
 MAX_RESUME_RETRIES = 3
+
+
+_alive_elsewhere: set[int] | None = None
+_startup_at: datetime | None = None
+
+
+async def jobs_alive_elsewhere() -> set[int]:
+    """Jobs in 'processing' that another process is still working on.
+
+    Every pipeline run touches its job's updated_at every HEARTBEAT_S
+    (pipeline._heartbeat). At startup no run of this process exists yet, so
+    a 'processing' job that changes while we watch for two heartbeat
+    intervals — or that only became 'processing' meanwhile — is being worked
+    on elsewhere: in development a test script next to the app, which a hot
+    reload must not take over. After a crash nothing changes: all of them
+    are this process's interrupted jobs. The wait happens only when
+    'processing' jobs exist, and only once.
+    """
+    global _alive_elsewhere, _startup_at
+    if _alive_elsewhere is not None:
+        return _alive_elsewhere
+    from pipeline import HEARTBEAT_S
+
+    _startup_at = datetime.now()
+    async with async_session() as session:
+        before = dict((await session.execute(
+            select(Job.id, Job.updated_at).where(Job.status == "processing"))).all())
+    if not before:
+        _alive_elsewhere = set()
+        return _alive_elsewhere
+    wait_s = 2 * HEARTBEAT_S + 15
+    logger.info("%d job(s) in 'processing' at startup — watching %ds for a heartbeat", len(before), wait_s)
+    await asyncio.sleep(wait_s)
+    async with async_session() as session:
+        now_processing = dict((await session.execute(
+            select(Job.id, Job.updated_at).where(Job.status == "processing"))).all())
+        left = set(before) - set(now_processing)
+    _alive_elsewhere = left | {job_id for job_id, updated in now_processing.items()
+                               if job_id not in before or updated != before[job_id]}
+    if _alive_elsewhere:
+        async with async_session() as session:
+            keys = (await session.execute(
+                select(Job.debug_key).where(Job.id.in_(list(_alive_elsewhere))).limit(20))).scalars().all()
+        await log_info("filewatcher", f"{len(_alive_elsewhere)} Job(s) werden von einem anderen Prozess bearbeitet "
+                                      "— beim Start nicht angefasst", ", ".join(keys))
+    return _alive_elsewhere
+
+
+def _since_startup_s() -> float:
+    """Seconds since this process began its startup checks: operations
+    younger than that were started by another process."""
+    return (datetime.now() - _startup_at).total_seconds() if _startup_at else 0.0
 
 
 async def reconcile_file_operations() -> None:
@@ -21,14 +74,29 @@ async def reconcile_file_operations() -> None:
     before the operation; one that is still open now was cut short by the
     last shutdown. fileops compares each with the disk and Immich and ends it
     as reconciled or failed. Must run before the worker, which would
-    otherwise start new operations on the same files. Never raises — a
-    failure here must not keep the pipeline from starting.
+    otherwise start new operations on the same files. Operations of jobs
+    another process is still working on (jobs_alive_elsewhere) are left
+    open. Never raises — a failure here must not keep the pipeline from
+    starting.
     """
     from collections import Counter
     from fileops import reconcile_open_intents
 
     try:
-        results = await reconcile_open_intents()
+        alive = await jobs_alive_elsewhere()
+        # Only operations from before this start (younger ones belong to a
+        # process that is running), and only of jobs nobody works on;
+        # operations without a job then wait for the daily maintenance.
+        older_than_s = _since_startup_s()
+        if not alive:
+            results = await reconcile_open_intents(older_than_s=older_than_s)
+        else:
+            async with async_session() as session:
+                job_ids = sorted(set((await session.execute(
+                    select(FileOp.job_id).where(FileOp.state == "intent", FileOp.job_id.isnot(None))
+                )).scalars().all()) - alive)
+            results = await reconcile_open_intents(job_ids=job_ids, older_than_s=older_than_s) \
+                if job_ids else []
     except Exception as e:
         logger.exception("Reconcile of open file operations failed")
         await log_error("fileops", "Abgleich offener Dateioperationen beim Start fehlgeschlagen",
@@ -53,12 +121,36 @@ async def requeue_interrupted_jobs() -> None:
     run each interrupted job to completion, one by one, before the worker
     even started; with many interrupted jobs the whole instance sat idle
     behind them.
+
+    Runs after reconcile_file_operations. A job another process still works
+    on (jobs_alive_elsewhere) is not touched. A job whose file operation is
+    still open in the ledger (its check failed, e.g. Immich unreachable) is
+    not resumed: the new run would act on a file whose state is unknown. It
+    stays 'processing'; the stale watchdog settles the operation once it is
+    older than the stale timeout and then puts the job back into the queue.
     """
+    alive = await jobs_alive_elsewhere()
+    query = select(Job).where(Job.status == "processing", Job.id.notin_(list(alive)))
+    if _startup_at is not None:
+        # A job touched since this start is another process's.
+        query = query.where(Job.updated_at < _startup_at)
     async with async_session() as session:
-        interrupted = (await session.execute(
-            select(Job).where(Job.status == "processing")
-        )).scalars().all()
+        interrupted = (await session.execute(query)).scalars().all()
+        open_ops: dict[int, list[str]] = {}
+        if interrupted:
+            for job_id, op_id, op in (await session.execute(
+                    select(FileOp.job_id, FileOp.id, FileOp.op).where(
+                        FileOp.state == "intent", FileOp.job_id.in_([j.id for j in interrupted])))).all():
+                open_ops.setdefault(job_id, []).append(f"#{op_id} {op}")
         for job in interrupted:
+            if job.id in open_ops:
+                await log_warning(
+                    "filewatcher", f"{job.debug_key} nicht fortgesetzt — Dateioperation noch offen",
+                    f"{', '.join(open_ops[job.id])} konnte beim Start nicht abgeglichen werden (z. B. Immich "
+                    "nicht erreichbar). Der Job bleibt 'processing'; die Stale-Prüfung gleicht die Operation "
+                    "später ab und stellt ihn dann zurück in die Warteschlange.")
+                logger.warning("Job %s not resumed: open file operations %s", job.debug_key, open_ops[job.id])
+                continue
             retry = (job.retry_count or 0) + 1
             if retry > MAX_RESUME_RETRIES:
                 job.status = "error"
@@ -174,7 +266,7 @@ async def recover_immich_error_jobs():
     recovered = 0
     for job_id, debug_key in candidates:
         try:
-            if await reset_job_for_retry(job_id):
+            if await reset_job_for_retry(job_id, actor="system:recovery"):
                 recovered += 1
         except Exception as e:
             await log_warning("filewatcher", f"{debug_key} Wiedervorlage fehlgeschlagen", str(e))
