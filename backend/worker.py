@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, update
 
 import fileops
+import immich_client
 from config import config_manager
 from database import async_session
 from inputs.common import needs_immich_download
@@ -65,6 +66,12 @@ async def fetch_immich_source(job_id: int) -> bool:
     The content check the poller used to make happens here: an asset whose
     bytes were already processed for the same access is skipped instead of
     being tagged a second time.
+
+    After a crash between an upload or replace and the commit of the job,
+    the job still names the old asset while the ledger holds the new one
+    (R-10e). The new one is downloaded then — the rule IA-08 uses to pick the
+    asset it continues with — so IA-08 finds the content it already
+    delivered instead of uploading the old bytes over the new asset.
     """
     async with async_session() as session:
         job = await session.get(Job, job_id)
@@ -73,6 +80,14 @@ async def fetch_immich_source(job_id: int) -> bool:
         if not needs_immich_download(job):
             return True
         asset_id, user_id, debug_key = job.immich_asset_id, job.immich_user_id, job.debug_key
+        completed_at = job.completed_at
+
+    resumed = await fileops.last_result(job_id, ("upload", "replace"), since=completed_at)
+    from_ledger = bool(resumed) and resumed != asset_id
+    if from_ledger:
+        await log_info("immich_poll", f"{debug_key} Download des Assets aus dem Protokoll (Wiederaufnahme)",
+                       f"Job nennt {asset_id}, das Protokoll das neuere {resumed}")
+        asset_id = resumed
 
     async def fail(error: str) -> bool:
         async with async_session() as session:
@@ -116,13 +131,22 @@ async def fetch_immich_source(job_id: int) -> bool:
                 job.completed_at = datetime.now()
             else:
                 job.original_path = path
-                job.file_hash = digest
+                if not (from_ledger and job.file_hash):
+                    # The content the input took in; a resumed download holds
+                    # what the pipeline made of it (IA-07 notes that hash).
+                    job.file_hash = digest
             await session.commit()
     # The asset the download came from: its content is known now. Also the
-    # second copy that lets an unneeded download go.
+    # second copy that lets an unneeded download go. Immich serves the
+    # original of a trashed asset too; such an asset is not entered as present.
     try:
-        await fileops.register_existing(job_id, "immich", asset_id, sha256=digest, size=res.size,
-                                        verified=True)
+        state = await immich_client.get_asset_state(asset_id, api_key=api_key)
+        if state == immich_client.ASSET_PRESENT:
+            await fileops.register_existing(job_id, "immich", asset_id, sha256=digest, size=res.size,
+                                            verified=True)
+        else:
+            await log_info("immich_poll", f"{debug_key} Asset nicht als vorhanden eingetragen",
+                           f"Asset {asset_id} ist in Immich {state}; heruntergeladen nach {path}")
     except Exception as e:
         logger.warning("register %s failed: %s", debug_key, e)
         await log_warning("immich_poll", f"{debug_key} Eintrag im Exemplar-Register fehlgeschlagen",

@@ -360,7 +360,7 @@ Jeder Step hat: `async execute(job, session) -> dict`
 | `pause_pipeline_endpoint` | Pipeline pausieren. |
 | `resume_pipeline_endpoint` | Pipeline fortsetzen. |
 | `pipeline_status_endpoint` | Pipeline-Status abfragen. |
-| `delete_job_endpoint` | Job + Dateien löschen. |
+| `delete_job_endpoint` | Job löschen: eigene Exemplare über `fileops` in den Papierkorb (30 Tage), Immich-Assets bleiben, `original_path` wird nie angefasst. Die Zeile bleibt mit Status `deleted` (R-26); `queued`/`processing` wird abgelehnt. |
 
 ### routers/dashboard.py — Dashboard
 

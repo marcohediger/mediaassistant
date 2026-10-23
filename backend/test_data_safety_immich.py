@@ -49,6 +49,7 @@ import base64
 import contextlib
 import os
 import shutil
+import subprocess
 import sys
 import textwrap
 import time
@@ -1035,11 +1036,14 @@ async def test_r10e():
             "direkt danach (fileops-Absturzpunkt 'trashed'): Papierkorb- und Ersetzen-Zeile sind offen, "
             "P.immich_asset_id zeigt noch auf X. Neustart wie die App: offene Operationen abgleichen, P "
             "wieder einreihen; /tmp/ma_immich_* ist weg (Redeploy), der Worker lädt neu, die Pipeline läuft "
-            "weiter.",
+            "weiter. Dazu Job Q der Immich-Eingabe für ein Handy-Foto Z, das der Nutzer vor dem Download in "
+            "den Immich-Papierkorb gelegt hat.",
             "Im Absturzmoment liegt P's Inhalt geprüft in Immich (Y, im Register als P's Exemplar) und X "
             "wiederherstellbar im Papierkorb. Der Abgleich findet Y und führt X als 'trashed'; X lässt sich "
-            "wiederherstellen. Nach dem Neustart ist P 'done' mit einem vorhandenen Asset, und kein Asset "
-            "des Szenarios ist endgültig gelöscht.")
+            "wiederherstellen. Nach dem Neustart lädt der Worker Y (das Asset aus dem Protokoll) mit IA-07's "
+            "Stichwörtern; P endet 'done' auf Y mit unverändertem Inhalt, X bleibt im Papierkorb, kein Asset "
+            "des Szenarios ist endgültig gelöscht. Z wird heruntergeladen, aber nicht als vorhanden "
+            "eingetragen.")
     box = Box("R10e")
     set_id = await create_set("R-10e", base=box.lib, write_mode="direct")
     name = f"IMG_{TAG}_10e.JPG"
@@ -1067,6 +1071,7 @@ async def test_r10e():
     open_ops = [f"{o.op}#{o.id}" for o in ops if o.state == "intent"]
     y_rows = [r for r in await _asset_rows(y) if r.state == "present"]
     y_state, x_state = await im_state(y), await im_state(x)
+    y_checksum = (await im_info(y) or {}).get("checksum")
     report(risk, "R-10e im Absturzmoment liegt P's neuer Inhalt geprüft in Immich und im Register (Y)",
            y_state == "present" and len(y_rows) == 1 and y_rows[0].job_id == p
            and y_rows[0].verified_at is not None,
@@ -1110,6 +1115,22 @@ async def test_r10e():
         shutil.rmtree(os.path.dirname(mid.original_path), ignore_errors=True)
     await requeue_after_crash(p)
     fetched = await fetch(p, require=False)
+    got = (await get_job(p)).original_path
+    got_sha = sha256_file(got) if has_file(got) else None
+    y_sha = y_rows[0].sha256 if y_rows else None
+    x_sha = mid.file_hash
+    loaded = "Y" if got_sha and got_sha == y_sha else "X" if got_sha and got_sha == x_sha else f"{got_sha}"
+    report(risk, "R-10e nach dem Neustart lädt der Worker Y herunter (das Asset aus dem Protokoll), nicht X",
+           fetched and got_sha is not None and got_sha == y_sha,
+           f"heruntergeladen: {where(got)} = {loaded}; Y={str(y_sha)[:12]}…, X={str(x_sha)[:12]}…")
+    ia07_sha = ((mid.step_result or {}).get("IA-07") or {}).get("file_hash")
+    kw = ""
+    if has_file(got):
+        kw = (await asyncio.to_thread(subprocess.run, ["exiftool", "-s3", "-Subject", "-Keywords", got],
+                                      capture_output=True, text=True, timeout=30)).stdout
+    report(risk, "R-10e die heruntergeladene Datei ist IA-07's Fassung (Hash wie nach dem Schreiben, mit Stichwort)",
+           got_sha is not None and got_sha == ia07_sha and f"{TAG}-KI" in kw,
+           f"SHA256 {str(got_sha)[:12]}… vs. IA-07 {str(ia07_sha)[:12]}…; Stichwörter: {first_line(kw, 80)!r}")
     if fetched:
         await run_pipeline(p)
     jp = await get_job(p)
@@ -1121,14 +1142,45 @@ async def test_r10e():
     report(risk, "R-10e nach dem Neustart ist P 'done' und mit einem vorhandenen, geprüften Asset verknüpft",
            jp.status == "done" and res.ok and states.get(final) == "present",
            f"P: status={jp.status} ({first_line(jp.error_message, 90)}), immich_asset_id={final}; {res.summary()}")
+    async with async_session() as s:
+        replaces = (await s.execute(select(FileOp.id).where(
+            FileOp.job_id == p, FileOp.op == "replace"))).scalars().all()
+    y_checksum_after = (await im_info(y) or {}).get("checksum")
+    ia08 = (jp.step_result or {}).get("IA-08") or {}
+    report(risk, "R-10e P endet auf Y mit Y's Inhalt (kein zweites Ersetzen, Prüfsumme in Immich unverändert)",
+           final == y and len(replaces) == 1 and y_checksum and y_checksum_after == y_checksum,
+           f"P.immich_asset_id={final} ({'Y' if final == y else 'X' if final == x else '?'}); "
+           f"Ersetzen-Zeilen: {replaces}; IA-08 immich_replace={ia08.get('immich_replace')}; "
+           f"Y-Prüfsumme {y_checksum} → {y_checksum_after}")
+    x_present = [r.id for r in await _asset_rows(x) if r.state == "present"]
+    report(risk, "R-10e X bleibt im Immich-Papierkorb und steht im Register nicht als vorhanden",
+           states[x] == "trashed" and not x_present,
+           f"X={x}: {states[x]}; Register-Einträge 'present' für X: {x_present}")
     report(risk, "R-10e kein Asset des Szenarios ist endgültig gelöscht (X und Y vorhanden oder im Papierkorb)",
            all(st in ("present", "trashed") for st in states.values()),
            f"{', '.join(f'{a}: {st}' for a, st in states.items())}")
+
+    # Q: an Immich-input job whose asset Z the user trashed before the worker
+    # got to it. Immich still serves the original; the register must not
+    # call Z present (it is purged with the trash).
+    name_q = f"IMG_{TAG}_10e_q.JPG"
+    z = await phone_upload(make_jpeg(box.side("handy", name_q)))
+    q = await poller_job(set_id, z, name_q, step_result=pre_results(run=("IA-07",)))
+    await immich_client.trash_asset(z)
+    fetched_q = await fetch(q, require=False)
+    async with async_session() as s:
+        await s.execute(update(Job).where(Job.id == q).values(status="skipped"))  # never run here
+        await s.commit()
+    z_rows = await _asset_rows(z)
+    report(risk, "R-10e ein Asset im Immich-Papierkorb wird beim Download nicht als vorhanden eingetragen",
+           fetched_q and await im_state(z) == "trashed" and not [r for r in z_rows if r.state == "present"],
+           f"Download Q: {fetched_q}; Z: {await im_state(z)}; Register Z: "
+           f"{[(r.id, r.job_id, r.state) for r in z_rows]}")
     which = "Y (neues Asset)" if final == y else "X (altes Asset, aus dem Papierkorb zurückgeholt)" \
         if final == x else f"{final}"
-    actual(f"im Absturzmoment: P.immich_asset_id={mid.immich_asset_id} (X {x_state}), Y {y_state}; nach dem "
-           f"Neustart zeigt P auf {which}; X: {states[x]}, Y: {states[y]}. Der Worker lädt nach dem Neustart "
-           f"P.immich_asset_id (X) herunter, nicht das Asset aus dem Protokoll.")
+    actual(f"im Absturzmoment: P.immich_asset_id={mid.immich_asset_id} (X {x_state}), Y {y_state}; der Worker "
+           f"lädt nach dem Neustart {loaded} herunter; P zeigt danach auf {which}; X: {states[x]}, "
+           f"Y: {states[y]}; Z im Register: {[r.state for r in z_rows] or 'kein Eintrag'}.")
 
 
 # ---------------------------------------------------------------------------
