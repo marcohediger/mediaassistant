@@ -1,7 +1,7 @@
 import os
 import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from models import Base, Module, InboxDirectory
+from models import Base, Module, InboxDirectory, FILE_OPS_GUARDS
 
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")
 
@@ -116,6 +116,8 @@ async def _migrate_columns(conn):
         # endpoints — both look up jobs by filename in batches.
         "CREATE INDEX IF NOT EXISTS idx_job_filename ON jobs(filename)",
         "CREATE INDEX IF NOT EXISTS idx_job_set_status ON jobs(set_id, status)",
+        # The file-operation ledger is append-only (see models.FileOp).
+        *FILE_OPS_GUARDS,
     ]
     for sql in indexes:
         await conn.execute(sqlalchemy.text(sql))
