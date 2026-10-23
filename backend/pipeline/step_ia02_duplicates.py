@@ -15,7 +15,6 @@ import logging
 
 from config import config_manager
 from models import Job
-from safe_file import safe_move
 from system_logger import log_info, log_warning
 
 _orphan_logger = logging.getLogger("mediaassistant.pipeline.ia02.orphan")
@@ -482,35 +481,41 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
         await log_info("IA-02", f"{job.debug_key} [dry-run] {desc}")
         return folder_tags
 
-    from file_operations import get_duplicate_dir, resolve_filename_conflict
+    # Move through fileops: the name in duplicates/ is reserved atomically
+    # (never overwrites, R-06), the content is verified before the source
+    # goes, and the register records where the file is now. The caller's
+    # session holds no uncommitted writes here; the job fields below are set
+    # in memory and committed by run_pipeline.
+    import fileops
+    from file_operations import get_duplicate_dir
     dup_dir = await get_duplicate_dir(job)
-    filename = os.path.basename(job.original_path)
-    dup_path = resolve_filename_conflict(dup_dir, filename)
+    source_path = job.original_path
     await log_info(
         "IA-02",
-        f"{job.debug_key} safe_move → duplicate-Ordner wird ausgeführt",
-        f"src={job.original_path} dst={dup_path}",
+        f"{job.debug_key} Verschieben in den Duplikat-Ordner beginnt",
+        f"src={source_path} dst={dup_dir}",
     )
     try:
-        await asyncio.to_thread(safe_move, job.original_path, dup_path, job.debug_key)
+        moved = await fileops.move(job, source_path, dup_dir + os.sep, actor="IA-02", kind="local")
     except Exception as exc:
-        await log_info(
+        await log_warning(
             "IA-02",
-            f"{job.debug_key} safe_move → duplicate-Ordner fehlgeschlagen",
-            f"error={type(exc).__name__}: {exc}",
+            f"{job.debug_key} Verschieben in den Duplikat-Ordner fehlgeschlagen",
+            f"src={source_path} error={type(exc).__name__}: {exc}",
         )
         raise
+    dup_path = moved.location
     await log_info(
         "IA-02",
-        f"{job.debug_key} safe_move → duplicate-Ordner OK",
-        f"dst={dup_path}",
+        f"{job.debug_key} In den Duplikat-Ordner verschoben",
+        f"dst={dup_path} (fileops #{moved.op_id})",
     )
 
     # Write .log file
     log_lines = [
         f"Debug-Key: {job.debug_key}",
         f"File: {job.filename}",
-        f"Original: {job.original_path}",
+        f"Original: {source_path}",
         f"Duplicate type: {match_type}",
         f"Reference: {desc}",
         f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -518,9 +523,11 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     log_path = dup_path + ".log"
     await asyncio.to_thread(_write_log, log_path, "\n".join(log_lines))
 
-    # Update job status
+    # Update job status. original_path follows the file as well: it names
+    # where the file is, never the inbox path it left (R-01/R-02).
     job.status = "duplicate"
     job.target_path = dup_path
+    job.original_path = dup_path
     # Clear any pre-existing warning message — a duplicate aborts the
     # pipeline before the steps that produce warnings, so the message
     # would otherwise outlive its referent.
@@ -533,7 +540,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     try:
         if job.source_inbox_path:
             from pipeline.step_ia08_sort import _cleanup_empty_dirs
-            source_dir = os.path.dirname(job.original_path)
+            source_dir = os.path.dirname(source_path)
             await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
     except Exception as e:
         await log_warning("IA-02", f"{job.debug_key} Cleanup nach Duplikat-Move fehlgeschlagen: {e}")
@@ -541,7 +548,12 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     return folder_tags
 
 
-
 def _write_log(path: str, content: str):
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+    """Write the companion .log; never overwrite one that is already there
+    (it describes another file that had this name before)."""
+    try:
+        with open(path, "x", encoding="utf-8") as f:
+            f.write(content)
+    except FileExistsError:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n\n" + content)

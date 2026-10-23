@@ -1,6 +1,8 @@
 import asyncio
+import json
 import os
 import subprocess
+from functools import partial
 
 from file_operations import is_folder_tags_active as _is_folder_tags_active  # shared
 from system_logger import log_info
@@ -18,6 +20,10 @@ _IPTC_FORMATS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".dng"}
 _XMP_ONLY_FORMATS = {".heic", ".heif", ".webp", ".mp4", ".mov"}
 # Formats that don't support XPComment
 _NO_XPCOMMENT = {".mp4", ".mov"}
+# QuickTime containers: dates and GPS live in other tags than in EXIF
+_QUICKTIME_FORMATS = {".mp4", ".mov"}
+
+_EXIFTOOL_TIMEOUT = 30
 
 
 async def execute(job, session) -> dict:
@@ -123,22 +129,37 @@ async def execute(job, session) -> dict:
 
     description = " ".join(description_parts)
 
-    if not keywords and not description:
-        return {"status": "skipped", "reason": "no tags to write"}
-
     from sets import get_set
     processing_set = await get_set(session, job.set_id)
     write_mode = (processing_set.metadata_write_mode if processing_set else None) or "direct"
 
+    # Google Takeout: capture date and GPS from the JSON, wherever the file
+    # (and in sidecar mode an existing sidecar) lacks them (R-16). IA-10
+    # moves the JSON to the trash afterwards. None = no JSON to take from.
+    sidecar_path = job.original_path + ".xmp"
+    look_at = [job.original_path]
+    if write_mode == "sidecar" and await asyncio.to_thread(os.path.isfile, sidecar_path):
+        look_at.append(sidecar_path)
+    takeout = await asyncio.to_thread(_missing_takeout_fields, exif_data, look_at)
+
+    if not keywords and not description and not takeout:
+        result = {"status": "skipped", "reason": "no tags to write"}
+        if takeout is not None:
+            result["takeout_written"] = []
+        return result
+
     # Dry-run: report what would be written, but don't modify file
     if job.dry_run:
-        return {
+        result = {
             "status": "dry_run",
             "keywords_planned": keywords,
             "description_planned": description,
             "tags_count": len(keywords),
             "write_mode": write_mode,
         }
+        if takeout:
+            result["takeout_planned"] = sorted(takeout)
+        return result
 
     # Collect OCR text early (used by both modes)
     ocr_text = ""
@@ -146,79 +167,121 @@ async def execute(job, session) -> dict:
         ocr_text = ocr_result["text"].strip()
 
     if write_mode == "sidecar":
-        return await _write_sidecar(job, keywords, description, ocr_text, ext)
+        result = await _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout or {})
+    else:
+        result = await _write_direct(job, keywords, description, ocr_text, ext, takeout or {})
+    if takeout is not None:
+        result["takeout_written"] = sorted(takeout)
+    return result
 
-    return await _write_direct(job, keywords, description, ocr_text, ext)
+
+def _exiftool_write(args: list[str], error_label: str, path: str) -> None:
+    """Writer for fileops.write_metadata (bound with functools.partial):
+    exiftool edits the private copy fileops hands it, never the file itself."""
+    result = subprocess.run(
+        ["exiftool", "-overwrite_original", "-P", "-m", *args, path],
+        capture_output=True, timeout=_EXIFTOOL_TIMEOUT,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
+        raise RuntimeError(f"{error_label}: {stderr.strip()}")
 
 
-async def _write_direct(job, keywords, description, ocr_text, ext):
-    """Write metadata directly into the file (original behavior)."""
-    cmd = ["exiftool", "-overwrite_original_in_place", "-P", "-m"]
+async def _write_direct(job, keywords, description, ocr_text, ext, takeout):
+    """Write metadata directly into the file.
 
+    Through fileops.write_metadata: exiftool edits a private copy, which then
+    replaces the file atomically, so a crash leaves the old file or the new
+    one, never a torn one (R-10f). The register records the new content
+    hash. job.file_hash deliberately keeps the hash the file had when it was
+    read in: duplicate detection and the inbox scan compare files as they
+    arrive, and the same original arriving again has to match.
+    """
+    import fileops
+
+    args = []
     # Write keywords — format-aware tag field selection
     if ext in _IPTC_FORMATS:
-        for kw in keywords:
-            cmd.append(f"-Keywords+={kw}")
+        args += [f"-Keywords+={kw}" for kw in keywords]
     else:
-        for kw in keywords:
-            cmd.append(f"-Subject+={kw}")
+        args += [f"-Subject+={kw}" for kw in keywords]
 
     if description:
-        cmd.append(f"-ImageDescription={description}")
+        args.append(f"-ImageDescription={description}")
         if ext not in _NO_XPCOMMENT:
-            cmd.append(f"-XPComment={description}")
+            args.append(f"-XPComment={description}")
 
     if ocr_text:
-        cmd.append(f"-UserComment=OCR: {ocr_text}")
+        args.append(f"-UserComment=OCR: {ocr_text}")
 
-    cmd.append(job.original_path)
+    args += _takeout_args(takeout, "video" if ext in _QUICKTIME_FORMATS else "image")
 
-    result = await asyncio.to_thread(
-        subprocess.run,
-        cmd,
-        capture_output=True, timeout=30
-    )
-
-    if result.returncode != 0:
-        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
-        raise RuntimeError(f"ExifTool Write Fehler: {stderr.strip()}")
-
-    new_hash = await asyncio.to_thread(_sha256, job.original_path)
-    new_size = os.path.getsize(job.original_path)
+    res = await fileops.write_metadata(job, job.original_path,
+                                       partial(_exiftool_write, args, "ExifTool Write Fehler"), actor="IA-07")
 
     return {
         "keywords_written": keywords,
         "description_written": description,
         "ocr_text_written": ocr_text,
         "tags_count": len(keywords),
-        "file_size": new_size,
-        "file_hash": new_hash,
+        "file_size": res.size,
+        "file_hash": res.sha256,
         "write_mode": "direct",
     }
 
 
-async def _write_sidecar(job, keywords, description, ocr_text, ext):
-    """Write metadata to an XMP sidecar file, leaving the original untouched.
+async def _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout):
+    """Write metadata to the XMP sidecar, leaving the original untouched.
 
-    Uses an atomic write pattern: ExifTool writes to a temp file with the
-    debug_key in its name, then os.replace() atomically moves it to the
-    final destination. This handles three cases robustly:
+    A sidecar that already lies next to the file — supplied by the user
+    (Lightroom, darktable, …) or left by an earlier run — is never replaced:
+    MediaAssistant's keywords are merged into it, so rating, label and the
+    user's own keywords survive (R-17a). A description already in it stays
+    too. Only a file that is no XMP at all (e.g. the binary image clones the
+    v2.28.13 bug wrote) goes to the trash and is replaced by a new sidecar.
 
-    1. **First-time write**: temp doesn't exist, ExifTool creates it,
-       os.replace creates the final sidecar.
-    2. **Retry after a previous IA-07 success + later step failure**:
-       a stale sidecar from the prior run exists at the final path.
-       os.replace overwrites it cleanly (POSIX atomic).
-    3. **Concurrent calls** (shouldn't happen with the v2.28.2 atomic
-       claim, but defense in depth): each call uses a unique temp name
-       (debug_key suffix), so neither ExifTool invocation conflicts
-       with the other.
-
-    The previous v2.28.1 pre-delete approach had a TOCTOU race between
-    `os.path.exists` and `subprocess.run(exiftool)`. The atomic
-    write pattern eliminates that race entirely.
+    A new sidecar is produced by ExifTool in TEMP_DIR and then moved into
+    place by fileops, which never overwrites a name that is taken.
     """
-    sidecar_path = job.original_path + ".xmp"
+    import fileops
+
+    takeout_args = _takeout_args(takeout, "xmp")
+    origin = "created"
+    if await asyncio.to_thread(os.path.lexists, sidecar_path):
+        row = await fileops.register_existing(job, "sidecar", sidecar_path, take_over=True)
+        if await asyncio.to_thread(_is_xmp, sidecar_path):
+            keep_description = bool(description) and await asyncio.to_thread(_has_description, sidecar_path)
+            args = []
+            for kw in keywords:
+                args += [f"-Subject-={kw}", f"-Subject+={kw}"]  # add only if not there yet
+            if description and not keep_description:
+                args.append(f"-ImageDescription={description}")
+            if ocr_text:
+                args.append(f"-UserComment=OCR: {ocr_text}")
+            args += takeout_args
+            await log_info("IA-07", f"{job.debug_key} Vorhandene Sidecar wird ergänzt",
+                           f"{sidecar_path}: {len(keywords)} Stichwörter"
+                           + (", Beschreibung der Sidecar bleibt" if keep_description else ""))
+            await fileops.write_metadata(job, row.id, partial(_exiftool_write, args, "ExifTool Sidecar Fehler"),
+                                         actor="IA-07")
+            merged = {
+                "keywords_written": keywords,
+                # Only what was written: IA-08 copies it into Immich's description.
+                "description_written": "" if keep_description else description,
+                "ocr_text_written": ocr_text,
+                "tags_count": len(keywords),
+                "sidecar_path": sidecar_path,
+                "sidecar_for": job.original_path,
+                "sidecar_origin": "merged",
+                "write_mode": "sidecar",
+            }
+            if keep_description:
+                merged["description_kept"] = True
+            return merged
+        await fileops.trash(job, row.id, actor="IA-07", allow_last_copy=True,
+                            reason="vorhandene Sidecar ist kein lesbares XMP, wird neu erzeugt")
+        origin = "replaced"
+
     # IMPORTANT: the temp file MUST end in `.xmp`. ExifTool's `-o` flag
     # decides the output format by extension: `.xmp` → plain-text XMP
     # sidecar (what we want); any unrecognised suffix like `.tmp` →
@@ -226,12 +289,10 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
     # which means a FULL JPEG/HEIC clone gets written and then
     # renamed to `foo.jpg.xmp`. That bug was live between v2.28.13
     # and v2.28.40 and turned every sidecar into a binary image file.
-    tmp_sidecar = f"{job.original_path}.{job.debug_key}.tmp.xmp"
-
-    # Clean up any leftover tmp from a crashed previous run of THIS job
-    if os.path.exists(tmp_sidecar):
-        from file_operations import safe_remove
-        safe_remove(tmp_sidecar)
+    from pipeline.step_ia04_convert import TEMP_DIR
+    await asyncio.to_thread(os.makedirs, TEMP_DIR, exist_ok=True)
+    tmp_sidecar = os.path.join(TEMP_DIR, f"{job.debug_key}.xmp")
+    await _discard_tmp(job, tmp_sidecar, "Rest eines abgebrochenen Laufs")
 
     # ExifTool -o file.xmp creates an XMP sidecar from the source file
     cmd = ["exiftool", "-o", tmp_sidecar, "-P", "-m"]
@@ -247,52 +308,130 @@ async def _write_sidecar(job, keywords, description, ocr_text, ext):
     if ocr_text:
         cmd.append(f"-UserComment=OCR: {ocr_text}")
 
+    cmd += takeout_args
     cmd.append(job.original_path)
 
     result = await asyncio.to_thread(
         subprocess.run,
         cmd,
-        capture_output=True, timeout=30
+        capture_output=True, timeout=_EXIFTOOL_TIMEOUT
     )
 
     if result.returncode != 0:
-        # Cleanup tmp on failure
-        from file_operations import safe_remove
-        safe_remove(tmp_sidecar)
+        try:
+            await _discard_tmp(job, tmp_sidecar, "ExifTool-Fehler beim Erzeugen der Sidecar")
+        except Exception:
+            pass  # the ExifTool error below is what matters; fileops logged its own failure
         stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
         raise RuntimeError(f"ExifTool Sidecar Fehler: {stderr.strip()}")
 
-    # Atomic move: overwrites existing sidecar (from a prior failed run) cleanly
-    await log_info(
-        "IA-07",
-        f"{job.debug_key} Sidecar atomic replace wird ausgeführt",
-        f"dst={sidecar_path}",
-    )
+    # The temp file is registered as kind temp, so a leftover (a crash, a
+    # failed source removal below) is recognised and discarded next time.
+    await fileops.register_existing(job, "temp", tmp_sidecar)
     try:
-        os.replace(tmp_sidecar, sidecar_path)
-    except OSError as e:
-        from file_operations import safe_remove
-        safe_remove(tmp_sidecar)
-        await log_info(
-            "IA-07",
-            f"{job.debug_key} Sidecar atomic replace fehlgeschlagen",
-            f"error={type(e).__name__}: {e}",
-        )
-        raise RuntimeError(f"Sidecar atomic replace failed: {e}")
-    await log_info(
-        "IA-07",
-        f"{job.debug_key} Sidecar atomic replace OK",
-        f"dst={sidecar_path}",
-    )
+        res = await fileops.move(job, tmp_sidecar, sidecar_path, actor="IA-07", kind="sidecar")
+    except fileops.FileOpFailed as exc:
+        if exc.result is None:
+            raise
+        res = exc.result  # the sidecar is in place; only the temp file stayed behind
+        try:
+            await _discard_tmp(job, tmp_sidecar, "Sidecar abgelegt, Temp-Datei übrig")
+        except Exception:
+            pass  # discarded on the next run
 
     return {
         "keywords_written": keywords,
         "description_written": description,
         "ocr_text_written": ocr_text,
         "tags_count": len(keywords),
-        "sidecar_path": sidecar_path,
+        "sidecar_path": res.location,
+        "sidecar_for": job.original_path,
+        "sidecar_origin": origin,
         "write_mode": "sidecar",
     }
 
 
-from file_operations import sha256 as _sha256  # shared implementation
+async def _discard_tmp(job, path: str, reason: str) -> None:
+    """Remove this job's own temp sidecar (its name carries the debug key)."""
+    import fileops
+    if not await asyncio.to_thread(os.path.lexists, path):
+        return
+    row = await fileops.register_existing(job, "temp", path)
+    await fileops.discard(job, row.id, actor="IA-07", reason=reason)
+
+
+def _exiftool_read(paths: list[str], tags: list[str]) -> list[dict]:
+    try:
+        out = subprocess.run(["exiftool", "-json", "-n", *[f"-{t}" for t in tags], *paths],
+                             capture_output=True, timeout=_EXIFTOOL_TIMEOUT)
+        return json.loads(out.stdout.decode("utf-8", "replace") or "[]")
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return []
+
+
+def _is_xmp(path: str) -> bool:
+    try:
+        out = subprocess.run(["exiftool", "-s3", "-FileType", path],
+                             capture_output=True, timeout=_EXIFTOOL_TIMEOUT)
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return out.returncode == 0 and out.stdout.decode("utf-8", "replace").strip() == "XMP"
+
+
+def _has_description(path: str) -> bool:
+    for entry in _exiftool_read([path], ["Description", "ImageDescription"]):
+        if any(str(entry.get(t) or "").strip() for t in ("Description", "ImageDescription")):
+            return True
+    return False
+
+
+def _real_date(value) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and not text.startswith("0000")
+
+
+def _missing_takeout_fields(exif_data: dict, paths: list[str]) -> dict | None:
+    """Capture date and GPS from the Google Takeout JSON that IA-01 found,
+    limited to what none of `paths` carries yet. None when there is no JSON."""
+    json_path = exif_data.get("google_json_path")
+    if not exif_data.get("google_json") or not json_path or not json_path.endswith(".json"):
+        return None
+    from pipeline.step_ia01_exif import _read_google_json
+    # _read_google_json looks for "<media>.json" first; handing it the JSON's
+    # own path without ".json" reads exactly the file IA-01 found, with the
+    # same rules (UTC timestamp, 0/0 = no GPS).
+    data = _read_google_json(json_path[:-len(".json")])
+    if not data:
+        return None
+    present = _exiftool_read(paths, ["DateTimeOriginal", "CreateDate", "GPSLatitude", "GPSLongitude"])
+    has_date = any(_real_date(e.get("DateTimeOriginal")) or _real_date(e.get("CreateDate")) for e in present)
+    has_gps = any(e.get("GPSLatitude") is not None and e.get("GPSLongitude") is not None for e in present)
+    missing = {}
+    if data.get("date") and not has_date:
+        missing["date"] = data["date"]
+    if data.get("gps_lat") is not None and data.get("gps_lon") is not None and not has_gps:
+        missing["gps"] = [data["gps_lat"], data["gps_lon"]]
+    return missing
+
+
+def _takeout_args(takeout: dict, target: str) -> list[str]:
+    """ExifTool assignments for the Takeout fields. The date is UTC
+    (photoTakenTime is a Unix timestamp), so the offset is written with it."""
+    date, gps = takeout.get("date"), takeout.get("gps")
+    args = []
+    if target == "xmp":
+        if date:
+            args.append(f"-XMP-exif:DateTimeOriginal={date}+00:00")
+        if gps:
+            args += [f"-XMP-exif:GPSLatitude={gps[0]}", f"-XMP-exif:GPSLongitude={gps[1]}"]
+    elif target == "video":
+        if date:
+            args += [f"-QuickTime:CreateDate={date}", f"-Keys:CreationDate={date}+00:00"]
+        if gps:
+            args.append(f"-Keys:GPSCoordinates={gps[0]}, {gps[1]}")
+    else:
+        if date:
+            args += [f"-DateTimeOriginal={date}", f"-CreateDate={date}", "-OffsetTimeOriginal=+00:00"]
+        if gps:
+            args += [f"-GPSLatitude*={gps[0]}", f"-GPSLongitude*={gps[1]}"]
+    return args
