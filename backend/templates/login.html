@@ -9,11 +9,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ L.title | default('Anmeldung') }} – MediaAssistant</title>
     <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg?v=3">
-    <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
-    <link rel="stylesheet" href="/static/css/ui.css?v={{ version }}">
-    <link rel="stylesheet" href="/static/css/pages/login.css?v={{ version }}">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ asset_v }}">
+    <link rel="stylesheet" href="/static/css/ui.css?v={{ asset_v }}">
+    <link rel="stylesheet" href="/static/css/pages/login.css?v={{ asset_v }}">
     {% if not dark %}
-    <link rel="stylesheet" href="/static/css/light.css?v={{ version }}">
+    <link rel="stylesheet" href="/static/css/light.css?v={{ asset_v }}">
     {% endif %}
 </head>
 <body data-theme="{{ 'dark' if dark else 'light' }}" class="lg-body">

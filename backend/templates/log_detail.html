@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ job.debug_key }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/logs.css?v={{ version }}">
-<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/logs.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/pages/history.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
 {% from "_status.html" import status_badge with context %}
 {% from "_modules.html" import module_bar, history_strings with context %}

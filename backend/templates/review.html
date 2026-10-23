@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ t.review.heading }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/review.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/review.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
 {% set r = t.review %}
 {% macro icon(name, size=16) -%}

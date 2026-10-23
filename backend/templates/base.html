@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}MediaAssistant{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="/static/img/logo_icon.svg?v=3">
-    <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
-    <link rel="stylesheet" href="/static/css/ui.css?v={{ version }}">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ asset_v }}">
+    <link rel="stylesheet" href="/static/css/ui.css?v={{ asset_v }}">
     {# Page-specific stylesheets (static/css/pages/*.css) go here, before light.css #}
     {% block head %}{% endblock %}
     {% if theme | default('dark') == 'light' %}
-    <link rel="stylesheet" href="/static/css/light.css?v={{ version }}">
+    <link rel="stylesheet" href="/static/css/light.css?v={{ asset_v }}">
     {% endif %}
 </head>
 <body data-theme="{{ theme | default('dark') }}">
@@ -121,6 +121,6 @@
     {% from "_status.html" import status_badge, STATUSES with context %}
     <template id="status-badges">{% for s in STATUSES %}{{ status_badge(s) }}{{ status_badge(s, icon_only=True) }}{% endfor %}</template>
     <script type="application/json" id="ui-strings">{{ {"cancel": t.common.cancel, "close": t.common.close, "ok": t.common.ok} | tojson }}</script>
-    <script src="/static/js/app.js?v={{ version }}"></script>
+    <script src="/static/js/app.js?v={{ asset_v }}"></script>
 </body>
 </html>

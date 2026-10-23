@@ -1,5 +1,7 @@
 """Central Jinja2 template engine with i18n and theme support."""
 
+import time
+
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from i18n import load_lang, get_section, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE
@@ -17,6 +19,13 @@ async def get_ui_settings() -> dict:
     if lang not in SUPPORTED_LANGUAGES:
         lang = DEFAULT_LANGUAGE
     return {"lang": lang, "theme": theme}
+
+
+# Cache key for static assets (?v=...). The release version alone stayed the
+# same during development ("3.0.0-dev"), so browsers kept an old cached
+# settings.js next to a new page and the set editor stopped opening. The app
+# start time changes with every deploy and every dev reload.
+ASSET_VERSION = f"{VERSION}.{int(time.time())}"
 
 
 async def render(request: Request, template: str, context: dict = None) -> templates.TemplateResponse:
@@ -37,6 +46,7 @@ async def render(request: Request, template: str, context: dict = None) -> templ
         "theme": ui["theme"],
         "supported_languages": SUPPORTED_LANGUAGES,
         "version": VERSION,
+        "asset_v": ASSET_VERSION,
         "version_date": VERSION_DATE,
         "sso_user": sso_user,
         "sso_user_name": sso_user_name,

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t.dashboard.title }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/dashboard.css?v={{ version }}">
-<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/dashboard.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/pages/history.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
 {% from "_status.html" import status_badge with context %}
 {% from "_modules.html" import module_strip, history_toggle, history_strings with context %}
