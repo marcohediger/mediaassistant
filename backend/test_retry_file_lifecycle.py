@@ -265,10 +265,16 @@ async def _run_lifecycle_test(*, mode: str, source_heic: str):
         possible_locations.append(reprocess_path)
 
         existing = [p for p in possible_locations if os.path.exists(p)]
+        # Since the fileops rebuild IA-08 discards the work copy in reprocess/
+        # once its content is verified in Immich (it used to stay there for
+        # good, inventory S9). The content must be reachable: on disk or in
+        # the job's asset, present (not trashed).
+        from immich_client import ASSET_PRESENT, get_asset_state
+        asset_state = await get_asset_state(after_asset) if after_asset else "none"
         report(
-            "file still exists on disk after retry",
-            bool(existing),
-            f"checked={possible_locations} → existing={existing}",
+            "file content still reachable after retry (disk or the job's Immich asset)",
+            bool(existing) or asset_state == ASSET_PRESENT,
+            f"checked={possible_locations} → existing={existing}; asset {after_asset}: {asset_state}",
         )
 
         # C) Job must end in a sane state (done) after retry
@@ -806,10 +812,15 @@ async def _run_immich_only_retry_test(source_heic: str):
             bool(final_orig and final_orig.startswith(REPROCESS_DIR)),
             f"original_path={final_orig}",
         )
+        # The download is a work copy: IA-08 discards it once the content is
+        # verified in Immich (it used to stay in reprocess/ for good, S9).
+        from immich_client import ASSET_PRESENT, get_asset_state
+        final_asset = final_target[len("immich:"):] if final_target and final_target.startswith("immich:") else None
+        asset_state = await get_asset_state(final_asset) if final_asset else "none"
         report(
-            "immich-only: downloaded file exists in reprocess/",
-            bool(final_orig and os.path.exists(final_orig)),
-            f"checked={final_orig}",
+            "immich-only: download in reprocess/, or discarded with the content verified in Immich",
+            bool(final_orig and os.path.exists(final_orig)) or asset_state == ASSET_PRESENT,
+            f"checked={final_orig}; asset {final_asset}: {asset_state}",
         )
 
     except Exception as e:

@@ -1,56 +1,95 @@
 """Shared building block for re-queueing a job through the pipeline.
 
-Several flows need to put a previously processed job back into the pipeline
-worker's queue:
+Several flows put a previously processed job back into the worker's queue:
 
 - Retry of error / warning jobs (`pipeline.reset_job_for_retry`)
 - Manual review in the duplicates UI (`routers/duplicates.py`)
-- Wartungs-Tools wie tag_cleanup (issue #42)
+- Maintenance tools (stuck duplicate winners, tag cleanup)
 
-All of these share the same three-step dance:
+All of them share the same steps:
 
-1. Move the job's current file (`target_path` if present, else `original_path`)
-   into the internal `/app/data/reprocess/` directory so the worker doesn't
-   pick it up from the library while it's mid-edit. The companion `.xmp`
-   sidecar is moved with the file so EXIF/sidecar metadata stays attached
-   wherever IA-07 originally wrote it. The `.log` file is removed.
-2. Reset `step_result` according to one of three policies (keep specific
-   steps, drop steps with given statuses, inject synthetic results).
-3. Flip the job to `status='queued'`, clear `target_path` and
-   `error_message`, and commit. The pipeline worker / `run_pipeline()`
-   takes over from here.
+1. Find the job's own content (`find_source`). The source comes from the
+   copy register (fileops): a local copy this job owns whose hash checks
+   out right now. Without one, the old job fields are tried, but a file
+   there is taken only if its hash is one this job's content ever had —
+   a different photo that landed at a stale `original_path` (R-01) or a
+   file another job owns is never touched. Last comes the job's own (or
+   shared) Immich asset.
+2. Bring it into the internal `REPROCESS_DIR` (`materialize`): a local
+   copy is moved there with fileops (never overwriting anything; its
+   `.xmp` sidecar travels along, the `.log` of the previous run is
+   dropped), an Immich asset is downloaded into a work copy of its own
+   (R-03).
+3. Reset `step_result` (keep / drop / inject policies; the run
+   parameters of the previous run are always dropped), flip the job to
+   `status='queued'`. The pipeline worker takes over from there.
 
-IA-07 (`step_ia07_exif_write`) honours the `metadata_write_mode` of the job's set
-setting at runtime, so as long as that setting hasn't changed between the
-original processing and the reprocess, the data will land in EXIF or sidecar
-exactly as it did the first time around. This helper deliberately preserves
-the `.xmp` sidecar (instead of orphaning it) so IA-07 in sidecar mode picks
-up cleanly at the new location.
+Run parameters are control values for exactly one pipeline run (e.g.
+`_force_reupload` from the duplicate review, `_retry_previous_immich_tags`
+from a retry). They are stored in `step_result` under keys starting with
+an underscore, read by steps through `pipeline.run_params(job)`, survive a
+crash of that run (the resumed run gets them again) and are removed by
+run_pipeline when the run ends. Every reset here drops the old ones.
 """
 
 import asyncio
 import os
+from dataclasses import dataclass
+from datetime import datetime
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm.attributes import flag_modified
 
-from safe_file import safe_move
-from system_logger import log_info
+import fileops
+from database import async_session
+from file_operations import sha256 as _sha256
+from models import AssetRef, FileCopy, FileOp, Job
+from system_logger import log_info, log_warning
 
 
 REPROCESS_DIR = "/app/data/reprocess"
+ACTOR = "system:reprocess"
+
+# Marker of a retry whose old results are already dropped but whose source is
+# not prepared yet (see pipeline.reset_job_for_retry, R-10b). run_pipeline
+# finishes the preparation when it finds it.
+PREPARE_SOURCE = "_prepare_source"
+
+# Register kinds that hold the job's content itself (not a sidecar, a temp
+# JPEG or a Takeout JSON).
+CONTENT_KINDS = ("local", "work", "immich")
+_LOCAL_CONTENT_KINDS = ("local", "work")
+
+# run_pipeline hands the parameters of the run in progress to the steps
+# through this attribute of the Job object (not persisted).
+RUN_PARAMS_ATTR = "_ma_run_params"
 
 
-def _resolve_reprocess_path(filename: str, debug_key: str) -> str:
-    """Build a non-colliding path inside REPROCESS_DIR for `filename`.
+def is_run_param(key) -> bool:
+    return isinstance(key, str) and key.startswith("_")
 
-    If a file with the same name already exists (from a prior reprocess
-    of a different job), suffix it with the debug_key to keep them apart.
+
+def run_params(job) -> dict:
+    """Parameters of the pipeline run in progress for `job`, e.g.
+    {"_force_reupload": True} after a duplicate keep or
+    {"_retry_previous_immich_tags": [...]} after a retry.
+
+    Set by run_pipeline for exactly one run; empty outside a run, so a step
+    called on its own never acts on a leftover value (R-12). Steps read
+    them here instead of from step_result and need not remove them —
+    run_pipeline does that when the run ends.
     """
-    candidate = os.path.join(REPROCESS_DIR, filename)
-    if os.path.exists(candidate):
-        name, ext = os.path.splitext(filename)
-        candidate = os.path.join(REPROCESS_DIR, f"{name}_{debug_key}{ext}")
-    return candidate
+    return dict(getattr(job, RUN_PARAMS_ATTR, None) or {})
+
+
+@dataclass
+class Source:
+    """Where a job's content can be taken from for a new run."""
+    kind: str                 # "local" (a file) or "immich" (an asset id)
+    location: str
+    sha256: str | None = None
+    copy_id: int | None = None  # file_copies row, None for a copy only the old job fields know
+    checked: bool = True      # False: a file from the old fields whose content could not be compared
 
 
 def _is_immich_target(target_path: str | None) -> bool:
@@ -58,195 +97,395 @@ def _is_immich_target(target_path: str | None) -> bool:
     return bool(target_path and target_path.startswith("immich:"))
 
 
-async def _move_file_for_reprocess(job) -> bool:
-    """Move the job's current file (+ sidecar, - log) into REPROCESS_DIR.
+def _local_path(path: str | None) -> str | None:
+    if not path or path.startswith(("immich:", "immich-pending:")):
+        return None
+    return os.path.abspath(os.path.normpath(path))
 
-    Source resolution order:
-      1. `target_path` (if it's a real disk path that exists)
-      2. `original_path` (if it exists on disk)
-      3. `target_path` if it's an `immich:<asset_id>` reference — in
-         that case the asset is downloaded from Immich into the
-         reprocess dir. This is the path used for jobs whose only
-         remaining copy lives in Immich (the inbox file was already
-         deleted by IA-08 after the successful upload).
 
-    Updates `job.original_path` to the new local location. Clears
-    `job.target_path` **only when it pointed to a now-stale local file
-    path** — an `immich:<asset_id>` reference is preserved so the job
-    stays linked to its Immich data.
+def _inside(path: str, directory: str) -> bool:
+    path = os.path.abspath(os.path.normpath(path))
+    directory = os.path.abspath(os.path.normpath(directory))
+    return path.startswith(directory.rstrip(os.sep) + os.sep)
 
-    Returns True if the file is now available in REPROCESS_DIR (either
-    via local move or Immich download), False if no source could be
-    located anywhere.
+
+def _is_file(path: str) -> bool:
+    return os.path.isfile(path) and not os.path.islink(path)
+
+
+def _free_name(directory: str, filename: str, debug_key: str) -> str:
+    """A name that is free in `directory` together with its .xmp companion.
+
+    A taken name gets the debug key, as before. Only a wish: fileops
+    reserves the name atomically and adds a counter if it got taken since.
     """
-    src = None
-    if job.target_path and not _is_immich_target(job.target_path) and os.path.exists(job.target_path):
-        src = job.target_path
-    elif job.original_path and os.path.exists(job.original_path):
-        src = job.original_path
+    stem, ext = os.path.splitext(filename)
+    names = [filename, f"{stem}_{debug_key}{ext}"]
+    names += [f"{stem}_{debug_key}_{n}{ext}" for n in range(1, 100)]
+    for name in names:
+        path = os.path.join(directory, name)
+        if not os.path.lexists(path) and not os.path.lexists(path + ".xmp"):
+            return name
+    return filename
 
-    if not src:
-        # Last-resort: download the original from Immich into REPROCESS_DIR.
-        # This makes retry work for jobs whose only surviving copy lives in
-        # Immich — the typical state for any job whose inbox file IA-08
-        # already removed after upload.
-        #
-        # The asset id comes from either handle: IA-08 writes
-        # `target_path = immich:<id>` once the upload succeeded, but a job
-        # that failed *before* that still knows its asset via
-        # `immich_asset_id`. For Immich-sourced jobs that id is the only
-        # handle there is — their local copy lives in a container temp dir
-        # that a redeploy wipes, so without this fallback every retry fails
-        # on the missing file (live: MA-2026-70150).
-        asset_id = None
-        if _is_immich_target(job.target_path):
-            asset_id = job.target_path[len("immich:"):]
-        elif job.immich_asset_id:
-            asset_id = job.immich_asset_id
-        if asset_id:
-            try:
-                # Lazy import to avoid an immich_client → reprocess
-                # circular at module-load time and to keep this module
-                # importable in tests that don't need Immich at all.
-                from immich_client import download_asset, get_user_api_key
-                user_api_key = None
-                if job.immich_user_id:
-                    user_api_key = await get_user_api_key(job.immich_user_id)
-                await asyncio.to_thread(os.makedirs, REPROCESS_DIR, exist_ok=True)
-                downloaded = await download_asset(
-                    asset_id, REPROCESS_DIR, api_key=user_api_key,
-                )
-            except Exception:
-                # Asset gone from Immich too — no source anywhere. Apply the
-                # same stale-target cleanup the no-source tail below does, so
-                # reaching this branch via immich_asset_id leaves the job in
-                # the state callers saw before that fallback existed.
-                if not _is_immich_target(job.target_path):
-                    job.target_path = None
-                return False
 
-            # Move the just-downloaded file to a debug-key-suffixed name
-            # so concurrent reprocesses of different jobs that happen to
-            # have the same Immich filename don't collide.
-            dst = _resolve_reprocess_path(os.path.basename(downloaded), job.debug_key)
-            if downloaded != dst:
-                await log_info(
-                    "reprocess",
-                    f"{job.debug_key} os.rename Download → reprocess wird ausgeführt",
-                    f"src={downloaded} dst={dst}",
-                )
-                try:
-                    await asyncio.to_thread(os.rename, downloaded, dst)
-                except Exception as exc:
-                    await log_info(
-                        "reprocess",
-                        f"{job.debug_key} os.rename Download → reprocess fehlgeschlagen",
-                        f"error={type(exc).__name__}: {exc}",
-                    )
-                    raise
-                await log_info(
-                    "reprocess",
-                    f"{job.debug_key} os.rename Download → reprocess OK",
-                    f"dst={dst}",
-                )
-            job.original_path = dst
-            # Keep target_path = "immich:<id>" so IA-08's webhook branch
-            # (cached in step_result) still recognises the asset.
-            return True
-
-        # Nothing to move — caller decides whether to fail or continue.
-        # Clear a stale local target_path; preserve immich: references.
-        if not _is_immich_target(job.target_path):
-            job.target_path = None
+def _is_own_log(path: str, debug_key: str) -> bool:
+    """The .log next to an error file is MediaAssistant's own if it starts
+    with this job's debug key (pipeline._move_to_error writes it so)."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.readline().strip() == f"Debug-Key: {debug_key}"
+    except OSError:
         return False
 
-    await asyncio.to_thread(os.makedirs, REPROCESS_DIR, exist_ok=True)
-    dst = _resolve_reprocess_path(os.path.basename(src), job.debug_key)
-    await log_info(
-        "reprocess",
-        f"{job.debug_key} safe_move → reprocess wird ausgeführt",
-        f"src={src} dst={dst}",
-    )
+
+def _field_hashes(job) -> set[str]:
+    """Content hashes the job's own fields know (scan hash, hash after a
+    direct metadata write, hashes a cut-short retry noted)."""
+    sr = job.step_result or {}
+    ia07 = sr.get("IA-07") if isinstance(sr.get("IA-07"), dict) else {}
+    marker = sr.get(PREPARE_SOURCE) if isinstance(sr.get(PREPARE_SOURCE), dict) else {}
+    hashes = {job.file_hash, ia07.get("file_hash"), *(marker.get("sha256") or [])}
+    return {h for h in hashes if h}
+
+
+async def own_copies(job, states=None, kinds=CONTENT_KINDS) -> list[FileCopy]:
+    """Register rows this job owns — this job, not an earlier one with the
+    same id.
+
+    SQLite hands the id of the newest job to the next one once that job row
+    is deleted, and the register keeps the rows of the deleted job (the
+    ledger may not lose history). Such a row is older than the job and none
+    of the job's own operations touched it: it is skipped. A row this job
+    created, or one its operations moved, downloaded or took over
+    (`transfer`) after the job existed, counts.
+    """
+    since = job.created_at
+    query = select(FileCopy).where(FileCopy.job_id == job.id, FileCopy.kind.in_(kinds))
+    if states:
+        query = query.where(FileCopy.state.in_(states))
+    async with async_session() as session:
+        rows = list((await session.execute(query.order_by(FileCopy.id))).scalars().all())
+        if since is None or not rows:
+            return rows
+        old = [r.id for r in rows if r.created_at is None or r.created_at < since]
+        touched = set()
+        if old:
+            for copy_id, dst_copy_id in (await session.execute(
+                    select(FileOp.copy_id, FileOp.dst_copy_id).where(
+                        FileOp.job_id == job.id, FileOp.created_at >= since,
+                        or_(FileOp.copy_id.in_(old), FileOp.dst_copy_id.in_(old))))).all():
+                touched.update((copy_id, dst_copy_id))
+    return [r for r in rows if r.id not in old or r.id in touched]
+
+
+async def known_hashes(job) -> set[str]:
+    """Every content hash this job's file ever had: its fields, its copies in
+    the register (and the copies it shares) and its ledger (e.g. the hash
+    before a metadata write)."""
+    hashes = _field_hashes(job)
+    own = await own_copies(job)
+    hashes.update(r.sha256 for r in own if r.sha256)
+    own_ids = [r.id for r in own]
+    since = job.created_at or datetime.min
+    async with async_session() as session:
+        hashes.update((await session.execute(
+            select(FileCopy.sha256).join(AssetRef, AssetRef.location == FileCopy.location)
+            .where(AssetRef.job_id == job.id, AssetRef.created_at >= since,
+                   FileCopy.kind.in_(CONTENT_KINDS), FileCopy.sha256.isnot(None))
+        )).scalars().all())
+        if own_ids:
+            for before, after in (await session.execute(
+                    select(FileOp.sha256_before, FileOp.sha256_after).where(
+                        FileOp.job_id == job.id, FileOp.created_at >= since,
+                        or_(FileOp.copy_id.in_(own_ids), FileOp.dst_copy_id.in_(own_ids))))).all():
+                hashes.update(h for h in (before, after) if h)
+    return hashes
+
+
+async def register_row_at(path: str) -> FileCopy | None:
+    """The present register row at a local path, if any."""
+    return await _register_row_at(os.path.abspath(os.path.normpath(path)))
+
+
+async def _register_row_at(path: str) -> FileCopy | None:
+    async with async_session() as session:
+        return (await session.execute(
+            select(FileCopy).where(FileCopy.location == path, FileCopy.state == "present")
+        )).scalar()
+
+
+async def _debug_key_of(job_id: int | None) -> str:
+    if job_id is None:
+        return "keinem Job"
+    async with async_session() as session:
+        key = (await session.execute(select(Job.debug_key).where(Job.id == job_id))).scalar()
+    return key or f"Job #{job_id}"
+
+
+async def _other_jobs_at(path: str, job_id: int, *, statuses=None) -> list[str]:
+    """Debug keys of other jobs whose original_path or target_path is `path`."""
+    query = select(Job.debug_key).where(
+        Job.id != job_id, or_(Job.original_path == path, Job.target_path == path))
+    if statuses:
+        query = query.where(Job.status.in_(statuses))
+    async with async_session() as session:
+        return list((await session.execute(query.limit(5))).scalars().all())
+
+
+async def job_api_key(job) -> str | None:
+    """API key for the job's Immich user (None = the global key). A job whose
+    user is gone gets no key at all: the global key sees another account."""
+    if not job.immich_user_id:
+        return None
+    from immich_client import get_user_api_key
+    key = await get_user_api_key(job.immich_user_id)
+    if not key:
+        raise fileops.FileOpRefused(f"Immich-Zugang #{job.immich_user_id} des Jobs ist nicht mehr hinterlegt")
+    return key
+
+
+async def own_local_copy(job) -> FileCopy | None:
+    """A local copy this job owns that verifies right now."""
+    target, original = _local_path(job.target_path), _local_path(job.original_path)
+    rows = await own_copies(job, states=("present",), kinds=_LOCAL_CONTENT_KINDS)
+    rows.sort(key=lambda r: (r.location != target, r.location != original, -r.id))
+    for row in rows:
+        checked = await fileops.verify(row, actor=ACTOR)
+        if checked.state == "present":
+            return checked
+    return None
+
+
+async def _local_from_fields(job, known: set[str], notes: list[str]) -> Source | None:
+    """A file named by target_path / original_path, if it is this job's content."""
+    seen = set()
+    for label, path in (("target_path", _local_path(job.target_path)),
+                        ("original_path", _local_path(job.original_path))):
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        if not await asyncio.to_thread(_is_file, path):
+            continue
+        row = await _register_row_at(path)
+        if row is not None and row.job_id != job.id:
+            notes.append(f"{path} gehört {await _debug_key_of(row.job_id)} — nicht übernommen")
+            continue
+        busy = await _other_jobs_at(path, job.id, statuses=("queued", "processing"))
+        if busy:
+            notes.append(f"{path} wird von {', '.join(busy)} verarbeitet — nicht übernommen")
+            continue
+        digest = await asyncio.to_thread(_sha256, path)
+        if known:
+            if digest in known:
+                return Source("local", path, digest, row.id if row else None)
+            notes.append(f"{path} hat anderen Inhalt als dieser Job (SHA256 {digest[:12]}…) — "
+                         "fremde Datei, nicht übernommen")
+            continue
+        # Nothing records this job's content (old job without a hash). Only a
+        # file no other job names is taken, and the log says it was unchecked.
+        others = await _other_jobs_at(path, job.id)
+        if others:
+            notes.append(f"{path}: Inhalt nicht prüfbar (kein Hash bekannt) und auch von "
+                         f"{', '.join(others)} verwendet — nicht übernommen")
+            continue
+        return Source("local", path, digest, row.id if row else None, checked=False)
+    return None
+
+
+async def _immich_source(job, notes: list[str]) -> Source | None:
+    """The job's own Immich asset, or one it shares with another job."""
+    import immich_client
+
     try:
-        await asyncio.to_thread(safe_move, src, dst, job.debug_key)
-    except Exception as exc:
-        await log_info(
-            "reprocess",
-            f"{job.debug_key} safe_move → reprocess fehlgeschlagen",
-            f"src={src} dst={dst} error={type(exc).__name__}: {exc}",
-        )
-        raise
-    await log_info(
-        "reprocess",
-        f"{job.debug_key} safe_move → reprocess OK",
-        f"dst={dst}",
-    )
-
-    # Companion .xmp sidecar — move it alongside so IA-07 in sidecar mode
-    # finds the metadata at the new location instead of orphaning it.
-    sidecar_src = src + ".xmp"
-    if os.path.exists(sidecar_src):
-        sidecar_dst = dst + ".xmp"
-        # Avoid clobbering a leftover sidecar at the destination from
-        # an interrupted prior reprocess of the same job.
-        if os.path.exists(sidecar_dst):
-            from file_operations import safe_remove
-            safe_remove(sidecar_dst)
-        await log_info(
-            "reprocess",
-            f"{job.debug_key} safe_move sidecar → reprocess wird ausgeführt",
-            f"src={sidecar_src} dst={sidecar_dst}",
-        )
+        key = await job_api_key(job)
+    except fileops.FileOpRefused as exc:
+        notes.append(str(exc))
+        return None
+    rows = list(reversed(await own_copies(job, states=("present",), kinds=("immich",))))
+    async with async_session() as session:
+        rows += list((await session.execute(select(FileCopy).where(
+            FileCopy.kind == "immich", FileCopy.state == "present", FileCopy.job_id != job.id,
+            FileCopy.location.in_(select(AssetRef.location).where(
+                AssetRef.job_id == job.id, AssetRef.kind == "immich",
+                AssetRef.created_at >= (job.created_at or datetime.min))),
+        ).order_by(FileCopy.id.desc()))).scalars().all())
+    tried = set()
+    for row in rows:
+        tried.add(row.location)
         try:
-            await asyncio.to_thread(safe_move, sidecar_src, sidecar_dst, job.debug_key)
-        except Exception as exc:
-            await log_info(
-                "reprocess",
-                f"{job.debug_key} safe_move sidecar → reprocess fehlgeschlagen",
-                f"src={sidecar_src} dst={sidecar_dst} error={type(exc).__name__}: {exc}",
-            )
-            raise
-        await log_info(
-            "reprocess",
-            f"{job.debug_key} safe_move sidecar → reprocess OK",
-            f"dst={sidecar_dst}",
-        )
+            checked = await fileops.verify(row, actor=ACTOR)
+        except fileops.FileOpError as exc:
+            notes.append(f"Asset {row.location}: {exc}")
+            continue
+        if checked.state == "present":
+            return Source("immich", checked.location, checked.sha256, checked.id)
+        notes.append(f"Asset {row.location}: {checked.state}")
 
-        # The cached IA-07 step result still points at the old sidecar
-        # location. Update it so any step that re-runs after the move
-        # (e.g. IA-08 picking up the sidecar to upload alongside the
-        # asset) sees the new path instead of looking at a stale one.
-        sr = job.step_result or {}
+    legacy = []
+    if _is_immich_target(job.target_path):
+        legacy.append(job.target_path[len("immich:"):])
+    if job.immich_asset_id:
+        legacy.append(job.immich_asset_id)
+    for asset_id in dict.fromkeys(legacy):
+        if asset_id in tried:
+            continue
+        try:
+            state = await immich_client.get_asset_state(asset_id, api_key=key)
+        except Exception as exc:
+            notes.append(f"Asset {asset_id}: Zustand in Immich unbekannt ({type(exc).__name__}: {exc})")
+            continue
+        if state == immich_client.ASSET_PRESENT:
+            return Source("immich", asset_id)
+        notes.append(f"Asset {asset_id}: {state}")
+    return None
+
+
+async def find_source(job, known: set[str] | None = None) -> tuple[Source | None, list[str]]:
+    """Where this job's content can be taken from; (None, reasons) if nowhere.
+
+    Order: a local copy the job owns (register, hash verified now); a file
+    named by target_path / original_path whose hash is one of the job's
+    (`known_hashes`); the job's Immich asset. Reads only — apart from the
+    register noting a copy as missing when its check fails. Call it without
+    flushed writes in your session (fileops writes in sessions of its own).
+    """
+    notes: list[str] = []
+    if known is None:
+        known = await known_hashes(job)
+    row = await own_local_copy(job)
+    if row is not None:
+        return Source("local", row.location, row.sha256, row.id), notes
+    source = await _local_from_fields(job, known, notes)
+    if source is None:
+        source = await _immich_source(job, notes)
+    return source, notes
+
+
+async def _carry_companions(job, src: str, dst: str, actor: str) -> str | None:
+    """After the move of src → dst: move the .xmp sidecar along (returns its
+    new place) and drop this job's .log of the previous run. A failure here
+    is logged and does not stop the reprocess."""
+    key = job.debug_key
+    moved_sidecar = None
+    sidecar = src + ".xmp"
+    if await asyncio.to_thread(_is_file, sidecar):
+        try:
+            res = await fileops.move(job, sidecar, dst + ".xmp", actor=actor, kind="sidecar")
+            moved_sidecar = res.location
+            if moved_sidecar != dst + ".xmp":
+                await log_warning("reprocess", f"{key} Sidecar unter anderem Namen abgelegt",
+                                  f"{sidecar} → {moved_sidecar} (Name {dst}.xmp war belegt)")
+        except fileops.FileOpError as exc:
+            await log_warning("reprocess", f"{key} Sidecar nicht mitverschoben: {os.path.basename(sidecar)}",
+                              f"{sidecar}: {exc}")
+    for log_path in (src + ".log", f"{src}.{key}.log"):
+        if not await asyncio.to_thread(_is_file, log_path):
+            continue
+        if not await asyncio.to_thread(_is_own_log, log_path, key):
+            continue
+        try:
+            await fileops.register_existing(job, "temp", log_path)
+            await fileops.discard(job, log_path, actor=actor, reason="Fehlerprotokoll des vorherigen Laufs")
+        except Exception as exc:
+            await log_warning("reprocess", f"{key} Fehlerprotokoll nicht entfernt: {os.path.basename(log_path)}",
+                              f"{log_path}: {type(exc).__name__}: {exc}")
+    return moved_sidecar
+
+
+async def materialize(job, source: Source, *, actor: str = ACTOR) -> tuple[str, str | None]:
+    """Bring the source into REPROCESS_DIR; returns (file, moved sidecar or None).
+
+    A local copy already inside REPROCESS_DIR stays where it is (a resumed
+    retry). Others are moved there by fileops (copy, verify, then remove the
+    source; never over another file). An Immich asset is downloaded into a
+    work copy of its own. Raises fileops.FileOpError; nothing is lost then.
+    """
+    reprocess_dir = REPROCESS_DIR
+    if source.kind == "local":
+        if _inside(source.location, reprocess_dir):
+            return source.location, None
+        if not source.checked:
+            await log_warning("reprocess", f"{job.debug_key} Quelle ohne Inhaltsprüfung übernommen",
+                              f"{source.location}: für diesen Job ist kein Hash bekannt")
+        await asyncio.to_thread(os.makedirs, reprocess_dir, exist_ok=True)
+        name = await asyncio.to_thread(_free_name, reprocess_dir, os.path.basename(source.location),
+                                       job.debug_key)
+        res = await fileops.move(job, source.location, os.path.join(reprocess_dir, name), actor=actor,
+                                 kind="work", expected_sha256=source.sha256)
+        sidecar = await _carry_companions(job, source.location, res.location, actor)
+        return res.location, sidecar
+
+    key = await job_api_key(job)
+    res = await fileops.download(job, source.location, reprocess_dir, actor=actor, kind="work", api_key=key)
+    if source.copy_id is None:
+        # The asset was known only from the job fields; its content is known now.
+        try:
+            await fileops.register_existing(job, "immich", source.location, sha256=res.sha256,
+                                            size=res.size, verified=True)
+        except Exception as exc:
+            await log_warning("reprocess", f"{job.debug_key} Immich-Asset nicht im Register eingetragen",
+                              f"Asset {source.location}: {type(exc).__name__}: {exc}")
+    await log_info("reprocess", f"{job.debug_key} Original aus Immich geladen: {os.path.basename(res.location)}",
+                   f"Asset {source.location} → {res.location}")
+    return res.location, None
+
+
+def point_job_at(job, path: str, sidecar: str | None) -> None:
+    """The job's file now lies at `path` (in REPROCESS_DIR). A local
+    target_path is stale now; an `immich:<id>` reference stays so the job
+    remains linked to its Immich data."""
+    job.original_path = path
+    if not _is_immich_target(job.target_path):
+        job.target_path = None
+    if sidecar:
+        # A step that is kept (not re-run) still points at the old sidecar.
+        sr = dict(job.step_result or {})
         ia07 = sr.get("IA-07")
         if isinstance(ia07, dict) and ia07.get("sidecar_path"):
-            ia07["sidecar_path"] = sidecar_dst
-            sr["IA-07"] = ia07
+            sr["IA-07"] = dict(ia07, sidecar_path=sidecar)
             job.step_result = sr
             flag_modified(job, "step_result")
 
-    # Defensive: drop any leftover `.xmp.{debug_key}.tmp` from an interrupted
-    # ExifTool run at the new location.
-    stale_tmp = f"{dst}.xmp.{job.debug_key}.tmp"
-    if os.path.exists(stale_tmp):
-        from file_operations import safe_remove
-        safe_remove(stale_tmp)
 
-    # Remove .log file at the source location (it described the previous
-    # run; the next run will produce a fresh one if needed).
-    log_src = src + ".log"
-    if os.path.exists(log_src):
-        from file_operations import safe_remove
-        safe_remove(log_src)
+def missing_source_message(notes: list[str]) -> str:
+    message = ("Datei nicht auffindbar — Retry abgebrochen. Kein geprüftes Exemplar dieses Jobs "
+               "gefunden (weder lokal noch in Immich).")
+    if notes:
+        message += " " + "; ".join(notes)
+    return message[:2000]
 
-    job.original_path = dst
-    # Only clear target_path if it pointed to a now-stale local file
-    # location. An `immich:<asset_id>` reference still points to a valid
-    # asset that survives the retry — keep it so the job remains linked
-    # to its Immich data even when IA-08's cached step result skips
-    # re-running on retry.
-    if not _is_immich_target(job.target_path):
-        job.target_path = None
-    return True
+
+async def resolved_donor(job) -> bool:
+    """A donor whose duplicate group was resolved: its content lives on in
+    the kept job, the Immich asset it still names belongs to that job now.
+    Only an own local copy that still verifies would make it retryable."""
+    if job.status != "done" or not (job.error_message or "").startswith("Duplicate deleted"):
+        return False
+    return await own_local_copy(job) is None
+
+
+async def resume_prepare_source(session, job, *, actor: str = ACTOR) -> tuple[bool, list[str]]:
+    """Finish a retry that was cut short after it dropped the old results
+    (R-10b): find the source again, bring it into REPROCESS_DIR, drop the
+    marker. `job` belongs to `session`, which must hold no flushed writes.
+    Commits. Returns (ok, reasons)."""
+    source, notes = await find_source(job)
+    if source is None:
+        return False, notes
+    try:
+        path, sidecar = await materialize(job, source, actor=actor)
+    except fileops.FileOpError as exc:
+        return False, notes + [str(exc)]
+    point_job_at(job, path, sidecar)
+    sr = dict(job.step_result or {})
+    sr.pop(PREPARE_SOURCE, None)
+    job.step_result = sr
+    flag_modified(job, "step_result")
+    await session.commit()
+    await log_info("reprocess", f"{job.debug_key} unterbrochenen Retry fortgesetzt",
+                   f"Quelle {source.location} → {path}")
+    return True, notes
 
 
 # Pipeline order — used for cascade-dropping downstream steps. Mirrors
@@ -264,33 +503,33 @@ def _reset_step_results(
     drop_step_statuses: set[str] | None,
     drop_step_codes: set[str] | None = None,
     inject_steps: dict[str, dict] | None,
+    run_params: dict | None = None,
 ) -> None:
     """Apply the chosen step_result reset policy in-place on `job`.
 
     Policies (combinable, applied in order):
+    - The previous run's parameters (keys starting with "_") are always
+      dropped: a reset starts a new run, which gets only what the caller
+      passes (R-12: a leaked _force_reupload used to survive every retry).
     - keep_steps: if set, keep ONLY these step codes (drop everything else)
     - drop_step_statuses: drop step codes whose result has one of these
       statuses (e.g. {"error", "warning"} for retry of soft failures).
     - drop_step_codes: drop these step codes regardless of status — used
-      by `reset_job_for_retry()` to act on `error_message="Warnungen in:
-      IA-XX"` even when the cached step_result no longer carries the
-      warning status (e.g. because a previous partial retry overwrote
-      it with a successful result). Live-Vorfall MA-2026-28121 vor
-      v2.28.35.
+      to act on `error_message="Warnungen in: IA-XX"` even when the cached
+      step_result no longer carries the warning status. Live-Vorfall
+      MA-2026-28121 vor v2.28.35.
     - inject_steps: merge these synthetic step results in last (e.g.
-      {"IA-02": {"status": "skipped", "reason": "..."}})
+      {"IA-02": {"status": "skipped", "reason": "..."}}); keys starting
+      with "_" are run parameters, like run_params.
+    - run_params: parameters for the next run (e.g. {"_force_reupload": True}).
 
     **Cascade**: when ANY step is dropped (via either status or explicit
     code), every step that runs *after* it in the pipeline order is
     dropped too. Otherwise the cached downstream results would still
-    reflect the OLD output of the dropped step — IA-07 (writes
-    EXIF/sidecar tags) and IA-08 (uploads to Immich + writes Immich
-    tags) consume IA-05's classification, so a re-run of IA-05 alone
-    is not enough; the downstream cached results would still carry the
-    old keywords. Live-Vorfälle MA-2026-28111 (v2.28.33), MA-2026-28121
-    (v2.28.35).
+    reflect the OLD output of the dropped step. Live-Vorfälle MA-2026-28111
+    (v2.28.33), MA-2026-28121 (v2.28.35).
     """
-    current = dict(job.step_result or {})
+    current = {k: v for k, v in (job.step_result or {}).items() if not is_run_param(k)}
 
     if keep_steps is not None:
         current = {k: v for k, v in current.items() if k in keep_steps}
@@ -306,8 +545,6 @@ def _reset_step_results(
                 matched.add(step_code)
 
     if matched:
-        # Cascade: for each matched step, drop the step itself plus
-        # everything that runs after it in the pipeline order.
         to_drop = set(matched)
         for matched_code in matched:
             if matched_code in _PIPELINE_ORDER:
@@ -320,6 +557,8 @@ def _reset_step_results(
 
     if inject_steps:
         current.update(inject_steps)
+    if run_params:
+        current.update(run_params)
 
     job.step_result = current
     flag_modified(job, "step_result")
@@ -333,8 +572,10 @@ async def prepare_job_for_reprocess(
     drop_step_statuses: set[str] | None = None,
     drop_step_codes: set[str] | None = None,
     inject_steps: dict[str, dict] | None = None,
+    run_params: dict | None = None,
     move_file: bool = True,
     commit: bool = True,
+    actor: str = ACTOR,
 ) -> bool:
     """Reset `job` for a fresh pipeline run and (optionally) commit.
 
@@ -342,29 +583,42 @@ async def prepare_job_for_reprocess(
     happen *before* this helper runs (e.g. the atomic `error → processing`
     transition in `reset_job_for_retry()`).
 
+    With move_file the job's own content is located (`find_source`) and
+    brought into REPROCESS_DIR (`materialize`). The file operations commit
+    in sessions of their own, so the caller's session must not hold
+    flushed writes at that point (SQLite has one write lock).
+
     Args:
         session: active SQLAlchemy AsyncSession the job is bound to.
         job: ORM Job instance to reset.
         keep_steps: if given, only these step codes survive the reset.
         drop_step_statuses: drop step results with these statuses.
         inject_steps: synthetic step results merged in last.
-        move_file: when True (default), move the file + sidecar to the
-            internal reprocess dir. Set False for in-place reprocessing
-            (e.g. tag_cleanup, where the file stays at target_path and
-            only its EXIF was wiped beforehand).
+        run_params: parameters for exactly the next run (keys start with "_").
+        move_file: when True (default), bring the file + sidecar into the
+            internal reprocess dir. Set False for in-place reprocessing.
         commit: when True (default), commit the session at the end.
 
     Returns:
-        True if a file was moved (or move_file was False),
-        False if move_file was True but no source file could be located.
+        True if the file is in place (or move_file was False), False if no
+        verified copy of the job's content could be found or moved; the job
+        is then left as it was (apart from a stale local target_path).
     """
-    moved_or_skipped = True
     if move_file:
-        moved_or_skipped = await _move_file_for_reprocess(job)
-        if not moved_or_skipped:
-            # No source file found anywhere — abort without changing the job.
-            # Callers check the return value and can set error status themselves.
+        source, notes = await find_source(job)
+        if source is None:
+            await log_warning("reprocess", f"{job.debug_key} Kein Exemplar für die Neuverarbeitung gefunden",
+                              "; ".join(notes) or "weder lokal noch in Immich")
+            if not _is_immich_target(job.target_path):
+                job.target_path = None
             return False
+        try:
+            path, sidecar = await materialize(job, source, actor=actor)
+        except fileops.FileOpError as exc:
+            await log_warning("reprocess", f"{job.debug_key} Neuverarbeitung: Datei nicht bereitgestellt",
+                              f"{source.location}: {exc}")
+            return False
+        point_job_at(job, path, sidecar)
 
     _reset_step_results(
         job,
@@ -372,24 +626,13 @@ async def prepare_job_for_reprocess(
         drop_step_statuses=drop_step_statuses,
         drop_step_codes=drop_step_codes,
         inject_steps=inject_steps,
+        run_params=run_params,
     )
 
     job.status = "queued"
     job.error_message = None
-    if not move_file:
-        # In-place reprocess: target_path stays so IA-08 knows where the
-        # file already lives. Caller is responsible for the consistency
-        # of that path.
-        pass
-    else:
-        # Only clear target_path if it was a now-stale local file path.
-        # An `immich:<asset_id>` reference still points to a valid asset
-        # — preserve it so the job stays linked to its Immich data after
-        # IA-08's cached step result skips re-execution on retry.
-        if not _is_immich_target(job.target_path):
-            job.target_path = None
 
     if commit:
         await session.commit()
 
-    return moved_or_skipped
+    return True
