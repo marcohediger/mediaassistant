@@ -73,6 +73,10 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
                 if sidecar_path and os.path.exists(sidecar_path):
                     sidecar_fh = stack.enter_context(open(sidecar_path, "rb"))
                     files["sidecarData"] = (os.path.basename(sidecar_path), sidecar_fh)
+                # deviceAssetId/deviceId are required by Immich 2.x. Immich 3.x
+                # removed both from the API: it accepts and silently drops them,
+                # and asset responses no longer carry deviceId — so on 3.x the
+                # poller cannot recognise MediaAssistant's own uploads by it.
                 resp = await client.post(
                     f"{url}/api/assets",
                     headers=headers,
@@ -712,7 +716,14 @@ async def get_asset_original(asset_id: str, *, api_key: str | None = None) -> tu
 
 
 async def copy_asset_metadata(from_id: str, to_id: str, *, api_key: str | None = None) -> dict:
-    """Copy metadata (albums, favorites, faces, stacks, shared links) from one asset to another."""
+    """Copy albums, favorite, shared links, stack and sidecar from one asset to another.
+
+    Measured on Immich 3.1 (docs/IMMICH_3_VERHALTEN.md): tags, description,
+    rating and date edits are not copied as such. With Immich's default
+    sidecar=true the target's own XMP is deleted and replaced by the source's,
+    and the re-extraction that follows sets the target's tags, description,
+    rating and date to the source's values.
+    """
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich URL or API key not configured")
@@ -768,6 +779,123 @@ async def delete_asset(asset_id: str, *, force: bool = True, api_key: str | None
         f"force={force}",
     )
     return {"status": "deleted", "asset_id": asset_id}
+
+
+ASSET_PRESENT = "present"
+ASSET_TRASHED = "trashed"
+ASSET_MISSING = "missing"
+
+
+async def get_asset_state(asset_id: str, *, api_key: str | None = None) -> str:
+    """Return ASSET_PRESENT, ASSET_TRASHED or ASSET_MISSING for an asset.
+
+    Measured on Immich 3.1 (docs/IMMICH_3_VERHALTEN.md):
+
+      - present: GET /api/assets/{id} -> 200 with isTrashed false.
+      - trashed: 200 with isTrashed true. GET, download and thumbnail keep
+        working for a trashed asset, which is why a plain "GET answered 200"
+        must never count as "the asset is safe". A force-deleted asset also
+        reads as trashed for the few seconds until Immich's purge job ran.
+      - missing: 400 "Not found or no asset.read access" (404 on some
+        versions). Immich does not distinguish "never existed" from "belongs
+        to another account", so missing means "not visible to this key".
+        That includes assets in the locked folder (lock_asset): an API key
+        has no elevated session, so Immich hides them from GET and DELETE.
+
+    Raises on everything else — timeouts, 5xx, 401/403, validation errors.
+    A deletion decision must not be taken on a transient failure that only
+    looks like "missing".
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+    if not asset_id:
+        raise ValueError("asset_id is required")
+    async with httpx.AsyncClient(timeout=ASSET_INFO_TIMEOUT) as client:
+        resp = await client.get(
+            f"{url}/api/assets/{asset_id}",
+            headers={"x-api-key": api_key},
+        )
+    # Only a JSON answer comes from Immich; an HTML 404 from a reverse proxy
+    # in front of it says nothing about the asset.
+    is_json = "json" in resp.headers.get("content-type", "").lower()
+    if resp.status_code == 200 and is_json:
+        return ASSET_TRASHED if resp.json().get("isTrashed") else ASSET_PRESENT
+    if resp.status_code in (400, 404) and is_json:
+        body = resp.json() or {}
+        msg = body.get("message")
+        # 400 is both "not found / no access" and a validation error; only
+        # the former carries a plain message without an `errors` list.
+        if resp.status_code == 404 or (
+            isinstance(msg, str) and "not found" in msg.lower() and not body.get("errors")
+        ):
+            return ASSET_MISSING
+    raise RuntimeError(
+        f"Immich asset state unknown: HTTP {resp.status_code} — "
+        f"{_server_message(resp) or resp.text[:120]}"
+    )
+
+
+async def trash_asset(asset_id: str, *, api_key: str | None = None) -> dict:
+    """Move an asset to Immich's trash instead of deleting it for good.
+
+    DELETE /api/assets with force=false. The asset stays restorable with
+    restore_asset() until Immich purges it: the nightly job (default 00:00)
+    removes trashed assets older than the server setting trash.days
+    (default 30). The result is verified with get_asset_state(), so a caller
+    never records a trash that did not happen.
+    """
+    await delete_asset(asset_id, force=False, api_key=api_key)
+    state = await get_asset_state(asset_id, api_key=api_key)
+    if state != ASSET_TRASHED:
+        await log_warning(
+            "immich_client",
+            f"trash_asset {asset_id}: Asset liegt danach nicht im Papierkorb",
+            f"state={state}",
+        )
+        raise RuntimeError(f"asset {asset_id} not in trash after delete (state={state})")
+    return {"status": "trashed", "asset_id": asset_id}
+
+
+async def restore_asset(asset_id: str, *, api_key: str | None = None) -> dict:
+    """Bring a trashed asset back via POST /api/trash/restore/assets.
+
+    Immich answers {"count": n} with n = number of ids sent, whether or not
+    they were in the trash, so success is checked with get_asset_state().
+    An asset that was already purged answers 400 and cannot come back.
+    Restoring an asset that is not in the trash is a no-op and succeeds.
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+
+    await log_info("immich_client", f"restore_asset {asset_id} wird ausgeführt")
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{url}/api/trash/restore/assets",
+                headers=headers,
+                json={"ids": [asset_id]},
+            )
+        if resp.status_code not in (200, 204):
+            raise RuntimeError(
+                f"Immich restore failed: HTTP {resp.status_code} — "
+                f"{_server_message(resp) or resp.text[:120]}"
+            )
+        state = await get_asset_state(asset_id, api_key=api_key)
+        if state != ASSET_PRESENT:
+            raise RuntimeError(f"asset {asset_id} not restored (state={state})")
+    except Exception as exc:
+        await log_info(
+            "immich_client",
+            f"restore_asset {asset_id} fehlgeschlagen",
+            f"error={type(exc).__name__}: {exc}",
+        )
+        raise
+
+    await log_info("immich_client", f"restore_asset {asset_id} OK")
+    return {"status": "restored", "asset_id": asset_id}
 
 
 async def add_asset_to_albums(asset_id: str, album_names: list[str], *, api_key: str | None = None) -> list[str]:
@@ -866,6 +994,11 @@ async def get_recent_assets(since: str | None = None, *, api_key: str | None = N
                 "order": "asc",
                 "type": media_type,
                 "withExif": True,
+                # Immich 2.x searched the timeline when visibility was omitted;
+                # 3.x searches every visibility except locked. Pinned so the
+                # poller keeps skipping archived assets and the hidden video
+                # halves of live photos, as it did on 2.x.
+                "visibility": "timeline",
             }
             if since:
                 body["createdAfter"] = since
