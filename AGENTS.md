@@ -50,12 +50,19 @@ MediaAssistant/
 │   ├── recovery.py             # Einmaliges beim Start: Wiederaufnahme, Einmal-Migrationen
 │   ├── fileops.py              # DER Weg für Dateioperationen: Protokoll, Register, Papierkorb
 │   ├── job_view.py             # Sicht auf einen Job (module_blocks, Verlauf) — nur lesend
+│   ├── runs.py                 # module_runs: einziger Schreiber, step_result als abgeleitete Sicht
+│   ├── reruns.py               # Aufträge „Neu ausführen": anlegen, Feeder, verfolgen, abbrechen
+│   ├── resources.py            # Betriebsmittel-Grenzen (ai, geo, immich, io, cpu), max_jobs
+│   ├── folder_path.py          # Ordnerstruktur → Tags/Alben je nach Set-Optionen
 │   ├── safe_file.py            # safe_move(): copy → verify hash → delete (nur noch Baustein von fileops)
 │   ├── ai_backends.py          # Loadbalancer für mehrere OpenAI-kompat. Endpunkte
 │   ├── immich_client.py        # REST-Client für Immich
 │   ├── system_logger.py        # log_info/warning/error → system_logs Tabelle
 │   ├── pipeline/               # Die 11 Pipeline-Steps + Helpers
 │   │   ├── __init__.py         # run_pipeline, retry_job, reset_job_for_retry
+│   │   ├── registry.py         # DIE Liste der Module: Reihenfolge, Abhängigkeiten, kritisch, Felder
+│   │   ├── executor.py         # führt die Module eines Jobs aus (Pipeline-Lauf und Neu-Ausführen)
+│   │   ├── rerun.py            # Neu ausführen: Vorschau, Kaskade, Vorbereitung eines Jobs
 │   │   ├── reprocess.py        # _move_file_for_reprocess, prepare_job_for_reprocess
 │   │   ├── step_ia01_exif.py   # IA-01 ExifTool
 │   │   ├── step_ia02_duplicates.py
@@ -70,6 +77,7 @@ MediaAssistant/
 │   │   ├── setup.py
 │   │   ├── review.py           # "Unknown" review queue
 │   │   ├── processing_sets.py  # JSON-API für Set-Liste und Set-Editor (Popup)
+│   │   ├── reruns.py           # /api/reruns: Module, Vorschau, Auftrag, Fortschritt, Abbrechen
 │   │   ├── tools.py            # Register "Werkzeuge": Tag-Aufräumen + Schreibweisen
 │   │   ├── diagnostics.py      # Nur-lesende Diagnose-API (Token aus Einstellungen)
 │   │   └── auth_oidc.py
@@ -111,17 +119,25 @@ Immich Auto-Tagging), Zeitplan, Sortier-Regeln, Kategorien, Ordner-Tags,
 OCR, Metadaten-Schreibmodus, Ziel-Ablage. Jeder Job trägt `set_id`;
 Pipeline-Steps holen Regeln, Kategorien, Basis-Pfad usw. über
 `sets.get_set(session, job.set_id)` — nie aus der globalen Config.
-Die App startet drei Hintergrund-Tasks: **Filewatcher** (Taktgeber über
+Die App startet diese Hintergrund-Tasks: **Filewatcher** (Taktgeber über
 die aktiven Sets; deren Eingänge reihen nur Jobs ein), **Pipeline-Worker**
-(der einzige Ort, der `run_pipeline` startet; zieht `queued`-Jobs in
-freie Slots, lädt Immich-Originale erst beim Start eines Jobs),
-**Health-Watcher** (überwacht AI-Backend + Geocoding und auto-pausiert
-die Pipeline bei Ausfall). `run_pipeline(job_id)` läuft die 11 Steps
-sequentiell, jeder Step schreibt sein Ergebnis als JSON in
-`job.step_result`. Failures unter IA-02..IA-06 sind weich (Warning),
-IA-01/IA-07/IA-08 sind kritisch (Job → `status='error'`, Datei wandert
-nach `<Basis-Pfad des Sets>/error/`). Finalizer IA-09/10/11 laufen
-IMMER, auch nach Critical-Failure.
+(der einzige Ort, der `run_pipeline` startet; zieht `queued`-Jobs, bis zu
+`resources.max_jobs()` gleichzeitig — Standard 2 × KI-Slots + 2 —, lädt
+Immich-Originale erst beim Start eines Jobs), **Rerun-Feeder**
+(`reruns.feeder`: bereitet Aufträge „Neu ausführen" vor und reiht sie ein,
+höchstens die Hälfte der Plätze), **Health-Watcher** (überwacht AI-Backend
++ Geocoding und auto-pausiert die Pipeline bei Ausfall) und die tägliche
+**Papierkorb-Leerung**. `run_pipeline(job_id)` übergibt die Module an
+`pipeline/executor.py`: Reihenfolge, Abhängigkeiten und kritische Module
+stehen nur in `pipeline/registry.py`; IA-03 läuft als Seiten-Task neben
+IA-04 (`pipeline.parallel_modules`); jedes Modul hält nur das
+Betriebsmittel, das es gerade braucht (`resources.py`: ai, geo, immich,
+io, cpu). Jeder Modul-Lauf ist eine Zeile in `module_runs` (`runs.py`
+schreibt als Einziger; `jobs.step_result` ist nur die abgeleitete Sicht
+„jüngster gültiger Lauf je Modul"). Failures unter IA-02..IA-06 sind
+weich (Warning), IA-01/IA-07/IA-08 sind kritisch (Job → `status='error'`,
+Datei wandert nach `<Basis-Pfad des Sets>/error/`). Finalizer IA-09/10/11
+laufen IMMER, auch nach Critical-Failure.
 
 **Regel:** Neue Eingänge, Retry-Knöpfe oder Reparaturen setzen einen Job
 auf `queued` — sie rufen nie selbst `run_pipeline`. Vor dem Umbau taten
@@ -138,7 +154,10 @@ das fünf Stellen, und nur eine hielt die Slot-Grenze.
   also Deutsch.
 
 ### Versionierung
-- SemVer-ish: `2.<MAJOR>.<MINOR>` in `backend/version.py`.
+- SemVer-ish: `<MAJOR>.<MINOR>.<PATCH>` in `backend/version.py` (bis 2.32.x
+  hiess die mittlere Stelle MAJOR; 3.0.0 ist der Umbau „Sets, Design,
+  Module & Datensicherheit" mit Datenbank-Migration).
+- Grosser Umbau mit Migration oder geändertem Verhalten für Nutzer: MAJOR.
 - Bei Bug-Fix oder kleinem Feature: PATCH (letzte Stelle) bumpen.
 - Bei größerem Feature: MINOR bumpen.
 - Bei jedem Bump: `VERSION_DATE = "YYYY-MM-DD"` mit aktuellem Datum.
@@ -262,6 +281,10 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_no_direct_step_result.py` | Wächter: `jobs.step_result` schreibt nur `runs.py` — meldet jede direkte Zuweisung, `Job(step_result=…)`, `flag_modified`, `.values(step_result=…)` und SQL-Text, Tests eingeschlossen (Datei:Zeile, `ALLOWLIST`) | `docker exec mediaassistant-dev python /app/test_no_direct_step_result.py` |
 | `backend/test_data_safety_local.py` | Reproducer der lokalen Datenverlust-Risiken (z. B. R-05, R-10b, ohne Immich), je Risiko ein Abschnitt; Pipeline muss pausiert sein | `docker exec mediaassistant-dev python /app/test_data_safety_local.py [R-05 …]` |
 | `backend/test_data_safety_immich.py` | Reproducer der Datenverlust-Risiken mit Immich (z. B. R-10e Absturz im Ersetzen), je Risiko ein Abschnitt; Pipeline muss pausiert sein | `docker exec mediaassistant-dev python /app/test_data_safety_immich.py [R-10e …]` |
+| `backend/test_module_runs.py` | `module_runs`: Schreiben über `runs.py`, Sicht `step_result`, Trigger, Migration aus `step_result` (optional auf Live-Kopie: Indexe, WAL, Dauer) | `docker exec mediaassistant-dev python /app/test_module_runs.py [kopie.db]` |
+| `backend/test_module_rerun.py` | Neu ausführen: Vorschau, Kaskade nach gelesenen Feldern, veraltet, KI nur auf Wunsch, Immich-Modus, Abbruch, Absturz in der Vorbereitung | `docker exec mediaassistant-dev python /app/test_module_rerun.py` |
+| `backend/test_executor.py` | Ausführung nach Abhängigkeiten: Register als einzige Quelle, IA-03 als Seiten-Task, Betriebsmittel-Grenzen, Stopp-Regeln | `docker exec mediaassistant-dev python /app/test_executor.py` |
+| `backend/test_immich_dedup.py` | Duplikat-Auflösung mit echtem Immich: geteiltes Asset bei Keep, Übertragung, Review-Fälle | `docker exec mediaassistant-dev python /app/test_immich_dedup.py` |
 
 ### Pflicht-Vorstufe: startet die App überhaupt?
 
@@ -332,6 +355,11 @@ echte DB) und verifiziert das Endergebnis:
 | **US-8: Kein Duplikat** | "Kein Duplikat" → volle Pipeline → Upload zu Immich → Asset + Tags korrekt |
 | **US-9: Retry nach Fehler** | Pipeline-Fehler → Retry → Datei landet korrekt in Immich |
 | **US-10: Folder-Tags → Album** | Datei in Subfolder → Album in Immich erstellt → Asset zugeordnet |
+| **US-11 … US-14: pHash, Keep, Batch-Clean** | pHash-Duplikat (andere Kompression), Keep mit Ordner-/Stichwort-Merge, Batch-Clean alle bzw. diese Seite |
+| **US-15: Geocoding neu (Immich)** | Modul einzeln neu → IA-07/IA-08 laufen nach → Tags in Immich per API aktualisiert; gleicher Ort → nichts kaskadiert |
+| **US-16: Immich-Job ohne lokale Kopie** | Handy-Upload neu ausführen über eine Arbeitskopie; Variante „Datei ersetzen"; Datum bleibt (Datei-Zeit aus Immich) |
+| **US-17: Ablage, Vorlage mit {CITY}** | Geocoding neu → Datei wandert in den neuen Ordner, leerer alter Ordner verschwindet, fremde Dateien bleiben |
+| **US-18 … US-20: Ausführung nach Abhängigkeiten** | IA-03 neben IA-04 inkl. Absturz und Wiederaufnahme, Betriebsmittel-Grenzen und Durchsatz, kein Modul läuft doppelt |
 
 **Pflicht vor jedem Release:**
 ```bash
