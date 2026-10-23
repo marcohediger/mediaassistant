@@ -37,6 +37,7 @@ router = APIRouter()
 
 # Templates read the module blocks through these, never step_result.
 templates.env.globals.update(module_blocks=job_view.module_blocks,
+                             step_visible=job_view.step_visible,
                              strip_summary=job_view.strip_summary,
                              job_signature=job_view.job_signature)
 

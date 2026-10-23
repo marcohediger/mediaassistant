@@ -728,7 +728,10 @@
 
     const wasOpen = {};
     steps.querySelectorAll("details.ui-step").forEach((d) => { wasOpen[d.dataset.step] = d.open; });
-    const entries = Object.entries(job.step_result || {});
+    // IA-09 only mails about failed jobs; it shows up only when it sent
+    // something or failed itself (same rule as job_view.step_visible).
+    const entries = Object.entries(job.step_result || {}).filter(([step, r]) =>
+      step !== "IA-09" || (r && typeof r === "object" && (r.sent || r.status === "error")));
     steps.replaceChildren();
     if (!entries.length) {
       const empty = el("div", "ui-empty-inline job-steps-empty");
