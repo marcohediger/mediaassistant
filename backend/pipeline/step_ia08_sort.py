@@ -760,11 +760,9 @@ async def _to_library(job, *, category: str, target_dir: str, wished_path: str,
             if placed_sc:
                 result["sidecar_path"] = placed_sc
 
+    # A library file filed into another folder (a rerun, 2.4) needs nothing
+    # here: fileops.move prunes the library folders a move leaves empty.
     await _prune_inbox_dirs(job, source_dir)
-    # A library file filed into another folder (a rerun, 2.4): the folders
-    # it left empty go, up to the set's base path (an inbox inside the
-    # library is left to the line above; fileops keeps inputs and the trash).
-    await fileops.prune_empty_dirs(job, source_dir, base_path, actor="IA-08")
     result["target_path"] = target_path
     return result
 

@@ -641,6 +641,28 @@ async def test_prune_empty_dirs(set_id):
            and not (await _ops_of(job.id)), f"{len(logs)} Logzeilen")
 
 
+async def test_prune_after_move_and_trash(set_id):
+    print("\n── Leere Ordner hinter move() und trash() ──")
+    job = await new_job(set_id, "prune-auto")
+    src = f"{BASE}/kat/ort/auto.jpg"
+    write(src, blob("prune-auto"))
+    out_dir = f"{ROOT}/reprocess-auto"
+    res = await fileops.move(job, src, out_dir + "/", actor="test")
+    report("Aus der Ablage verschoben: leere Ordner bis unter den Basis-Pfad entfernt",
+           not os.path.exists(f"{BASE}/kat") and os.path.isdir(BASE) and os.path.isfile(res.location),
+           f"kat={os.path.exists(f'{BASE}/kat')}")
+
+    keep = f"{BASE}/kat2/keep.txt"
+    write(keep, b"vom Benutzer")
+    back = await fileops.move(job, res.location, f"{BASE}/kat2/ort2/", actor="test")
+    report("Quelle ausserhalb jedes Basis-Pfads: ihr Ordner bleibt", os.path.isdir(out_dir))
+
+    await fileops.trash(job, back.copy_id, actor="test", reason="Test", allow_last_copy=True)
+    report("Nach dem Papierkorb: leerer Ordner weg, Ordner mit fremder Datei bleibt",
+           not os.path.exists(f"{BASE}/kat2/ort2") and read(keep) == b"vom Benutzer",
+           f"ort2={os.path.exists(f'{BASE}/kat2/ort2')}")
+
+
 async def _ops_of(job_id) -> list[FileOp]:
     async with async_session() as s:
         return list((await s.execute(select(FileOp).where(FileOp.job_id == job_id))).scalars().all())
@@ -704,6 +726,7 @@ async def main():
         await test_write_metadata(set_id)
         await test_download(set_id)
         await test_prune_empty_dirs(set_id)
+        await test_prune_after_move_and_trash(set_id)
         await test_thread_logging()
         await test_ledger_append_only(set_id)
     except Exception:

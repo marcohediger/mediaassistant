@@ -912,7 +912,9 @@ async def move(job, src: str, dst: str, *, actor: str, kind: str | None = None,
         copy_id=row.id if row else None, sep=sep, run_id=run_id,
         register_src=None if row else "local",
         texts={"before": "Verschieben beginnt", "after": "Verschoben", "verb": "Verschieben"})
-    return await _run(plan)
+    result = await _run(plan)
+    await prune_empty_dirs(jref, os.path.dirname(src), None, actor=actor)
+    return result
 
 
 async def copy(job, src: str, dst: str, *, actor: str, kind: str = "work",
@@ -1196,7 +1198,9 @@ async def trash(job, target, *, actor: str, reason: str, allow_last_copy: bool =
         expected_sha=row.sha256, copy_id=row.id, reason=reason, run_id=run_id,
         texts={"before": "Wird in den Papierkorb verschoben", "after": "Im Papierkorb",
                "verb": "Löschen"})
-    return await _run(plan, recheck=recheck)
+    result = await _run(plan, recheck=recheck)
+    await prune_empty_dirs(jref, os.path.dirname(row.location), None, actor=actor)
+    return result
 
 
 async def restore(copy_id: int | None = None, *, op_id: int | None = None,
@@ -2834,10 +2838,14 @@ def prune_empty_dirs_blocking(start_dir: str, stop_at: str) -> list[str]:
     return removed
 
 
-async def prune_empty_dirs(job, start_dir: str, stop_at: str, *, actor: str) -> list[str]:
+async def prune_empty_dirs(job, start_dir: str, stop_at: str | None, *, actor: str) -> list[str]:
     """Remove the folders a move left empty: from start_dir (the folder the
-    file came from) upwards, up to (not including) stop_at — e.g. after IA-08
-    filed a library file into another folder, up to the set's base path.
+    file came from) upwards, up to (not including) stop_at. stop_at None
+    means the innermost set base path holding start_dir — move() and trash()
+    call it that way behind every file they take away, so a library file
+    filed elsewhere (IA-08 after a rerun), taken to reprocess/, classified
+    out of review or trashed leaves no empty folder; a start_dir in no base
+    path (an inbox outside the library, reprocess/, a temp folder) stays.
 
     What stays, always: stop_at itself and everything outside it; anything
     in the trash (``.papierkorb``); every input folder and library base
@@ -2850,19 +2858,25 @@ async def prune_empty_dirs(job, start_dir: str, stop_at: str, *, actor: str) -> 
     removed folders.
     """
     from models import InboxDirectory, ProcessingSet
-    if not start_dir or not stop_at:
+    if not start_dir:
         return []
     jref = await _job_ref(job)
-    start, stop = os.path.realpath(start_dir), os.path.realpath(stop_at)
-    if start == stop or os.path.commonpath([start, stop]) != stop:
-        return []
-    if TRASH_DIRNAME in os.path.relpath(start, stop).split(os.sep):
-        return []
+    start = os.path.realpath(start_dir)
     try:
         async with async_session() as session:
-            kept = {p for (p,) in (await session.execute(select(InboxDirectory.path))).all() if p}
-            kept |= {p for (p,) in (await session.execute(select(ProcessingSet.library_base_path))).all() if p}
+            bases = {p for (p,) in (await session.execute(select(ProcessingSet.library_base_path))).all() if p}
+            kept = bases | {p for (p,) in (await session.execute(select(InboxDirectory.path))).all() if p}
             inbox = (await session.execute(select(Job.source_inbox_path).where(Job.id == jref.id))).scalar()
+        if stop_at is None:
+            holding = [b for b in map(os.path.realpath, bases) if os.path.commonpath([b, start]) == b]
+            if not holding:
+                return []
+            stop_at = max(holding, key=len)
+        stop = os.path.realpath(stop_at)
+        if start == stop or os.path.commonpath([start, stop]) != stop:
+            return []
+        if TRASH_DIRNAME in os.path.relpath(start, stop).split(os.sep):
+            return []
         if inbox:
             kept.add(inbox)
         # The climb ends below the innermost of them that holds start_dir.
