@@ -1,23 +1,36 @@
 import asyncio
+import base64
+import hashlib
 import logging
 import os
 import re
-import subprocess
 from datetime import datetime
 
 logger = logging.getLogger("mediaassistant.pipeline.ia08")
 from sqlalchemy import select
+import fileops
 from config import config_manager
-from database import async_session as _async_session
-from system_logger import log_info
+from system_logger import log_info, log_warning
 from file_operations import (
     is_folder_tags_active as _is_folder_tags_active,
     parse_date as _parse_date,
     sanitize_path_component as _sanitize_path_component,
+    sha256 as _sha256,
     validate_target_path as _validate_target_path,
 )
-from safe_file import safe_move
-from immich_client import safe_upload_asset, safe_replace_asset, archive_asset, lock_asset, tag_asset, untag_asset, get_asset_info, get_user_api_key, update_asset_description
+from immich_client import (
+    add_asset_to_albums, archive_asset, get_asset_info, get_user_api_key,
+    tag_asset, untag_asset, update_asset_description,
+)
+
+# Files the Immich input downloaded; IA-10 removes them together with their
+# temp dir (inventory S19), so IA-08 leaves them alone.
+_POLLER_TMP_PREFIX = "/tmp/ma_immich_"
+
+# Control flags other code leaves in step_result for this one IA-08 run.
+# _force_reupload is no longer read: whether an asset is replaced follows
+# from its content (R-12), so a leaked flag cannot trigger a replace.
+_SENTINELS = ("_retry_previous_immich_tags", "_retry_previous_immich_description", "_force_reupload")
 
 
 async def _get_folder_album_names(job) -> list[str] | None:
@@ -224,56 +237,16 @@ def _resolve_path(template: str, exif: dict, date: datetime | None) -> str:
     return result
 
 
-_IGNORABLE_FILES = {".ds_store", "thumbs.db", ".thumbs", "desktop.ini"}
-_IGNORABLE_DIRS = {"@eadir", ".synology"}
+def _cleanup_empty_dirs(start_dir: str, stop_at: str) -> list[str]:
+    """Remove folders from start_dir up to (not including) stop_at that hold
+    nothing but system junk (Synology @eaDir, .DS_Store, Thumbs.db, …).
 
-
-def _is_dir_empty(path: str) -> bool:
-    """Check if directory only contains ignorable system files (Synology, macOS, Windows)."""
-    for entry in os.scandir(path):
-        if entry.is_dir():
-            if entry.name.lower() not in _IGNORABLE_DIRS:
-                return False
-        else:
-            if entry.name.lower() not in _IGNORABLE_FILES:
-                return False
-    return True
-
-
-def _force_remove_dir(path: str):
-    """Remove directory including ignorable system files/subdirs."""
-    import shutil
-    for entry in os.scandir(path):
-        if entry.is_dir() and entry.name.lower() in _IGNORABLE_DIRS:
-            shutil.rmtree(entry.path, ignore_errors=True)
-        elif entry.is_file() and entry.name.lower() in _IGNORABLE_FILES:
-            from file_operations import safe_remove
-            safe_remove(entry.path)
-    os.rmdir(path)
-
-
-def _cleanup_empty_dirs(start_dir: str, stop_at: str):
-    """Remove empty directories from start_dir up to (but not including) stop_at.
-
-    Treats Synology metadata dirs (@eaDir) and OS junk files (.DS_Store, Thumbs.db)
-    as ignorable — directories containing only these are considered empty.
-
-    Safe for concurrent use: silently skips if directory was already removed
-    by another parallel pipeline job.
+    Blocking; IA-02 calls it through asyncio.to_thread. Only folders inside
+    stop_at are touched, decided by path containment — the old loop stopped
+    by string length and removed e.g. an empty /app/data/reprocess below an
+    /inbox (R-23). Returns the removed folders.
     """
-    stop_at = os.path.realpath(stop_at)
-    current = os.path.realpath(start_dir)
-    while current != stop_at and len(current) > len(stop_at):
-        try:
-            if not os.path.isdir(current):
-                break  # already removed by another job
-            if _is_dir_empty(current):
-                _force_remove_dir(current)
-            else:
-                break  # directory has real content, stop
-        except (OSError, FileNotFoundError):
-            break  # race condition with parallel job — safe to skip
-        current = os.path.dirname(current)
+    return fileops.prune_empty_dirs_blocking(start_dir, stop_at)
 
 
 def _eval_exif_expression(expression: str, exif: dict) -> bool:
@@ -370,27 +343,199 @@ async def _match_sorting_rules(filename: str, exif: dict, session, is_video: boo
     return None
 
 
+# ---------------------------------------------------------------------------
+# Small helpers for the targets
+# ---------------------------------------------------------------------------
+
+def _sha1_b64(path: str) -> str:
+    """Immich's checksum of a file: SHA-1, base64."""
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return base64.b64encode(h.digest()).decode("ascii")
+
+
+def _same_path(a: str, b: str) -> bool:
+    return os.path.realpath(a) == os.path.realpath(b)
+
+
+def _is_under(path: str, root: str | None) -> bool:
+    if not path or not root:
+        return False
+    path, root = os.path.realpath(path), os.path.realpath(root)
+    return path == root or os.path.commonpath([path, root]) == root
+
+
+def _set_mtime(path: str, iso: str) -> bool:
+    """Give a work copy the capture time Immich has for its asset.
+
+    upload_asset sends the file's mtime as fileCreatedAt, which Immich uses
+    as the capture date when the file has no EXIF date. A file downloaded
+    from Immich has the download time as mtime (R-19c).
+    """
+    try:
+        stamp = datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, ValueError):
+        return False
+    st = os.stat(path)
+    if abs(st.st_mtime - stamp) < 1:
+        return False
+    os.utime(path, (st.st_atime, stamp))
+    return True
+
+
+def _asset_description(info: dict | None) -> str:
+    return (((info or {}).get("exifInfo") or {}).get("description") or "").strip()
+
+
+def _description_to_write(current: str, ma_desc: str, previous: set) -> str | None:
+    """MA's description, or None when the asset carries someone else's.
+
+    MediaAssistant writes its description only onto an asset that has none,
+    already has this one, or still has the one MA wrote last time. Anything
+    else was entered by the user (in Immich or on the phone) and stays (R-19a).
+    """
+    ma_desc = (ma_desc or "").strip()
+    if not ma_desc:
+        return None
+    if not current or current == ma_desc or current in previous:
+        return ma_desc
+    return None
+
+
+async def _apply_description(asset_id: str, info: dict | None, ma_desc: str, previous: set,
+                             api_key: str | None) -> tuple[str, bool]:
+    """Set MA's description where allowed. Returns (description MA stands
+    behind on the asset, True if a foreign description was kept)."""
+    if not ma_desc:
+        return "", False
+    if info is None:
+        # Cannot see what the asset holds — never overwrite blindly.
+        return "", False
+    current = _asset_description(info)
+    wanted = _description_to_write(current, ma_desc, previous)
+    if wanted is None:
+        return "", True
+    if current != wanted:
+        try:
+            await update_asset_description(asset_id, wanted, api_key=api_key)
+        except Exception as exc:
+            logger.warning("Failed to update description for asset %s: %s", asset_id, exc)
+            return "", False
+    return wanted, False
+
+
+async def _immich_key(job) -> str | None:
+    """The API key of the job's Immich access; None = the job has none (global key).
+
+    Never falls back to the global key for a job that has its own access:
+    that key sees another account and would report the job's assets as missing.
+    """
+    if not job.immich_user_id:
+        return None
+    key = await get_user_api_key(job.immich_user_id)
+    if not key:
+        raise RuntimeError(f"Immich-Zugang #{job.immich_user_id} des Jobs ist nicht mehr hinterlegt")
+    return key
+
+
+async def _lock_nsfw(job, asset_id: str, ai_result: dict) -> bool:
+    if not ai_result.get("nsfw"):
+        return False
+    try:
+        await fileops.lock_asset(job, asset_id, actor="IA-08")
+        return True
+    except Exception as exc:
+        logger.warning("Failed to lock asset %s: %s", asset_id, exc)
+        return False
+
+
+async def _archive(asset_id: str, should_archive: bool, locked: bool, api_key: str | None) -> bool:
+    if not should_archive or locked:
+        return False
+    try:
+        await archive_asset(asset_id, api_key=api_key)
+        return True
+    except Exception as exc:
+        logger.warning("Failed to archive asset %s: %s", asset_id, exc)
+        return False
+
+
+async def _remove_source(job, src: str, asset_id: str) -> str | None:
+    """Remove the local source once its content is verified in Immich.
+
+    The inbox original goes to the set's trash; a failure there propagates
+    (the job ends in error, the pipeline moves the file to error/) — a file
+    left in the inbox would be read in again. A work copy in reprocess/ is
+    discarded, best effort. The poller's download is left to IA-10.
+    Returns a note for the result, or None.
+    """
+    if not src or src.startswith(_POLLER_TMP_PREFIX) or not os.path.isfile(src):
+        return None
+    from pipeline import reprocess as _reprocess
+    work_copy = _is_under(src, _reprocess.REPROCESS_DIR)
+    location = os.path.abspath(os.path.normpath(src))
+    row = next((c for c in await fileops.copies(job) if c.location == location), None)
+    reason = f"in Immich abgelegt (Asset {asset_id})"
+    try:
+        if row is not None and row.kind in ("work", "temp"):
+            await fileops.discard(job, row.id, actor="IA-08", reason=reason)
+            return f"Arbeitskopie entfernt: {src}"
+        if row is None:
+            await fileops.register_existing(job, "local", src)
+        res = await fileops.trash(job, src, actor="IA-08", reason=reason)
+        return f"Quelle im Papierkorb: {res.location}"
+    except fileops.FileOpError as exc:
+        if not work_copy:
+            raise
+        return f"Arbeitskopie bleibt ({exc}): {src}"
+
+
+async def _prune_inbox_dirs(job, source_dir: str) -> None:
+    if not job.source_inbox_path:
+        return
+    try:
+        removed = await asyncio.to_thread(fileops.prune_empty_dirs_blocking, source_dir,
+                                          job.source_inbox_path)
+    except Exception as exc:
+        await log_warning("IA-08", f"{job.debug_key} Leere Eingangsordner nicht entfernt",
+                          f"{source_dir}: {type(exc).__name__}: {exc}")
+        return
+    if removed:
+        await log_info("IA-08", f"{job.debug_key} Leere Eingangsordner entfernt", ", ".join(removed))
+
+
+def _warn(result: dict, reason: str) -> None:
+    result["status"] = "warning"
+    result["reason"] = f"{result['reason']}; {reason}" if result.get("reason") else reason
+
+
+# ---------------------------------------------------------------------------
+# The step
+# ---------------------------------------------------------------------------
+
 async def execute(job, session) -> dict:
     """IA-08: Datei in Zielordner verschieben.
 
     Runs without autoflush. IA-08 changes the job (status "review", target
-    path) and then logs through system_logger, which writes in a session of
-    its own. With autoflush, the next lookup flushed those changes, so this
-    session held SQLite's write lock while the log write waited for it —
-    for the whole 600 s busy timeout, with every other writer blocked, and
-    then the job failed with "database is locked". run_pipeline commits the
-    step right afterwards, so deferring the flush loses nothing.
+    path) and then logs through system_logger and fileops, which write in
+    sessions of their own. With autoflush, the next lookup flushed those
+    changes, so this session held SQLite's write lock while the other write
+    waited for it — for the whole 600 s busy timeout, with every other
+    writer blocked, and then the job failed with "database is locked".
+    run_pipeline commits the step right afterwards, so deferring the flush
+    loses nothing. Every move and removal of a file and every upload,
+    replace and lock of an asset goes through fileops (tags, albums,
+    description and archive go straight to Immich). fileops commits its
+    ledger and register before this step returns; after a crash the next
+    run finds its result there (R-10c).
     """
     with session.no_autoflush:
         return await _execute(job, session)
 
 
 async def _execute(job, session) -> dict:
-    # Resolve per-user Immich API key (None = fallback to global)
-    user_api_key = None
-    if job.immich_user_id:
-        user_api_key = await get_user_api_key(job.immich_user_id)
-
     step_results = job.step_result or {}
     exif = step_results.get("IA-01", {})
     ai_result = step_results.get("IA-05", {})
@@ -399,12 +544,13 @@ async def _execute(job, session) -> dict:
     # wrote on its PREVIOUS run, so we can delete any that are no
     # longer in the current set (= real stale removal).
     previous_immich_tags = list(step_results.get("_retry_previous_immich_tags") or [])
+    previous_descriptions = {d.strip() for d in [step_results.get("_retry_previous_immich_description")]
+                             if isinstance(d, str) and d.strip()}
     file_type = (exif.get("file_type") or "").upper()
     mime = exif.get("mime_type", "")
 
     # Determine category: static rules first, then AI verifies and corrects
     ai_type = ai_result.get("type", "")
-    ai_confidence = ai_result.get("confidence", 0.0)
     filename = os.path.basename(job.original_path)
     is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
 
@@ -442,10 +588,6 @@ async def _execute(job, session) -> dict:
             else:
                 category = ai_cat.key
 
-    # Unknown → Status "review" setzen für manuelle Klassifikation
-    if category == "unknown":
-        job.status = "review"
-
     # Merge geocoding data into exif for path resolution
     if geo_result.get("country"):
         exif = {**exif, "country": geo_result["country"], "city": geo_result.get("city", "")}
@@ -479,34 +621,9 @@ async def _execute(job, session) -> dict:
 
     # Security: ensure target stays within library
     target_dir = _validate_target_path(target_dir, base_path)
-
-    # Build target file path (handle name conflicts)
-    filename = os.path.basename(job.original_path)
-    target_path = os.path.join(target_dir, filename)
-
-    # If file already exists, decide: overwrite (same photo) or rename (different photo)
-    overwrite_existing = False
-    if os.path.exists(target_path):
-        from file_operations import sha256, resolve_filename_conflict
-        existing_size = os.path.getsize(target_path)
-        source_size = os.path.getsize(job.original_path)
-
-        # Same name + same size → likely same photo with updated tags → overwrite
-        if source_size == existing_size:
-            overwrite_existing = True
-            logger.info("File exists with same size, overwriting with updated metadata: %s", filename)
-        else:
-            # Check if it's the same base image (size may differ due to metadata changes)
-            # Same name in same folder → probably same photo re-processed → overwrite
-            existing_hash = await asyncio.to_thread(sha256, target_path)
-            source_hash = await asyncio.to_thread(sha256, job.original_path)
-            if existing_hash == source_hash:
-                overwrite_existing = True
-                logger.info("File exists with same hash, overwriting: %s", filename)
-            else:
-                # Different content → append counter
-                target_path = resolve_filename_conflict(target_dir, filename, "+")
-                logger.info("File exists with different content, saving as: %s", os.path.basename(target_path))
+    # The wished name; fileops picks the first free one (name+1.ext, …)
+    # and never overwrites (R-05, R-06).
+    wished_path = os.path.join(target_dir, filename)
 
     # All EXIF keywords are written by IA-07 (type, tags, source, geo, folder tags).
     # Build tag list for Immich tagging (category label + all IA-07 keywords).
@@ -517,347 +634,321 @@ async def _execute(job, session) -> dict:
         if kw not in tag_keywords:
             tag_keywords.append(kw)
 
-    # Dry-run: report where file would go, but don't move
+    # Dry run: report where the file would go and change nothing — not the
+    # file, not target_path, not the status. A would-be target_path or a
+    # 'review' status made real actions (review, delete, keep) act on files
+    # of other jobs (R-07). The would-be place lives in this result only.
     if job.dry_run:
-        job.target_path = target_path
         return {
             "status": "dry_run",
             "category": category,
-            "target_dir": target_dir,
-            "target_path": target_path,
+            "target_mode": "immich" if job.use_immich else "library",
+            "target_dir": None if job.use_immich else target_dir,
+            "target_path": None if job.use_immich else wished_path,
+            "would_review": category == "unknown",
             "moved": False,
             "immich_upload": False,
         }
 
-    source_dir = os.path.dirname(job.original_path)
+    # Unknown → Status "review" setzen für manuelle Klassifikation
+    if category == "unknown":
+        job.status = "review"
 
-    # Sidecar mode detection
     sidecar_mode = ia07_result.get("write_mode") == "sidecar"
     sidecar_path = ia07_result.get("sidecar_path")
+    should_archive = lib_cat.immich_archive if lib_cat else (category.startswith("sourceless") or category == "screenshot")
 
-    # Route: asset already exists in Immich (came via poller or was
-    # previously uploaded). Two sub-cases:
-    #
-    #   1. First-time processing, sidecar mode → the original file is
-    #      unchanged, only a .xmp was written beside it. No need to
-    #      re-upload; just tag the existing asset via API.
-    #
-    #   2. Retry (retry_count > 0) OR direct mode → the file or sidecar
-    #      changed, so we upload a fresh copy (with sidecar if
-    #      applicable), copy metadata from old→new, and delete the old
-    #      asset. This is the Upload+Copy+Delete workflow.
-    #
-    # Before v2.28.42, retries in sidecar mode fell into case 1 — the
-    # API tags were updated correctly, but the .xmp sidecar in Immich's
-    # storage was never refreshed (IA-08 skipped the re-upload). Since
-    # MediaAssistant has no direct filesystem access to Immich's storage,
-    # the only way to deliver the fresh sidecar is a full re-upload.
-    # The asset-id changes as a consequence, but copy_asset_metadata
-    # preserves albums, favorites, faces, and stacks.
-    if job.immich_asset_id:
-        old_asset_id = job.immich_asset_id
-        immich_replaced = False
-        new_asset_id = None
-        upload_result = {}
-
-        is_retry = (job.retry_count or 0) > 0
-        # Keep-Flow inheritance signal: when the duplicate-resolver in
-        # routers/duplicates.py transferred a donor's asset_id onto this
-        # job, the local file content differs from what the asset
-        # currently holds — a fresh safe_replace is required (not just
-        # an API-tag of the existing donor asset). The sentinel is
-        # injected by _resolve_duplicate_group via inject_steps and
-        # popped at the end of this function so it never leaks into
-        # the persisted step_result.
-        force_reupload = bool(step_results.get("_force_reupload"))
-        needs_reupload = not sidecar_mode or is_retry or force_reupload
-
-        if not needs_reupload:
-            # First-time processing, sidecar mode: original file unchanged,
-            # just tag the existing asset via API.
-            job.target_path = f"immich:{job.immich_asset_id}"
-            # Write description via Immich API — the XMP sidecar is not
-            # re-uploaded in this path, so the description from IA-07
-            # would otherwise be lost.  (Fix v2.28.72)
-            ia07_desc = ia07_result.get("description_written", "")
-            if ia07_desc:
-                try:
-                    await update_asset_description(
-                        job.immich_asset_id, ia07_desc, api_key=user_api_key,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to update description for asset %s: %s",
-                        job.immich_asset_id, exc,
-                    )
-        else:
-            # Re-upload: direct mode (file modified) OR sidecar-mode retry
-            # (fresh .xmp needs to reach Immich).
-            # Extract album name from inbox folder structure (re-check module + inbox at runtime)
-            reupload_album_names = await _get_folder_album_names(job)
-
-            # safe_replace_asset = upload+verify+copy+delete with the
-            # safe_move guarantee:
-            #   - 3 internal retries on upload/verify failure
-            #   - new asset is NEVER rolled back once verified
-            #     (the previous "rollback on Not found" logic destroyed
-            #      the only verified copy when old_asset_id was already
-            #      gone — root cause of "Bild verloren bei Keep This")
-            #   - copy_metadata + delete_old are best-effort: 404 OK
-            #   - on terminal failure raises RuntimeError → pipeline marks
-            #     job error → _move_to_error preserves the file in
-            #     /library/error/. Old asset stays as backup.
-            upload_result = await safe_replace_asset(
-                old_asset_id,
-                job.original_path,
-                sidecar_path=sidecar_path if sidecar_mode else None,
-                album_names=reupload_album_names,
-                api_key=user_api_key,
-            )
-            new_asset_id = upload_result.get("id")
-            if new_asset_id and new_asset_id != old_asset_id:
-                job.immich_asset_id = new_asset_id
-                immich_replaced = True
-            job.target_path = f"immich:{job.immich_asset_id}"
-
-        # Tag the asset in Immich. Also removes any stale tag that was
-        # in the PREVIOUS retry's immich_tags_written set but is no
-        # longer desired (e.g. 'unknown' from before an IA-05 fix).
-        tags_written, tags_failed, tags_removed = await _tag_immich_asset(
-            job.immich_asset_id, tag_keywords, api_key=user_api_key,
-            ia07_wrote_tags=bool(ia07_result.get("keywords_written")),
-            previous_tags=previous_immich_tags,
-        )
-
-        # NSFW: move to locked folder
-        immich_locked = False
-        if ai_result.get("nsfw"):
-            try:
-                await lock_asset(job.immich_asset_id, api_key=user_api_key)
-                immich_locked = True
-            except Exception as exc:
-                logger.warning(
-                    "Failed to lock asset %s: %s",
-                    job.immich_asset_id, exc,
-                )
-
-        # Archive if configured (skip if locked)
-        immich_archived = False
-        should_archive = lib_cat.immich_archive if lib_cat else (category.startswith("sourceless") or category == "screenshot")
-        if should_archive and not immich_locked:
-            try:
-                await archive_asset(job.immich_asset_id, api_key=user_api_key)
-                immich_archived = True
-            except Exception as exc:
-                logger.warning(
-                    "Failed to archive asset %s: %s",
-                    job.immich_asset_id, exc,
-                )
-
-        result = {
-            "category": category,
-            "target_path": job.target_path,
-            "moved": False,
-            "immich_upload": False,
-            "immich_replace": immich_replaced,
-            "immich_archived": immich_archived,
-            "immich_locked": immich_locked,
-            "immich_asset_id": job.immich_asset_id,
-            "immich_albums_added": upload_result.get("albums_added", []) if immich_replaced else [],
-            "immich_tags_written": tags_written,
-            "immich_tags_failed": tags_failed,
-            "immich_tags_removed": tags_removed,
-        }
-        if tags_failed:
-            result["status"] = "warning"
-            result["reason"] = f"Immich-Tags fehlgeschlagen: {', '.join(tags_failed)}"
-        # Drop sentinels so they don't leak into next run's step_result
-        step_results.pop("_retry_previous_immich_tags", None)
-        step_results.pop("_force_reupload", None)
-        return result
-
-    # Route: Immich upload or target directory
+    # The route follows the job's target (set by its input from the set:
+    # inbox jobs by the set's target mode, Immich-input jobs always Immich),
+    # never the mere presence of an immich_asset_id. A library job that
+    # inherited an asset id while a duplicate was kept goes to the library (R-15).
     if job.use_immich:
-        # Extract folder tags as single combined album name (re-check module + inbox at runtime)
-        album_names = await _get_folder_album_names(job)
+        result = await _to_immich(
+            job, category=category, tag_keywords=tag_keywords, ia07=ia07_result,
+            ai_result=ai_result, sidecar_mode=sidecar_mode, sidecar_path=sidecar_path,
+            should_archive=should_archive, previous_tags=previous_immich_tags,
+            previous_descriptions=previous_descriptions)
+    else:
+        result = await _to_library(job, category=category, target_dir=target_dir,
+                                   wished_path=wished_path, sidecar_path=sidecar_path)
 
-        # safe_upload_asset = upload + verify (size + checksum) + retries.
-        # On success: asset_id is guaranteed non-empty AND the asset is
-        # verified-reachable in Immich. Only then is it safe to remove
-        # the source file below.
-        # On failure (3x retries exhausted): RuntimeError → pipeline marks
-        # job error → _move_to_error preserves the file in /library/error/.
-        immich_result = await safe_upload_asset(
-            job.original_path,
-            album_names=album_names,
-            sidecar_path=sidecar_path,
-            api_key=user_api_key,
-        )
-        asset_id = immich_result["id"]
+    # Drop the control flags so they don't leak into the next run's step_result
+    for key in _SENTINELS:
+        step_results.pop(key, None)
+    return result
 
-        # Tag asset in Immich. Also removes any stale tag that was in
-        # the PREVIOUS retry's immich_tags_written set but is no longer
-        # desired (e.g. 'unknown' from before an IA-05 fix).
-        tags_written = []
-        tags_failed = []
-        tags_removed = []
-        if asset_id:
-            tags_written, tags_failed, tags_removed = await _tag_immich_asset(
-                asset_id, tag_keywords, api_key=user_api_key,
-                ia07_wrote_tags=bool(ia07_result.get("keywords_written")),
-                previous_tags=previous_immich_tags,
-            )
 
-        # Write description via Immich API (belt-and-suspenders: XMP
-        # sidecar may or may not be parsed by Immich depending on version)
-        if asset_id:
-            ia07_desc = ia07_result.get("description_written", "")
-            if ia07_desc:
-                try:
-                    await update_asset_description(asset_id, ia07_desc, api_key=user_api_key)
-                except Exception as exc:
-                    logger.warning("Failed to update description for asset %s: %s", asset_id, exc)
+# ---------------------------------------------------------------------------
+# Library target
+# ---------------------------------------------------------------------------
 
-        # NSFW: move to locked folder in Immich
-        immich_locked = False
-        if ai_result.get("nsfw") and asset_id:
-            try:
-                await lock_asset(asset_id, api_key=user_api_key)
-                immich_locked = True
-            except Exception as exc:
-                logger.warning(
-                    "Failed to lock asset %s: %s",
-                    asset_id, exc,
-                )
+async def _to_library(job, *, category: str, target_dir: str, wished_path: str,
+                      sidecar_path: str | None) -> dict:
+    key = job.debug_key
+    src = job.original_path
+    source_dir = os.path.dirname(src)
+    since = job.completed_at  # operations after the last completed run belong to this attempt
+    result = {"category": category, "target_dir": target_dir, "moved": True, "immich_upload": False}
 
-        # Archive in Immich if configured for this category (skip if already locked)
-        immich_archived = False
-        should_archive = lib_cat.immich_archive if lib_cat else (category.startswith("sourceless") or category == "screenshot")
-        if should_archive and asset_id and not immich_locked:
-            try:
-                await archive_asset(asset_id, api_key=user_api_key)
-                immich_archived = True
-            except Exception as exc:
-                logger.warning(
-                    "Failed to archive asset %s: %s",
-                    asset_id, exc,
-                )
-
-        # Remove source file after successful upload
-        from file_operations import safe_remove
-        if not await asyncio.to_thread(safe_remove, job.original_path):
-            logger.info("Source file already removed: %s", job.original_path)
-
-        # Clean up empty parent directories in inbox
-        if job.source_inbox_path:
-            await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
-
-        job.target_path = f"immich:{asset_id}"
-        # Mark asset ID so Immich polling skips this asset
-        job.immich_asset_id = asset_id
-
-        result = {
-            "category": category,
-            "target_path": job.target_path,
-            "moved": False,
-            "immich_upload": True,
-            "immich_archived": immich_archived,
-            "immich_locked": immich_locked,
-            "immich_id": asset_id,
-            "immich_albums_added": immich_result.get("albums_added", []),
-            "immich_tags_written": tags_written,
-            "immich_tags_failed": tags_failed,
-            "immich_tags_removed": tags_removed,
-        }
-        # Surface immich tag failures as a soft warning so the job UI shows
-        # "Warnungen in: IA-08" instead of silently hiding the failure in
-        # a sub-field that nobody looks at.
-        if tags_failed:
-            result["status"] = "warning"
-            result["reason"] = f"Immich-Tags fehlgeschlagen: {', '.join(tags_failed)}"
-        # Drop the retry sentinel so it doesn't leak into next run's step_result
-        step_results.pop("_retry_previous_immich_tags", None)
-        return result
-
-    # Move file to library (safe: copy → verify → delete)
-    await asyncio.to_thread(os.makedirs, target_dir, exist_ok=True)
-    if overwrite_existing:
-        # Remove old file first, then move the updated one in
-        from file_operations import safe_remove
-        await log_info(
-            "IA-08",
-            f"{job.debug_key} safe_remove (overwrite) wird ausgeführt",
-            f"target={target_path}",
-        )
+    if not await asyncio.to_thread(os.path.isfile, src):
+        # Resumed after a crash: the move may be done and only the commit of
+        # target_path was lost. The ledger knows where the file went.
+        placed = await fileops.last_result(job, ("move",), src=src, since=since)
+        if not placed:
+            raise FileNotFoundError(f"Datei nicht gefunden: {src}")
+        target_path = placed
+        result["resumed"] = True
+        await log_info("IA-08", f"{key} Ablage war bereits erfolgt (Wiederaufnahme)",
+                       f"{src} → {target_path} (laut Protokoll)")
+    elif _same_path(src, wished_path):
+        # The file already lies where it belongs (an inbox inside the
+        # library). Nothing to move; above all nothing to delete (R-05b).
+        await fileops.register_existing(job, "local", src)
+        target_path = os.path.abspath(src)
+        result.update(moved=False, in_place=True)
+        await log_info("IA-08", f"{key} Datei liegt bereits am Ziel", target_path)
+    else:
+        # The log texts keep their old wording; test_data_safety_local.py
+        # (R-10c) simulates a crash right after the "OK" line.
+        await log_info("IA-08", f"{key} safe_move → library wird ausgeführt",
+                       f"src={src} dst={wished_path}")
         try:
-            await asyncio.to_thread(safe_remove, target_path)
+            res = await fileops.move(job, src, wished_path, actor="IA-08", kind="local", sep="+")
         except Exception as exc:
-            await log_info(
-                "IA-08",
-                f"{job.debug_key} safe_remove (overwrite) fehlgeschlagen",
-                f"target={target_path} error={type(exc).__name__}: {exc}",
-            )
+            await log_info("IA-08", f"{key} safe_move → library fehlgeschlagen",
+                           f"src={src} dst={wished_path} error={type(exc).__name__}: {exc}")
             raise
-        await log_info(
-            "IA-08",
-            f"{job.debug_key} safe_remove (overwrite) OK",
-            f"target={target_path}",
-        )
-        logger.info("Removed old file for overwrite: %s", target_path)
-    await log_info(
-        "IA-08",
-        f"{job.debug_key} safe_move → library wird ausgeführt",
-        f"src={job.original_path} dst={target_path}",
-    )
-    try:
-        await asyncio.to_thread(safe_move, job.original_path, target_path, job.debug_key)
-    except Exception as exc:
-        await log_info(
-            "IA-08",
-            f"{job.debug_key} safe_move → library fehlgeschlagen",
-            f"src={job.original_path} dst={target_path} error={type(exc).__name__}: {exc}",
-        )
-        raise
-    await log_info(
-        "IA-08",
-        f"{job.debug_key} safe_move → library OK",
-        f"dst={target_path}",
-    )
-
-    # Move sidecar file alongside the image (if sidecar mode)
-    if sidecar_path and os.path.exists(sidecar_path):
-        sidecar_target = target_path + ".xmp"
-        await log_info(
-            "IA-08",
-            f"{job.debug_key} safe_move sidecar → library wird ausgeführt",
-            f"src={sidecar_path} dst={sidecar_target}",
-        )
-        try:
-            await asyncio.to_thread(safe_move, sidecar_path, sidecar_target, job.debug_key)
-        except Exception as exc:
-            await log_info(
-                "IA-08",
-                f"{job.debug_key} safe_move sidecar → library fehlgeschlagen",
-                f"src={sidecar_path} dst={sidecar_target} error={type(exc).__name__}: {exc}",
-            )
-            raise
-        await log_info(
-            "IA-08",
-            f"{job.debug_key} safe_move sidecar → library OK",
-            f"dst={sidecar_target}",
-        )
-
-    # Clean up empty parent directories in inbox (up to inbox root)
-    if job.source_inbox_path:
-        await asyncio.to_thread(_cleanup_empty_dirs, source_dir, job.source_inbox_path)
-
-    # Update job with target path
+        target_path = res.location
+        result.update(identical=res.identical, file_op=res.op_id)
+        same = " (identischer Inhalt lag bereits dort, als geteiltes Exemplar übernommen)" if res.identical else ""
+        await log_info("IA-08", f"{key} safe_move → library OK", f"dst={target_path}{same}")
     job.target_path = target_path
 
-    return {
+    # Move the sidecar alongside the image (sidecar mode)
+    if sidecar_path:
+        sidecar_wish = target_path + ".xmp"
+        if await asyncio.to_thread(os.path.isfile, sidecar_path):
+            if _same_path(sidecar_path, sidecar_wish):
+                result["sidecar_path"] = sidecar_wish
+            else:
+                await log_info("IA-08", f"{key} safe_move sidecar → library wird ausgeführt",
+                               f"src={sidecar_path} dst={sidecar_wish}")
+                try:
+                    res_sc = await fileops.move(job, sidecar_path, sidecar_wish, actor="IA-08",
+                                                kind="sidecar", sep="+")
+                except Exception as exc:
+                    await log_info("IA-08", f"{key} safe_move sidecar → library fehlgeschlagen",
+                                   f"src={sidecar_path} dst={sidecar_wish} error={type(exc).__name__}: {exc}")
+                    raise
+                result["sidecar_path"] = res_sc.location
+                await log_info("IA-08", f"{key} safe_move sidecar → library OK", f"dst={res_sc.location}")
+        else:
+            placed_sc = await fileops.last_result(job, ("move",), src=sidecar_path, since=since)
+            if placed_sc:
+                result["sidecar_path"] = placed_sc
+
+    await _prune_inbox_dirs(job, source_dir)
+    result["target_path"] = target_path
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Immich target
+# ---------------------------------------------------------------------------
+
+async def _to_immich(job, *, category: str, tag_keywords: list[str], ia07: dict, ai_result: dict,
+                     sidecar_mode: bool, sidecar_path: str | None, should_archive: bool,
+                     previous_tags: list[str], previous_descriptions: set) -> dict:
+    api_key = await _immich_key(job)
+    src = job.original_path
+    source_dir = os.path.dirname(src) if src else ""
+    src_exists = bool(src) and await asyncio.to_thread(os.path.isfile, src)
+    album_names = await _get_folder_album_names(job)
+    ma_desc = ia07.get("description_written") or ""
+
+    # After a crash the upload or replace may be done while the commit of
+    # the job's asset id was lost. fileops committed it to the ledger.
+    asset_id = job.immich_asset_id
+    resumed = await fileops.last_result(job, ("upload", "replace"), since=job.completed_at)
+    if resumed and resumed != asset_id:
+        await log_info("IA-08", f"{job.debug_key} Asset aus dem Protokoll übernommen (Wiederaufnahme)",
+                       f"{asset_id or '—'} → {resumed}")
+        asset_id = resumed
+
+    if asset_id:
+        result = await _update_asset(
+            job, asset_id, src=src, src_exists=src_exists, api_key=api_key, category=category,
+            tag_keywords=tag_keywords, album_names=album_names, ma_desc=ma_desc,
+            sidecar_mode=sidecar_mode, sidecar_path=sidecar_path,
+            previous_tags=previous_tags, previous_descriptions=previous_descriptions)
+    else:
+        result = await _upload(
+            job, src=src, src_exists=src_exists, api_key=api_key, category=category,
+            tag_keywords=tag_keywords, album_names=album_names, ma_desc=ma_desc,
+            sidecar_path=sidecar_path, previous_tags=previous_tags,
+            previous_descriptions=previous_descriptions)
+    if resumed:
+        result["resumed"] = True
+    asset_id = result["immich_asset_id"]
+
+    # NSFW: move to the locked folder (after tags and description: a locked
+    # asset is invisible to the API key)
+    result["immich_locked"] = await _lock_nsfw(job, asset_id, ai_result)
+    result["immich_archived"] = await _archive(asset_id, should_archive, result["immich_locked"], api_key)
+
+    # The content is verified in Immich now; the local source can go.
+    if src_exists:
+        note = await _remove_source(job, src, asset_id)
+        if note:
+            result["source_removed"] = note
+        if _is_under(src, job.source_inbox_path):
+            await _prune_inbox_dirs(job, source_dir)
+    if result.get("immich_tags_failed"):
+        _warn(result, f"Immich-Tags fehlgeschlagen: {', '.join(result['immich_tags_failed'])}")
+    return result
+
+
+async def _upload(job, *, src: str, src_exists: bool, api_key, category: str, tag_keywords: list[str],
+                  album_names, ma_desc: str, sidecar_path: str | None, previous_tags: list[str],
+                  previous_descriptions: set) -> dict:
+    """S11: a new upload. Success means the asset is present in Immich with
+    the source's checksum; a duplicate of an asset in Immich's trash is
+    restored instead of being taken for a copy (R-22)."""
+    if not src_exists:
+        raise FileNotFoundError(f"Datei nicht gefunden: {src}")
+    res = await fileops.upload(job, src, actor="IA-08", albums=album_names, sidecar=sidecar_path,
+                               restore_trashed=True)
+    asset_id = res.asset_id
+    # Point the job at the asset; an asset of another job (owned=False) is
+    # only used, never replaced or trashed from this job.
+    job.immich_asset_id = asset_id
+    job.target_path = f"immich:{asset_id}"
+
+    tags_written, tags_failed, tags_removed = await _tag_immich_asset(
+        asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags)
+    info = await get_asset_info(asset_id, api_key=api_key)
+    description, kept = await _apply_description(asset_id, info, ma_desc, previous_descriptions, api_key)
+
+    result = {
         "category": category,
-        "target_dir": target_dir,
-        "target_path": target_path,
-        "moved": True,
-        "immich_upload": False,
+        "target_path": job.target_path,
+        "moved": False,
+        "immich_upload": True,
+        "immich_id": asset_id,
+        "immich_asset_id": asset_id,
+        "immich_status": res.immich_status,
+        "immich_owned": res.owned,
+        "immich_albums_added": res.albums_added,
+        "immich_tags_written": tags_written,
+        "immich_tags_failed": tags_failed,
+        "immich_tags_removed": tags_removed,
+        "description_written": description,
+        "file_op": res.op_id,
     }
+    if kept:
+        result["description_kept"] = True
+    if res.notes:
+        result["notes"] = list(res.notes)
+    return result
+
+
+async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_key, category: str,
+                        tag_keywords: list[str], album_names, ma_desc: str, sidecar_mode: bool,
+                        sidecar_path: str | None, previous_tags: list[str],
+                        previous_descriptions: set) -> dict:
+    """S7: the job already has an asset (Immich input, retry, kept duplicate).
+
+    Replaced only when the local file holds other bytes than the asset —
+    IA-07 wrote into it, or a kept duplicate brings another version. Same
+    bytes: tags, albums and description through the API, nothing uploaded.
+    The replace goes through fileops: the old asset's albums, favorite,
+    stack, tags and rating move over, it lands in Immich's trash and only
+    when no other job uses it (R-08, R-18).
+    """
+    info = await get_asset_info(asset_id, api_key=api_key)
+    usable = info is not None and not info.get("isTrashed")
+    if src_exists:
+        local_sum = await asyncio.to_thread(_sha1_b64, src)
+        if info is not None:
+            same = usable and info.get("checksum") == local_sum
+        else:
+            # Immich does not show the asset: nothing to compare against.
+            # A sidecar-mode file is unchanged by IA-07, so only the API is updated.
+            same = sidecar_mode
+    else:
+        # Resumed after the source was removed: the content may already be in
+        # Immich (the ledger says so). Without it only sidecar mode, whose file
+        # IA-07 left unchanged, can go on with the API alone.
+        delivered = bool(src) and asset_id == await fileops.last_result(
+            job, ("upload", "replace"), src=src, since=job.completed_at)
+        if not (delivered or sidecar_mode):
+            raise FileNotFoundError(f"Datei nicht gefunden: {src}")
+        same, local_sum = True, None
+
+    result = {"category": category, "moved": False, "immich_upload": False}
+    old_id = asset_id
+    if same:
+        if src_exists and usable:
+            # The asset is verified to hold the local bytes: record it, so the
+            # register knows a second copy of this content (and the job's use).
+            try:
+                sha = await asyncio.to_thread(_sha256, src)
+                await fileops.register_existing(job, "immich", asset_id, sha256=sha, checksum=local_sum,
+                                                verified=True)
+            except Exception as exc:
+                await log_warning("IA-08", f"{job.debug_key} Eintrag im Exemplar-Register fehlgeschlagen",
+                                  f"Asset {asset_id}: {type(exc).__name__}: {exc}")
+        tags_written, tags_failed, tags_removed = await _tag_immich_asset(
+            asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags)
+        albums_added = []
+        if album_names:
+            try:
+                albums_added = await add_asset_to_albums(asset_id, album_names, api_key=api_key)
+            except Exception as exc:
+                logger.warning("Failed to add asset %s to albums: %s", asset_id, exc)
+        description, kept = await _apply_description(asset_id, info, ma_desc, previous_descriptions, api_key)
+        result.update(immich_replace=False, immich_albums_added=albums_added)
+    else:
+        if info and info.get("fileCreatedAt") and await asyncio.to_thread(_set_mtime, src, info["fileCreatedAt"]):
+            result["file_created_at"] = info["fileCreatedAt"]
+        description = _description_to_write(_asset_description(info), ma_desc, previous_descriptions)
+        kept = bool(ma_desc) and description is None
+        res = await fileops.replace(
+            job, asset_id, src, actor="IA-08", tags=tag_keywords, description=description,
+            drop_tags=previous_tags, albums=album_names,
+            sidecar=sidecar_path if sidecar_mode else None, restore_trashed=True)
+        asset_id = res.asset_id
+        if res.identical:
+            tags_written, tags_failed, tags_removed = await _tag_immich_asset(
+                asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags)
+        else:
+            # Only MA's own tags count as written: the next retry removes
+            # tags of this list that are no longer wanted, and the carried
+            # user tags must never end up there.
+            tags_written = [t for t in res.tags_written if t in tag_keywords]
+            tags_failed = list(res.tags_failed)
+            tags_removed = [t for t in previous_tags if t and t not in tag_keywords]
+        description = description or ""
+        result.update(immich_replace=asset_id != old_id, immich_albums_added=res.albums_added,
+                      immich_status=res.immich_status, immich_owned=res.owned, file_op=res.op_id)
+        if asset_id != old_id:
+            result["immich_replaced_asset"] = old_id
+            result["immich_old_trashed"] = res.old_trashed
+        if res.notes:
+            result["notes"] = list(res.notes)
+        if res.old_kept:
+            _warn(result, f"Altes Asset {old_id} bleibt: {res.old_kept}")
+
+    job.immich_asset_id = asset_id
+    job.target_path = f"immich:{asset_id}"
+    result.update(
+        target_path=job.target_path,
+        immich_asset_id=asset_id,
+        immich_tags_written=tags_written,
+        immich_tags_failed=tags_failed,
+        immich_tags_removed=tags_removed,
+        description_written=description,
+    )
+    if kept:
+        result["description_kept"] = True
+    return result
