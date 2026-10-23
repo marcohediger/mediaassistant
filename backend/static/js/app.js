@@ -171,6 +171,10 @@
       current.replaceWith(fresh);
     }
 
+    // Retry / delete: not while the job is waiting or running
+    const actions = document.querySelector("[data-section='actions']");
+    if (actions) actions.hidden = job.status === "queued" || job.status === "processing";
+
     // Current step (use data-field attribute)
     const stepEl = document.querySelector("[data-field='current_step']");
     if (stepEl) {
@@ -330,6 +334,180 @@
     });
   }
 
+  // Texts the shared helpers need, rendered by base.html (i18n).
+  let uiStrings = null;
+  function uiText(key) {
+    if (!uiStrings) {
+      const blob = document.getElementById("ui-strings");
+      uiStrings = blob ? JSON.parse(blob.textContent) : {};
+    }
+    return uiStrings[key] || "";
+  }
+
+  // ── Menus: .ui-menu-wrap > button[aria-haspopup="menu"] + .ui-menu ──
+  // Every .ui-menu-wrap on the page is wired up once. Click or Enter/Space
+  // toggles, ArrowDown/ArrowUp on the button opens on the first/last item;
+  // in the menu arrows, Home and End move between items, Tab closes it,
+  // Escape closes it and returns focus to the button. A click elsewhere
+  // closes it, and so does choosing an item (before the item's own handler
+  // runs, so a confirmation dialog opens on a closed menu). The panel is
+  // shifted or flipped so it stays inside the viewport.
+  const openMenus = new Set();
+  const VIEWPORT_MARGIN = 8;
+
+  function initMenu(wrap) {
+    const btn = wrap.querySelector(':scope > [aria-haspopup="menu"]');
+    const menu = wrap.querySelector(":scope > .ui-menu");
+    if (!btn || !menu) return;
+    const items = () => Array.from(menu.querySelectorAll(".ui-menu-item:not(:disabled):not([hidden])"));
+    const focusItem = (which) => {
+      const list = items();
+      if (list.length) list[which === "last" ? list.length - 1 : 0].focus();
+    };
+    const api = {
+      wrap,
+      close(returnFocus) {
+        if (menu.hidden) return;
+        menu.hidden = true;
+        btn.setAttribute("aria-expanded", "false");
+        menu.style.transform = menu.style.top = menu.style.bottom = "";
+        openMenus.delete(api);
+        if (returnFocus) btn.focus();
+      },
+      place() {
+        menu.style.transform = menu.style.top = menu.style.bottom = "";
+        const r = menu.getBoundingClientRect();
+        const maxRight = document.documentElement.clientWidth - VIEWPORT_MARGIN;
+        let dx = 0;
+        if (r.right > maxRight) dx = maxRight - r.right;
+        if (r.left + dx < VIEWPORT_MARGIN) dx = VIEWPORT_MARGIN - r.left;
+        if (dx) menu.style.transform = `translateX(${Math.round(dx)}px)`;
+        // Not enough room below but more above: open upwards
+        const b = btn.getBoundingClientRect();
+        if (r.bottom > innerHeight - VIEWPORT_MARGIN && b.top - VIEWPORT_MARGIN > innerHeight - b.bottom) {
+          menu.style.top = "auto";
+          menu.style.bottom = "calc(100% + 0.35rem)";
+        }
+      },
+    };
+
+    function open(focus) {
+      closeMenus(api);
+      if (menu.hidden) {
+        menu.hidden = false;
+        btn.setAttribute("aria-expanded", "true");
+        openMenus.add(api);
+        api.place();
+      }
+      if (focus) focusItem(focus);
+    }
+
+    btn.addEventListener("click", (e) => {
+      if (!menu.hidden) { api.close(false); return; }
+      // e.detail is 0 for a click from the keyboard: then start on the first item
+      open(e.detail === 0 ? "first" : null);
+    });
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        open(e.key === "ArrowDown" ? "first" : "last");
+      }
+    });
+    // Capture phase: the menu is closed before the item's own handler runs
+    menu.addEventListener("click", (e) => {
+      if (e.target.closest(".ui-menu-item")) api.close(true);
+    }, true);
+    menu.addEventListener("keydown", (e) => {
+      const list = items();
+      const i = list.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = list.length;
+        if (!n) return;
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        list[i < 0 ? (step > 0 ? 0 : n - 1) : (i + step + n) % n].focus();
+      } else if (e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        focusItem(e.key === "Home" ? "first" : "last");
+      } else if (e.key === "Tab") {
+        // Back on the button first, so Tab / Shift+Tab continue from there
+        api.close(true);
+      }
+    });
+  }
+
+  // Closes every open menu, except `keep`
+  function closeMenus(keep) {
+    openMenus.forEach((m) => { if (m !== keep) m.close(false); });
+  }
+
+  function initMenus() {
+    document.querySelectorAll(".ui-menu-wrap").forEach(initMenu);
+    document.addEventListener("click", (e) => {
+      openMenus.forEach((m) => { if (!m.wrap.contains(e.target)) m.close(false); });
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || !openMenus.size) return;
+      // Only one menu is open at a time
+      openMenus.forEach((m) => m.close(true));
+    });
+    window.addEventListener("resize", () => openMenus.forEach((m) => m.place()));
+  }
+
+  // ── Confirmation dialog: MA.confirm({title, text, ok, danger}) → Promise<boolean> ──
+  // One dialog.ui-dialog for every page, built on first use. Destructive
+  // actions (danger) start on "Cancel" and get a red button; harmless ones
+  // start on the action itself. Escape, the close button and "Cancel"
+  // resolve false.
+  let confirmDialog = null;
+
+  function buildConfirmDialog() {
+    const dlg = document.createElement("dialog");
+    dlg.className = "ui-dialog";
+    dlg.id = "ui-confirm";
+    dlg.setAttribute("aria-labelledby", "ui-confirm-title");
+    dlg.setAttribute("aria-describedby", "ui-confirm-text");
+    // Fixed markup only; the texts are set with textContent
+    dlg.innerHTML = '<form method="dialog" class="ui-dialog-shell">'
+      + '<div class="ui-dialog-head"><div class="ui-dialog-head-text"><h2 class="ui-dialog-title" id="ui-confirm-title"></h2></div>'
+      + '<button type="submit" value="cancel" class="ui-icon-btn" data-role="close">'
+      + '<svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use href="#ui-i-x"/></svg></button></div>'
+      + '<div class="ui-dialog-body"><p class="ui-dialog-text" id="ui-confirm-text"></p></div>'
+      + '<div class="ui-dialog-foot">'
+      + '<button type="submit" value="cancel" class="ui-btn ui-btn-secondary" data-role="cancel"></button>'
+      + '<button type="submit" value="ok" class="ui-btn ui-btn-primary" data-role="ok"></button>'
+      + "</div></form>";
+    const close = dlg.querySelector('[data-role="close"]');
+    close.setAttribute("aria-label", uiText("close"));
+    close.title = uiText("close");
+    dlg.querySelector('[data-role="cancel"]').textContent = uiText("cancel");
+    document.body.appendChild(dlg);
+    return dlg;
+  }
+
+  function confirmAsk(opts) {
+    const dlg = confirmDialog || (confirmDialog = buildConfirmDialog());
+    dlg.querySelector("#ui-confirm-title").textContent = opts.title || "";
+    dlg.querySelector("#ui-confirm-text").textContent = opts.text || "";
+    const ok = dlg.querySelector('[data-role="ok"]');
+    ok.textContent = opts.ok || uiText("ok");
+    ok.className = "ui-btn " + (opts.danger ? "ui-btn-danger-solid" : "ui-btn-primary");
+    dlg.returnValue = "";
+    return new Promise((resolve) => {
+      dlg.addEventListener("close", () => resolve(dlg.returnValue === "ok"), { once: true });
+      dlg.showModal();
+      (opts.danger ? dlg.querySelector('[data-role="cancel"]') : ok).focus();
+    });
+  }
+
+  // The options for MA.confirm from data-confirm-title/-text/-ok/-danger
+  function confirmOptions(el) {
+    return {
+      title: el.dataset.confirmTitle, text: el.dataset.confirmText,
+      ok: el.dataset.confirmOk, danger: !!el.dataset.confirmDanger,
+    };
+  }
+
   // ── Navbar dropdowns: one open at a time, closed by a click elsewhere or Escape ──
   function initDropdown(root, onOpen) {
     const toggle = root.querySelector(".quick-menu-toggle");
@@ -420,6 +598,10 @@
   initDashboard();
   initJobDetail();
   initLightbox();
+  initMenus();
   initQuickMenu();
   initStatusMenu();
+
+  // For the pages' own scripts
+  window.MA = { confirm: confirmAsk, confirmOptions };
 })();
