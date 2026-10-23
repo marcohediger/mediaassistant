@@ -30,6 +30,12 @@ os.environ.setdefault("DATABASE_PATH", "/app/data/mediaassistant.db")
 
 PASS, FAIL = [], []
 
+def _content_hash(path):
+    # Real content hash: fileops refuses a copy whose bytes do not match the job.
+    from file_operations import sha256
+    return sha256(path)
+
+
 def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
     print(f"  {'✅ PASS' if cond else '❌ FAIL'}  {name}" + (f" — {detail}" if detail else ""))
@@ -144,7 +150,7 @@ async def main():
 
         nd_job = Job(filename=os.path.basename(nd_path), original_path=nd_path,
                      source_inbox_path="/inbox", status="duplicate", target_path=nd_path,
-                     debug_key=f"NFL-D3-{ts}", file_hash=f"d3_{ts}",
+                     debug_key=f"NFL-D3-{ts}", file_hash=_content_hash(nd_path),
                      phash=f"d3ph_{ts}", use_immich=has_immich,
                      step_result={"IA-01": {"file_type": "JPEG"},
                                   "IA-02": {"status": "duplicate",
@@ -525,8 +531,9 @@ async def main():
     if has_immich:
         print("\n── K1: Keep This Donor-Asset wird via safe_replace ersetzt ──")
         # Original-Job hat Asset in Immich; Duplikat-Job behaltet "Keep This"
-        from immich_client import safe_upload_asset, asset_exists, delete_asset
+        from immich_client import safe_upload_asset, asset_exists, delete_asset, get_asset_state
         from routers.duplicates import _resolve_duplicate_group
+        from file_operations import sha256 as _sha
 
         orig_path_k1 = f"/tmp/__nfl_k1_orig_{ts}.jpg"
         dup_path_k1 = f"/library/error/duplicates/__nfl_k1_dup_{ts}.jpg"
@@ -546,7 +553,7 @@ async def main():
                 target_path=f"immich:{orig_asset_id}",
                 immich_asset_id=orig_asset_id,
                 debug_key=f"NFL-K1-ORIG-{ts}",
-                file_hash=f"k1orig_{ts}", phash=f"k1ph_{ts}",
+                file_hash=_sha(orig_path_k1), phash=f"k1ph_{ts}",
                 use_immich=True,
                 step_result={"IA-01": {"file_type": "JPEG"},
                              "IA-02": {"status": "ok"}},
@@ -557,7 +564,7 @@ async def main():
                 source_inbox_path="/inbox", status="duplicate",
                 target_path=dup_path_k1,
                 debug_key=f"NFL-K1-DUP-{ts}",
-                file_hash=f"k1dup_{ts}", phash=f"k1ph_{ts}",
+                file_hash=_sha(dup_path_k1), phash=f"k1ph_{ts}",
                 use_immich=True,
                 step_result={"IA-01": {"file_type": "JPEG"},
                              "IA-02": {"status": "duplicate",
@@ -566,14 +573,15 @@ async def main():
             )
             session.add_all([orig_job, dup_job])
             await session.commit()
-            dup_id = dup_job.id
+            dup_id, orig_id = dup_job.id, orig_job.id
 
-            _, _, _, flush = await _resolve_duplicate_group(
-                session, dup_job, [orig_job, dup_job],
-                source="keep", user_kept=True,
-            )
-            await session.commit()
-            await flush()
+        # Fresh rows (committed objects expire); the resolution claims the
+        # group and writes in sessions of its own.
+        async with async_session() as session:
+            orig_job = (await session.execute(select(Job).where(Job.id == orig_id))).scalar()
+            dup_job = (await session.execute(select(Job).where(Job.id == dup_id))).scalar()
+        res_k1 = await _resolve_duplicate_group(dup_job, [orig_job, dup_job], source="keep", user_kept=True)
+        check("K1 Auflösung nicht abgelehnt", not res_k1.refused, f"problems={res_k1.problems}")
 
         # Pipeline läuft jetzt auf den queued duplikat-job
         await run_pipeline(dup_id)
@@ -587,9 +595,10 @@ async def main():
                 exists_new = await asset_exists(dup_job.immich_asset_id)
                 check("K1b Neues Immich-Asset existiert", exists_new,
                       f"asset={dup_job.immich_asset_id}")
-                check("K1c Altes Donor-Asset ist weg",
-                      not await asset_exists(orig_asset_id),
-                      f"old_asset={orig_asset_id}")
+                state_k1 = await get_asset_state(orig_asset_id)
+                check("K1c Altes Donor-Asset im Papierkorb (nicht mehr sichtbar, wiederherstellbar)",
+                      state_k1 in ("trashed", "missing") and dup_job.immich_asset_id != orig_asset_id,
+                      f"old_asset={orig_asset_id} state={state_k1}")
                 # Cleanup
                 try:
                     await delete_asset(dup_job.immich_asset_id)
@@ -617,7 +626,9 @@ async def main():
         old_upload = await safe_upload_asset(old_content_path)
         best_pre_asset_id = old_upload["id"]
         # Donor (irgendein anderes Asset im Immich, harmloses Setup)
-        donor_upload = await safe_upload_asset(_mk_file("k2donor", b"donor" * 100))
+        donor_src_k2 = _mk_file("k2donor", b"donor" * 100)
+        donor_hash_k2 = _sha(donor_src_k2)
+        donor_upload = await safe_upload_asset(donor_src_k2)
         donor_pre_asset_id = donor_upload["id"]
 
         async with async_session() as session:
@@ -628,7 +639,7 @@ async def main():
                 target_path=new_content_path,
                 immich_asset_id=best_pre_asset_id,  # ← PRE-EXISTING
                 debug_key=f"NFL-K2-BEST-{ts}",
-                file_hash=f"k2best_{ts}", phash=f"k2ph_{ts}",
+                file_hash=_sha(new_content_path), phash=f"k2ph_{ts}",
                 use_immich=True,
                 step_result={"IA-01": {"file_type": "JPEG"},
                              "IA-02": {"status": "duplicate",
@@ -642,21 +653,20 @@ async def main():
                 target_path=f"immich:{donor_pre_asset_id}",
                 immich_asset_id=donor_pre_asset_id,
                 debug_key=f"NFL-K2-DON-{ts}",
-                file_hash=f"k2don_{ts}", phash=f"k2ph_{ts}",
+                file_hash=donor_hash_k2, phash=f"k2ph_{ts}",
                 use_immich=True,
                 step_result={"IA-01": {"file_type": "JPEG"},
                              "IA-02": {"status": "ok"}},
             )
             session.add_all([best_k2, donor_k2])
             await session.commit()
-            best_k2_id = best_k2.id
+            best_k2_id, donor_k2_id = best_k2.id, donor_k2.id
 
-            _, _, _, flush2 = await _resolve_duplicate_group(
-                session, best_k2, [best_k2, donor_k2],
-                source="keep", user_kept=True,
-            )
-            await session.commit()
-            await flush2()
+        async with async_session() as session:
+            best_k2 = (await session.execute(select(Job).where(Job.id == best_k2_id))).scalar()
+            donor_k2 = (await session.execute(select(Job).where(Job.id == donor_k2_id))).scalar()
+        res_k2 = await _resolve_duplicate_group(best_k2, [best_k2, donor_k2], source="keep", user_kept=True)
+        check("K2 Auflösung nicht abgelehnt", not res_k2.refused, f"problems={res_k2.problems}")
 
         await run_pipeline(best_k2_id)
 
@@ -677,9 +687,10 @@ async def main():
                       actual_size == new_size,
                       f"immich_size={actual_size} local_new={new_size} local_old={old_size}")
                 # Old asset must be gone
-                check("K2d Altes pre-existing Asset weg",
-                      not await asset_exists(best_pre_asset_id),
-                      f"old={best_pre_asset_id}")
+                state_k2 = await get_asset_state(best_pre_asset_id)
+                check("K2d Altes pre-existing Asset im Papierkorb",
+                      state_k2 in ("trashed", "missing"),
+                      f"old={best_pre_asset_id} state={state_k2}")
                 # Cleanup
                 try:
                     await delete_asset(best_k2.immich_asset_id)

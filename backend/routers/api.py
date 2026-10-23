@@ -27,6 +27,13 @@ async def health():
     }
 
 
+@router.get("/version")
+async def version():
+    """Running version, e.g. for monitoring or to check a deploy."""
+    from version import VERSION, VERSION_DATE
+    return {"version": VERSION, "date": VERSION_DATE}
+
+
 @router.post("/job/{debug_key}/retry")
 async def retry_job_endpoint(debug_key: str, request: Request):
     import job_view
