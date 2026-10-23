@@ -9,6 +9,10 @@ class Base(DeclarativeBase):
 
 class Job(Base):
     __tablename__ = "jobs"
+    # Never hand out the id of a deleted job again: register, reference and
+    # ledger rows are keyed by job id (R-26). Existing databases are rebuilt
+    # once in database._jobs_autoincrement.
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True)
     filename = Column(Text, nullable=False)
