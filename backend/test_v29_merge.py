@@ -1,9 +1,16 @@
 """
-Test: v2.29.5-7 merge features — FTAG-38 to FTAG-50
-Covers: own_album preservation, donor_albums from Immich/fallback,
-        _get_folder_album_names, album→keywords flow, folder_tags
-        boolean gate, _IGNORED_ALBUMS filter, already-done path,
-        add_asset_to_albums existence.
+Test: v2.29.5-7 merge features — FTAG-38 to FTAG-50, folders since the split
+into a tag mode (none / flat / nested) and albums (folder_path.py)
+Covers: the kept job's own folder and the donors' folders merged as raw
+        paths (routers.duplicates._merge), donor_albums from IA-08 and the
+        legacy fallback, folder_targets (tags and albums per the set's
+        options, legacy own_album), donors' old flat folder words not carried,
+        the skip record of a kept duplicate, IA-02's folder record,
+        _IGNORED_ALBUMS filter, already-done path, add_asset_to_albums
+        existence, _quality_score.
+
+The folder tests call the real merge and folder_targets on unsaved jobs of a
+throw-away set; nothing is written but that set, which is removed again.
 
 Run via:  docker exec mediaassistant-dev python /app/test_v29_merge.py
 """
@@ -17,587 +24,181 @@ def check(name, cond, detail=""):
     print(f"  {'✅ PASS' if cond else '❌ FAIL'}  {name}" + (f" — {detail}" if detail else ""))
 
 
-# ──────────────────────────────────────────────────────────────
-# FTAG-38: own_album preservation
-# ──────────────────────────────────────────────────────────────
-async def test_own_album_preservation():
-    """FTAG-38: own_album saved before donor folder_tags merge."""
+TS = int(time.time())
+_SETS: list[int] = []
+
+
+async def _make_set(mode: str, albums: bool) -> int:
     from database import async_session
+    from models import ProcessingSet
+    async with async_session() as session:
+        ps = ProcessingSet(name=f"__v29_folders_{TS}_{len(_SETS)}", active=False, position=9800 + len(_SETS),
+                           schedule_mode="manual", folder_tag_mode=mode, folder_albums=albums)
+        session.add(ps)
+        await session.commit()
+        _SETS.append(ps.id)
+        return ps.id
+
+
+async def _drop_sets():
+    from database import async_session
+    from models import ProcessingSet
+    from sqlalchemy import delete
+    if _SETS:
+        async with async_session() as session:
+            await session.execute(delete(ProcessingSet).where(ProcessingSet.id.in_(_SETS)))
+            await session.commit()
+
+
+def _job(key, set_id, *, path, ia02, ia07=None, ia08=None, status="duplicate", inbox="/inbox"):
+    """An unsaved job: the merge and folder_targets only read it."""
     from models import Job
-    from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
-
-    ts = int(time.time())
-    print("\n── FTAG-38: own_album preservation ──")
-
-    async with async_session() as session:
-        jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 100 + b'\xff\xd9'
-        dup_dir = "/library/error/duplicates"
-        os.makedirs(dup_dir, exist_ok=True)
-
-        kept_path = f"{dup_dir}/__v29_oa_kept_{ts}.jpg"
-        donor_path = f"{dup_dir}/__v29_oa_donor_{ts}.jpg"
-        for p in [kept_path, donor_path]:
-            with open(p, 'wb') as f:
-                f.write(jpeg)
-
-        kept = Job(
-            filename=f"__v29_oa_kept_{ts}.jpg",
-            original_path=kept_path, source_inbox_path="/inbox",
-            status="duplicate", target_path=kept_path,
-            debug_key=f"V29-OA-KEPT-{ts}",
-            file_hash=f"v29oa_{ts}", phash=f"v29oa_phash_{ts}",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "folder_tags": ["Sommer", "Strand", "Sommer Strand"],
-                },
-                "IA-07": {"keywords_written": []},
-            },
-        )
-        donor = Job(
-            filename=f"__v29_oa_donor_{ts}.jpg",
-            original_path=donor_path, source_inbox_path="/inbox",
-            status="duplicate", target_path=donor_path,
-            debug_key=f"V29-OA-DONOR-{ts}",
-            file_hash=f"v29oad_{ts}", phash=f"v29oa_phash_{ts}",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "folder_tags": ["Winter", "Ski", "Winter Ski"],
-                },
-                "IA-07": {"keywords_written": []},
-            },
-        )
-        session.add_all([kept, donor])
-        await session.commit()
-        keep_key = kept.debug_key
-
-    # Simulate the keep_file merge logic (lines 718-823 of duplicates.py)
-    async with async_session() as session:
-        result = await session.execute(
-            select(Job).where(Job.debug_key.in_([f"V29-OA-KEPT-{ts}", f"V29-OA-DONOR-{ts}"]))
-        )
-        group_jobs = list(result.scalars().all())
-        kept_job = next(j for j in group_jobs if j.debug_key == keep_key)
-
-        kept_sr = kept_job.step_result or {}
-        kept_ia02 = kept_sr.get("IA-02") or {}
-        kept_folder_tags = list(kept_ia02.get("folder_tags") or [])
-
-        # The critical line: own_album saved BEFORE donor merge
-        own_album = kept_folder_tags[-1] if kept_folder_tags else ""
-
-        check("FTAG-38a own_album = last folder_tag of kept",
-              own_album == "Sommer Strand",
-              f"own_album={own_album}")
-
-        # Merge donor tags
-        for d in group_jobs:
-            if d.debug_key == keep_key:
-                continue
-            d_ia02 = (d.step_result or {}).get("IA-02") or {}
-            donor_ft = d_ia02.get("folder_tags") or []
-            new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
-            kept_folder_tags.extend(new_ft)
-
-        # Persist own_album into IA-02
-        kept_ia02["folder_tags"] = kept_folder_tags
-        kept_ia02["own_album"] = own_album
-        kept_sr["IA-02"] = kept_ia02
-        kept_job.step_result = kept_sr
-        flag_modified(kept_job, "step_result")
-        await session.commit()
-
-        check("FTAG-38b own_album persisted in IA-02",
-              kept_ia02.get("own_album") == "Sommer Strand",
-              f"ia02_own_album={kept_ia02.get('own_album')}")
-
-        check("FTAG-38c donor tags merged into folder_tags",
-              "Winter Ski" in kept_folder_tags and "Sommer Strand" in kept_folder_tags,
-              f"ft={kept_folder_tags}")
-
-        check("FTAG-38d own_album unchanged after merge",
-              kept_ia02.get("own_album") == "Sommer Strand",
-              f"own_album={kept_ia02.get('own_album')}")
-
-    # Clean up
-    for p in [kept_path, donor_path]:
-        if os.path.exists(p):
-            os.remove(p)
+    sr = {"IA-01": {"file_type": "JPEG"}, "IA-02": ia02, "IA-07": ia07 or {"keywords_written": []}}
+    if ia08:
+        sr["IA-08"] = ia08
+    return Job(filename=os.path.basename(path), original_path=path, target_path=path,
+               source_inbox_path=inbox, status=status, debug_key=f"V29-{key}-{TS}",
+               set_id=set_id, step_result=sr)
 
 
 # ──────────────────────────────────────────────────────────────
-# FTAG-39/40: donor_albums from Immich / fallback to folder_tags
+# FTAG-38: own folder kept, donor folders merged as raw paths
+# ──────────────────────────────────────────────────────────────
+async def test_own_folder_and_donor_paths():
+    """FTAG-38: the kept job's folder stays its own; the donors' folders are added."""
+    from routers.duplicates import _merge
+    print("\n── FTAG-38: own folder + donor folders ──")
+    set_id = await _make_set(mode="nested", albums=True)
+    kept = _job("OA-KEPT", set_id, path="/library/error/duplicates/k.jpg",
+                ia02={"status": "duplicate", "folder_path": "Sommer/Strand"})
+    donor = _job("OA-DONOR", set_id, path="/library/error/duplicates/d.jpg",
+                 ia02={"status": "duplicate", "folder_path": "Winter/Ski"})
+    same = _job("OA-SAME", set_id, path="/library/error/duplicates/s.jpg",
+                ia02={"status": "duplicate", "folder_path": "Sommer/Strand"})
+    m = await _merge(kept, [donor, same], {}, source="test", user_kept=True)
+    ia02 = m.step_result["IA-02"]
+    check("FTAG-38a own folder unchanged", ia02.get("folder_path") == "Sommer/Strand", f"{ia02.get('folder_path')}")
+    check("FTAG-38b donor folder added once, own folder not repeated",
+          ia02.get("donor_folder_paths") == ["Winter/Ski"], f"{ia02.get('donor_folder_paths')}")
+    check("FTAG-38c merge note", "folders(+1)" in m.notes, f"{m.notes}")
+    check("FTAG-38d no folder words as keywords", m.keywords == [], f"{m.keywords}")
+    check("FTAG-38e recorded in the merge record", (m.step_result.get("dup_merge") or {}).get("folders") == ["Winter/Ski"],
+          f"{m.step_result.get('dup_merge')}")
+
+
+# ──────────────────────────────────────────────────────────────
+# FTAG-39/40: donor_albums from IA-08 / legacy fallback
 # ──────────────────────────────────────────────────────────────
 async def test_donor_albums_fallback():
-    """FTAG-39/40: donor_albums from Immich asset or folder_tags fallback."""
-    from database import async_session
-    from models import Job
-    from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
-
-    ts = int(time.time())
-    print("\n── FTAG-39/40: donor_albums (Immich + fallback) ──")
-
-    async with async_session() as session:
-        jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 100 + b'\xff\xd9'
-        dup_dir = "/library/error/duplicates"
-        os.makedirs(dup_dir, exist_ok=True)
-
-        kept_path = f"{dup_dir}/__v29_da_kept_{ts}.jpg"
-        donor_no_immich_path = f"{dup_dir}/__v29_da_donor_noi_{ts}.jpg"
-        for p in [kept_path, donor_no_immich_path]:
-            with open(p, 'wb') as f:
-                f.write(jpeg)
-
-        kept = Job(
-            filename=f"__v29_da_kept_{ts}.jpg",
-            original_path=kept_path, source_inbox_path="/inbox",
-            status="duplicate", target_path=kept_path,
-            debug_key=f"V29-DA-KEPT-{ts}",
-            file_hash=f"v29da_{ts}", phash=f"v29da_phash_{ts}",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "folder_tags": ["Ferien", "Ibiza", "Ferien Ibiza"],
-                },
-                "IA-07": {"keywords_written": []},
-            },
-        )
-        # Donor WITHOUT Immich asset → fallback to folder_tags[-1]
-        donor_no_immich = Job(
-            filename=f"__v29_da_donor_noi_{ts}.jpg",
-            original_path=donor_no_immich_path, source_inbox_path="/inbox",
-            status="duplicate", target_path=donor_no_immich_path,
-            debug_key=f"V29-DA-DNI-{ts}",
-            file_hash=f"v29dad_{ts}", phash=f"v29da_phash_{ts}",
-            immich_asset_id=None,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "folder_tags": ["Arbeit", "Konferenz", "Arbeit Konferenz"],
-                },
-                "IA-07": {"keywords_written": []},
-            },
-        )
-        session.add_all([kept, donor_no_immich])
-        await session.commit()
-        keep_key = kept.debug_key
-
-    # Simulate the merge logic from keep_file (lines 729-796)
-    async with async_session() as session:
-        result = await session.execute(
-            select(Job).where(Job.debug_key.in_([f"V29-DA-KEPT-{ts}", f"V29-DA-DNI-{ts}"]))
-        )
-        group_jobs = list(result.scalars().all())
-        kept_job = next(j for j in group_jobs if j.debug_key == keep_key)
-
-        kept_sr = kept_job.step_result or {}
-        kept_ia02 = kept_sr.get("IA-02") or {}
-        kept_folder_tags = list(kept_ia02.get("folder_tags") or [])
-        own_album = kept_folder_tags[-1] if kept_folder_tags else ""
-        donor_immich_albums = []
-
-        for donor in group_jobs:
-            if donor.debug_key == keep_key:
-                continue
-            d_sr = donor.step_result or {}
-            d_ia02 = d_sr.get("IA-02") or {}
-
-            donor_ft = d_ia02.get("folder_tags") or []
-            new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
-            kept_folder_tags.extend(new_ft)
-
-            # Collect donor's albums from all sources
-            donor_albums_found = []
-            # Source 1: Immich API (donor has an uploaded asset)
-            donor_asset = donor.immich_asset_id or ""
-            if not donor_asset and (donor.target_path or "").startswith("immich:"):
-                donor_asset = (donor.target_path or "")[7:]
-            if donor_asset:
-                from immich_client import get_asset_albums
-                donor_albums_found = await get_asset_albums(donor_asset)
-            # Source 2: IA-08 result
-            if not donor_albums_found:
-                d_ia08 = d_sr.get("IA-08") or {}
-                donor_albums_found = d_ia08.get("immich_albums_added") or []
-            # Source 3: folder_tags fallback
-            if not donor_albums_found and donor_ft:
-                donor_albums_found = [donor_ft[-1]]
-
-            for a in donor_albums_found:
-                if a and a not in donor_immich_albums:
-                    donor_immich_albums.append(a)
-
-        check("FTAG-40a donor without Immich falls back to folder_tags[-1]",
-              "Arbeit Konferenz" in donor_immich_albums,
-              f"donor_albums={donor_immich_albums}")
-
-        # Persist
-        kept_ia02["folder_tags"] = kept_folder_tags
-        kept_ia02["own_album"] = own_album
-        kept_ia02["donor_albums"] = donor_immich_albums
-        kept_sr["IA-02"] = kept_ia02
-        kept_job.step_result = kept_sr
-        flag_modified(kept_job, "step_result")
-        await session.commit()
-
-        check("FTAG-39a donor_albums persisted in IA-02",
-              kept_ia02.get("donor_albums") == ["Arbeit Konferenz"],
-              f"donor_albums={kept_ia02.get('donor_albums')}")
-
-    # Clean up
-    for p in [kept_path, donor_no_immich_path]:
-        if os.path.exists(p):
-            os.remove(p)
+    """FTAG-39/40: donor_albums from IA-08; a donor from before the raw folder
+    was recorded gives its old folder album only with albums on."""
+    from routers.duplicates import _merge
+    print("\n── FTAG-39/40: donor_albums ──")
+    for albums_on in (True, False):
+        set_id = await _make_set(mode="none", albums=albums_on)
+        kept = _job("DA-KEPT", set_id, path="/library/error/duplicates/k.jpg",
+                    ia02={"status": "duplicate", "folder_path": "Urlaub"})
+        recorded = _job("DA-REC", set_id, path="/library/photos/r.jpg", status="done",
+                        ia02={"status": "ok"}, ia08={"immich_albums_added": ["Ferien Ibiza"]})
+        legacy = _job("DA-LEG", set_id, path="/library/error/duplicates/l.jpg",
+                      ia02={"status": "duplicate", "folder_tags": ["Arbeit", "Konferenz", "Arbeit Konferenz"]})
+        m = await _merge(kept, [recorded, legacy], {}, source="test", user_kept=False)
+        tag = "on" if albums_on else "off"
+        check(f"FTAG-39 ({tag}) album recorded by IA-08 always carried", "Ferien Ibiza" in m.donor_albums,
+              f"{m.donor_albums}")
+        check(f"FTAG-40 ({tag}) legacy folder album only with albums on",
+              ("Arbeit Konferenz" in m.donor_albums) == albums_on, f"{m.donor_albums}")
 
 
 # ──────────────────────────────────────────────────────────────
-# FTAG-41: _get_folder_album_names returns own_album + donor_albums
+# FTAG-41: folder_targets — tags and albums of the merged job
 # ──────────────────────────────────────────────────────────────
-async def test_get_folder_album_names():
-    """FTAG-41: _get_folder_album_names returns own_album + donor_albums."""
-    from database import async_session
-    from models import Job
-    from pipeline.step_ia08_sort import _get_folder_album_names
+async def test_folder_targets():
+    """FTAG-41: folder_targets gives tag paths and album names of own and donor folders."""
+    from folder_path import folder_targets
+    print("\n── FTAG-41: folder_targets ──")
+    set_id = await _make_set(mode="nested", albums=True)
+    job = _job("FT", set_id, path="/app/data/reprocess/f.jpg", status="queued",
+               ia02={"status": "skipped", "folder_path": "Sommer/Strand/2019",
+                     "donor_folder_paths": ["Winter/Ski"], "donor_albums": ["Best of"]})
+    t = await folder_targets(job)
+    check("FTAG-41a tag paths of own and donor folders",
+          t.tag_paths == ["Ordner/Sommer/Strand/2019", "Ordner/Winter/Ski"], f"{t.tag_paths}")
+    check("FTAG-41b album names (year appended) plus donor albums",
+          t.albums == ["Sommer Strand 2019", "Winter Ski", "Best of"], f"{t.albums}")
 
-    ts = int(time.time())
-    print("\n── FTAG-41: _get_folder_album_names ──")
-
-    async with async_session() as session:
-        # Job with own_album + donor_albums in IA-02, file at /app/data/reprocess/
-        job = Job(
-            filename=f"__v29_gfan_{ts}.jpg",
-            original_path=f"/app/data/reprocess/__v29_gfan_{ts}.jpg",
-            source_inbox_path="/inbox", status="queued",
-            debug_key=f"V29-GFAN-{ts}",
-            folder_tags=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG"},
-                "IA-02": {
-                    "status": "skipped",
-                    "folder_tags": ["Sommer", "Strand", "Sommer Strand", "Winter", "Ski", "Winter Ski"],
-                    "own_album": "Sommer Strand",
-                    "donor_albums": ["Winter Ski"],
-                },
-            },
-        )
-        session.add(job)
-        await session.commit()
-
-        albums = await _get_folder_album_names(job)
-
-        check("FTAG-41a albums is not None",
-              albums is not None,
-              f"albums={albums}")
-
-        check("FTAG-41b own_album in albums",
-              albums is not None and "Sommer Strand" in albums,
-              f"albums={albums}")
-
-        check("FTAG-41c donor_albums in albums",
-              albums is not None and "Winter Ski" in albums,
-              f"albums={albums}")
-
-        check("FTAG-41d own_album comes first",
-              albums is not None and len(albums) >= 2 and albums[0] == "Sommer Strand",
-              f"albums={albums}")
-
-    # Test with ONLY own_album (no donor)
-    async with async_session() as session:
-        from sqlalchemy import select
-        result = await session.execute(select(Job).where(Job.debug_key == f"V29-GFAN-{ts}"))
-        job = result.scalar()
-        sr = dict(job.step_result)
-        sr["IA-02"] = {
-            "status": "skipped",
-            "folder_tags": ["Urlaub", "Urlaub"],
-            "own_album": "Urlaub",
-        }
-        job.step_result = sr
-        from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(job, "step_result")
-        await session.commit()
-
-        albums2 = await _get_folder_album_names(job)
-        check("FTAG-41e only own_album, no donors",
-              albums2 is not None and albums2 == ["Urlaub"],
-              f"albums={albums2}")
-
-    # Test with legacy fallback (no own_album key, just folder_tags)
-    async with async_session() as session:
-        result = await session.execute(select(Job).where(Job.debug_key == f"V29-GFAN-{ts}"))
-        job = result.scalar()
-        sr = dict(job.step_result)
-        sr["IA-02"] = {
-            "status": "skipped",
-            "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"],
-        }
-        job.step_result = sr
-        flag_modified(job, "step_result")
-        await session.commit()
-
-        albums3 = await _get_folder_album_names(job)
-        check("FTAG-41f legacy fallback: folder_tags[-1]",
-              albums3 is not None and albums3[0] == "Ferien Mallorca",
-              f"albums={albums3}")
+    legacy = _job("FT-LEG", set_id, path="/app/data/reprocess/f.jpg", status="queued",
+                  ia02={"status": "skipped", "own_album": "Ferien Mallorca",
+                        "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"]})
+    t2 = await folder_targets(legacy)
+    check("FTAG-41c legacy job: own_album as album, no tag tree", t2.albums == ["Ferien Mallorca"]
+          and t2.tag_paths == [], f"{t2}")
+    legacy2 = _job("FT-LEG2", set_id, path="/app/data/reprocess/f.jpg", status="queued",
+                   ia02={"status": "skipped", "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"]})
+    t3 = await folder_targets(legacy2)
+    check("FTAG-41d legacy without own_album: last folder tag", t3.albums == ["Ferien Mallorca"], f"{t3}")
+    live = _job("FT-LIVE", set_id, path="/inbox/Ferien/Mallorca/f.jpg", status="queued", ia02={"status": "ok"})
+    t4 = await folder_targets(live)
+    check("FTAG-41e still in the inbox: from the path", t4.albums == ["Ferien Mallorca"]
+          and t4.tag_paths == ["Ordner/Ferien/Mallorca"], f"{t4}")
 
 
 # ──────────────────────────────────────────────────────────────
-# FTAG-42: Album names flow into keywords_written
+# FTAG-42: donors' old flat folder words — keywords only in flat mode
 # ──────────────────────────────────────────────────────────────
-async def test_album_names_into_keywords():
-    """FTAG-42: donor album names are added to kept_folder_tags and keywords_written."""
-    from database import async_session
-    from models import Job
-    from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
-
-    ts = int(time.time())
-    print("\n── FTAG-42: Album names → keywords_written ──")
-
-    async with async_session() as session:
-        jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 100 + b'\xff\xd9'
-        dup_dir = "/library/error/duplicates"
-        os.makedirs(dup_dir, exist_ok=True)
-
-        kept_path = f"{dup_dir}/__v29_ak_kept_{ts}.jpg"
-        donor_path = f"{dup_dir}/__v29_ak_donor_{ts}.jpg"
-        for p in [kept_path, donor_path]:
-            with open(p, 'wb') as f:
-                f.write(jpeg)
-
-        kept = Job(
-            filename=f"__v29_ak_kept_{ts}.jpg",
-            original_path=kept_path, source_inbox_path="/inbox",
-            status="duplicate", target_path=kept_path,
-            debug_key=f"V29-AK-KEPT-{ts}",
-            file_hash=f"v29ak_{ts}", phash=f"v29ak_phash_{ts}",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "folder_tags": ["MyAlbum"],
-                },
-                "IA-07": {"keywords_written": ["Natur"]},
-            },
-        )
-        donor = Job(
-            filename=f"__v29_ak_donor_{ts}.jpg",
-            original_path=donor_path, source_inbox_path="/inbox",
-            status="duplicate", target_path=donor_path,
-            debug_key=f"V29-AK-DONOR-{ts}",
-            file_hash=f"v29akd_{ts}", phash=f"v29ak_phash_{ts}",
-            immich_asset_id=None,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "folder_tags": ["Reise", "Japan", "Reise Japan"],
-                },
-                "IA-07": {"keywords_written": ["Tempel"]},
-            },
-        )
-        session.add_all([kept, donor])
-        await session.commit()
-        keep_key = kept.debug_key
-
-    # Simulate keep_file merge including album→keyword flow (lines 729-811)
-    async with async_session() as session:
-        result = await session.execute(
-            select(Job).where(Job.debug_key.in_([f"V29-AK-KEPT-{ts}", f"V29-AK-DONOR-{ts}"]))
-        )
-        group_jobs = list(result.scalars().all())
-        kept_job = next(j for j in group_jobs if j.debug_key == keep_key)
-
-        kept_sr = kept_job.step_result or {}
-        kept_ia02 = kept_sr.get("IA-02") or {}
-        kept_ia07 = kept_sr.get("IA-07") or {}
-        kept_folder_tags = list(kept_ia02.get("folder_tags") or [])
-        donor_immich_albums = []
-
-        for donor in group_jobs:
-            if donor.debug_key == keep_key:
-                continue
-            d_sr = donor.step_result or {}
-            d_ia02 = d_sr.get("IA-02") or {}
-            d_ia07 = d_sr.get("IA-07") or {}
-
-            # Merge donor keywords
-            kept_kw = kept_ia07.get("keywords_written") or []
-            donor_kw = d_ia07.get("keywords_written") or []
-            new_kw = [k for k in donor_kw if k and k not in kept_kw]
-            if new_kw:
-                kept_kw.extend(new_kw)
-                kept_ia07["keywords_written"] = kept_kw
-
-            # Merge donor folder_tags
-            donor_ft = d_ia02.get("folder_tags") or []
-            new_ft = [t for t in donor_ft if t and t not in kept_folder_tags]
-            kept_folder_tags.extend(new_ft)
-
-            # Donor albums fallback
-            donor_albums_found = []
-            if not donor_albums_found and donor_ft:
-                donor_albums_found = [donor_ft[-1]]
-            for a in donor_albums_found:
-                if a and a not in donor_immich_albums:
-                    donor_immich_albums.append(a)
-                # Album names flow into keywords/tags
-                if a and a not in kept_folder_tags:
-                    kept_folder_tags.append(a)
-                for word in (a or "").split():
-                    if word and word not in kept_folder_tags:
-                        kept_folder_tags.append(word)
-
-        # Ensure all folder_tags are in keywords (lines 804-811)
-        kept_kw = kept_ia07.get("keywords_written") or []
-        for ft in kept_folder_tags:
-            if ft and ft not in kept_kw:
-                kept_kw.append(ft)
-        kept_ia07["keywords_written"] = kept_kw
-
-        check("FTAG-42a donor album 'Reise Japan' in kept_folder_tags",
-              "Reise Japan" in kept_folder_tags,
-              f"ft={kept_folder_tags}")
-
-        check("FTAG-42b 'Reise Japan' in keywords_written",
-              "Reise Japan" in kept_kw,
-              f"kw={kept_kw}")
-
-        check("FTAG-42c donor keyword 'Tempel' in keywords_written",
-              "Tempel" in kept_kw,
-              f"kw={kept_kw}")
-
-        check("FTAG-42d kept's own 'MyAlbum' still in folder_tags",
-              "MyAlbum" in kept_folder_tags,
-              f"ft={kept_folder_tags}")
-
-        check("FTAG-42e all folder_tags are in keywords_written",
-              all(ft in kept_kw for ft in kept_folder_tags if ft),
-              f"ft={kept_folder_tags}, kw={kept_kw}")
-
-    # Clean up
-    for p in [kept_path, donor_path]:
-        if os.path.exists(p):
-            os.remove(p)
+async def test_no_folder_words_as_keywords():
+    """FTAG-42: a donor's legacy folder words stay out of the kept job's
+    keywords unless the set wants flat folder tags."""
+    from routers.duplicates import _merge
+    print("\n── FTAG-42: legacy folder words of a donor ──")
+    for mode in ("nested", "flat"):
+        set_id = await _make_set(mode=mode, albums=True)
+        kept = _job("KW-KEPT", set_id, path="/library/error/duplicates/k.jpg",
+                    ia02={"status": "duplicate", "folder_path": "MyAlbum"}, ia07={"keywords_written": ["Strand"]})
+        donor = _job("KW-DONOR", set_id, path="/library/photos/d.jpg", status="done",
+                     ia02={"status": "ok", "folder_tags": ["Reise", "Japan", "Reise Japan"]},
+                     ia07={"keywords_written": ["Reise", "Japan", "Reise Japan", "Tempel"]},
+                     ia08={"immich_albums_added": ["Reise Japan"]})
+        m = await _merge(kept, [donor], {}, source="test", user_kept=False)
+        check(f"FTAG-42a ({mode}) donor's own keyword taken over",
+              "Tempel" in m.keywords and "Tempel" in m.taken_keywords, f"{m.keywords}")
+        words = {"Reise", "Japan", "Reise Japan"} & set(m.keywords)
+        check(f"FTAG-42b ({mode}) donor's folder words {'kept' if mode == 'flat' else 'not taken over'}",
+              (words == {"Reise", "Japan", "Reise Japan"}) if mode == "flat" else not words, f"{m.keywords}")
+        check(f"FTAG-42c ({mode}) donor's album stays an album", m.donor_albums == ["Reise Japan"], f"{m.donor_albums}")
 
 
 # ──────────────────────────────────────────────────────────────
-# FTAG-43: folder_tags extraction respects job.folder_tags boolean
+# FTAG-43: the set's options gate tags and albums
 # ──────────────────────────────────────────────────────────────
-async def test_folder_tags_boolean_gate():
-    """FTAG-43: _extract_folder_tags only called if donor.folder_tags is True."""
-    from database import async_session
-    from models import Job
-    from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
-
-    ts = int(time.time())
-    print("\n── FTAG-43: folder_tags boolean gate ──")
-
-    async with async_session() as session:
-        jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 100 + b'\xff\xd9'
-        dup_dir = "/library/error/duplicates"
-        os.makedirs(dup_dir, exist_ok=True)
-
-        kept_path = f"{dup_dir}/__v29_fb_kept_{ts}.jpg"
-        donor_ft_true_path = f"{dup_dir}/__v29_fb_donor_t_{ts}.jpg"
-        donor_ft_false_path = f"{dup_dir}/__v29_fb_donor_f_{ts}.jpg"
-        for p in [kept_path, donor_ft_true_path, donor_ft_false_path]:
-            with open(p, 'wb') as f:
-                f.write(jpeg)
-
-        kept = Job(
-            filename=f"__v29_fb_kept_{ts}.jpg",
-            original_path=kept_path, source_inbox_path="/inbox",
-            status="duplicate", target_path=kept_path,
-            debug_key=f"V29-FB-KEPT-{ts}",
-            file_hash=f"v29fb_{ts}", phash=f"v29fb_phash_{ts}",
-            folder_tags=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {"status": "duplicate", "folder_tags": ["Kept Album"]},
-                "IA-07": {"keywords_written": []},
-            },
-        )
-        # Donor with folder_tags=True but NO folder_tags in IA-02 →
-        # _extract_folder_tags should be called
-        donor_ft_true = Job(
-            filename=f"__v29_fb_donor_t_{ts}.jpg",
-            original_path=donor_ft_true_path,
-            source_inbox_path="/inbox",
-            status="duplicate", target_path=donor_ft_true_path,
-            debug_key=f"V29-FB-DT-{ts}",
-            file_hash=f"v29fbdt_{ts}", phash=f"v29fb_phash_{ts}",
-            folder_tags=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {"status": "duplicate"},
-                "IA-07": {"keywords_written": []},
-            },
-        )
-        # Donor with folder_tags=False and NO folder_tags in IA-02 →
-        # _extract_folder_tags should NOT be called
-        donor_ft_false = Job(
-            filename=f"__v29_fb_donor_f_{ts}.jpg",
-            original_path=donor_ft_false_path,
-            source_inbox_path="/inbox",
-            status="duplicate", target_path=donor_ft_false_path,
-            debug_key=f"V29-FB-DF-{ts}",
-            file_hash=f"v29fbdf_{ts}", phash=f"v29fb_phash_{ts}",
-            folder_tags=False,
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {"status": "duplicate"},
-                "IA-07": {"keywords_written": []},
-            },
-        )
-        session.add_all([kept, donor_ft_true, donor_ft_false])
-        await session.commit()
-
-    # Simulate the guard from keep_file (lines 762-765):
-    #   donor_ft = d_ia02.get("folder_tags") or []
-    #   if not donor_ft and donor.folder_tags:
-    #       donor_ft = _extract_folder_tags(donor)
-    from pipeline.step_ia02_duplicates import _extract_folder_tags
-
-    # donor_ft_true: folder_tags=True, no IA-02 folder_tags → extraction called
-    d_ia02_t = (donor_ft_true.step_result or {}).get("IA-02") or {}
-    donor_ft_t = d_ia02_t.get("folder_tags") or []
-    called_for_true = not donor_ft_t and donor_ft_true.folder_tags
-    if called_for_true:
-        donor_ft_t = _extract_folder_tags(donor_ft_true)
-
-    check("FTAG-43a folder_tags=True → extraction attempted",
-          called_for_true is True,
-          f"called={called_for_true}")
-
-    # donor_ft_false: folder_tags=False, no IA-02 folder_tags → extraction NOT called
-    d_ia02_f = (donor_ft_false.step_result or {}).get("IA-02") or {}
-    donor_ft_f = d_ia02_f.get("folder_tags") or []
-    called_for_false = not donor_ft_f and donor_ft_false.folder_tags
-    if called_for_false:
-        donor_ft_f = _extract_folder_tags(donor_ft_false)
-
-    check("FTAG-43b folder_tags=False → extraction NOT attempted",
-          called_for_false is False,
-          f"called={called_for_false}")
-
-    # Clean up
-    for p in [kept_path, donor_ft_true_path, donor_ft_false_path]:
-        if os.path.exists(p):
-            os.remove(p)
+async def test_options_gate():
+    """FTAG-43: each tag mode and the album switch, alone and combined."""
+    from folder_path import folder_targets
+    print("\n── FTAG-43: options of the set ──")
+    ia02 = {"status": "ok", "folder_path": "A/B", "donor_folder_paths": ["C"], "donor_albums": ["Best of"]}
+    for mode, albums, want_paths, want_flat, want_albums in (
+            ("none", False, [], [], ["Best of"]),
+            ("nested", False, ["Ordner/A/B", "Ordner/C"], [], ["Best of"]),
+            ("flat", False, [], ["A", "B", "C"], ["Best of"]),
+            ("none", True, [], [], ["A B", "C", "Best of"]),
+            ("flat", True, [], ["A", "B", "C"], ["A B", "C", "Best of"])):
+        set_id = await _make_set(mode=mode, albums=albums)
+        t = await folder_targets(_job("OPT", set_id, path="/library/x.jpg", status="done", ia02=dict(ia02)))
+        check(f"FTAG-43 mode={mode} albums={albums}",
+              t.tag_paths == want_paths and t.flat_tags == want_flat and t.albums == want_albums, f"{t}")
+    set_id = await _make_set(mode="flat", albums=False)
+    legacy = _job("OPT-LEG", set_id, path="/app/data/reprocess/x.jpg", status="queued",
+                  ia02={"status": "skipped", "folder_tags": ["Ferien", "Mallorca", "Ferien Mallorca"]})
+    t = await folder_targets(legacy)
+    check("FTAG-43e flat, job from before the raw folder: its old flat tags",
+          t.flat_tags == ["Ferien", "Mallorca", "Ferien Mallorca"], f"{t}")
+    set_id = await _make_set(mode="nested", albums=True)
+    immich_job = _job("OPT-IMM", set_id, path="/tmp/ma_immich_x/f.jpg", status="done", inbox=None,
+                      ia02={"status": "ok", "folder_path": "A"})
+    t = await folder_targets(immich_job)
+    check("FTAG-43d a job without a directory input has no folder", t.tag_paths == [] and t.albums == [], f"{t}")
 
 
-# ──────────────────────────────────────────────────────────────
-# FTAG-44: _IGNORED_ALBUMS filter in get_asset_albums
-# ──────────────────────────────────────────────────────────────
 async def test_ignored_albums_filter():
     """FTAG-44: get_asset_albums filters out 'Zuletzt'."""
     import inspect
@@ -761,168 +362,48 @@ async def test_add_asset_to_albums_exists():
 
 
 # ──────────────────────────────────────────────────────────────
-# FTAG-47: _extract_folder_tags unit test
+# FTAG-47: IA-02 records the raw folder
 # ──────────────────────────────────────────────────────────────
-async def test_extract_folder_tags():
-    """FTAG-47: _extract_folder_tags produces correct tags from path."""
-    from pipeline.step_ia02_duplicates import _extract_folder_tags
+async def test_folder_record():
+    """FTAG-47: IA-02's folder record is the raw folder below the inbox."""
     from models import Job
-
-    print("\n── FTAG-47: _extract_folder_tags ──")
-
-    # Single subfolder
-    j1 = Job(
-        filename="test.jpg",
-        original_path="/inbox/Urlaub/test.jpg",
-        source_inbox_path="/inbox",
-    )
-    ft1 = _extract_folder_tags(j1)
-    check("FTAG-47a single subfolder",
-          ft1 == ["Urlaub"],
-          f"ft={ft1}")
-
-    # Two subfolders → parts + combined
-    j2 = Job(
-        filename="test.jpg",
-        original_path="/inbox/Ferien/Mallorca/test.jpg",
-        source_inbox_path="/inbox",
-    )
-    ft2 = _extract_folder_tags(j2)
-    check("FTAG-47b two subfolders → parts + combined",
-          "Ferien" in ft2 and "Mallorca" in ft2 and "Ferien Mallorca" in ft2,
-          f"ft={ft2}")
-
-    # Flat inbox (no subfolder) → empty
-    j3 = Job(
-        filename="test.jpg",
-        original_path="/inbox/test.jpg",
-        source_inbox_path="/inbox",
-    )
-    ft3 = _extract_folder_tags(j3)
-    check("FTAG-47c flat inbox → empty",
-          ft3 == [],
-          f"ft={ft3}")
-
-    # Multi-word folder name → words split + combined
-    j4 = Job(
-        filename="test.jpg",
-        original_path="/inbox/Summer Vacation/test.jpg",
-        source_inbox_path="/inbox",
-    )
-    ft4 = _extract_folder_tags(j4)
-    check("FTAG-47d multi-word folder → words split",
-          "Summer" in ft4 and "Vacation" in ft4,
-          f"ft={ft4}")
-
-    # No source_inbox_path → empty
-    j5 = Job(
-        filename="test.jpg",
-        original_path="/other/path/test.jpg",
-        source_inbox_path=None,
-    )
-    ft5 = _extract_folder_tags(j5)
-    check("FTAG-47e no source_inbox → empty",
-          ft5 == [],
-          f"ft={ft5}")
+    from pipeline.step_ia02_duplicates import _folder_record
+    print("\n── FTAG-47: IA-02 folder record ──")
+    for name, path, inbox, want in (
+            ("FTAG-47a nested, with spaces", "/inbox/Summer Vacation/Beach/f.jpg", "/inbox",
+             {"folder_path": "Summer Vacation/Beach"}),
+            ("FTAG-47b umlauts", "/inbox/Ferien Zürich/f.jpg", "/inbox", {"folder_path": "Ferien Zürich"}),
+            ("FTAG-47c raw: technical levels are kept here", "/inbox/A/2019/07/DCIM/f.jpg", "/inbox",
+             {"folder_path": "A/2019/07/DCIM"}),
+            ("FTAG-47d directly in the inbox", "/inbox/f.jpg", "/inbox", {}),
+            ("FTAG-47e outside the inbox, no ledger", "/app/data/reprocess/f.jpg", "/inbox", {}),
+            ("FTAG-47f no inbox", "/inbox/A/f.jpg", None, {})):
+        job = Job(filename="f.jpg", original_path=path, source_inbox_path=inbox, step_result={})
+        got = await _folder_record(job)
+        check(name, got == want, f"{got}")
 
 
 # ──────────────────────────────────────────────────────────────
-# FTAG-48: Full keep_file merge preserves own_album + donor_albums
-# in IA-02 skip overwrite
+# FTAG-48: a kept duplicate's skip record keeps the folders
 # ──────────────────────────────────────────────────────────────
-async def test_skip_overwrite_preserves_albums():
-    """FTAG-48: IA-02 skip overwrite preserves own_album + donor_albums."""
-    from database import async_session
-    from models import Job
-    from sqlalchemy import select
-    from sqlalchemy.orm.attributes import flag_modified
-
-    ts = int(time.time())
-    print("\n── FTAG-48: skip overwrite preserves own_album + donor_albums ──")
-
-    async with async_session() as session:
-        jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 100 + b'\xff\xd9'
-        dup_dir = "/library/error/duplicates"
-        os.makedirs(dup_dir, exist_ok=True)
-        kept_path = f"{dup_dir}/__v29_so_kept_{ts}.jpg"
-        with open(kept_path, 'wb') as f:
-            f.write(jpeg)
-
-        job = Job(
-            filename=f"__v29_so_kept_{ts}.jpg",
-            original_path=kept_path, source_inbox_path="/inbox",
-            status="duplicate", target_path=kept_path,
-            debug_key=f"V29-SO-{ts}",
-            step_result={
-                "IA-01": {"file_type": "JPEG", "file_size": len(jpeg)},
-                "IA-02": {
-                    "status": "duplicate",
-                    "folder_tags": ["A", "B", "A B", "C", "D", "C D"],
-                    "own_album": "A B",
-                    "donor_albums": ["C D"],
-                },
-                "IA-07": {"keywords_written": []},
-            },
-        )
-        session.add(job)
-        await session.commit()
-        job_dk = job.debug_key
-
-    # Simulate the IA-02 skip overwrite from keep_file (lines 914-947)
-    async with async_session() as session:
-        result = await session.execute(select(Job).where(Job.debug_key == job_dk))
-        job = result.scalar()
-
-        pre_ia02 = (job.step_result or {}).get("IA-02") or {}
-        saved_folder_tags = pre_ia02.get("folder_tags") or []
-        saved_own_album = pre_ia02.get("own_album") or ""
-        saved_donor_albums = pre_ia02.get("donor_albums") or []
-
-        # Simulate prepare_job_for_reprocess wiping steps
-        sr = {"IA-01": job.step_result.get("IA-01", {})}
-
-        # Inject IA-02 as skipped (exact code from lines 939-946)
-        sr["IA-02"] = {
-            "status": "skipped",
-            "reason": "kept via duplicate review",
-            "user_kept": True,
-        }
-        if saved_folder_tags:
-            sr["IA-02"]["folder_tags"] = saved_folder_tags
-        if saved_own_album:
-            sr["IA-02"]["own_album"] = saved_own_album
-        if saved_donor_albums:
-            sr["IA-02"]["donor_albums"] = saved_donor_albums
-
-        job.step_result = sr
-        flag_modified(job, "step_result")
-        await session.commit()
-
-        ia02 = sr["IA-02"]
-        check("FTAG-48a folder_tags survives skip overwrite",
-              ia02.get("folder_tags") == ["A", "B", "A B", "C", "D", "C D"],
-              f"ft={ia02.get('folder_tags')}")
-
-        check("FTAG-48b own_album survives skip overwrite",
-              ia02.get("own_album") == "A B",
-              f"own={ia02.get('own_album')}")
-
-        check("FTAG-48c donor_albums survives skip overwrite",
-              ia02.get("donor_albums") == ["C D"],
-              f"donors={ia02.get('donor_albums')}")
-
-        check("FTAG-48d user_kept set in skip overwrite",
-              ia02.get("user_kept") is True,
-              f"user_kept={ia02.get('user_kept')}")
-
-    # Clean up
-    if os.path.exists(kept_path):
-        os.remove(kept_path)
+async def test_skip_record_keeps_folders():
+    """FTAG-48: the IA-02 record of a kept duplicate's next run carries folder, donor folders and albums."""
+    from routers.duplicates import _merge
+    print("\n── FTAG-48: skip record ──")
+    set_id = await _make_set(mode="nested", albums=True)
+    kept = _job("SO-KEPT", set_id, path="/library/error/duplicates/k.jpg",
+                ia02={"status": "duplicate", "folder_path": "A/B", "donor_albums": ["C D"]})
+    donor = _job("SO-DONOR", set_id, path="/library/error/duplicates/d.jpg",
+                 ia02={"status": "duplicate", "folder_path": "E"})
+    m = await _merge(kept, [donor], {}, source="duplicate review", user_kept=True)
+    skip = m.ia02_skip
+    check("FTAG-48a status skipped", skip.get("status") == "skipped", f"{skip}")
+    check("FTAG-48b own folder", skip.get("folder_path") == "A/B", f"{skip}")
+    check("FTAG-48c donor folders", skip.get("donor_folder_paths") == ["E"], f"{skip}")
+    check("FTAG-48d donor albums kept from before", skip.get("donor_albums") == ["C D"], f"{skip}")
+    check("FTAG-48e user_kept", skip.get("user_kept") is True, f"{skip}")
 
 
-# ──────────────────────────────────────────────────────────────
-# FTAG-49: _quality_score is consistent
-# ──────────────────────────────────────────────────────────────
 async def test_quality_score():
     """FTAG-49: _quality_score produces correct ordering."""
     from pipeline.step_ia02_duplicates import _quality_score
@@ -975,73 +456,15 @@ async def test_quality_score():
 
 
 # ──────────────────────────────────────────────────────────────
-# FTAG-50: _get_folder_album_names with no folder_tags → None
+# FTAG-50: no folder → no albums
 # ──────────────────────────────────────────────────────────────
-async def test_get_folder_album_names_none():
-    """FTAG-50: _get_folder_album_names returns None when no folder structure."""
-    from database import async_session
-    from models import Job
-    from pipeline.step_ia08_sort import _get_folder_album_names
-
-    ts = int(time.time())
-    print("\n── FTAG-50: _get_folder_album_names → None ──")
-
-    async with async_session() as session:
-        # Job with folder_tags=True but no subfolder and no IA-02 folder_tags
-        job = Job(
-            filename=f"__v29_gfan_none_{ts}.jpg",
-            original_path=f"/inbox/__v29_gfan_none_{ts}.jpg",
-            source_inbox_path="/inbox", status="queued",
-            debug_key=f"V29-GFAN-NONE-{ts}",
-            folder_tags=True,
-            step_result={
-                "IA-01": {"file_type": "JPEG"},
-                "IA-02": {"status": "ok"},
-            },
-        )
-        session.add(job)
-        await session.commit()
-
-        albums = await _get_folder_album_names(job)
-        check("FTAG-50a flat inbox + no IA-02 folder_tags → None",
-              albums is None,
-              f"albums={albums}")
-
-    # Job whose set has folder tags switched off → None, even with a
-    # subfolder. _get_folder_album_names checks the switch of the job's
-    # processing set (not Job.folder_tags); a job without set_id belongs to
-    # the first set, whose switch is turned off for this check and restored.
-    from sets import get_set
-    async with async_session() as session:
-        first_set = await get_set(session, None)
-        saved_ft = first_set.folder_tags
-        first_set.folder_tags = False
-        await session.commit()
-    try:
-        async with async_session() as session:
-            job_no_ft = Job(
-                filename=f"__v29_gfan_nomod_{ts}.jpg",
-                original_path=f"/fake_inbox_disabled/SubFolder/__v29_gfan_nomod_{ts}.jpg",
-                source_inbox_path="/fake_inbox_disabled", status="queued",
-                debug_key=f"V29-GFAN-NOMOD-{ts}",
-                folder_tags=False,
-                step_result={
-                    "IA-01": {"file_type": "JPEG"},
-                    "IA-02": {"status": "ok"},
-                },
-            )
-            session.add(job_no_ft)
-            await session.commit()
-
-            albums2 = await _get_folder_album_names(job_no_ft)
-            check("FTAG-50b folder_tags inactive set → None",
-                  albums2 is None,
-                  f"albums={albums2}")
-    finally:
-        async with async_session() as session:
-            first_set = await get_set(session, None)
-            first_set.folder_tags = saved_ft
-            await session.commit()
+async def test_no_folder_no_albums():
+    """FTAG-50: a file directly in the inbox gets no folder album or tag."""
+    from folder_path import folder_targets
+    print("\n── FTAG-50: no folder ──")
+    set_id = await _make_set(mode="nested", albums=True)
+    t = await folder_targets(_job("NONE", set_id, path="/inbox/f.jpg", status="queued", ia02={"status": "ok"}))
+    check("FTAG-50a flat inbox → nothing", t.tag_paths == [] and t.albums == [], f"{t}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1049,21 +472,24 @@ async def test_get_folder_album_names_none():
 # ══════════════════════════════════════════════════════════════
 async def main():
     print("=" * 60)
-    print("  Test: v2.29.5-7 merge features (FTAG-34 to FTAG-50)")
+    print("  Test: v2.29.5-7 merge features (FTAG-38 to FTAG-50)")
     print("=" * 60)
 
-    await test_own_album_preservation()
-    await test_donor_albums_fallback()
-    await test_get_folder_album_names()
-    await test_album_names_into_keywords()
-    await test_folder_tags_boolean_gate()
-    await test_ignored_albums_filter()
-    await test_already_done_path()
-    await test_add_asset_to_albums_exists()
-    await test_extract_folder_tags()
-    await test_skip_overwrite_preserves_albums()
-    await test_quality_score()
-    await test_get_folder_album_names_none()
+    try:
+        await test_own_folder_and_donor_paths()
+        await test_donor_albums_fallback()
+        await test_folder_targets()
+        await test_no_folder_words_as_keywords()
+        await test_options_gate()
+        await test_ignored_albums_filter()
+        await test_already_done_path()
+        await test_add_asset_to_albums_exists()
+        await test_folder_record()
+        await test_skip_record_keeps_folders()
+        await test_quality_score()
+        await test_no_folder_no_albums()
+    finally:
+        await _drop_sets()
 
     print("\n" + "=" * 60)
     total = len(PASS) + len(FAIL)
@@ -1078,4 +504,5 @@ async def main():
     sys.exit(1 if FAIL else 0)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

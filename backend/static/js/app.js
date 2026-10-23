@@ -243,47 +243,164 @@
     return ol;
   }
 
-  function histOps(ops) {
-    if (!ops || !ops.length) return histEl("p", "hist-sec-empty", histText("ops_empty"));
+  // Timeline of a job: the intake ("Erfasst") first, then the ledger oldest
+  // first. Consecutive housekeeping (op.housekeeping, see job_view) folds
+  // into one grey line that opens on click.
+  function histOps(ops, intake) {
+    if ((!ops || !ops.length) && !intake) return histEl("p", "hist-sec-empty", histText("ops_empty"));
     const ol = histEl("ol", "hist-ops");
+    if (intake) ol.appendChild(histIntakeItem(intake));
     // The API lists the newest operations first (and caps the count there);
     // shown oldest first, the timeline follows the order of the modules.
-    for (const op of ops.slice().reverse()) {
-      const li = histEl("li", "hist-op");
-      li.dataset.state = op.state;
-      const tile = histIconEl("span", "ui-icon-tile ui-icon-tile-sm " + op.tone, op.icon, null, 14);
-      tile.title = op.state_label;
-      const body = histEl("div", "hist-op-body");
-      const head = histEl("div", "hist-op-head");
-      head.append(histEl("strong", "hist-op-title", op.op_label), histBadge(op.state_label, op.tone),
-        histEl("time", "hist-op-time", op.finished_at || op.created_at || ""));
-      body.appendChild(head);
-      if (op.src || op.dst) {
-        const path = histEl("div", "hist-op-path");
-        if (op.src) {
-          if (op.src_kind_label) path.appendChild(histBadge(op.src_kind_label));
-          path.appendChild(histEl("code", "ui-path", op.src));
-        }
-        const toOther = op.dst && op.dst !== op.src;
-        if (toOther || (op.dst_kind && op.dst_kind !== op.src_kind)) {
-          path.appendChild(histEl("span", "hist-op-arrow", "→"));
-          if (op.dst_kind_label) path.appendChild(histBadge(op.dst_kind_label));
-          if (toOther) path.appendChild(histEl("code", "ui-path", op.dst));
-        }
-        body.appendChild(path);
-      }
-      const meta = histEl("div", "hist-op-meta");
-      if (op.hash) {
-        meta.appendChild(histIconEl("span", "ui-cell-meta " + (op.hash === "verified" ? "is-ok" : "is-changed"),
-          op.hash === "verified" ? "check" : "pencil", op.hash_label, 13));
-      }
-      for (const text of [op.actor_label, op.reason, op.note]) if (text) meta.appendChild(histEl("span", "", text));
-      if (meta.childNodes.length) body.appendChild(meta);
-      if (op.error) body.appendChild(histEl("p", "hist-op-error", op.error));
-      li.append(tile, body);
-      ol.appendChild(li);
+    let group = [];
+    const flush = () => {
+      if (group.length) ol.appendChild(histHousekeeping(group));
+      group = [];
+    };
+    for (const op of (ops || []).slice().reverse()) {
+      if (op.housekeeping) { group.push(op); continue; }
+      flush();
+      ol.appendChild(histOpItem(op));
     }
+    flush();
     return ol;
+  }
+
+  function histIntakeItem(it) {
+    const li = histEl("li", "hist-op hist-op-intake");
+    li.dataset.state = it.reconstructed ? "reconstructed" : "intake";
+    const tile = histIconEl("span", "ui-icon-tile ui-icon-tile-sm is-accent", it.icon, null, 14);
+    const body = histEl("div", "hist-op-body");
+    const head = histEl("div", "hist-op-head");
+    head.appendChild(histEl("strong", "hist-op-title", it.title));
+    if (it.source_label) head.appendChild(histBadge(it.source_label, "is-accent"));
+    if (it.reconstructed) {
+      const mark = histBadge(it.reconstructed_label);
+      mark.classList.add("hist-badge-dashed");
+      mark.title = it.reconstructed_note;
+      head.appendChild(mark);
+    }
+    head.appendChild(histEl("time", "hist-op-time", it.created_at || ""));
+    body.appendChild(head);
+    if (it.location) {
+      const path = histEl("div", "hist-op-path");
+      if (it.location_kind_label) path.appendChild(histBadge(it.location_kind_label));
+      path.appendChild(histEl("code", "ui-path", it.location));
+      body.appendChild(path);
+    }
+    const meta = histEl("div", "hist-op-meta");
+    if (it.set_name) meta.appendChild(histEl("span", "", histText("intake_set", {name: it.set_name})));
+    if (it.input_name) meta.appendChild(histEl("span", "", histText("intake_input", {name: it.input_name})));
+    if (it.hash) {
+      const hash = histIconEl("span", "ui-cell-meta", "hash", it.hash_label + " ", 13);
+      hash.appendChild(histEl("code", "hist-op-hash", it.hash + "…"));
+      meta.appendChild(hash);
+    }
+    if (meta.childNodes.length) body.appendChild(meta);
+    if (it.reconstructed && it.reconstructed_note) body.appendChild(histEl("p", "hist-op-note", it.reconstructed_note));
+    li.append(tile, body);
+    return li;
+  }
+
+  function histHousekeeping(group) {
+    const li = histEl("li", "hist-op hist-op-group");
+    li.dataset.group = String(group[0].id);
+    const tile = histIconEl("span", "ui-icon-tile ui-icon-tile-sm is-neutral", "sparkles", null, 13);
+    const body = histEl("div", "hist-op-body");
+    const det = histEl("details", "hist-hk");
+    const sum = histEl("summary", "hist-hk-sum");
+    sum.title = histText("housekeeping_hint");
+    const last = group[group.length - 1];
+    sum.append(histEl("span", "hist-hk-label", group.length === 1 ? histText("housekeeping_one")
+      : histText("housekeeping_many", {n: group.length})),
+      histEl("span", "hist-hk-kinds", Array.from(new Set(group.map((o) => o.op_label))).join(", ")),
+      histEl("time", "hist-op-time", last.finished_at || last.created_at || ""));
+    const list = histEl("ol", "hist-ops hist-hk-list");
+    for (const op of group) list.appendChild(histOpItem(op, true));
+    det.append(sum, list);
+    body.appendChild(det);
+    li.append(tile, body);
+    return li;
+  }
+
+  // Re-render `box` with `nodes`; housekeeping groups that were open stay open
+  function histReplaceKeepOpen(box, ...nodes) {
+    const open = new Set(Array.from(box.querySelectorAll(".hist-op-group[data-group] > .hist-op-body > details[open]"))
+      .map((d) => d.closest(".hist-op-group").dataset.group));
+    box.replaceChildren(...nodes);
+    for (const id of open) {
+      const det = box.querySelector(`.hist-op-group[data-group="${CSS.escape(id)}"] > .hist-op-body > details`);
+      if (det) det.open = true;
+    }
+  }
+
+  // One ledger row; `muted` inside a housekeeping group (grey, no state badge)
+  function histOpItem(op, muted) {
+    const li = histEl("li", "hist-op" + (muted ? " is-muted" : ""));
+    li.dataset.state = op.state;
+    const tile = histIconEl("span", "ui-icon-tile ui-icon-tile-sm " + (muted ? "is-neutral" : op.tone), op.icon, null,
+      muted ? 12 : 14);
+    tile.title = op.state_label;
+    const body = histEl("div", "hist-op-body");
+    const head = histEl("div", "hist-op-head");
+    head.appendChild(histEl("strong", "hist-op-title", op.op_label));
+    if (!muted) head.appendChild(histBadge(op.state_label, op.tone));
+    head.appendChild(histEl("time", "hist-op-time", op.finished_at || op.created_at || ""));
+    body.appendChild(head);
+    if (op.src || op.dst) {
+      const path = histEl("div", "hist-op-path");
+      if (op.src) {
+        if (op.src_kind_label) path.appendChild(histBadge(op.src_kind_label));
+        path.appendChild(histEl("code", "ui-path", op.src));
+      }
+      const toOther = op.dst && op.dst !== op.src;
+      if (toOther || (op.dst_kind && op.dst_kind !== op.src_kind)) {
+        path.appendChild(histEl("span", "hist-op-arrow", "→"));
+        if (op.dst_kind_label) path.appendChild(histBadge(op.dst_kind_label));
+        if (toOther) path.appendChild(histEl("code", "ui-path", op.dst));
+      }
+      body.appendChild(path);
+    }
+    const meta = histEl("div", "hist-op-meta");
+    if (op.hash) {
+      meta.appendChild(histIconEl("span", "ui-cell-meta " + (op.hash === "verified" ? "is-ok" : "is-changed"),
+        op.hash === "verified" ? "check" : "pencil", op.hash_label, 13));
+    }
+    for (const text of [op.actor_label, op.reason, op.note]) if (text) meta.appendChild(histEl("span", "", text));
+    if (meta.childNodes.length) body.appendChild(meta);
+    if (op.error) body.appendChild(histEl("p", "hist-op-error", op.error));
+    li.append(tile, body);
+    return li;
+  }
+
+  // Tags and albums MA wrote (job_view.job_labels), as sections
+  function histLabels(labels) {
+    if (!labels) return [];
+    const tags = labels.tags || [];
+    const list = tags.length ? histEl("div", "ui-tags hist-tags") : histEl("p", "hist-sec-empty", histText("labels_tags_empty"));
+    for (const name of tags) list.appendChild(histEl("span", "ui-tag", name));
+    const sec = histSection(labels.tags_title, list, tags.length);
+    sec.classList.add("hist-sec-labels");
+    if (labels.planned_label) sec.firstChild.appendChild(histBadge(labels.planned_label, "is-info"));
+    const out = [sec];
+    const albums = labels.albums || [];
+    if (albums.length) {
+      const box = histEl("div", "ui-tags hist-tags");
+      for (const a of albums) {
+        const chip = histIconEl("span", "ui-tag hist-album" + (a.created ? " is-success" : ""), "images", a.name, 13);
+        if (a.created) {
+          const mark = histBadge(histText("labels_album_new"), "is-success");
+          mark.classList.add("hist-badge-xs");
+          chip.title = histText("labels_album_new_title");
+          chip.appendChild(mark);
+        }
+        box.appendChild(chip);
+      }
+      const asec = histSection(histText("labels_albums"), box, albums.length);
+      asec.classList.add("hist-sec-labels");
+      out.push(asec);
+    }
+    return out;
   }
 
   const COPY_ICONS = {present: "check-circle", trashed: "trash", missing: "alert-circle", deleted: "x-circle",
@@ -336,14 +453,16 @@
     return ul;
   }
 
-  // Expanded row content: modules left, ledger and copies right
+  // Expanded row content: modules, tags and albums left; timeline and copies right
   function histPanel(data) {
     const panel = histEl("div", "hist-panel");
     const grid = histEl("div", "hist-panel-grid");
+    const main = histEl("div", "hist-panel-side");
+    main.append(histSection(histText("modules"), histModules(data.modules)), ...histLabels(data.labels));
     const side = histEl("div", "hist-panel-side");
-    side.append(histSection(histText("ops_title"), histOps(data.ops), (data.ops || []).length),
+    side.append(histSection(histText("ops_title"), histOps(data.ops, data.intake), (data.ops || []).length),
       histSection(histText("copies_title"), histCopies(data.copies), (data.copies || []).length));
-    grid.append(histSection(histText("modules"), histModules(data.modules)), side);
+    grid.append(main, side);
     const foot = histEl("div", "hist-panel-foot");
     const open = histEl("a", "ui-btn ui-btn-ghost ui-btn-sm", histText("open_job"));
     open.href = "/logs/job/" + encodeURIComponent(data.debug_key);
@@ -407,7 +526,7 @@
       try {
         const data = await histFetchJob(key);
         entry.sig = data.signature;
-        entry.panel.replaceChildren(...histPanel(data).childNodes);
+        histReplaceKeepOpen(entry.panel, ...histPanel(data).childNodes);
       } catch (e) {
         if (!entry.sig) entry.panel.replaceChildren(histState(histText("load_failed") + " (" + e.message + ")", true));
       } finally {
@@ -526,6 +645,19 @@
     if (!header) return;
     const debugKey = header.dataset.debugKey;
 
+    // The back target came from the Referer: put it into the address, so a
+    // reload, and a job opened from here (whose Referer this address is),
+    // still lead back to where the user came from (job_view.back_link).
+    if (header.dataset.back) {
+      try {
+        const url = new URL(location.href);
+        if (!url.searchParams.get("back")) {
+          url.searchParams.set("back", header.dataset.back);
+          history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+        }
+      } catch (_) {}
+    }
+
     // "Expand all" / "Collapse all" for the step results
     const toggle = document.getElementById("steps-toggle");
     const steps = document.getElementById("step-results");
@@ -572,6 +704,7 @@
     const alertBox = document.getElementById("job-copies-alert");
     const opsCount = document.getElementById("job-ops-count");
     const copiesCount = document.getElementById("job-copies-count");
+    const labelsBox = document.getElementById("job-labels");
     if (!bar && !opsBox && !copiesBox) return;
 
     // A module block opens its step result below
@@ -622,16 +755,16 @@
         data = await histFetchJob(debugKey);
       } catch (e) {
         if (last === null) {
-          if (opsBox) opsBox.replaceChildren(histState(histText("load_failed"), true));
-          if (copiesBox) copiesBox.replaceChildren(histState(histText("load_failed"), true));
+          for (const box of [opsBox, copiesBox, labelsBox]) if (box) box.replaceChildren(histState(histText("load_failed"), true));
         }
         return;
       }
-      const sig = JSON.stringify([data.modules, data.ops, data.copies]);
+      const sig = JSON.stringify([data.modules, data.intake, data.ops, data.copies, data.labels]);
       if (sig === last) return;
       last = sig;
       renderBar(data.modules, data.summary);
-      if (opsBox) { opsBox.replaceChildren(histOps(data.ops)); opsBox.removeAttribute("aria-busy"); }
+      if (opsBox) { histReplaceKeepOpen(opsBox, histOps(data.ops, data.intake)); opsBox.removeAttribute("aria-busy"); }
+      if (labelsBox) { labelsBox.replaceChildren(...histLabels(data.labels)); labelsBox.removeAttribute("aria-busy"); }
       if (copiesBox) {
         const pastOpen = !!copiesBox.querySelector(".hist-copies-past[open]");
         copiesBox.replaceChildren(histCopies(data.copies, {restore}));

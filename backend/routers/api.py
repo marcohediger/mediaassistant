@@ -28,13 +28,19 @@ async def health():
 
 
 @router.post("/job/{debug_key}/retry")
-async def retry_job_endpoint(debug_key: str):
+async def retry_job_endpoint(debug_key: str, request: Request):
+    import job_view
     from pipeline import reset_job_for_retry
     async with async_session() as session:
         result = await session.execute(select(Job).where(Job.debug_key == debug_key))
         job = result.scalar()
     if not job:
         return {"status": "error", "message": "Job nicht gefunden"}
+    # Back to the job page, keeping where it was opened from (form field "back")
+    try:
+        detail_url = job_view.job_page_url(debug_key, (await request.form()).get("back"))
+    except Exception:
+        detail_url = job_view.job_page_url(debug_key)
 
     # Allow retry on any job that has reached a terminal state. The user
     # is the source of truth for "this needs to be redone" — clicking
@@ -45,12 +51,12 @@ async def retry_job_endpoint(debug_key: str):
     # Only refuse if the job is currently being processed or queued —
     # that would race the worker.
     if job.status in ("queued", "processing"):
-        return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
+        return RedirectResponse(url=detail_url, status_code=303)
 
     # Only re-queue. The worker runs it within a second, inside the slot
     # limit like every other job — the old direct start bypassed that.
     await reset_job_for_retry(job.id)
-    return RedirectResponse(url=f"/logs/job/{debug_key}", status_code=303)
+    return RedirectResponse(url=detail_url, status_code=303)
 
 
 async def _bulk_reset_errors_in_background(job_ids: list[int]):
@@ -1040,7 +1046,12 @@ async def delete_job_endpoint(debug_key: str, request: Request = None):
             return JSONResponse({"ok": False, "detail": await _text("job_detail", "not_found")},
                                 status_code=404)
         return RedirectResponse(url="/logs?tab=jobs", status_code=303)
-    detail_url = f"/logs/job/{debug_key}"
+    # Back to the job page, keeping where it was opened from (form field "back")
+    import job_view
+    try:
+        detail_url = job_view.job_page_url(debug_key, (await request.form()).get("back") if request else None)
+    except Exception:
+        detail_url = job_view.job_page_url(debug_key)
     previous = job.status
 
     # Claim: the worker and a retry only take queued / terminal-but-not-

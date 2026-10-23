@@ -34,6 +34,9 @@ Example (an E2E story)::
 The helper only reads. It opens one short DB session per call and closes it
 before touching the disk or Immich, so it never holds a session while the app
 or the worker might be waiting for the database.
+
+``delete_test_jobs()`` is the one writing helper: a test's cleanup removes
+its jobs with their register rows (file_copies, asset_refs) through it.
 """
 from __future__ import annotations
 
@@ -390,3 +393,60 @@ async def check_no_file_lost(job_ids, *, guard: FileGuard | None = None, search_
 
     foreign = guard.foreign_changes() if guard else []
     return InvariantResult(reports, foreign, require_linked)
+
+
+# ---------------------------------------------------------------------------
+# Test cleanup: jobs together with their register rows
+# ---------------------------------------------------------------------------
+
+async def delete_test_jobs(job_ids, *, locations=(), prefixes=()) -> list[str]:
+    """Delete a test's jobs and everything the copy register holds for them.
+
+    Removed: the ``file_copies`` and ``asset_refs`` rows of the jobs, those at
+    ``locations`` (e.g. asset ids the test created) or below one of the path
+    ``prefixes`` (the test's sandbox), then the job rows. A register row
+    left behind would claim a file or asset nobody owns any more.
+
+    The ledger (``file_ops``) stays: triggers make it append-only, and job
+    ids are never handed out again (R-26), so its rows cannot be attributed
+    to a later job. Open intents of the jobs (a simulated crash nobody
+    reconciled) are settled first, so the app's startup does not meet them.
+
+    Returns the local paths the removed rows named (present files and trash
+    locations), for the caller to remove from disk.
+    """
+    from sqlalchemy import delete, or_, select
+    from database import async_session
+    import fileops
+    from models import AssetRef, FileCopy, Job
+
+    job_ids = sorted({j for j in job_ids if j is not None})
+    if job_ids:
+        await fileops.reconcile_open_intents(job_ids=job_ids)
+    conditions = []
+    if job_ids:
+        conditions.append(FileCopy.job_id.in_(job_ids))
+    if locations:
+        conditions.append(FileCopy.location.in_(list(locations)))
+    conditions += [FileCopy.location.like(f"{p.rstrip(os.sep)}{os.sep}%") for p in prefixes]
+    ref_conditions = []
+    if job_ids:
+        ref_conditions.append(AssetRef.job_id.in_(job_ids))
+    if locations:
+        ref_conditions.append(AssetRef.location.in_(list(locations)))
+    ref_conditions += [AssetRef.location.like(f"{p.rstrip(os.sep)}{os.sep}%") for p in prefixes]
+    paths: list[str] = []
+    async with async_session() as session:
+        if conditions:
+            rows = (await session.execute(select(FileCopy).where(or_(*conditions)))).scalars().all()
+            for row in rows:
+                if row.kind != "immich":
+                    paths += [p for p in (row.location if row.state == "present" else None,
+                                          row.trash_location) if p]
+            await session.execute(delete(FileCopy).where(or_(*conditions)))
+        if ref_conditions:
+            await session.execute(delete(AssetRef).where(or_(*ref_conditions)))
+        if job_ids:
+            await session.execute(delete(Job).where(Job.id.in_(job_ids)))
+        await session.commit()
+    return list(dict.fromkeys(paths))

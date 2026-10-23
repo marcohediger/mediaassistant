@@ -184,7 +184,7 @@ async def create_set(name, *, copy_from, inbox=None, **fields) -> int:
         source = await s.get(ProcessingSet, copy_from)
         values = {f: getattr(source, f) for f in COPIED_FIELDS}
         values.update(description="E2E test set", active=True, schedule_mode="manual",
-                      interval_s=5, folder_tags=False, dry_run=False,
+                      interval_s=5, folder_tag_mode="none", folder_albums=False, dry_run=False,
                       immich_user_id=None, immich_poll=False, immich_poll_user_id=None)
         values.update(fields)
         ps = ProcessingSet(name=name, position=9000 + len(CLEANUP_SETS), **values)
@@ -279,7 +279,6 @@ async def poll_and_isolate(set_id, expected_assets: set[str]):
     (concurrent activity on the dev Immich) are removed at once — the worker
     is paused, so they never run."""
     from inputs.immich import poll_set
-    from models import Job
     ps = await load_set(set_id)
     before = {j.id for j in await jobs_of_set(set_id)}
     t0 = time.monotonic()
@@ -288,10 +287,9 @@ async def poll_and_isolate(set_id, expected_assets: set[str]):
     new = [j for j in await jobs_of_set(set_id) if j.id not in before]
     foreign = [j for j in new if j.immich_asset_id not in expected_assets]
     if foreign:
+        from test_support.invariants import delete_test_jobs
         print(f"    note: {len(foreign)} foreign asset(s) in the poll window, their jobs removed")
-        async with database.async_session() as s:
-            await s.execute(sqlalchemy.delete(Job).where(Job.id.in_([j.id for j in foreign])))
-            await s.commit()
+        await delete_test_jobs([j.id for j in foreign])
     mine = [j for j in new if j.immich_asset_id in expected_assets]
     CLEANUP_JOBS.extend(j.id for j in mine)
     return created, elapsed, mine, len(foreign)
@@ -307,7 +305,7 @@ async def story_scan(std_id):
     inbox = f"/app/data/__sets_e2e_scan_{TS}"
     CLEANUP_PATHS.append(inbox)
     set_id = await create_set(f"E2E-Scan-{TS}", copy_from=std_id, inbox=inbox,
-                              folder_tags=True, dry_run=True, target_mode="immich")
+                              folder_albums=True, dry_run=True, target_mode="immich")
     path = f"{inbox}/Album_{TS}/__sets_scan_{TS}.jpg"
     make_jpg(path)
     age(path)
@@ -333,7 +331,7 @@ async def story_scan(std_id):
             return
         job = jobs[0]
         check("S-SCAN-02 job belongs to the set", job.set_id == set_id, f"set_id={job.set_id}")
-        check("S-SCAN-03 folder_tags from the set", job.folder_tags is True, f"{job.folder_tags}")
+        check("S-SCAN-03 folder option of the set on the job", job.folder_tags is True, f"{job.folder_tags}")
         check("S-SCAN-04 dry_run from the set", job.dry_run is True, f"{job.dry_run}")
         check("S-SCAN-05 use_immich from target_mode=immich", job.use_immich is True, f"{job.use_immich}")
         check("S-SCAN-06 source_inbox_path, label, hash, queued",
@@ -412,11 +410,14 @@ async def story_us11(std):
     name_skip = f"__sets_us11_SETSB_SKIPME_b_{TS}.jpg"
     name_std = f"__sets_us11_SETSB_SKIPME_std_{TS}.jpg"
     path_b, path_skip = f"{inbox_b}/{name_b}", f"{inbox_b}/{name_skip}"
-    path_std = f"/inbox/{name_std}"
+    # Standard's file lies outside every scanned inbox (AGENTS.md): in /inbox
+    # a filewatcher another test switched back on would take it first.
+    inbox_std = f"/app/data/__sets_e2e_std_{TS}"
+    CLEANUP_PATHS.append(inbox_std)
+    path_std = f"{inbox_std}/{name_std}"
     for p in (path_b, path_skip, path_std):
         make_jpg(p)
         age(p)
-    CLEANUP_PATHS.append(path_std)
 
     n = await scan_set(await load_set(b_id))
     jobs_b = {j.original_path: j for j in await jobs_of_set(b_id)}
@@ -426,11 +427,11 @@ async def story_us11(std):
           and all(j.use_immich is False for j in jobs_b.values()),
           f"created={n} paths={list(jobs_b)}")
 
-    # Standard's job, with the flags its scanner would give it. /inbox is
-    # not scanned here — it holds unrelated files of other tests.
+    # Standard's job, with the flags its scanner would give it. Standard's
+    # inbox is not scanned here — it holds unrelated files of other tests.
     job_std = await create_job_safe(
         filename=name_std, original_path=path_std, source_label="E2E-Sets-Standard",
-        source_inbox_path="/inbox", set_id=std.id, folder_tags=bool(std.folder_tags),
+        source_inbox_path=inbox_std, set_id=std.id, folder_tags=(std.folder_tag_mode or "none") != "none" or bool(std.folder_albums),
         dry_run=bool(std.dry_run), use_immich=std.target_mode == "immich",
         immich_user_id=std.immich_user_id, file_hash=sha256(path_std))
     CLEANUP_JOBS.append(job_std.id)
@@ -536,23 +537,45 @@ async def story_us12(std_id):
     check("S-US12-01 phone upload to Immich", status in (200, 201) and asset_a, f"HTTP {status} {body}")
     if not asset_a:
         return poll_id
-    # An asset MediaAssistant uploaded itself must never come back as a job
-    from immich_client import upload_asset
+    # MediaAssistant's own assets must never come back as jobs (R-24). Immich
+    # 3.x has no deviceId: an upload through upload_asset() with no job
+    # behind it is recognised by its metadata marker alone, an asset without
+    # the marker by the copy register alone.
+    import fileops
+    from immich_client import has_upload_marker, upload_asset
+    from models import Job
     own_src = f"/app/data/__sets_us12_own_{TS}.jpg"
     CLEANUP_PATHS.append(own_src)
     make_jpg(own_src)
     own_id = (await upload_asset(own_src)).get("id", "")
     if own_id:
         CLEANUP_ASSETS.append(own_id)
+    reg_src = f"/app/data/__sets_us12_reg_{TS}.jpg"
+    CLEANUP_PATHS.append(reg_src)
+    make_jpg(reg_src)
+    _status, reg_body = await phone_upload(reg_src, "us12reg")
+    reg_id = reg_body.get("id", "")
+    if reg_id:
+        async with database.async_session() as s:
+            holder = Job(filename=os.path.basename(reg_src), original_path=reg_src, status="done",
+                         source_label="E2E-Sets", debug_key=f"E2E-SETS-REG-{TS}", use_immich=True)
+            s.add(holder)
+            await s.commit()
+            CLEANUP_JOBS.append(holder.id)
+        await fileops.register_existing(holder.id, "immich", reg_id)
     await asyncio.sleep(3)  # Immich's search index lags behind uploads
 
     tmp_before = immich_tmp_dirs()
-    created, elapsed, mine, _ = await poll_and_isolate(poll_id, {asset_a, own_id})
+    created, elapsed, mine, _ = await poll_and_isolate(poll_id, {asset_a, own_id, reg_id})
     job_a = next((j for j in mine if j.immich_asset_id == asset_a), None)
     check("S-US12-02 poll created a job for the phone upload", job_a is not None,
           f"created={created} mine={[j.immich_asset_id for j in mine]}")
-    check("S-US12-03 own MediaAssistant upload ignored (deviceId)",
-          not any(j.immich_asset_id == own_id for j in mine), f"own={own_id}")
+    marked = bool(own_id) and await has_upload_marker(own_id)
+    check("S-US12-03 own upload without a job ignored (metadata marker 'mediaassistant')",
+          bool(own_id) and marked and not any(j.immich_asset_id == own_id for j in mine),
+          f"own={own_id} marker={marked}")
+    check("S-US12-03b asset in the copy register (no marker) ignored",
+          bool(reg_id) and not any(j.immich_asset_id == reg_id for j in mine), f"asset={reg_id}")
     if not job_a:
         return poll_id
     check("S-US12-04 job only carries the asset id (immich-pending:)",
@@ -578,7 +601,7 @@ async def story_us12(std_id):
           ps.immich_last_poll != cursor and drift is not None and drift < 60,
           f"{cursor} -> {ps.immich_last_poll}")
 
-    created2, _, mine2, _ = await poll_and_isolate(poll_id, {asset_a, own_id})
+    created2, _, mine2, _ = await poll_and_isolate(poll_id, {asset_a, own_id, reg_id})
     check("S-US12-09 next poll does not enqueue the asset again", not mine2,
           f"created={created2}")
 
@@ -725,8 +748,10 @@ async def story_us13(poll_id):
 # Cleanup + main
 # ══════════════════════════════════════════════════════════════════════
 async def cleanup():
+    import fileops
     from immich_client import asset_exists, delete_asset
     from models import InboxDirectory, Job, LibraryCategory, ProcessingSet, SortingRule
+    from test_support.invariants import delete_test_jobs
 
     for aid in dict.fromkeys(CLEANUP_ASSETS):
         try:
@@ -745,8 +770,12 @@ async def cleanup():
             for p in (j.original_path, j.target_path):
                 if p and not p.startswith(("immich:", "immich-pending:")):
                     CLEANUP_PATHS.append(p)
-        if ids:
-            await s.execute(sqlalchemy.delete(Job).where(Job.id.in_(ids)))
+    # Jobs with their file_copies / asset_refs (the append-only ledger
+    # stays); the files those rows name — trash included — go as well.
+    sandboxes = [p for p in CLEANUP_PATHS if p.startswith(("/app/data/__", "/library/__"))]
+    CLEANUP_PATHS.extend(await delete_test_jobs(ids, locations=list(dict.fromkeys(CLEANUP_ASSETS)),
+                                                prefixes=sandboxes))
+    async with database.async_session() as s:
         for model in (InboxDirectory, SortingRule, LibraryCategory):
             if CLEANUP_SETS:
                 await s.execute(sqlalchemy.delete(model).where(model.set_id.in_(CLEANUP_SETS)))
@@ -766,6 +795,10 @@ async def cleanup():
             parent = os.path.dirname(p)
             if parent.startswith("/tmp/ma_immich_") and os.path.isdir(parent) and not os.listdir(parent):
                 os.rmdir(parent)
+            parts = p.split(os.sep)
+            if fileops.TRASH_DIRNAME in parts:
+                trash_root = os.sep.join(parts[:parts.index(fileops.TRASH_DIRNAME) + 1])
+                fileops.prune_empty_dirs_blocking(parent, trash_root)
         except Exception as exc:
             print(f"  cleanup: {p}: {exc}")
 

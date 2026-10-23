@@ -106,9 +106,9 @@
                         </span>
                     </td>
                     <td>
-                        {% set feature_on = s.folder_tags or s.ocr_enabled or s.immich_poll or s.dry_run %}
+                        {% set feature_on = s.folder_tag_mode != 'none' or s.folder_albums or s.ocr_enabled or s.immich_poll or s.dry_run %}
                         <span class="lst-feats">
-                        {% if s.folder_tags %}<span class="lst-feat lst-feat-tags" role="img" title="{{ t.sets.col_folder_tags }}" aria-label="{{ t.sets.col_folder_tags }}"><svg class="lst-i" width="17" height="17" aria-hidden="true" focusable="false"><use href="#lst-i-tag"/></svg></span>{% endif %}
+                        {% if s.folder_tag_mode != 'none' or s.folder_albums %}<span class="lst-feat lst-feat-tags" role="img" title="{{ t.sets.col_folder_tags }}" aria-label="{{ t.sets.col_folder_tags }}"><svg class="lst-i" width="17" height="17" aria-hidden="true" focusable="false"><use href="#lst-i-tag"/></svg></span>{% endif %}
                         {% if s.ocr_enabled %}<span class="lst-feat lst-feat-ocr" role="img" title="{{ t.sets.tab_ocr }}" aria-label="{{ t.sets.tab_ocr }}"><svg class="lst-i" width="17" height="17" aria-hidden="true" focusable="false"><use href="#lst-i-scan-text"/></svg></span>{% endif %}
                         {% if s.immich_poll %}<span class="lst-feat lst-feat-poll" role="img" title="{{ t.sets.immich_poll_short }}" aria-label="{{ t.sets.immich_poll_short }}"><svg class="lst-i" width="17" height="17" aria-hidden="true" focusable="false"><use href="#lst-i-sparkles"/></svg></span>{% endif %}
                         {% if s.dry_run %}<span class="lst-feat lst-feat-dry" role="img" title="{{ t.sets.dry_run_short }}" aria-label="{{ t.sets.dry_run_short }}"><svg class="lst-i" width="17" height="17" aria-hidden="true" focusable="false"><use href="#lst-i-flask"/></svg></span>{% endif %}

@@ -176,7 +176,7 @@ async def _file_exists(job_entry) -> bool:
 async def execute(job, session) -> dict:
     """IA-02: Duplikat-Erkennung — SHA256 (exakt) + pHash (ähnlich)."""
     if not await config_manager.is_module_enabled("duplikat_erkennung"):
-        return {"status": "skipped", "reason": "module disabled"}
+        return {"status": "skipped", "reason": "module disabled", **await _folder_record(job)}
 
     image_path = job.original_path
 
@@ -200,16 +200,14 @@ async def execute(job, session) -> dict:
         candidates = result.scalars().all()
         for existing in candidates:
             if await _file_exists(existing):
-                folder_tags = await _handle_duplicate(job, session, existing, "exact", 0)
-                result = {
+                folder = await _handle_duplicate(job, session, existing, "exact", 0)
+                return {
                     "status": "duplicate",
                     "match_type": "exact",
                     "original_debug_key": existing.debug_key,
                     "original_path": existing.target_path or existing.original_path,
+                    **folder,
                 }
-                if folder_tags:
-                    result["folder_tags"] = folder_tags
-                return result
             # File missing — likely because it's currently being retried
             # (path in transition from /library/error to /app/data/reprocess)
             # or the user manually deleted it. Operational noise, not a real
@@ -246,16 +244,14 @@ async def execute(job, session) -> dict:
                 # JPG sucht RAW-Partner und umgekehrt
                 if (is_jpg and cand_ext in RAW_EXTENSIONS) or (is_raw and cand_ext in jpg_exts):
                     if await _file_exists(candidate):
-                        folder_tags = await _handle_duplicate(job, session, candidate, "raw_jpg_pair", 0)
-                        result = {
+                        folder = await _handle_duplicate(job, session, candidate, "raw_jpg_pair", 0)
+                        return {
                             "status": "duplicate",
                             "match_type": "raw_jpg_pair",
                             "original_debug_key": candidate.debug_key,
                             "original_path": candidate.target_path or candidate.original_path,
+                            **folder,
                         }
-                        if folder_tags:
-                            result["folder_tags"] = folder_tags
-                        return result
 
     # --- Stage 2: Perceptual hash (pHash) similarity ---
     phash_str = await asyncio.to_thread(_compute_phash, image_path)
@@ -307,16 +303,15 @@ async def execute(job, session) -> dict:
                     # Load full Job object only for the match
                     candidate = await session.get(Job, row.id)
                     if candidate and await _file_exists(candidate):
-                        folder_tags = await _handle_duplicate(job, session, candidate, "similar", distance)
+                        folder = await _handle_duplicate(job, session, candidate, "similar", distance)
                         found_duplicate = {
                             "status": "duplicate",
                             "match_type": "similar",
                             "phash_distance": distance,
                             "original_debug_key": candidate.debug_key,
                             "original_path": candidate.target_path or candidate.original_path,
+                            **folder,
                         }
-                        if folder_tags:
-                            found_duplicate["folder_tags"] = folder_tags
                         break
                     elif candidate:
                         _orphan_logger.debug(
@@ -331,7 +326,7 @@ async def execute(job, session) -> dict:
             return found_duplicate
 
 
-    return {"status": "ok", "phash": phash_str}
+    return {"status": "ok", "phash": phash_str, **await _folder_record(job)}
 
 
 async def execute_video_phash(job, session) -> dict | None:
@@ -398,17 +393,15 @@ async def execute_video_phash(job, session) -> dict | None:
 
                 candidate = await session.get(Job, row.id)
                 if candidate and await _file_exists(candidate):
-                    folder_tags = await _handle_duplicate(job, session, candidate, "similar", distance)
-                    result = {
+                    folder = await _handle_duplicate(job, session, candidate, "similar", distance)
+                    return {
                         "status": "duplicate",
                         "match_type": "similar",
                         "phash_distance": distance,
                         "original_debug_key": candidate.debug_key,
                         "original_path": candidate.target_path or candidate.original_path,
+                        **folder,
                     }
-                    if folder_tags:
-                        result["folder_tags"] = folder_tags
-                    return result
 
         offset += BATCH_SIZE
 
@@ -416,44 +409,22 @@ async def execute_video_phash(job, session) -> dict | None:
 
 
 
-def _extract_folder_tags(job) -> list[str]:
-    """Extract folder-based tags from the job's inbox path.
-
-    Same logic as step_ia07_exif_write.py:74-87, but called at IA-02 time
-    so the tags are preserved in step_result even after the file moves to
-    /library/error/duplicates/ (which breaks the relative-path calculation).
-
-    Stored in step_result['IA-02']['folder_tags'] and picked up by IA-07
-    when the duplicate is later kept via the review UI and re-processed.
-    """
-    if not job.source_inbox_path or not job.original_path:
-        return []
-    try:
-        rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
-    except ValueError:
-        return []
-    if not rel or rel == "." or rel.startswith(".."):
-        return []
-    folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
-    if not folder_parts:
-        return []
-
-    tags = []
-    for part in folder_parts:
-        for word in part.split():
-            if word and word not in tags:
-                tags.append(word)
-    combined = " ".join(folder_parts)
-    if combined not in tags:
-        tags.append(combined)
-    return tags
+async def _folder_record(job) -> dict:
+    """The raw folder below the inbox, recorded as step_result['IA-02']
+    ['folder_path'] while the path still shows it (the file may move to the
+    duplicate folder or to reprocess/ later). Tags and albums are derived
+    from it when they are written (folder_path.py), so a set's options and
+    later rule changes apply to it."""
+    from folder_path import folder_path_of
+    rel = await folder_path_of(job, {})
+    return {"folder_path": rel} if rel else {}
 
 
-async def _handle_duplicate(job, session, original, match_type: str, distance: int) -> list[str]:
+async def _handle_duplicate(job, session, original, match_type: str, distance: int) -> dict:
     """Move duplicate file to duplicates/ directory and write .log file.
 
-    Returns the extracted folder_tags list (may be empty) so the caller
-    can include them in the step_result dict returned to the pipeline.
+    Returns the folder record (_folder_record) taken before the move, for
+    the caller's step result.
     """
     original_path = original.target_path or original.original_path
     if match_type == "exact":
@@ -461,14 +432,10 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     else:
         desc = f"Similar to: {original_path} ({original.debug_key}, pHash distance: {distance})"
 
-    # Preserve folder tags before the file moves (path breaks after move).
-    # Gated by is_folder_tags_active so we don't stash folder tags into
-    # step_result when the module/inbox is OFF — otherwise IA-07 would
-    # read them from the cache (ungated fallback) on a later "Keep This"
-    # reprocess and write them as keywords/Immich-tags despite the user
-    # having explicitly disabled the feature.
-    from file_operations import is_folder_tags_active
-    folder_tags = _extract_folder_tags(job) if await is_folder_tags_active(job) else []
+    # Record the folder before the file moves (the path breaks after the
+    # move). Only the raw folder: whether it becomes tags or albums is
+    # decided by the set's options when they are written.
+    folder = await _folder_record(job)
 
     # Dry-run: detect but don't move
     if job.dry_run:
@@ -479,7 +446,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
         # warnings, so the message is no longer truthful.
         job.error_message = None
         await log_info("IA-02", f"{job.debug_key} [dry-run] {desc}")
-        return folder_tags
+        return folder
 
     # Move through fileops: the name in duplicates/ is reserved atomically
     # (never overwrites, R-06), the content is verified before the source
@@ -534,7 +501,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     job.error_message = None
 
     await log_info("IA-02", f"{job.debug_key} {desc}"
-                   + (f" [folder_tags: {', '.join(folder_tags)}]" if folder_tags else ""))
+                   + (f" [Ordner: {folder['folder_path']}]" if folder else ""))
 
     # Clean up empty parent directories in inbox (best-effort, file is already moved)
     try:
@@ -545,7 +512,7 @@ async def _handle_duplicate(job, session, original, match_type: str, distance: i
     except Exception as e:
         await log_warning("IA-02", f"{job.debug_key} Cleanup nach Duplikat-Move fehlgeschlagen: {e}")
 
-    return folder_tags
+    return folder
 
 
 def _write_log(path: str, content: str):

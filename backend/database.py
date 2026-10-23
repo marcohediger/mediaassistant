@@ -73,6 +73,11 @@ async def _migrate_columns(conn):
          "ALTER TABLE processing_sets ADD COLUMN google_json BOOLEAN DEFAULT 0"),
         ("processing_sets", "immich_input",
          "ALTER TABLE processing_sets ADD COLUMN immich_input BOOLEAN DEFAULT 0"),
+        # The folder-tag switch split into a tag mode and albums (folder_path.py).
+        ("processing_sets", "folder_tag_mode",
+         "ALTER TABLE processing_sets ADD COLUMN folder_tag_mode TEXT DEFAULT 'none'"),
+        ("processing_sets", "folder_albums",
+         "ALTER TABLE processing_sets ADD COLUMN folder_albums BOOLEAN DEFAULT 0"),
     ]
     added = set()
     for table, column, sql in migrations:
@@ -95,6 +100,15 @@ async def _migrate_columns(conn):
         await conn.execute(sqlalchemy.text(
             "UPDATE processing_sets SET immich_input = CASE WHEN immich_poll = 1 "
             "OR immich_poll_user_id IS NOT NULL THEN 1 ELSE 0 END"))
+    # The old switch made flat keywords and one album per folder. Its sets
+    # keep both: flat tags and albums (same names, so existing albums are
+    # reused). Nested tags are new and stay off until chosen.
+    if ("processing_sets", "folder_tag_mode") in added:
+        await conn.execute(sqlalchemy.text(
+            "UPDATE processing_sets SET folder_tag_mode = CASE WHEN folder_tags = 1 THEN 'flat' ELSE 'none' END"))
+    if ("processing_sets", "folder_albums") in added:
+        await conn.execute(sqlalchemy.text(
+            "UPDATE processing_sets SET folder_albums = CASE WHEN folder_tags = 1 THEN 1 ELSE 0 END"))
     if ("processing_sets", "google_json") in added:
         await conn.execute(sqlalchemy.text(
             "UPDATE processing_sets SET google_json = COALESCE("

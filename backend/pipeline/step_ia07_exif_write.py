@@ -4,7 +4,7 @@ import os
 import subprocess
 from functools import partial
 
-from file_operations import is_folder_tags_active as _is_folder_tags_active  # shared
+from folder_path import folder_options, folder_targets, is_tag_path
 from system_logger import log_info
 
 
@@ -58,38 +58,16 @@ async def execute(job, session) -> dict:
     # Collect keywords
     keywords = []
 
-    # From folder structure (re-check module + inbox setting at runtime)
-    folder_tags_active = await _is_folder_tags_active(job)
-    if folder_tags_active and job.source_inbox_path:
-        rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
-        if rel and rel != "." and not rel.startswith(".."):
-            folder_parts = [p for p in rel.split(os.sep) if p and p != "."]
-            # Split all folder names into individual words as tags
-            for part in folder_parts:
-                for word in part.split():
-                    if word and word not in keywords:
-                        keywords.append(word)
-            # Add combined tag from all folder parts (e.g. "Ferien Spanien 2024")
-            combined = " ".join(folder_parts)
-            if combined not in keywords:
-                keywords.append(combined)
-
-    # Folder tags preserved from IA-02 duplicate detection: when a file was
-    # originally imported from an inbox folder (with folder_tags=True) but
-    # then marked as duplicate, the path-based extraction above fails after
-    # reprocess (the file moved to /library/error/duplicates/ → relative
-    # path is broken). IA-02 pre-computes the folder tags and stores them
-    # in step_result['IA-02']['folder_tags'] so they survive the move.
-    # Gate by folder_tags_active so the cached IA-02 list is only honoured
-    # when the module is currently active. Otherwise a stale cache (from a
-    # prior run when the module was on) would leak folder-derived keywords
-    # despite the user having since disabled the feature.
-    if folder_tags_active:
-        ia02_folder_tags = step_results.get("IA-02", {}).get("folder_tags", [])
-        if ia02_folder_tags:
-            for tag in ia02_folder_tags:
-                if tag and tag not in keywords:
-                    keywords.append(tag)
+    # Folder structure as tags (set option, read at runtime): flat — one
+    # keyword per folder level, like any other keyword — or nested, which
+    # goes into the file as TagsList/HierarchicalSubject, never as a flat
+    # keyword. Albums are IA-08's business.
+    options = await folder_options(job)
+    tag_paths: list[str] = []
+    if options.flat or options.nested:
+        folder = await folder_targets(job, options=options)
+        tag_paths = folder.tag_paths
+        keywords += [t for t in folder.flat_tags if t not in keywords]
 
     # From AI analysis (type + tags + source)
     # Skip the literal "unknown" type — it gets set as a default when IA-05
@@ -142,7 +120,11 @@ async def execute(job, session) -> dict:
         look_at.append(sidecar_path)
     takeout = await asyncio.to_thread(_missing_takeout_fields, exif_data, look_at)
 
-    if not keywords and not description and not takeout:
+    # TagsList: written for the tag tree, and kept in step wherever the file
+    # already has one — Immich reads only TagsList then (see _tags_list).
+    tags_list, stale_tags = await asyncio.to_thread(_tags_list, look_at, keywords, tag_paths)
+
+    if not keywords and not tag_paths and not stale_tags and not description and not takeout:
         result = {"status": "skipped", "reason": "no tags to write"}
         if takeout is not None:
             result["takeout_written"] = []
@@ -157,6 +139,8 @@ async def execute(job, session) -> dict:
             "tags_count": len(keywords),
             "write_mode": write_mode,
         }
+        if tag_paths:
+            result["tag_paths_planned"] = tag_paths
         if takeout:
             result["takeout_planned"] = sorted(takeout)
         return result
@@ -166,12 +150,18 @@ async def execute(job, session) -> dict:
     if ocr_result.get("has_text") and ocr_result.get("text"):
         ocr_text = ocr_result["text"].strip()
 
+    tag_args = _tags_list_args(tags_list, stale_tags)
     if write_mode == "sidecar":
-        result = await _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout or {})
+        result = await _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout or {},
+                                      tag_args)
     else:
-        result = await _write_direct(job, keywords, description, ocr_text, ext, takeout or {})
+        result = await _write_direct(job, keywords, description, ocr_text, ext, takeout or {}, tag_args)
     if takeout is not None:
         result["takeout_written"] = sorted(takeout)
+    if tag_paths:
+        result["tag_paths_written"] = tag_paths
+    if stale_tags:
+        result["tag_paths_removed"] = stale_tags
     return result
 
 
@@ -187,7 +177,7 @@ def _exiftool_write(args: list[str], error_label: str, path: str) -> None:
         raise RuntimeError(f"{error_label}: {stderr.strip()}")
 
 
-async def _write_direct(job, keywords, description, ocr_text, ext, takeout):
+async def _write_direct(job, keywords, description, ocr_text, ext, takeout, tag_args=()):
     """Write metadata directly into the file.
 
     Through fileops.write_metadata: exiftool edits a private copy, which then
@@ -215,6 +205,7 @@ async def _write_direct(job, keywords, description, ocr_text, ext, takeout):
         args.append(f"-UserComment=OCR: {ocr_text}")
 
     args += _takeout_args(takeout, "video" if ext in _QUICKTIME_FORMATS else "image")
+    args += tag_args
 
     res = await fileops.write_metadata(job, job.original_path,
                                        partial(_exiftool_write, args, "ExifTool Write Fehler"), actor="IA-07")
@@ -230,7 +221,7 @@ async def _write_direct(job, keywords, description, ocr_text, ext, takeout):
     }
 
 
-async def _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout):
+async def _write_sidecar(job, sidecar_path, keywords, description, ocr_text, takeout, tag_args=()):
     """Write metadata to the XMP sidecar, leaving the original untouched.
 
     A sidecar that already lies next to the file — supplied by the user
@@ -259,6 +250,7 @@ async def _write_sidecar(job, sidecar_path, keywords, description, ocr_text, tak
             if ocr_text:
                 args.append(f"-UserComment=OCR: {ocr_text}")
             args += takeout_args
+            args += tag_args
             await log_info("IA-07", f"{job.debug_key} Vorhandene Sidecar wird ergänzt",
                            f"{sidecar_path}: {len(keywords)} Stichwörter"
                            + (", Beschreibung der Sidecar bleibt" if keep_description else ""))
@@ -309,6 +301,7 @@ async def _write_sidecar(job, sidecar_path, keywords, description, ocr_text, tak
         cmd.append(f"-UserComment=OCR: {ocr_text}")
 
     cmd += takeout_args
+    cmd += tag_args
     cmd.append(job.original_path)
 
     result = await asyncio.to_thread(
@@ -358,6 +351,71 @@ async def _discard_tmp(job, path: str, reason: str) -> None:
         return
     row = await fileops.register_existing(job, "temp", path)
     await fileops.discard(job, row.id, actor="IA-07", reason=reason)
+
+
+def _as_list(value) -> list[str]:
+    """exiftool's JSON gives a single list item as a bare value (and numbers
+    as numbers)."""
+    if value is None or value == "":
+        return []
+    return [str(v) for v in (value if isinstance(value, list) else [value]) if str(v).strip()]
+
+
+def _tags_list(sources: list[str], keywords: list[str], tag_paths: list[str]) -> tuple[list[str], list[str]]:
+    """Every tag of the file as TagsList entries ("/" separates levels), and
+    the folder-tree entries that no longer apply.
+
+    Immich reads tags from TagsList, else HierarchicalSubject, else IPTC
+    Keywords — and once TagsList exists, from TagsList alone (a sidecar's
+    fields override the file's). So the list starts with what Immich read
+    until now, read by the same rule, then MediaAssistant's flat keywords
+    ("/" replaced as the Immich API tags get it, immich_client.tag_asset) and
+    the folder tree. dc:subject keeps the flat keywords for other programs.
+    A file that has a TagsList gets one even without a tree, or Immich would
+    not see this run's keywords; folder-tree entries ("Ordner/…") the
+    current rules no longer produce are removed. ([], []) when the file has
+    no TagsList and no tree is to be written.
+    """
+    merged: dict = {}
+    by_file = {e.get("SourceFile"): e for e in _exiftool_read(sources, ["TagsList", "HierarchicalSubject",
+                                                                         "Keywords"])}
+    for path in sources:  # file first, sidecar second: the sidecar wins
+        for field_name, value in (by_file.get(path) or {}).items():
+            if field_name != "SourceFile" and _as_list(value):
+                merged[field_name] = _as_list(value)
+    if not tag_paths and not merged.get("TagsList"):
+        return [], []
+    if merged.get("TagsList"):
+        existing = merged["TagsList"]
+    elif merged.get("HierarchicalSubject"):
+        existing = ["/".join(p.replace("/", "|") for p in h.split("|")) for h in merged["HierarchicalSubject"]]
+    else:
+        existing = merged.get("Keywords") or []
+    stale = [e for e in dict.fromkeys(existing) if is_tag_path(e) and e not in tag_paths]
+    entries: list[str] = []
+    for entry in [*existing, *(k.replace("/", " - ") for k in keywords), *tag_paths]:
+        if entry and entry not in entries and entry not in stale:
+            entries.append(entry)
+    return entries, stale
+
+
+def _hierarchical(entry: str) -> str:
+    return "|".join(level.replace("|", "/") for level in entry.split("/"))
+
+
+def _tags_list_args(tags_list: list[str], stale: list[str]) -> list[str]:
+    """ExifTool assignments for TagsList (digiKam) and HierarchicalSubject
+    (Lightroom, "|" separates levels): stale entries out, every value in
+    once."""
+    args: list[str] = []
+    for entry in stale:
+        args += [f"-XMP-digiKam:TagsList-={entry}", f"-XMP-lr:HierarchicalSubject-={_hierarchical(entry)}"]
+    for entry in tags_list:
+        args += [f"-XMP-digiKam:TagsList-={entry}", f"-XMP-digiKam:TagsList+={entry}"]
+    for entry in tags_list:
+        args += [f"-XMP-lr:HierarchicalSubject-={_hierarchical(entry)}",
+                 f"-XMP-lr:HierarchicalSubject+={_hierarchical(entry)}"]
+    return args
 
 
 def _exiftool_read(paths: list[str], tags: list[str]) -> list[dict]:

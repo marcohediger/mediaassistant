@@ -12,7 +12,6 @@ import fileops
 from config import config_manager
 from system_logger import log_info, log_warning
 from file_operations import (
-    is_folder_tags_active as _is_folder_tags_active,
     parse_date as _parse_date,
     sanitize_path_component as _sanitize_path_component,
     sha256 as _sha256,
@@ -20,8 +19,9 @@ from file_operations import (
 )
 from immich_client import (
     add_asset_to_albums, archive_asset, get_asset_info, get_user_api_key,
-    tag_asset, untag_asset, update_asset_description,
+    tag_asset, tag_asset_path, untag_asset, untag_asset_path, update_asset_description,
 )
+from folder_path import folder_targets, is_tag_path
 
 # Files the Immich input downloaded; IA-10 removes them together with their
 # temp dir (inventory S19), so IA-08 leaves them alone.
@@ -32,50 +32,6 @@ _POLLER_TMP_PREFIX = "/tmp/ma_immich_"
 # from its content (R-12), so a leaked flag cannot trigger a replace.
 _SENTINELS = ("_retry_previous_immich_tags", "_retry_previous_immich_description", "_force_reupload")
 
-
-async def _get_folder_album_names(job) -> list[str] | None:
-    """Extract album name(s) from inbox folder structure, with fallback to IA-02.
-
-    Returns a list like ["Ferien Mallorca"] or None if folder tags are
-    inactive or no folder structure is available.  When the file has been
-    moved away from the inbox (e.g. duplicate → /reprocess/), the path-
-    based extraction fails.  In that case, fall back to the combined tag
-    stored in step_result['IA-02']['folder_tags'] by _handle_duplicate.
-    """
-    if not await _is_folder_tags_active(job):
-        return None
-
-    albums = []
-
-    # 1) Own album: from inbox path or IA-02 own_album
-    if job.source_inbox_path:
-        try:
-            rel = os.path.relpath(os.path.dirname(job.original_path), job.source_inbox_path)
-        except ValueError:
-            rel = None
-        if rel and rel != "." and not rel.startswith(".."):
-            parts = [p for p in rel.split(os.sep) if p and p != "."]
-            if parts:
-                albums.append(" ".join(parts))
-
-    if not albums:
-        # Path failed (file moved) — use saved own_album from IA-02
-        ia02 = (job.step_result or {}).get("IA-02") or {}
-        own = ia02.get("own_album") or ""
-        if not own:
-            # Legacy fallback: last entry before donor merge
-            ia02_ft = ia02.get("folder_tags") or []
-            own = ia02_ft[-1] if ia02_ft else ""
-        if own:
-            albums.append(own)
-
-    # 2) Donor albums: inherited from deleted donors (always add)
-    ia02 = (job.step_result or {}).get("IA-02") or {}
-    for a in (ia02.get("donor_albums") or []):
-        if a and a not in albums:
-            albums.append(a)
-
-    return albums if albums else None
 
 # WhatsApp UUID filename pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.ext
 _WHATSAPP_UUID_RE = re.compile(
@@ -115,6 +71,10 @@ async def _tag_immich_asset(
     preserved — those are assumed to be user-added via the Immich UI
     and we don't touch them.
 
+    Nested folder tags ("Ordner/…", folder_path.is_tag_path) are created
+    with their parents and compared by their full value; every other
+    keyword stays a flat tag (tag_asset turns "/" into " - ").
+
     Behaviour:
       1. GET `get_asset_info()` — de-dup reporting.
       2. For every tag in `tag_keywords` NOT already on asset: POST.
@@ -130,9 +90,20 @@ async def _tag_immich_asset(
     if info:
         existing_tags = {t["value"] for t in (info.get("tags") or [])}
 
-    # Compare using the sanitised name (tag_asset replaces "/" with " - ")
+    # Compare by the value Immich stores: the full path of a nested folder
+    # tag, the sanitised name of a flat one (tag_asset replaces "/" with " - ")
     def _sanitize(name: str) -> str:
-        return name.replace("/", " - ")
+        return name if is_tag_path(name) else name.replace("/", " - ")
+
+    async def _tag(name: str) -> dict:
+        if is_tag_path(name):
+            return await tag_asset_path(asset_id, name, api_key=api_key)
+        return await tag_asset(asset_id, name, api_key=api_key)
+
+    async def _untag(name: str) -> dict:
+        if is_tag_path(name):
+            return await untag_asset_path(asset_id, name, api_key=api_key)
+        return await untag_asset(asset_id, name, api_key=api_key)
     missing = [t for t in tag_keywords if _sanitize(t) not in existing_tags]
     tags_written: list[str] = []
     tags_failed: list[str] = []
@@ -145,7 +116,7 @@ async def _tag_immich_asset(
 
     for tag_name in missing:
         try:
-            await tag_asset(asset_id, tag_name, api_key=api_key)
+            await _tag(tag_name)
             tags_written.append(tag_name)
         except Exception as exc:
             tags_failed.append(tag_name)
@@ -161,7 +132,7 @@ async def _tag_immich_asset(
         stale = [t for t in previous_tags if t and t not in new_set]
         for tag_name in stale:
             try:
-                result = await untag_asset(asset_id, tag_name, api_key=api_key)
+                result = await _untag(tag_name)
                 if result.get("status") == "untagged":
                     tags_removed.append(tag_name)
             except Exception as exc:
@@ -179,7 +150,7 @@ async def _tag_immich_asset(
         for tag_name in tag_keywords:
             if _sanitize(tag_name) not in final_set:
                 try:
-                    await tag_asset(asset_id, tag_name, api_key=api_key)
+                    await _tag(tag_name)
                     if tag_name not in tags_written:
                         tags_written.append(tag_name)
                     await asyncio.sleep(IMMICH_TAG_WRITE_DELAY_S)
@@ -192,7 +163,7 @@ async def _tag_immich_asset(
             for tag_name in previous_tags:
                 if tag_name and tag_name not in set(tag_keywords) and _sanitize(tag_name) in final_set:
                     try:
-                        await untag_asset(asset_id, tag_name, api_key=api_key)
+                        await _untag(tag_name)
                         if tag_name not in tags_removed:
                             tags_removed.append(tag_name)
                         await asyncio.sleep(IMMICH_TAG_WRITE_DELAY_S)
@@ -763,7 +734,14 @@ async def _to_immich(job, *, category: str, tag_keywords: list[str], ia07: dict,
     src = job.original_path
     source_dir = os.path.dirname(src) if src else ""
     src_exists = bool(src) and await asyncio.to_thread(os.path.isfile, src)
-    album_names = await _get_folder_album_names(job)
+    # Folder structure per the set's options (folder_path.py): one album per
+    # folder plus the albums of merged duplicates, and the folder tags (flat
+    # ones are usually in IA-07's keywords already — not for a format IA-07
+    # cannot write).
+    folder = await folder_targets(job)
+    album_names = folder.albums or None
+    tag_keywords = [*tag_keywords, *dict.fromkeys(
+        t for t in [*folder.flat_tags, *folder.tag_paths] if t not in tag_keywords)]
     ma_desc = ia07.get("description_written") or ""
 
     # After a crash the upload or replace may be done while the commit of
@@ -839,6 +817,7 @@ async def _upload(job, *, src: str, src_exists: bool, api_key, category: str, ta
         "immich_status": res.immich_status,
         "immich_owned": res.owned,
         "immich_albums_added": res.albums_added,
+        "immich_albums_created": res.albums_created,
         "immich_tags_written": tags_written,
         "immich_tags_failed": tags_failed,
         "immich_tags_removed": tags_removed,
@@ -900,22 +879,26 @@ async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_k
                                   f"Asset {asset_id}: {type(exc).__name__}: {exc}")
         tags_written, tags_failed, tags_removed = await _tag_immich_asset(
             asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags)
-        albums_added = []
+        albums_added, albums_created = [], []
         if album_names:
             try:
-                albums_added = await add_asset_to_albums(asset_id, album_names, api_key=api_key)
+                albums_added = await add_asset_to_albums(asset_id, album_names, api_key=api_key,
+                                                         created=albums_created)
             except Exception as exc:
                 logger.warning("Failed to add asset %s to albums: %s", asset_id, exc)
         description, kept = await _apply_description(asset_id, info, ma_desc, previous_descriptions, api_key)
-        result.update(immich_replace=False, immich_albums_added=albums_added)
+        result.update(immich_replace=False, immich_albums_added=albums_added,
+                      immich_albums_created=albums_created)
     else:
         if info and info.get("fileCreatedAt") and await asyncio.to_thread(_set_mtime, src, info["fileCreatedAt"]):
             result["file_created_at"] = info["fileCreatedAt"]
         description = _description_to_write(_asset_description(info), ma_desc, previous_descriptions)
         kept = bool(ma_desc) and description is None
+        # fileops tags by name (flat); the nested folder tags follow below.
+        flat_tags = [t for t in tag_keywords if not is_tag_path(t)]
         res = await fileops.replace(
-            job, asset_id, src, actor="IA-08", tags=tag_keywords, description=description,
-            drop_tags=previous_tags, albums=album_names,
+            job, asset_id, src, actor="IA-08", tags=flat_tags, description=description,
+            drop_tags=[t for t in previous_tags if not is_tag_path(t)], albums=album_names,
             sidecar=sidecar_path if sidecar_mode else None, restore_trashed=True)
         asset_id = res.asset_id
         if res.identical:
@@ -925,11 +908,22 @@ async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_k
             # Only MA's own tags count as written: the next retry removes
             # tags of this list that are no longer wanted, and the carried
             # user tags must never end up there.
-            tags_written = [t for t in res.tags_written if t in tag_keywords]
+            tags_written = [t for t in res.tags_written if t in flat_tags]
             tags_failed = list(res.tags_failed)
-            tags_removed = [t for t in previous_tags if t and t not in tag_keywords]
+            tags_removed = [t for t in previous_tags if t and not is_tag_path(t) and t not in tag_keywords]
+            # Nested folder tags by their full value. The old asset's ones
+            # came over by id; those no longer wanted are removed here.
+            paths = [t for t in tag_keywords if is_tag_path(t)]
+            old_paths = [t for t in previous_tags if is_tag_path(t)]
+            if paths or old_paths:
+                p_written, p_failed, p_removed = await _tag_immich_asset(
+                    asset_id, paths, api_key=api_key, previous_tags=old_paths)
+                tags_written += p_written
+                tags_failed += p_failed
+                tags_removed += p_removed
         description = description or ""
         result.update(immich_replace=asset_id != old_id, immich_albums_added=res.albums_added,
+                      immich_albums_created=res.albums_created,
                       immich_status=res.immich_status, immich_owned=res.owned, file_op=res.op_id)
         if asset_id != old_id:
             result["immich_replaced_asset"] = old_id

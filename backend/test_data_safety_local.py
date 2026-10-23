@@ -22,17 +22,19 @@ What the test does to the dev system, and undoes in `finally`:
   wherever the step itself is not under test, so neither AI, geocoding nor
   Immich is called;
 - simulates a crash by monkeypatching a function in this process so it raises
-  SimulatedCrash at the critical point. SimulatedCrash is a BaseException:
-  the pipeline's `except Exception` does not handle it and nothing after it
-  runs, which is what the process dying there looks like to the DB;
+  SimulatedCrash at the critical point, or by arming one of fileops' own
+  crash points (fileops._CRASH_AT). Both are BaseExceptions: the pipeline's
+  `except Exception` does not handle them and nothing after them runs, which
+  is what the process dying there looks like to the DB;
 - redirects REPROCESS_DIR and CSV_RETRY_DIR into the sandbox (this process
   only), so the shared /app/data/reprocess and csv-retry stay untouched;
 - disables the filewatcher module for the run (AGENTS.md) and restores it;
-- removes its jobs, sets, categories, rules, the sandbox and the system_logs
-  rows that carry its run tag.
+- removes its jobs with their file_copies / asset_refs rows (open ledger
+  intents are reconciled first; file_ops rows stay, the ledger is
+  append-only), sets, categories, rules, the sandbox and the system_logs rows
+  that carry its run tag.
 """
 import asyncio
-import builtins
 import contextlib
 import errno
 import json
@@ -55,7 +57,7 @@ from config import config_manager
 from database import async_session
 from models import Job, LibraryCategory, ProcessingSet, SortingRule, SystemLog
 from sets import seed_set_defaults
-from test_support.invariants import FileGuard, check_no_file_lost, is_under, sha256_file
+from test_support.invariants import FileGuard, check_no_file_lost, delete_test_jobs, is_under, sha256_file
 
 TS = int(time.time())
 TAG = f"DSL{TS}"
@@ -362,12 +364,14 @@ async def test_r06():
     risk = "R-06"
     section("R-06", "Zielname wird nicht atomar reserviert: zwei parallele Jobs, gleicher Name",
             "Zwei Worker-Slots verarbeiten gleichzeitig zwei verschiedene IMG_….JPG (zwei Handys, "
-            "gleicher Monat). Beide prüfen os.path.exists(Ziel) bevor einer verschiebt, beide "
-            "wählen denselben Pfad; safe_move öffnet das Ziel mit 'wb' ohne O_EXCL. Der Test hält "
-            "beide Kopiervorgänge an einer Schranke an, bis beide ihr Ziel gewählt haben (das "
-            "erzwingt nur die Reihenfolge, die Logik bleibt unverändert), dann laufen sie nacheinander.",
-            "Zwei verschiedene Dateien in der Ablage, jede mit dem sha256 ihres Jobs.")
-    from pipeline import step_ia08_sort
+            "gleicher Monat). Vor dem Umbau prüften beide os.path.exists(Ziel), wählten denselben Pfad, "
+            "und safe_move schrieb ohne O_EXCL. Heute legt fileops den Inhalt in eine eigene Teildatei und "
+            "gibt ihr per link() den ersten freien Namen. Der Test hält beide Verschiebungen direkt vor "
+            "diesem Schritt (fileops._link_free) an einer Schranke an, bis beide ihre Teildatei fertig "
+            "haben, und lässt sie dann gleichzeitig los — beide greifen nach demselben Namen.",
+            "Zwei verschiedene Dateien in der Ablage, jede mit dem sha256 ihres Jobs; einer bekommt den "
+            "Namen, der andere einen neuen (+1).")
+    import fileops
     box = Box("R06")
     set_id = await create_set("R-06", base=box.lib)
     name = f"IMG_{TAG}.JPG"
@@ -376,31 +380,43 @@ async def test_r06():
     j1 = await create_job(p1, set_id=set_id, inbox=box.inbox, step_result=pre_results())
     j2 = await create_job(p2, set_id=set_id, inbox=box.inbox, step_result=pre_results())
 
-    real_move = step_ia08_sort.safe_move
+    real_link = fileops._link_free
     barrier = threading.Barrier(2, timeout=30)
+    gate = {"arrived": 0, "broken": False, "wanted": [], "got": []}
     lock = threading.Lock()
-    chosen: list[str] = []
 
-    def gated_move(src, dst, context=""):
-        if is_under(dst, box.lib) and not dst.endswith(".xmp"):
-            chosen.append(dst)
-            try:
-                barrier.wait()
-            except threading.BrokenBarrierError:
-                pass
-            with lock:
-                return real_move(src, dst, context)
-        return real_move(src, dst, context)
+    def gated_link(part, src, dst_dir, filename, *args, **kwargs):
+        if not is_under(dst_dir, box.lib):
+            return real_link(part, src, dst_dir, filename, *args, **kwargs)
+        with lock:
+            gate["arrived"] += 1
+            gate["wanted"].append(os.path.join(dst_dir, filename))
+        try:
+            barrier.wait()
+        except threading.BrokenBarrierError:
+            gate["broken"] = True
+        placed = real_link(part, src, dst_dir, filename, *args, **kwargs)
+        with lock:
+            gate["got"].append(placed[0])
+        return placed
 
     guard = FileGuard([box.root], own=[os.path.join(box.inbox, "handy1"), os.path.join(box.inbox, "handy2")],
                       may_create=[box.lib]).snapshot()
-    with patched(step_ia08_sort, "safe_move", gated_move):
+    with patched(fileops, "_link_free", gated_link):
         await asyncio.gather(run_pipeline(j1), run_pipeline(j2))
+    if gate["arrived"] != 2 or gate["broken"]:
+        raise Precondition(f"Schranke nicht von beiden erreicht: {gate['arrived']} angekommen, "
+                           f"gebrochen={gate['broken']}")
     a, b = await get_job(j1), await get_job(j2)
     res = await check_no_file_lost([j1, j2], guard=guard, search_roots=[box.root])
     report(risk, "R-06 beide Aufnahmen liegen verifiziert in der Ablage", res.ok, res.summary())
-    actual(f"gewählte Ziele: {[where(c) for c in chosen]}; J1 {a.status} → {where(a.target_path)}, "
-           f"J2 {b.status} → {where(b.target_path)}.")
+    distinct = (a.status == b.status == "done" and has_file(a.target_path) and has_file(b.target_path)
+                and a.target_path != b.target_path
+                and {sha256_file(a.target_path), sha256_file(b.target_path)} == {a.file_hash, b.file_hash})
+    report(risk, "R-06 zwei verschiedene Dateien unter zwei Namen, jede mit dem Inhalt ihres Jobs", distinct,
+           f"J1 {a.status} → {where(a.target_path)}, J2 {b.status} → {where(b.target_path)}")
+    actual(f"beide wollten {sorted(set(where(w) for w in gate['wanted']))}; erhalten: "
+           f"{[where(g) for g in gate['got']]}.")
 
 
 # ---------------------------------------------------------------------------
@@ -643,133 +659,187 @@ async def test_r10c():
 
 
 # ---------------------------------------------------------------------------
-# R-10d: crash between safe_remove(target) and safe_move in the overwrite branch
+# R-10d / R-10h: crashes inside fileops.move
 # ---------------------------------------------------------------------------
+
+async def crash_in_fileops(job_id: int, point: str) -> bool:
+    """run_pipeline with fileops' crash point `point` armed. True if it fired."""
+    import fileops
+    fileops._CRASH_AT = point
+    try:
+        await run_pipeline(job_id)
+    except fileops._SimulatedCrash:
+        return True
+    finally:
+        fileops._CRASH_AT = None
+    return False
+
+
+async def open_intents(job_id: int) -> list:
+    from sqlalchemy import select
+    from models import FileOp
+    async with async_session() as s:
+        return (await s.execute(select(FileOp).where(
+            FileOp.job_id == job_id, FileOp.state == "intent").order_by(FileOp.id))).scalars().all()
+
+
+def part_files(directory: str) -> list[str]:
+    if not os.path.isdir(directory):
+        return []
+    return sorted(n for n in os.listdir(directory) if n.startswith(".fops-"))
+
+
+async def register_at(path: str) -> tuple[list, list]:
+    """(present file_copies rows, asset_refs rows) at a location."""
+    from sqlalchemy import select
+    from models import AssetRef, FileCopy
+    async with async_session() as s:
+        copies = (await s.execute(select(FileCopy).where(
+            FileCopy.location == path, FileCopy.state == "present"))).scalars().all()
+        refs = (await s.execute(select(AssetRef).where(AssetRef.location == path))).scalars().all()
+    return copies, refs
+
 
 async def test_r10d():
     risk = "R-10d"
-    section("R-10d", "Absturz zwischen 'alte Datei löschen' und 'neue Datei verschieben' (Überschreiben)",
-            "Job A liegt in der Ablage. Job B bringt dieselbe Datei (gleicher Name, gleiche Grösse, "
-            "Duplikat-Erkennung aus) und nimmt den Zweig 'überschreiben': safe_remove(target), dann "
-            "safe_move. Der Prozess stirbt nach dem Löschen.",
-            "Zu jedem Zeitpunkt hat A eine verifizierte Kopie unter A.target_path (atomares Ersetzen).")
+    import fileops
+    section("R-10d", "Absturz beim Ablegen auf einen belegten Namen (früher: Zweig 'überschreiben')",
+            "Job A liegt in der Ablage (T). Job B bringt eine Datei gleichen Namens in denselben Ordner. "
+            "Vor dem Umbau nahm IA-08 bei gleicher Grösse den Zweig 'überschreiben' — safe_remove(T), dann "
+            "safe_move — und ein Absturz dazwischen liess A ohne Datei. Diesen Zweig gibt es nicht mehr: "
+            "fileops legt bei gleichem Inhalt zusammen (B nutzt T mit), bei anderem Inhalt bekommt B einen "
+            "neuen Namen (T+1). Beide Fälle werden an jedem Absturzpunkt von fileops.move abgebrochen: "
+            "'intent' (Absicht protokolliert), 'linked' (Teildatei hat einen Namen, noch nicht "
+            "protokolliert; nur bei anderem Inhalt), 'placed' (Ziel protokolliert, Quelle noch da), "
+            "'source_removed' (Quelle entfernt, Register nicht nachgeführt). Danach Neustart wie die App: "
+            "offene Operationen abgleichen, B wieder einreihen, Pipeline fortsetzen.",
+            "Zu jedem Zeitpunkt liegt A's Inhalt unverändert unter A.target_path und B's Inhalt an seiner "
+            "Quelle oder am protokollierten Ziel. Nach Abgleich und Fortsetzung ist B 'done' (gleicher Inhalt: "
+            "T, als Verweis auf A's Exemplar; anderer Inhalt: eigener Name), keine Teildateien, das Register "
+            "stimmt.")
     box = Box("R10d")
     set_id = await create_set("R-10d", base=box.lib)
-    from pipeline import step_ia08_sort
     name = f"IMG_{TAG}_10d.JPG"
-    a_src = make_jpeg(os.path.join(box.inbox, "karte1", name))
-    b_src = os.path.join(box.inbox, "karte2", name)
-    os.makedirs(os.path.dirname(b_src), exist_ok=True)
-    shutil.copyfile(a_src, b_src)
+    a_src = make_jpeg(os.path.join(box.inbox, "karte_a", name))
+    with open(a_src, "rb") as f:
+        a_bytes = f.read()
     a = await create_job(a_src, set_id=set_id, inbox=box.inbox, step_result=pre_results())
     await run_pipeline(a)
     ja = await get_job(a)
     if ja.status != "done" or not has_file(ja.target_path):
         raise Precondition(f"A nicht abgelegt: {ja.status} {ja.target_path}")
-    b = await create_job(b_src, set_id=set_id, inbox=box.inbox, step_result=pre_results())
-    key = (await get_job(b)).debug_key
-    real_log = step_ia08_sort.log_info
+    t, a_hash = ja.target_path, ja.file_hash
+    target_dir = os.path.dirname(t)
 
-    async def crash_after_remove(source, message, detail=""):
-        if key in message and "safe_remove (overwrite) OK" in message:
-            raise SimulatedCrash("old file removed, new one not moved yet")
-        return await real_log(source, message, detail)
+    cases = [(True, pt) for pt in ("intent", "placed", "source_removed")] + \
+            [(False, pt) for pt in ("intent", "linked", "placed", "source_removed")]
+    for same, point in cases:
+        label = f"{'gleich' if same else 'anders'}/{point}"
+        b_dir = os.path.join(box.inbox, f"karte_b_{'gleich' if same else 'anders'}_{point}")
+        b_src = os.path.join(b_dir, name)
+        if same:
+            os.makedirs(b_dir, exist_ok=True)
+            with open(b_src, "wb") as f:
+                f.write(a_bytes)
+        else:
+            make_jpeg(b_src)
+        b = await create_job(b_src, set_id=set_id, inbox=box.inbox, step_result=pre_results())
+        b_hash = sha256_file(b_src)
+        lib_guard = FileGuard([box.lib], may_create=[box.lib]).snapshot()
+        all_guard = FileGuard([box.root], own=[b_dir], may_create=[box.lib]).snapshot()
 
-    crashed = False
-    with patched(step_ia08_sort, "log_info", crash_after_remove):
-        try:
-            await run_pipeline(b)
-        except SimulatedCrash:
-            crashed = True
-    if not crashed:
-        raise Precondition("Überschreib-Zweig wurde nicht erreicht")
-    res = await check_no_file_lost([a], search_roots=[box.root])
-    report(risk, "R-10d A hat im Absturzmoment eine verifizierte Kopie unter seinem target_path",
-           res.ok, res.summary())
-    at_crash = os.path.exists(ja.target_path)
-    await run_until_done(b)
-    healed = await check_no_file_lost([a, b])
-    actual(f"im Absturzmoment existiert A.target_path: {at_crash}; A's Inhalt nur noch in B's "
-           f"Eingangsdatei. Nach Fortsetzung von B: {'geheilt' if healed.ok else healed.summary()} "
-           f"(nur weil B's Datei identisch ist und B weiterläuft; mit R-05 wäre A endgültig weg).")
+        if not await crash_in_fileops(b, point):
+            raise Precondition(f"{label}: Absturzpunkt nicht erreicht")
+        ops = await open_intents(b)
+        placed = next((o.dst for o in ops if o.op == "move" and o.dst), None)
+        b_kept = [p for p in (b_src, placed) if p and has_file(p) and sha256_file(p) == b_hash]
+        at_crash = await check_no_file_lost([a], guard=lib_guard)
+        report(risk, f"R-10d {label}: im Absturzmoment A unverändert unter T, B's Inhalt vorhanden",
+               at_crash.ok and has_file(t) and sha256_file(t) == a_hash and bool(b_kept),
+               f"{at_crash.summary()}; B's Inhalt bei {[where(p) for p in b_kept]}; offen: "
+               f"{[f'{o.op}#{o.id}' for o in ops]}; Teildateien: {part_files(target_dir)}")
 
-
-# ---------------------------------------------------------------------------
-# R-10h: partial destination after an interrupted copy
-# ---------------------------------------------------------------------------
-
-class _CrashAfterFirstChunk:
-    """File wrapper: the first write lands, the second one 'kills the process'."""
-
-    def __init__(self, f):
-        self._f = f
-        self._writes = 0
-
-    def write(self, data):
-        self._writes += 1
-        if self._writes > 1:
-            self._f.flush()
-            raise SimulatedCrash("copy interrupted after the first chunk")
-        return self._f.write(data)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self._f.close()
-        return False
-
-    def __getattr__(self, name):
-        return getattr(self._f, name)
+        settled = await fileops.reconcile_open_intents(job_ids=[b])
+        await run_until_done(b)
+        jb = await get_job(b)
+        copies, refs = await register_at(t)
+        b_copies, _ = await register_at(jb.target_path or "")
+        src_rows, _ = await register_at(b_src)
+        res = await check_no_file_lost([a, b], guard=all_guard, search_roots=[box.root])
+        if same:
+            where_ok = jb.target_path == t
+            reg_ok = ([c.job_id for c in copies] == [a] and any(r.job_id == b for r in refs))
+        else:
+            where_ok = (jb.target_path != t and os.path.dirname(jb.target_path or "") == target_dir)
+            reg_ok = [c.job_id for c in b_copies] == [b]
+        ok = (jb.status == "done" and where_ok and has_file(jb.target_path)
+              and sha256_file(jb.target_path) == b_hash and sha256_file(t) == a_hash and res.ok
+              and reg_ok and not src_rows and not part_files(target_dir) and not os.path.exists(b_src)
+              and not await open_intents(b))
+        report(risk, f"R-10d {label}: nach Abgleich + Fortsetzung ist B 'done', A unberührt, Register stimmt",
+               ok, f"B {jb.status} → {where(jb.target_path)}; Abgleich: "
+               f"{[(r['op'], r['state']) for r in settled]}; T gehört {[c.job_id for c in copies]}, "
+               f"Verweise {[r.job_id for r in refs]} (A={a}, B={b}); Quelle registriert: {len(src_rows)}; "
+               f"Teildateien: {part_files(target_dir)}; {res.summary()}")
+    actual(f"Ablage {where(target_dir)}: {sorted(n for n in os.listdir(target_dir))}.")
 
 
 async def test_r10h():
     risk = "R-10h"
+    import fileops
     section("R-10h", "Abgebrochene Kopie hinterlässt ein Teilstück in der Ablage",
-            "safe_move kopiert ein Video in die Ablage und der Prozess stirbt nach dem ersten "
-            "64-KiB-Block. Beim Neustart findet IA-08 eine Datei gleichen Namens mit anderer "
-            "Grösse, hält sie für ein anderes Foto und legt das Video als '+1' daneben.",
-            "Nach dem Neustart liegt kein Teilstück in der Ablage; das Video liegt verifiziert unter "
-            "seinem eigenen Namen.")
-    import safe_file
+            "IA-08 verschiebt ein Video (3 MB) in die Ablage; der Prozess stirbt nach dem ersten 1-MiB-Block "
+            "der Kopie (fileops-Absturzpunkt 'copying'). Vor dem Umbau schrieb safe_move direkt unter den "
+            "echten Namen; beim Neustart hielt IA-08 das Teilstück für ein anderes Foto und legte das Video "
+            "als '+1' daneben. fileops schreibt in eine private Teildatei (.fops-<id>.part) und gibt ihr "
+            "erst nach der Prüfung einen Namen. Neustart wie die App: Abgleich, wieder einreihen, fortsetzen.",
+            "Unter dem echten Namen liegt nie ein Teilstück. Der Abgleich entfernt die Teildatei (die Quelle "
+            "ist ja noch da); danach liegt das Video verifiziert unter seinem eigenen Namen, nichts daneben.")
     box = Box("R10h")
     set_id = await create_set("R-10h", base=box.lib)
     name = f"VID_{TAG}.MOV"
-    src = make_bytes(os.path.join(box.inbox, name), 600_000)
+    size = 3_000_000
+    src = make_bytes(os.path.join(box.inbox, name), size)
+    src_hash = sha256_file(src)
     video = pre_results(file_type="MOV", mime="video/quicktime", make="Apple", model="iPhone 15")
     a = await create_job(src, set_id=set_id, inbox=box.inbox, step_result=video)
-    real_open = builtins.open
-
-    def crashing_open(file, mode="r", *args, **kwargs):
-        f = real_open(file, mode, *args, **kwargs)
-        if "w" in mode and is_under(str(file), box.lib):
-            return _CrashAfterFirstChunk(f)
-        return f
-
-    crashed = False
-    with patched(safe_file, "open", crashing_open):
-        try:
-            await run_pipeline(a)
-        except SimulatedCrash:
-            crashed = True
-    if not crashed:
+    if not await crash_in_fileops(a, "copying"):
         raise Precondition("Kopie wurde nicht abgebrochen")
-    target_dir = os.path.join(box.lib, "videos", "2026", "2026-10")
-    fragment = os.path.join(target_dir, name)
-    frag_size = os.path.getsize(fragment) if os.path.exists(fragment) else None
+    move = next((o for o in await open_intents(a) if o.op == "move"), None)
+    if move is None:
+        raise Precondition("keine offene Verschiebung nach dem Absturz")
+    target_dir = (move.detail or {}).get("dst_dir")
+    real = os.path.join(target_dir, (move.detail or {}).get("filename") or name)
+    part = (move.detail or {}).get("part")
+    frag = os.path.getsize(part) if part and os.path.exists(part) else None
+    if not frag or frag >= size:
+        raise Precondition(f"kein Teilstück entstanden: Teildatei {where(part)} {frag} Bytes")
+    visible = [n for n in (os.listdir(target_dir) if os.path.isdir(target_dir) else []) if not n.startswith(".")]
+    report(risk, "R-10h im Absturzmoment liegt unter dem echten Namen (und überhaupt sichtbar) kein Teilstück",
+           not os.path.exists(real) and not visible and sha256_file(src) == src_hash,
+           f"{where(real)} existiert: {os.path.exists(real)}; sichtbar im Ordner: {visible}; Teilstück "
+           f"{frag} von {size} Bytes nur in {where(part)}; Quelle unverändert: {sha256_file(src) == src_hash}")
+
+    settled = await fileops.reconcile_open_intents(job_ids=[a])
+    report(risk, "R-10h der Abgleich entfernt die Teildatei, die Quelle bleibt",
+           not part_files(target_dir) and sha256_file(src) == src_hash and not os.path.exists(real),
+           f"Abgleich: {[(r['op'], r['state'], first_line(r['note'], 80)) for r in settled]}; "
+           f"Teildateien: {part_files(target_dir)}")
+
     await run_until_done(a)
     ja = await get_job(a)
     stray = []
     for n in sorted(os.listdir(target_dir)) if os.path.isdir(target_dir) else []:
-        p = os.path.join(target_dir, n)
-        if os.path.isfile(p) and sha256_file(p) != ja.file_hash:
-            stray.append(f"{n} ({os.path.getsize(p)} Bytes)")
+        pth = os.path.join(target_dir, n)
+        if n.startswith(".fops-") or (os.path.isfile(pth) and sha256_file(pth) != src_hash):
+            stray.append(f"{n} ({os.path.getsize(pth)} Bytes)")
     report(risk, "R-10h kein Teilstück in der Ablage nach dem Neustart", not stray,
            f"fremde/teilweise Dateien im Zielordner: {stray}")
-    report(risk, "R-10h Video liegt unter seinem eigenen Namen", ja.target_path == fragment,
-           f"target_path={where(ja.target_path)}")
+    report(risk, "R-10h Video liegt verifiziert unter seinem eigenen Namen",
+           ja.status == "done" and ja.target_path == real and has_file(real) and sha256_file(real) == src_hash,
+           f"status={ja.status}, target_path={where(ja.target_path)}")
     res = await check_no_file_lost([a], search_roots=[box.root])
-    actual(f"Teilstück nach Absturz: {frag_size} Bytes von 600000; nach Neustart status={ja.status}, "
+    actual(f"Teilstück nach Absturz: {frag} von {size} Bytes in {where(part)}; nach Neustart status={ja.status}, "
            f"target_path={where(ja.target_path)}; Invariante: {res.summary()}")
 
 
@@ -1282,8 +1352,13 @@ TESTS = [
 
 
 async def cleanup():
+    from sqlalchemy import select
     async with async_session() as s:
-        await s.execute(delete(Job).where(or_(Job.id.in_(CREATED_JOBS), Job.debug_key.like(f"{TAG}-%"))))
+        ids = set(CREATED_JOBS) | set((await s.execute(
+            select(Job.id).where(Job.debug_key.like(f"{TAG}-%")))).scalars().all())
+    # Jobs with their file_copies / asset_refs; ledger rows stay (append-only).
+    await delete_test_jobs(ids, prefixes=[SANDBOX])
+    async with async_session() as s:
         if CREATED_SETS:
             await s.execute(delete(SortingRule).where(SortingRule.set_id.in_(CREATED_SETS)))
             await s.execute(delete(LibraryCategory).where(LibraryCategory.set_id.in_(CREATED_SETS)))

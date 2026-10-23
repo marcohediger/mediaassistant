@@ -55,18 +55,49 @@ def _compile(pattern: str) -> re.Pattern | None:
         return None
 
 
-def _subjects(entry: dict) -> list[str]:
-    """Subject as a list — exiftool returns a bare string for a single value."""
-    subj = entry.get("Subject")
-    if not subj:
+def _values(entry: dict, field_name: str) -> list[str]:
+    """A list field — exiftool returns a bare value for a single item."""
+    value = entry.get(field_name)
+    if value is None or value == "" or value == []:
         return []
-    return [str(s) for s in (subj if isinstance(subj, list) else [subj])]
+    return [str(s) for s in (value if isinstance(value, list) else [value])]
+
+
+# Keyword fields of a sidecar. Immich reads its tags from TagsList, else
+# HierarchicalSubject, never from dc:subject — so a keyword removed from
+# Subject alone comes back from the other two on the next re-index.
+KEYWORD_FIELDS = ("Subject", "TagsList", "HierarchicalSubject")
+
+
+def _keyword_entries(entry: dict) -> list[tuple[str, str, str]]:
+    """(field, raw value, shown value) of every keyword in a sidecar. Nested
+    values are shown the way Immich stores them: levels joined with "/"."""
+    out = []
+    for field_name in KEYWORD_FIELDS:
+        for raw in _values(entry, field_name):
+            shown = raw
+            if field_name == "HierarchicalSubject":
+                shown = "/".join(level.replace("/", "|") for level in raw.split("|"))
+            out.append((field_name, raw, shown))
+    return out
+
+
+def _matches(field_name: str, shown: str, rx: re.Pattern) -> bool:
+    """A nested value matches when the whole path or any of its levels does —
+    the way deleting a tag in Immich takes its whole subtree along."""
+    if rx.search(shown):
+        return True
+    return field_name != "Subject" and any(rx.search(level) for level in shown.split("/"))
+
+
+def _is_nested(field_name: str, raw: str) -> bool:
+    return (field_name == "TagsList" and "/" in raw) or (field_name == "HierarchicalSubject" and "|" in raw)
 
 
 async def _read_library_subjects(libraries: list[str]) -> list[dict]:
     proc = await asyncio.to_thread(
         subprocess.run,
-        ["exiftool", "-j", "-q", "-Subject", "-r", "-ext", "xmp", *libraries],
+        ["exiftool", "-j", "-q", *[f"-{f}" for f in KEYWORD_FIELDS], "-r", "-ext", "xmp", *libraries],
         capture_output=True, timeout=SCAN_TIMEOUT_S,
     )
     out = (proc.stdout or b"").decode("utf-8", errors="replace").strip()
@@ -80,18 +111,38 @@ def _is_part_file(path: str) -> bool:
     return os.path.basename(path).startswith(".fops-")
 
 
-def _collect(entries: list[dict], rx: re.Pattern) -> tuple[dict, list[str]]:
-    """Matching keyword -> occurrences, plus the sidecars carrying them."""
+def _collect(entries: list[dict], rx: re.Pattern) -> tuple[dict, list[str], dict]:
+    """Matching keyword -> sidecars carrying it, the sidecars, and per shown
+    keyword the (field, raw value) pairs to remove from them."""
     counts: dict[str, int] = {}
     files: list[str] = []
+    raw: dict[str, list[list[str]]] = {}
     for entry in entries:
-        hits = [s for s in _subjects(entry) if rx.search(s)]
-        if not hits or _is_part_file(entry.get("SourceFile", "")):
+        if _is_part_file(entry.get("SourceFile", "")):
+            continue
+        hits = [(f, r, shown) for f, r, shown in _keyword_entries(entry) if _matches(f, shown, rx)]
+        if not hits:
             continue
         files.append(entry.get("SourceFile", ""))
-        for h in hits:
-            counts[h] = counts.get(h, 0) + 1
-    return counts, files
+        for shown in dict.fromkeys(shown for _f, _r, shown in hits):
+            counts[shown] = counts.get(shown, 0) + 1
+        for f, r, shown in hits:
+            pairs = raw.setdefault(shown, [])
+            if [f, r] not in pairs:
+                pairs.append([f, r])
+    return counts, files, raw
+
+
+def _removal_args(counts: dict, raw: dict) -> list[str]:
+    """ExifTool removals for the approved keywords, in every field they were
+    found in (a value a file does not carry is a no-op)."""
+    args: list[str] = []
+    for shown in counts:
+        for field_name, value in raw.get(shown) or [["Subject", shown]]:
+            arg = f"-{field_name}-={value}"
+            if arg not in args:
+                args.append(arg)
+    return args
 
 
 async def _sidecar_copy(path: str) -> tuple[int | None, int]:
@@ -163,14 +214,21 @@ def _tag_name(tag: dict) -> str:
     return str(tag.get("name") or tag.get("value") or "")
 
 
+def _tag_value(tag: dict) -> str:
+    """The full path of a tag ("Ordner/Kategorie/2007"); the name is only its
+    last level, and several nested tags can share it."""
+    return str(tag.get("value") or tag.get("name") or "")
+
+
 def _immich_matches(tags: list[dict], rx: re.Pattern) -> tuple[list[dict], list[str]]:
     """Tags to delete, plus the names the cascade would take along uninvited.
 
     `tag.parentId` is ON DELETE CASCADE in Immich, so deleting a matched tag
     also removes every descendant — including ones the pattern never matched.
-    Those are listed separately instead of quietly disappearing.
+    Those are listed separately instead of quietly disappearing. A tag
+    matches by its name or its full path; it is shown by its full path.
     """
-    matched = [t for t in tags if rx.search(_tag_name(t))]
+    matched = [t for t in tags if rx.search(_tag_name(t)) or rx.search(_tag_value(t))]
     matched_ids = {t.get("id") for t in matched}
 
     children: dict[str, list[dict]] = {}
@@ -188,7 +246,7 @@ def _immich_matches(tags: list[dict], rx: re.Pattern) -> tuple[list[dict], list[
             seen.add(cid)
             stack.append(cid)
             if cid not in matched_ids:
-                collateral.append(_tag_name(child))
+                collateral.append(_tag_value(child))
     return matched, sorted(collateral)
 
 
@@ -202,7 +260,7 @@ async def _scan_immich(rx: re.Pattern, per_asset: bool) -> dict:
         return {"available": False, "error": f"{type(e).__name__}: {e}"[:160],
                 "tags": [], "collateral": []}
     matched, collateral = _immich_matches(tags, rx)
-    entries = [{"id": t.get("id"), "name": _tag_name(t)} for t in matched]
+    entries = [{"id": t.get("id"), "name": _tag_value(t)} for t in matched]
 
     # Per-asset mode needs the asset ids anyway, and counting them turns the
     # preview from "these tags" into "these tags on this many pictures".
@@ -382,14 +440,14 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset:
 
         # Reading every sidecar is the expensive half — skip it entirely when
         # the run is meant for Immich only.
-        entries, counts, files = [], {}, []
+        entries, counts, files, raw = [], {}, [], {}
         if with_sidecars:
             _cleanup_phase("reading_sidecars")
             entries = await _read_library_subjects(library)
             _cleanup_progress["total"] = len(entries)
             _cleanup_progress["current"] = len(entries)
             _cleanup_phase("collecting_matches")
-            counts, files = _collect(entries, rx)
+            counts, files, raw = _collect(entries, rx)
         immich = {"enabled": False, "available": False, "error": "",
                   "total": 0, "tags": [], "collateral": []}
         if with_immich:
@@ -397,7 +455,7 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset:
             immich = {"enabled": True, **await _scan_immich(rx, per_asset)}
 
         _last_scan.clear()
-        _last_scan.update({"pattern": pattern, "counts": counts, "files": files,
+        _last_scan.update({"pattern": pattern, "counts": counts, "files": files, "raw": raw,
                            "sidecars_enabled": with_sidecars,
                            "immich_enabled": with_immich,
                            "immich_per_asset": per_asset,
@@ -457,7 +515,7 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
         # Removing a value a file does not carry is a no-op, so the whole
         # approved set can be passed for every file. One file at a time
         # through fileops: each change is in the ledger and survives a crash.
-        removals = [f"-Subject-={value}" for value in counts]
+        removals = _removal_args(counts, dict(_last_scan.get("raw") or {}))
         changed, failed = 0, 0
         if files:
             await log_info("tools", f"Tag-Aufräumen: {len(counts)} Schlagwörter werden aus "
@@ -620,20 +678,35 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
     from immich_client import list_tags, count_tag_assets
     try:
         library = await library_roots()
+        # Only flat keywords: a spelling merge deletes the losing tag, and in a
+        # tree that would take its whole subtree along (nested folder tags,
+        # folder_path.py). Nested values are left as they are.
         sidecar_files: dict[str, list[str]] = {}
+        sidecar_fields: dict[str, dict[str, list[str]]] = {}  # keyword -> sidecar -> fields
         if with_sidecars:
             _cleanup_phase("reading_sidecars")
             for entry in await _read_library_subjects(library):
-                for value in _subjects(entry):
-                    sidecar_files.setdefault(value, []).append(entry.get("SourceFile", ""))
+                src = entry.get("SourceFile", "")
+                for field_name, raw, _shown in _keyword_entries(entry):
+                    if _is_nested(field_name, raw):
+                        continue
+                    files = sidecar_files.setdefault(raw, [])
+                    if src not in files:
+                        files.append(src)
+                    fields = sidecar_fields.setdefault(raw, {}).setdefault(src, [])
+                    if field_name not in fields:
+                        fields.append(field_name)
 
         immich_tags: dict[str, dict] = {}
         immich_error = ""
         if with_immich:
             _cleanup_phase("reading_immich_tags")
             try:
-                for t in await list_tags():
-                    immich_tags[_tag_name(t)] = t
+                all_tags = await list_tags()
+                parents = {t.get("parentId") for t in all_tags if t.get("parentId")}
+                for t in all_tags:
+                    if not t.get("parentId") and t.get("id") not in parents:
+                        immich_tags[_tag_value(t)] = t
             except Exception as e:
                 immich_error = f"{type(e).__name__}: {e}"
 
@@ -692,7 +765,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
         orphans = sorted(e["name"] for e in universe
                          if _is_damaged(e["name"]) and e["name"] not in grouped)
         _last_merge.clear()
-        _last_merge.update({"groups": plan, "sidecar_files": sidecar_files,
+        _last_merge.update({"groups": plan, "sidecar_files": sidecar_files, "sidecar_fields": sidecar_fields,
                             "sidecars_enabled": with_sidecars, "immich_enabled": with_immich})
         _cleanup_finish(result={
             "mode": "merge_scan",
@@ -725,6 +798,7 @@ async def _merge_apply(*_ignored):
     try:
         groups = list(_last_merge.get("groups") or [])
         sidecar_files = dict(_last_merge.get("sidecar_files") or {})
+        sidecar_fields = dict(_last_merge.get("sidecar_fields") or {})
         do_sidecars = bool(_last_merge.get("sidecars_enabled"))
         do_immich = bool(_last_merge.get("immich_enabled"))
         files_changed, files_failed = 0, 0
@@ -747,18 +821,30 @@ async def _merge_apply(*_ignored):
                 if _cancelled():
                     break
                 _cleanup_phase("merging_sidecars", name=winner)
-                # Removing the winner before adding it keeps files that already
-                # carry both spellings from ending up with it twice.
-                args = [f"-Subject-={n}" for n in losers] + [
-                    f"-Subject-={winner}", f"-Subject+={winner}"]
                 await log_info("tools", f"Schreibweisen: „{winner}“ wird in {len(files)} Sidecars gesetzt",
                                "ersetzt: " + ", ".join(f"„{n}“" for n in losers)[:300])
-                ok, bad = await _rewrite_sidecars(files, args, "tools:tag_merge", progress_offset=done)
-                done += len(files)
-                files_changed += ok
-                files_failed += bad
-                await log_info("tools", f"Schreibweisen: „{winner}“ in {ok} Sidecars gesetzt",
-                               f"fehlgeschlagen={bad}")
+                # Each sidecar in the fields its losing spellings sit in: a
+                # TagsList is never added to a file that had none (Immich
+                # would then read only that list).
+                by_fields: dict[tuple, list[str]] = {}
+                ok_group, bad_group = 0, 0
+                for f in files:
+                    fields = sorted({fld for n in losers for fld in (sidecar_fields.get(n) or {}).get(f, [])}
+                                    or {"Subject"})
+                    by_fields.setdefault(tuple(fields), []).append(f)
+                for fields, subset in by_fields.items():
+                    # Removing the winner before adding it keeps files that already
+                    # carry both spellings from ending up with it twice.
+                    args = [a for fld in fields for a in
+                            [f"-{fld}-={n}" for n in losers] + [f"-{fld}-={winner}", f"-{fld}+={winner}"]]
+                    ok, bad = await _rewrite_sidecars(subset, args, "tools:tag_merge", progress_offset=done)
+                    done += len(subset)
+                    ok_group += ok
+                    bad_group += bad
+                files_changed += ok_group
+                files_failed += bad_group
+                await log_info("tools", f"Schreibweisen: „{winner}“ in {ok_group} Sidecars gesetzt",
+                               f"fehlgeschlagen={bad_group}")
 
         if do_immich:
             _cleanup_progress["total"] = len(groups)

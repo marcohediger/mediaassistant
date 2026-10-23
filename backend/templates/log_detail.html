@@ -20,9 +20,12 @@
 } %}
 {% set STEP_OK = ('is-success', 'check-circle', t.job_detail.step_ok) %}
 
-<div class="ui-page-head job-head" data-page="job-detail" data-debug-key="{{ job.debug_key }}">
+{# Back to the page the job was opened from (routers/logs.py, job_view.back_link).
+   data-back: a target from the Referer, which app.js puts into the address. #}
+{% set back = back | default({'url': back_url | default('/logs?tab=jobs'), 'label': t.logs.job_log, 'explicit': false}) %}
+<div class="ui-page-head job-head" data-page="job-detail" data-debug-key="{{ job.debug_key }}"{% if back.explicit %} data-back="{{ back.url }}"{% endif %}>
     <div class="ui-page-head-text">
-        <a class="ui-page-back" href="{{ back_url | default('/logs?tab=jobs') }}">{{ icon('chevron-left') }}{{ t.logs.job_log }}</a>
+        <a class="ui-page-back" href="{{ back.url }}" title="{{ t.job_detail.back_to | replace('{page}', back.label) }}">{{ icon('chevron-left') }}{{ back.label }}</a>
         <h1 class="ui-page-title"><span class="job-key">{{ job.debug_key }}</span></h1>
         <p class="ui-page-sub job-file">{{ job.filename }}</p>
     </div>
@@ -34,11 +37,13 @@
        (updateJobDetail) shows and hides them as the status changes. #}
     <div class="ui-page-actions" data-section="actions"{% if job.status in ('queued', 'processing') %} hidden{% endif %}>
         <form method="post" action="/api/job/{{ job.debug_key }}/retry">
+            <input type="hidden" name="back" value="{{ back.url }}">
             <button type="submit" class="ui-btn ui-btn-primary">{{ icon('retry') }}{{ t.job_detail.retry }}</button>
         </form>
         <form method="post" action="/api/job/{{ job.debug_key }}/delete"
               data-confirm="{{ t.job_detail.delete_confirm | replace('{key}', job.debug_key) }}"
               onsubmit="return confirm(this.dataset.confirm)">
+            <input type="hidden" name="back" value="{{ back.url }}">
             <button type="submit" class="ui-btn ui-btn-danger">{{ icon('trash') }}{{ t.job_detail.delete }}</button>
         </form>
     </div>
@@ -157,7 +162,8 @@
             {% endfor %}
         </div>
 
-        {# File operations from the ledger (file_ops), shown oldest first like the modules; filled by app.js #}
+        {# Intake, then the file operations from the ledger (file_ops) oldest first like the
+           modules; housekeeping folds into one line. Filled by app.js #}
         <section class="job-history" aria-labelledby="job-history-title">
             <div class="ui-section-head">
                 <div class="ui-section-head-text">
@@ -187,6 +193,12 @@
                     <dd><code class="ui-path job-path{{ ' is-empty' if not (job.target_path or planned) else '' }}" data-field="target_path"{% if planned %} data-planned="1"{% endif %}>{{ job.target_path or planned or '—' }}</code></dd>
                 </div>
             </dl>
+        </section>
+
+        {# Tags and albums MA wrote (job_view.job_labels); filled by app.js #}
+        <section class="ui-card" aria-labelledby="job-labels-title">
+            <div class="ui-card-head"><h2 class="ui-card-title" id="job-labels-title">{{ icon('tag') }}{{ t.history.labels_title }}</h2></div>
+            <div class="job-labels-body" id="job-labels" aria-busy="true"><span class="ui-skeleton hist-skel"></span></div>
         </section>
 
         {# Copies of the file from the register (file_copies); restore for trashed ones #}

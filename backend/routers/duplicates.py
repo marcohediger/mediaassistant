@@ -21,7 +21,7 @@ import fileops
 from config import config_manager
 from database import async_session
 from file_operations import (
-    is_folder_tags_active, job_asset_ids, job_copies, present_owners, resolve_filepath,
+    job_asset_ids, job_copies, present_owners, resolve_filepath,
 )
 from models import AssetRef, Job
 from pipeline.reprocess import prepare_job_for_reprocess
@@ -215,10 +215,12 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
     from pipeline.step_ia02_duplicates import _quality_score
     q_score = _quality_score(job)
 
-    # Folder tags (album name) — shown in the duplicate comparison UI.
-    # Priority: 1) IA-02 folder_tags  2) IA-08 immich_albums_added  3) Immich API
+    # Folder album name — shown in the duplicate comparison UI.
+    # Priority: 1) IA-02 folder (raw path, old jobs: folder_tags)
+    # 2) IA-08 immich_albums_added  3) Immich API
+    from folder_path import album_name
     folder_tags = dup_info.get("folder_tags") or []
-    folder_album = folder_tags[-1] if folder_tags else ""
+    folder_album = album_name(dup_info.get("folder_path")) or (folder_tags[-1] if folder_tags else "")
 
     if not folder_album:
         # Fallback: IA-08 recorded which albums the asset was added to
@@ -251,6 +253,7 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
         "immich_asset_id": immich_asset_id,
         "quality_score": q_score,
         "folder_tags": folder_tags,
+        "folder_path": dup_info.get("folder_path") or "",
         "folder_album": folder_album,
         **img_info,
     }
@@ -893,10 +896,14 @@ class _Merge:
 
 
 async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _Merge:
-    """GPS, date, keywords, folder tags, description and albums of the donors,
-    merged into the kept job (v2.29.5). Reads only (Immich: album lookups)."""
+    """GPS, date, keywords, folders, description and albums of the donors,
+    merged into the kept job (v2.29.5). Reads only (Immich: album lookups).
+
+    Folders are merged as raw relative paths (IA-02 donor_folder_paths);
+    whether they become tags (flat or nested) or albums is decided by the
+    kept job's set when they are written (folder_path.folder_targets)."""
     from immich_client import get_asset_albums
-    from pipeline.step_ia02_duplicates import _extract_folder_tags
+    from folder_path import folder_options, folder_path_of
 
     sr = copy.deepcopy(_without_plan(kept.step_result))
     ia01 = dict(sr.get("IA-01") or {})
@@ -904,17 +911,18 @@ async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _
     ia07 = dict(sr["IA-07"]) if isinstance(sr.get("IA-07"), dict) else {}
     own_keywords = [k for k in (ia07.get("keywords_written") or []) if k]
     own_description = ia07.get("description_written") or ""
-    folder_tags = list(ia02.get("folder_tags") or [])
-    own_album = ia02.get("own_album") or (folder_tags[-1] if folder_tags else "")
+    own_folder = await folder_path_of(kept, ia02)
+    # Jobs from before the raw folder was recorded only kept the old flat
+    # folder keywords; the last one was the album name.
+    legacy_tags = list(ia02.get("folder_tags") or [])
+    own_album = ia02.get("own_album") or ("" if own_folder or not legacy_tags else legacy_tags[-1])
+    donor_folders = list(ia02.get("donor_folder_paths") or [])
     keywords = list(own_keywords)
     description = own_description
-    donor_albums: list[str] = []
+    donor_albums: list[str] = list(ia02.get("donor_albums") or [])
     notes: list[str] = []
-    # Folder tags count only while the kept job's set has them on — a donor
-    # processed back when they were on must not carry them over (they would
-    # become keywords and Immich tags the user switched off).
-    folder_tags_on = await is_folder_tags_active(kept)
-    folder_words: set[str] = set()
+    options = await folder_options(kept)
+    new_folders = 0
 
     for donor in donors:
         dsr = donor.step_result or {}
@@ -932,22 +940,23 @@ async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _
             ia01["date"] = d01["date"]
             notes.append("date")
 
-        new_keywords = [k for k in (d07.get("keywords_written") or []) if k and k not in keywords]
+        # A donor's old flat folder keywords stay keywords only while the
+        # kept job's set wants flat folder tags; otherwise its folder comes
+        # along as a path only (and becomes whatever the set says).
+        d_legacy = set() if options.flat else set(d02.get("folder_tags") or [])
+        new_keywords = [k for k in (d07.get("keywords_written") or [])
+                        if k and k not in keywords and k not in d_legacy]
         if new_keywords:
             keywords.extend(new_keywords)
             notes.append(f"keywords(+{len(new_keywords)})")
 
-        donor_ft: list[str] = []
-        donor_ft_raw = d02.get("folder_tags") or (_extract_folder_tags(donor) if donor.folder_tags else [])
-        folder_words.update(donor_ft_raw)
-        if folder_tags_on:
-            donor_ft = donor_ft_raw
-            new_ft = [t for t in donor_ft if t and t not in folder_tags]
-            if new_ft:
-                folder_tags.extend(new_ft)
-                notes.append(f"folder_tags(+{len(new_ft)})")
+        d_folder = await folder_path_of(donor, d02)
+        if d_folder and d_folder != own_folder and d_folder not in donor_folders:
+            donor_folders.append(d_folder)
+            new_folders += 1
 
-        # Albums of the donor: Immich → what IA-08 recorded → its folder
+        # Albums of the donor: Immich → what IA-08 recorded → for a donor
+        # from before the raw folder was recorded, its old folder album
         found: list[str] = []
         for asset_id in job_asset_ids(donor):
             try:
@@ -958,32 +967,25 @@ async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _
                 break
         if not found:
             found = list((dsr.get("IA-08") or {}).get("immich_albums_added") or [])
-        if not found and donor_ft:
-            found = [donor_ft[-1]]
+        if not found and not d_folder and options.albums and d02.get("folder_tags"):
+            found = [d02["folder_tags"][-1]]
         for album in found:
             if album and album not in donor_albums:
                 donor_albums.append(album)
-            folder_words.add(album)
-            folder_words.update((album or "").split())
-            # Album names become keywords only with folder tags on; the album
-            # itself is added in Immich either way.
-            if folder_tags_on:
-                for name in [album, *(album or "").split()]:
-                    if name and name not in folder_tags:
-                        folder_tags.append(name)
 
         if not description and d07.get("description_written"):
             description = d07["description_written"]
             notes.append("description")
 
-    for tag in folder_tags:
-        if tag and tag not in keywords:
-            keywords.append(tag)
+    if new_folders:
+        notes.append(f"folders(+{new_folders})")
     if donor_albums:
         notes.append(f"donor_albums({', '.join(donor_albums)})")
 
-    if folder_tags:
-        ia02["folder_tags"] = folder_tags
+    if own_folder:
+        ia02["folder_path"] = own_folder
+    if donor_folders:
+        ia02["donor_folder_paths"] = donor_folders
     if own_album:
         ia02["own_album"] = own_album
     if donor_albums:
@@ -1001,20 +1003,18 @@ async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _
         sr["IA-07"] = ia07
 
     taken = [k for k in keywords if k not in own_keywords]
-    if not folder_tags_on:
-        taken = [k for k in taken if k not in folder_words]
     donor_keys = [d.debug_key for d in donors]
-    if taken or description != own_description or donor_albums:
+    if taken or description != own_description or donor_albums or new_folders:
         sr[MERGE_KEY] = {
             "keywords": taken, "description": description if description != own_description else None,
-            "albums": donor_albums, "from": donor_keys, "source": source,
+            "albums": donor_albums, "folders": donor_folders, "from": donor_keys, "source": source,
             "at": datetime.now().isoformat(timespec="seconds"),
         }
 
     analysis_donor = next((d for d in donors if prev.get(str(d.id)) != "duplicate"
                            and (d.step_result or {}).get("IA-05")), None)
     ia02_skip = {"status": "skipped", "reason": f"kept via {source}"}
-    for key in ("user_kept", "folder_tags", "own_album", "donor_albums"):
+    for key in ("user_kept", "folder_path", "donor_folder_paths", "folder_tags", "own_album", "donor_albums"):
         if ia02.get(key):
             ia02_skip[key] = ia02[key]
     return _Merge(sr, notes, keywords, taken, description, own_description, donor_albums,
@@ -1237,19 +1237,27 @@ async def _promoted_asset(kept, donors, prev: dict, kept_assets: set, group_ids)
 
 
 async def _apply_merge_in_immich(kept, asset_id: str, merge: _Merge, notes: list) -> None:
-    """A kept original that is already in Immich: add the donors' tags and
-    albums to its asset. The description is written only where the asset
-    has none or still has MediaAssistant's own one — a text the user wrote
-    in Immich stays (R-19b)."""
-    from immich_client import add_asset_to_albums, get_asset_info, tag_asset, update_asset_description
+    """A kept original that is already in Immich: add the donors' tags,
+    folders (nested tags, albums — per the kept job's set) and albums to its
+    asset. The description is written only where the asset has none or
+    still has MediaAssistant's own one — a text the user wrote in Immich
+    stays (R-19b)."""
+    from immich_client import (add_asset_to_albums, get_asset_info, tag_asset, tag_asset_path,
+                               update_asset_description)
+    from folder_path import folder_options, folder_targets
 
     key = await _api_key(kept)
     info = await get_asset_info(asset_id, api_key=key) or {}
     on_asset = {t.get("value") or t.get("name") for t in (info.get("tags") or []) if isinstance(t, dict)}
     written = set(((kept.step_result or {}).get("IA-08") or {}).get("immich_tags_written") or [])
+    options = await folder_options(kept)
     new_tags = [t for t in merge.keywords if t not in written and t.replace("/", " - ") not in on_asset]
-    if not await is_folder_tags_active(kept):
+    if not options.any:
         new_tags = [t for t in new_tags if t in merge.taken_keywords or t in written]
+    folder = await folder_targets(kept, ia02=merge.step_result.get("IA-02") or {}, options=options)
+    new_tags += [t for t in folder.flat_tags
+                 if t not in new_tags and t not in written and t.replace("/", " - ") not in on_asset]
+    new_paths = [p for p in folder.tag_paths if p not in on_asset]
     added = 0
     for tag in new_tags:
         try:
@@ -1257,10 +1265,16 @@ async def _apply_merge_in_immich(kept, asset_id: str, merge: _Merge, notes: list
             added += 1
         except Exception as exc:
             logger.warning("tag %s on %s: %s", tag, asset_id, exc)
+    for path in new_paths:
+        try:
+            await tag_asset_path(asset_id, path, api_key=key)
+            added += 1
+        except Exception as exc:
+            logger.warning("tag %s on %s: %s", path, asset_id, exc)
     if added:
         notes.append(f"tags(+{added})")
-    if merge.donor_albums:
-        albums = await add_asset_to_albums(asset_id, merge.donor_albums, api_key=key)
+    if folder.albums:
+        albums = await add_asset_to_albums(asset_id, folder.albums, api_key=key)
         if albums:
             notes.append(f"albums({', '.join(albums)})")
     current = ((info.get("exifInfo") or {}).get("description") or "").strip()
@@ -1599,8 +1613,10 @@ async def not_duplicate(request: Request):
 
     old_ia02 = (job.step_result or {}).get("IA-02") or {}
     skip_result = {"status": "skipped", "reason": "manually marked as not a duplicate", "user_kept": True}
-    if isinstance(old_ia02, dict) and old_ia02.get("folder_tags"):
-        skip_result["folder_tags"] = old_ia02["folder_tags"]
+    if isinstance(old_ia02, dict):
+        for field_name in ("folder_path", "folder_tags"):  # folder_tags: jobs from before folder_path
+            if old_ia02.get(field_name):
+                skip_result[field_name] = old_ia02[field_name]
     try:
         await log_info("duplicates", f"{debug_key} Kein Duplikat: wird neu verarbeitet",
                        f"bisher Duplikat von {old_ia02.get('original_debug_key') if isinstance(old_ia02, dict) else '?'}")

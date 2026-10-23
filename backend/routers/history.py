@@ -1,7 +1,7 @@
 """History, trash and inventory check: what the data-safety rebuild shows.
 
-- /api/history/job/{key}     modules, ledger and register of one job (expanded
-                             rows, job detail page)
+- /api/history/job/{key}     modules, intake, ledger, register, tags and albums
+                             of one job (expanded rows, job detail page)
 - /api/history/modules       module blocks of several jobs (dashboard refresh)
 - /api/history/copies/{id}/restore   brings a trashed copy back (fileops.restore)
 - /tools/papierkorb          trash page, filled from /api/history/trash
@@ -101,8 +101,10 @@ async def job_history(debug_key: str):
         "signature": job_view.job_signature(job),
         "modules": blocks,
         "summary": job_view.strip_summary(blocks, t),
+        "intake": await job_view.job_intake(job, t),
         "ops": await job_view.job_ledger(job.id, t),
         "copies": await job_view.job_copies(job.id, t, await immich_trash_days()),
+        "labels": job_view.job_labels(job, t),
     }
 
 

@@ -24,6 +24,7 @@ SCHEDULE_MODES = {"continuous", "manual", "window", "scheduled"}
 OCR_MODES = {"smart", "always"}
 WRITE_MODES = {"direct", "sidecar"}
 TARGET_MODES = {"library", "immich"}
+FOLDER_TAG_MODES = {"none", "flat", "nested"}
 RULE_CONDITIONS = {"filename_contains", "filename_pattern", "exif_expression", "extension"}
 MEDIA_TYPES = {None, "image", "video"}
 _TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -74,7 +75,8 @@ async def serialize(session, ps: ProcessingSet) -> dict:
         "schedule_mode": ps.schedule_mode or "continuous", "interval_s": ps.interval_s or 5,
         "window_start": ps.window_start or "22:00", "window_end": ps.window_end or "06:00",
         "scheduled_days": ps.scheduled_days or "", "scheduled_time": ps.scheduled_time or "23:00",
-        "folder_tags": bool(ps.folder_tags), "dry_run": bool(ps.dry_run),
+        "folder_tag_mode": ps.folder_tag_mode or "none", "folder_albums": bool(ps.folder_albums),
+        "dry_run": bool(ps.dry_run),
         "ocr_enabled": bool(ps.ocr_enabled), "ocr_mode": ps.ocr_mode or "smart",
         "metadata_write_mode": ps.metadata_write_mode or "direct", "google_json": bool(ps.google_json),
         "target_mode": ps.target_mode or "library",
@@ -118,7 +120,8 @@ async def summaries() -> list[dict]:
             "scheduled_time": ps.scheduled_time,
             "target_mode": ps.target_mode or "library", "target_access": access(ps.immich_user_id),
             "library_base_path": ps.library_base_path,
-            "rules": rule_counts.get(ps.id, 0), "folder_tags": bool(ps.folder_tags),
+            "rules": rule_counts.get(ps.id, 0),
+            "folder_tag_mode": ps.folder_tag_mode or "none", "folder_albums": bool(ps.folder_albums),
             "ocr_enabled": bool(ps.ocr_enabled), "dry_run": bool(ps.dry_run),
             "metadata_write_mode": ps.metadata_write_mode or "direct",
             "queue": queue.get(ps.id, 0),
@@ -239,6 +242,14 @@ async def save_set(request: Request, set_id: int):
         if data.get("ocr_mode") not in OCR_MODES or data.get("target_mode") not in TARGET_MODES \
                 or data.get("metadata_write_mode") not in WRITE_MODES:
             return _fail(await _t("err_schedule"))
+        # An editor page loaded before the update still sends the old switch,
+        # which meant flat folder tags and one album per folder.
+        tag_mode = data.get("folder_tag_mode")
+        if tag_mode is None and "folder_tags" in data:
+            tag_mode = "flat" if data.get("folder_tags") else "none"
+        if (tag_mode or "none") not in FOLDER_TAG_MODES:
+            return _fail(await _t("err_folder_tag_mode"))
+        tag_mode = tag_mode or "none"
         base = (data.get("library_base_path") or "").strip()
         if not base.startswith("/"):
             return _fail(await _t("err_base_path"))
@@ -339,7 +350,8 @@ async def save_set(request: Request, set_id: int):
         ps.schedule_mode, ps.interval_s = mode, interval
         ps.window_start, ps.window_end, ps.scheduled_time = times
         ps.scheduled_days = days
-        ps.folder_tags = bool(data.get("folder_tags"))
+        ps.folder_tag_mode = tag_mode
+        ps.folder_albums = bool(data.get("folder_albums", data.get("folder_tags")))
         ps.dry_run = bool(data.get("dry_run"))
         ps.ocr_enabled = bool(data.get("ocr_enabled"))
         ps.ocr_mode = data["ocr_mode"]

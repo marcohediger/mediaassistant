@@ -131,22 +131,17 @@ async def main():
 
     # ── T7: Folder-Tags mit Sonderzeichen ──
     print("\n── T7: Folder-Tags Sonderzeichen ──")
-    from pipeline.step_ia02_duplicates import _extract_folder_tags
+    from folder_path import album_name, relative_folder, tag_path
 
-    j_uml = Job(filename="f.jpg", original_path="/inbox/Höhlen/Übersee/f.jpg",
-                source_inbox_path="/inbox", debug_key="SC-1")
-    ft = _extract_folder_tags(j_uml)
-    check("T7a Umlaute", "Höhlen" in ft and "Übersee" in ft, f"ft={ft}")
+    rel = relative_folder("/inbox/Höhlen/Übersee/f.jpg", "/inbox")
+    check("T7a Umlaute", tag_path(rel) == "Ordner/Höhlen/Übersee", f"tag={tag_path(rel)}")
 
-    j_space = Job(filename="f.jpg", original_path="/inbox/Mein Album/f.jpg",
-                  source_inbox_path="/inbox", debug_key="SC-2")
-    ft2 = _extract_folder_tags(j_space)
-    check("T7b Leerzeichen im Ordnernamen", "Mein" in ft2 and "Album" in ft2, f"ft={ft2}")
+    rel2 = relative_folder("/inbox/Mein Album/f.jpg", "/inbox")
+    check("T7b Leerzeichen im Ordnernamen", tag_path(rel2) == "Ordner/Mein Album"
+          and album_name(rel2) == "Mein Album", f"tag={tag_path(rel2)} album={album_name(rel2)}")
 
-    j_emoji = Job(filename="f.jpg", original_path="/inbox/🏔️ Berge/f.jpg",
-                  source_inbox_path="/inbox", debug_key="SC-3")
-    ft3 = _extract_folder_tags(j_emoji)
-    check("T7c Emoji", len(ft3) > 0, f"ft={ft3}")
+    rel3 = relative_folder("/inbox/🏔️ Berge/f.jpg", "/inbox")
+    check("T7c Emoji", tag_path(rel3) == "Ordner/🏔️ Berge", f"tag={tag_path(rel3)}")
 
     # ── T8: Concurrent Pipeline (5 parallel) ──
     print("\n── T8: 5 Dateien parallel ──")

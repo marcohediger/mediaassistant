@@ -13,7 +13,7 @@ Stories:
   US-1:  Inbox → Immich (volle Pipeline)
   US-2:  Inbox → Lokale Ablage
   US-3:  Immich-Poller (Handy-Upload simuliert)
-  US-4:  Poller ignoriert eigene MA-Uploads (deviceId-Filter)
+  US-4:  Poller ignoriert eigene MA-Uploads (Register + Upload-Marker, R-24)
   US-5:  Duplikat Keep (zwei verschiedene Assets)
   US-6:  Duplikat Keep Shared-Asset (gleiche immich_asset_id)
   US-7:  Batch-Clean
@@ -31,6 +31,12 @@ CLEANUP_FILES = []
 CLEANUP_JOBS = []
 
 TS = int(time.time())
+# Test files live where no filewatcher scans (AGENTS.md): a scan of /inbox
+# during the run turned the stories' copies into jobs of the Default Inbox.
+# The filewatcher module is switched off as well, but another test running
+# at the same time may switch it back on.
+E2E_ROOT = f"/app/data/__e2e_{TS}"
+INBOX = f"{E2E_ROOT}/inbox"
 
 
 def check(name, cond, detail=""):
@@ -122,7 +128,7 @@ async def get_immich_albums(asset_id):
 
 
 async def create_and_run_job(filename, original_path, *, use_immich=True,
-                             source_inbox_path="/inbox", folder_tags=False,
+                             source_inbox_path=INBOX, folder_tags=False,
                              immich_user_id=None):
     """Create a job and run the full pipeline. Returns job_id."""
     from database import async_session
@@ -154,48 +160,142 @@ async def create_and_run_job(filename, original_path, *, use_immich=True,
 
 
 _SAVED_SET_FOLDER_TAGS = []
+# What the folder stories (US-10, US-12) leave in Immich besides assets:
+# nested tags under "Ordner/" and albums, removed by restore_set_folder_tags.
+_FOLDER_STORIES = {"assets": [], "tags": [], "albums": [], "root_existed": None}
 
 
 async def enable_set_folder_tags():
-    """Folder tags are a switch of the processing set now (the global module
-    and the per-directory switch are gone). Jobs without set_id run under the
-    first set, so that one is switched on; main() restores it."""
+    """The folder options (tag mode, albums) belong to the processing set.
+    Jobs without set_id run under the first set, so it gets nested tags and
+    albums; main() restores what it had."""
     from database import async_session
+    from immich_client import list_tags
     from sets import get_set
+    if _FOLDER_STORIES["root_existed"] is None:
+        _FOLDER_STORIES["root_existed"] = any(t.get("value") == "Ordner" for t in await list_tags())
     async with async_session() as session:
         ps = await get_set(session, None)
         if not _SAVED_SET_FOLDER_TAGS:
-            _SAVED_SET_FOLDER_TAGS.append((ps.id, ps.folder_tags))
-        ps.folder_tags = True
+            _SAVED_SET_FOLDER_TAGS.append((ps.id, ps.folder_tag_mode, ps.folder_albums))
+        ps.folder_tag_mode = "nested"
+        ps.folder_albums = True
         await session.commit()
         return ps
 
 
 async def restore_set_folder_tags():
+    """Restore the first set's folder options, then remove the folder
+    stories' assets first (a tag deleted while its asset lives would come
+    back from the file's TagsList), then their tags and albums."""
+    import httpx
     from database import async_session
+    from immich_client import delete_asset, delete_tag, get_immich_config, list_tags
     from models import ProcessingSet
-    for set_id, value in _SAVED_SET_FOLDER_TAGS:
+    for set_id, mode, albums in _SAVED_SET_FOLDER_TAGS:
         async with async_session() as session:
             ps = await session.get(ProcessingSet, set_id)
             if ps:
-                ps.folder_tags = value
+                ps.folder_tag_mode, ps.folder_albums = mode, albums
                 await session.commit()
+    for aid in dict.fromkeys(_FOLDER_STORIES["assets"]):
+        try:
+            await delete_asset(aid)
+        except Exception as exc:
+            print(f"  cleanup: asset {aid}: {exc}")
+    try:
+        tags = await list_tags()
+        for t in tags:
+            if t.get("value") in _FOLDER_STORIES["tags"]:
+                await delete_tag(t["id"])
+        tags = await list_tags()
+        root = next((t for t in tags if t.get("value") == "Ordner"), None)
+        if root and _FOLDER_STORIES["root_existed"] is False \
+                and not any(t.get("parentId") == root["id"] for t in tags):
+            await delete_tag(root["id"])
+        url, key = await get_immich_config()
+        async with httpx.AsyncClient(timeout=30) as c:
+            for a in (await c.get(f"{url}/api/albums", headers={"x-api-key": key})).json():
+                if a.get("albumName") in _FOLDER_STORIES["albums"]:
+                    await c.delete(f"{url}/api/albums/{a['id']}", headers={"x-api-key": key})
+    except Exception as exc:
+        print(f"  cleanup: folder tags/albums: {exc}")
 
 
 async def cleanup():
-    """Clean up test artifacts from Immich and DB."""
+    """Remove what the stories created: Immich assets, jobs with their
+    register rows (file_copies, asset_refs; the append-only ledger stays),
+    the files those rows name (library, duplicates, trash) with .xmp/.log
+    companions, and the sandbox."""
+    import fileops
+    from database import async_session
     from immich_client import delete_asset
-    for aid in CLEANUP_ASSETS:
+    from models import Job
+    from sqlalchemy import or_, select
+    from test_support.invariants import delete_test_jobs
+
+    for aid in dict.fromkeys(CLEANUP_ASSETS):
         try:
             await delete_asset(aid)
         except Exception:
             pass
-    for f in CLEANUP_FILES:
-        try:
-            if os.path.exists(f):
-                os.remove(f)
-        except Exception:
-            pass
+    async with async_session() as session:
+        ids = set(CLEANUP_JOBS) | set((await session.execute(select(Job.id).where(or_(
+            Job.debug_key.like(f"E2E-%{TS}%"), Job.original_path.like(f"{E2E_ROOT}/%"))))).scalars().all())
+    paths = await delete_test_jobs(ids, locations=list(dict.fromkeys(CLEANUP_ASSETS)), prefixes=[E2E_ROOT])
+    for f in list(dict.fromkeys(CLEANUP_FILES + paths)):
+        for p in (f, f + ".xmp", f + ".log"):
+            try:
+                if os.path.isfile(p):
+                    os.remove(p)
+            except Exception as exc:
+                print(f"  cleanup: {p}: {exc}")
+        parts = f.split(os.sep)
+        if fileops.TRASH_DIRNAME in parts:
+            trash_root = os.sep.join(parts[:parts.index(fileops.TRASH_DIRNAME) + 1])
+            fileops.prune_empty_dirs_blocking(os.path.dirname(f), trash_root)
+    shutil.rmtree(E2E_ROOT, ignore_errors=True)
+
+
+async def phone_upload(path, tag):
+    """Upload as a phone would: no MediaAssistant marker. Returns the asset id."""
+    from immich_client import get_immich_config
+    import httpx
+    url, key = await get_immich_config()
+    async with httpx.AsyncClient(timeout=60) as client:
+        with open(path, "rb") as f:
+            resp = await client.post(
+                f"{url}/api/assets", headers={"x-api-key": key},
+                data={"deviceAssetId": f"e2e-{tag}-{TS}", "deviceId": "iPhone-E2E-Test",
+                      "fileCreatedAt": "2025-06-15T10:00:00Z", "fileModifiedAt": "2025-06-15T10:00:00Z"},
+                files={"assetData": (os.path.basename(path), f)},
+            )
+    asset_id = resp.json().get("id", "") if resp.status_code in (200, 201) else ""
+    if asset_id:
+        CLEANUP_ASSETS.append(asset_id)
+    return asset_id
+
+
+async def asset_json(asset_id):
+    """The asset as the poller's search returns it (same fields as GET /api/assets/<id>)."""
+    from immich_client import get_immich_config
+    import httpx
+    url, key = await get_immich_config()
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.get(f"{url}/api/assets/{asset_id}", headers={"x-api-key": key})
+    return r.json() if r.status_code == 200 else None
+
+
+async def insert_job(filename, original_path, debug_key, **fields):
+    from database import async_session
+    from models import Job
+    async with async_session() as session:
+        job = Job(filename=filename, original_path=original_path, debug_key=debug_key,
+                  source_label="E2E-Test", **fields)
+        session.add(job)
+        await session.commit()
+        CLEANUP_JOBS.append(job.id)
+        return job.id
 
 
 # ══════════════════════════════════════════════════════════════
@@ -204,7 +304,7 @@ async def cleanup():
 async def test_us1_inbox_to_immich():
     print("\n-- US-1: Inbox -> Immich --")
 
-    path = f"/inbox/__e2e_us1_{TS}.jpg"
+    path = f"{INBOX}/__e2e_us1_{TS}.jpg"
     make_unique_jpg(path)
     CLEANUP_FILES.append(path)
 
@@ -237,7 +337,7 @@ async def test_us1_inbox_to_immich():
 async def test_us2_inbox_to_local():
     print("\n-- US-2: Inbox -> Lokale Ablage --")
 
-    path = f"/inbox/__e2e_us2_{TS}.jpg"
+    path = f"{INBOX}/__e2e_us2_{TS}.jpg"
     make_unique_jpg(path)
     CLEANUP_FILES.append(path)
 
@@ -338,57 +438,107 @@ async def test_us3_poller_handy_upload():
 
 
 # ══════════════════════════════════════════════════════════════
-# US-4: Poller ignoriert eigene MA-Uploads (deviceId-Filter)
+# US-4: Poller ignoriert eigene MA-Uploads (Register + Upload-Marker, R-24)
 # ══════════════════════════════════════════════════════════════
 async def test_us4_poller_skips_own():
-    print("\n-- US-4: Poller ignoriert eigene MA-Uploads --")
+    print("\n-- US-4: Poller ignoriert eigene MA-Uploads (Register + Upload-Marker) --")
+    # Immich 3.x has no deviceId any more. The poller's filter (inputs.immich.
+    # new_assets, the function poll_set uses) recognises MediaAssistant's
+    # uploads by the copy register and by the metadata marker upload_asset()
+    # sets; deviceId only where Immich still returns it (2.x).
+    import uuid
+    import fileops
+    from immich_client import MA_DEVICE_ID, get_immich_config, has_upload_marker, upload_asset
+    from inputs.immich import _known_asset_ids, new_assets
+    from test_support.invariants import sha1_b64_file
+    _url, key = await get_immich_config()
 
-    # Upload via MA (US-1 hat schon ein Asset erzeugt, aber wir machen
-    # einen expliziten Test des Filter-Mechanismus)
-    ma_asset = {"id": "fake-ma-001", "deviceId": "MediaAssistant",
-                "originalFileName": "test.jpg"}
-    phone_asset = {"id": "fake-phone-001", "deviceId": "iPhone15",
-                   "originalFileName": "IMG_0001.jpg"}
-    web_asset = {"id": "fake-web-001", "originalFileName": "upload.jpg"}
-
-    already_by_id = set()
-    assets = [ma_asset, phone_asset, web_asset]
-
-    # Exakt der Filter aus inputs/immich.py (poll_set)
-    new_assets = [
-        a for a in assets
-        if a["id"] not in already_by_id
-        and a.get("deviceId") != "MediaAssistant"
-    ]
-
-    check("US4-01 MA-Upload uebersprungen",
-          not any(a["id"] == "fake-ma-001" for a in new_assets))
-    check("US4-02 Handy-Upload verarbeitet",
-          any(a["id"] == "fake-phone-001" for a in new_assets))
-    check("US4-03 Web-Upload verarbeitet",
-          any(a["id"] == "fake-web-001" for a in new_assets))
-
-    # Zusaetzlich: echten Upload via MA pruefen
-    from immich_client import get_immich_config
-    import httpx
-    url, key = await get_immich_config()
-
-    path = f"/tmp/__e2e_us4_{TS}.jpg"
+    # (1) the real path: inbox -> pipeline -> Immich
+    path = f"{INBOX}/__e2e_us4_{TS}.jpg"
     make_unique_jpg(path)
     CLEANUP_FILES.append(path)
+    pipe_id = (await get_job(await create_and_run_job(f"__e2e_us4_{TS}.jpg", path))).immich_asset_id
+    if pipe_id:
+        CLEANUP_ASSETS.append(pipe_id)
+    # (2) upload_asset alone: no job, nothing in the register, only the marker tells
+    m_path = f"/tmp/__e2e_us4m_{TS}.jpg"
+    make_unique_jpg(m_path)
+    CLEANUP_FILES.append(m_path)
+    m_id = (await upload_asset(m_path)).get("id", "")
+    if m_id:
+        CLEANUP_ASSETS.append(m_id)
+    # (3) an asset without the marker that a job holds in the copy register
+    r_path = f"/tmp/__e2e_us4r_{TS}.jpg"
+    make_unique_jpg(r_path)
+    CLEANUP_FILES.append(r_path)
+    r_id = await phone_upload(r_path, "us4reg")
+    if r_id:
+        holder = await insert_job(os.path.basename(r_path), r_path, f"E2E-US4-REG-{TS}",
+                                  status="done", use_immich=True)
+        await fileops.register_existing(holder, "immich", r_id)
+    # (4) a phone upload: nobody's
+    p_path = f"/tmp/__e2e_us4p_{TS}.jpg"
+    make_unique_jpg(p_path)
+    CLEANUP_FILES.append(p_path)
+    p_id = await phone_upload(p_path, "us4phone")
+    if not (pipe_id and m_id and r_id and p_id):
+        check("US4-00 Vorbereitung: vier Assets in Immich", False, f"{pipe_id} {m_id} {r_id} {p_id}")
+        return
 
-    from immich_client import upload_asset
-    result = await upload_asset(path)
-    asset_id = result.get("id", "")
-    if asset_id:
-        CLEANUP_ASSETS.append(asset_id)
-        # Verify deviceId via API
-        async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.get(f"{url}/api/assets/{asset_id}", headers={"x-api-key": key})
-            if r.status_code == 200:
-                did = r.json().get("deviceId", "")
-                check("US4-04 MA-Upload hat deviceId=MediaAssistant",
-                      did == "MediaAssistant", f"deviceId={did}")
+    assets = [a for a in [await asset_json(i) for i in (pipe_id, m_id, r_id, p_id)] if a]
+    fresh = {a["id"] for a in await new_assets(assets, api_key=key)}
+    check("US4-01 Pipeline-Upload uebersprungen", pipe_id not in fresh, f"asset={pipe_id}")
+    check("US4-02 Upload ohne Job am Upload-Marker erkannt, uebersprungen", m_id not in fresh, f"asset={m_id}")
+    check("US4-03 Asset ohne Marker, im Register eines Jobs: uebersprungen", r_id not in fresh, f"asset={r_id}")
+    m_info = await asset_json(m_id) or {}
+    marked = await has_upload_marker(m_id, api_key=key)
+    check("US4-04 MA-Upload traegt den Metadaten-Marker 'mediaassistant' (deviceId gibt es in Immich 3.x nicht)",
+          marked or m_info.get("deviceId") == MA_DEVICE_ID,
+          f"marker={marked} deviceId={m_info.get('deviceId', '(fehlt)')}")
+    check("US4-05 Handy-Upload verarbeitet", p_id in fresh, f"asset={p_id}")
+
+    # (5) the window between Immich's answer and the register entry: MA's
+    # upload is cut short right after the request (fileops crash point
+    # 'uploaded'). Only the open ledger intent knows the asset then.
+    w_path = f"{INBOX}/__e2e_us4w_{TS}.jpg"
+    make_unique_jpg(w_path)
+    CLEANUP_FILES.append(w_path)
+    w_job = await insert_job(os.path.basename(w_path), w_path, f"E2E-US4-WIN-{TS}", status="done",
+                             use_immich=True, file_hash=sha256(w_path))
+    fileops._CRASH_AT = "uploaded"
+    try:
+        await fileops.upload(w_job, w_path, actor="e2e:us4")
+        crashed = False
+    except fileops._SimulatedCrash:
+        crashed = True
+    finally:
+        fileops._CRASH_AT = None
+    from immich_client import find_asset_by_checksum
+    hit = await find_asset_by_checksum(sha1_b64_file(w_path), api_key=key)
+    w_id = (hit or {}).get("id", "")
+    if w_id:
+        CLEANUP_ASSETS.append(w_id)
+    w_asset = await asset_json(w_id) if w_id else None
+    if not (crashed and w_asset):
+        check("US4-06 Vorbereitung: Upload nach der Anfrage abgebrochen", False, f"crashed={crashed} asset={w_id}")
+        return
+    unregistered = not [c for c in await fileops.copies(w_job, states=("present", "trashed", "missing"))
+                        if c.kind == "immich"]
+    check("US4-06 Upload offen (Asset in Immich, noch nicht im Register): Asset gilt als bekannt",
+          unregistered and w_id in await _known_asset_ids([w_asset]),
+          f"asset={w_id}, im Register: {not unregistered}")
+    settled = await fileops.reconcile_open_intents(job_ids=[w_job])
+    registered = [c for c in await fileops.copies(w_job) if c.kind == "immich" and c.location == w_id]
+    check("US4-07 nach dem Abgleich im Register und weiter bekannt",
+          bool(registered) and w_id in await _known_asset_ids([w_asset]),
+          f"Abgleich={[(r['op'], r['state']) for r in settled]}")
+
+    # (6) Immich 2.x still returns deviceId: it decides, no marker is read
+    fake = [{"id": str(uuid.uuid4()), "deviceId": MA_DEVICE_ID, "originalFileName": "a.jpg"},
+            {"id": str(uuid.uuid4()), "deviceId": "iPhone15", "originalFileName": "b.jpg"}]
+    fresh2 = [a["id"] for a in await new_assets(fake, api_key=key)]
+    check("US4-08 Immich 2.x: deviceId MediaAssistant uebersprungen, Handy verarbeitet",
+          fresh2 == [fake[1]["id"]], f"neu={fresh2}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -398,12 +548,12 @@ async def test_us5_duplicate_keep():
     print("\n-- US-5: Duplikat Keep --")
 
     # Erstelle zwei verschiedene Dateien mit gleichem Inhalt
-    path1 = f"/inbox/__e2e_us5a_{TS}.jpg"
+    path1 = f"{INBOX}/__e2e_us5a_{TS}.jpg"
     make_unique_jpg(path1)
     CLEANUP_FILES.append(path1)
 
     # Kopie fuer zweiten Job (gleicher Inhalt = SHA256 Match)
-    path2 = f"/inbox/__e2e_us5b_{TS}.jpg"
+    path2 = f"{INBOX}/__e2e_us5b_{TS}.jpg"
     shutil.copy2(path1, path2)
     CLEANUP_FILES.append(path2)
 
@@ -451,7 +601,7 @@ async def test_us5_duplicate_keep():
 async def test_us6_shared_asset_keep():
     print("\n-- US-6: Shared-Asset Keep (Datenverlust-Praevention) --")
 
-    path = f"/inbox/__e2e_us6_{TS}.jpg"
+    path = f"{INBOX}/__e2e_us6_{TS}.jpg"
     make_unique_jpg(path)
     CLEANUP_FILES.append(path)
 
@@ -531,11 +681,11 @@ async def test_us6_shared_asset_keep():
 async def test_us7_batch_clean():
     print("\n-- US-7: Batch-Clean --")
 
-    path1 = f"/inbox/__e2e_us7a_{TS}.jpg"
+    path1 = f"{INBOX}/__e2e_us7a_{TS}.jpg"
     make_unique_jpg(path1)
     CLEANUP_FILES.append(path1)
 
-    path2 = f"/inbox/__e2e_us7b_{TS}.jpg"
+    path2 = f"{INBOX}/__e2e_us7b_{TS}.jpg"
     shutil.copy2(path1, path2)
     CLEANUP_FILES.append(path2)
 
@@ -584,11 +734,11 @@ async def test_us7_batch_clean():
 async def test_us8_not_duplicate():
     print("\n-- US-8: Kein Duplikat -> volle Pipeline --")
 
-    path1 = f"/inbox/__e2e_us8a_{TS}.jpg"
+    path1 = f"{INBOX}/__e2e_us8a_{TS}.jpg"
     make_unique_jpg(path1)
     CLEANUP_FILES.append(path1)
 
-    path2 = f"/inbox/__e2e_us8b_{TS}.jpg"
+    path2 = f"{INBOX}/__e2e_us8b_{TS}.jpg"
     shutil.copy2(path1, path2)
     CLEANUP_FILES.append(path2)
 
@@ -649,7 +799,7 @@ async def test_us8_not_duplicate():
 async def test_us9_retry_after_error():
     print("\n-- US-9: Retry nach Fehler --")
 
-    path = f"/inbox/__e2e_us9_{TS}.jpg"
+    path = f"{INBOX}/__e2e_us9_{TS}.jpg"
     make_unique_jpg(path)
     CLEANUP_FILES.append(path)
 
@@ -694,7 +844,7 @@ async def test_us10_folder_tags_album():
 
     # Erstelle Subfolder-Struktur
     album_name = f"E2E_Album_{TS}"
-    inbox_sub = f"/inbox/{album_name}"
+    inbox_sub = f"{INBOX}/{album_name}"
     os.makedirs(inbox_sub, exist_ok=True)
     CLEANUP_FILES.append(inbox_sub)
 
@@ -702,10 +852,12 @@ async def test_us10_folder_tags_album():
     make_unique_jpg(path)
     CLEANUP_FILES.append(path)
 
+    _FOLDER_STORIES["tags"].append(f"Ordner/{album_name}")
+    _FOLDER_STORIES["albums"].append(album_name)
     job_id = await create_and_run_job(
         f"__e2e_us10_{TS}.jpg", path,
-        use_immich=True, source_inbox_path="/inbox",
-        folder_tags=bool(std.folder_tags),
+        use_immich=True, source_inbox_path=INBOX,
+        folder_tags=(std.folder_tag_mode or "none") != "none" or bool(std.folder_albums),
     )
     job = await get_job(job_id)
 
@@ -713,14 +865,23 @@ async def test_us10_folder_tags_album():
 
     if job.immich_asset_id:
         CLEANUP_ASSETS.append(job.immich_asset_id)
+        _FOLDER_STORIES["assets"].append(job.immich_asset_id)
 
         albums = await get_immich_albums(job.immich_asset_id)
-        check("US10-02 Album in Immich erstellt",
+        check("US10-02 Album in Immich erstellt (Name wie bisher: der Ordner)",
               album_name in albums, f"albums={albums}")
 
         tags = await get_immich_tags(job.immich_asset_id)
-        check("US10-03 Album-Name als Tag",
-              any(album_name in t for t in tags), f"tags={tags}")
+        check("US10-03 Ordner als verschachteltes Tag",
+              f"Ordner/{album_name}" in tags, f"tags={tags}")
+        check("US10-04 keine flachen Ordner-Wörter mehr", album_name not in tags, f"tags={tags}")
+
+        from immich_client import list_tags
+        by_value = {t.get("value"): t for t in await list_tags()}
+        leaf, root = by_value.get(f"Ordner/{album_name}"), by_value.get("Ordner")
+        check("US10-05 Eltern-Tag „Ordner“ listet das Kind",
+              bool(leaf and root) and leaf.get("parentId") == root.get("id"),
+              f"leaf={bool(leaf)} root={bool(root)}")
 
     # Cleanup subfolder
     if os.path.isdir(inbox_sub) and not os.listdir(inbox_sub):
@@ -744,8 +905,8 @@ async def test_us11_phash_duplicate():
             draw.rectangle([i * 100, j * 100, (i + 1) * 100, (j + 1) * 100], fill=c)
     draw.text((100, 200), f"US11-{TS}", fill=(255, 255, 255))
 
-    path_a = f"/inbox/__e2e_us11a_{TS}.jpg"
-    path_b = f"/inbox/__e2e_us11b_{TS}.jpg"
+    path_a = f"{INBOX}/__e2e_us11a_{TS}.jpg"
+    path_b = f"{INBOX}/__e2e_us11b_{TS}.jpg"
     img.save(path_a, "JPEG", quality=85)
     img.save(path_b, "JPEG", quality=92)
     CLEANUP_FILES.extend([path_a, path_b])
@@ -788,8 +949,8 @@ async def test_us12_keep_with_tag_merge():
     await enable_set_folder_tags()
 
     # Zwei Ordner mit verschiedenen Folder-Tags
-    folder_a = f"/inbox/Ferien_US12_{TS}"
-    folder_b = f"/inbox/Backup_US12_{TS}"
+    folder_a = f"{INBOX}/Ferien_US12_{TS}"
+    folder_b = f"{INBOX}/Backup_US12_{TS}"
     os.makedirs(folder_a, exist_ok=True)
     os.makedirs(folder_b, exist_ok=True)
     CLEANUP_FILES.extend([folder_a, folder_b])
@@ -802,18 +963,23 @@ async def test_us12_keep_with_tag_merge():
     shutil.copy2(path_a, path_b)
     CLEANUP_FILES.extend([path_a, path_b])
 
+    folder_a_name = f"Ferien_US12_{TS}"
+    folder_b_name = f"Backup_US12_{TS}"
+    _FOLDER_STORIES["tags"] += [f"Ordner/{folder_a_name}", f"Ordner/{folder_b_name}"]
+    _FOLDER_STORIES["albums"] += [folder_a_name, folder_b_name]
     job1_id = await create_and_run_job(
         f"__e2e_us12_{TS}.jpg", path_a, use_immich=True,
-        source_inbox_path="/inbox", folder_tags=True)
+        source_inbox_path=INBOX, folder_tags=True)
     job2_id = await create_and_run_job(
         f"__e2e_us12_{TS}.jpg", path_b, use_immich=True,
-        source_inbox_path="/inbox", folder_tags=True)
+        source_inbox_path=INBOX, folder_tags=True)
 
     job1 = await get_job(job1_id)
     job2 = await get_job(job2_id)
 
     if job1.immich_asset_id:
         CLEANUP_ASSETS.append(job1.immich_asset_id)
+        _FOLDER_STORIES["assets"].append(job1.immich_asset_id)
 
     check("US12-01 Job1 done", job1.status == "done")
     check("US12-02 Job2 duplicate", job2.status == "duplicate")
@@ -833,18 +999,19 @@ async def test_us12_keep_with_tag_merge():
             j1, [j1, j2], source="e2e-us12", user_kept=True,
         )
 
-        check("US12-03 Folder-Tags gemergt",
-              any("folder_tags" in n for n in merge_notes),
+        check("US12-03 Ordner gemergt",
+              any(n.startswith("folders(") for n in merge_notes),
               f"merged={merge_notes}")
 
         if job1.immich_asset_id:
             tags = await get_immich_tags(job1.immich_asset_id)
-            folder_a_name = f"Ferien_US12_{TS}"
-            folder_b_name = f"Backup_US12_{TS}"
             check("US12-04 FolderA-Tag in Immich",
-                  any(folder_a_name in t for t in tags), f"tags={tags}")
+                  f"Ordner/{folder_a_name}" in tags, f"tags={tags}")
             check("US12-05 FolderB-Tag in Immich (gemergt)",
-                  any(folder_b_name in t for t in tags), f"tags={tags}")
+                  f"Ordner/{folder_b_name}" in tags, f"tags={tags}")
+            albums = await get_immich_albums(job1.immich_asset_id)
+            check("US12-06 Alben beider Ordner (gemergt)",
+                  folder_a_name in albums and folder_b_name in albums, f"albums={albums}")
 
     # Cleanup
     for d in [folder_a, folder_b]:
@@ -864,8 +1031,8 @@ async def test_us13_batch_clean_all():
     # 3 Duplikat-Paare erstellen
     pairs = []
     for i in range(3):
-        path_a = f"/inbox/__e2e_us13_{i}a_{TS}.jpg"
-        path_b = f"/inbox/__e2e_us13_{i}b_{TS}.jpg"
+        path_a = f"{INBOX}/__e2e_us13_{i}a_{TS}.jpg"
+        path_b = f"{INBOX}/__e2e_us13_{i}b_{TS}.jpg"
         make_unique_jpg(path_a)
         shutil.copy2(path_a, path_b)
         CLEANUP_FILES.extend([path_a, path_b])
@@ -929,8 +1096,8 @@ async def test_us14_batch_clean_page():
     # 2 Duplikat-Paare erstellen
     dup_ids = []
     for i in range(2):
-        path_a = f"/inbox/__e2e_us14_{i}a_{TS}.jpg"
-        path_b = f"/inbox/__e2e_us14_{i}b_{TS}.jpg"
+        path_a = f"{INBOX}/__e2e_us14_{i}a_{TS}.jpg"
+        path_b = f"{INBOX}/__e2e_us14_{i}b_{TS}.jpg"
         make_unique_jpg(path_a)
         shutil.copy2(path_a, path_b)
         CLEANUP_FILES.extend([path_a, path_b])
@@ -987,9 +1154,11 @@ async def main():
         sys.exit(1)
     print(f"Immich: {immich_url}")
 
-    # Sicherstellen dass Filewatcher nicht dazwischenfunkt
+    # Sicherstellen dass Filewatcher nicht dazwischenfunkt (die Testdateien
+    # liegen ausserdem in E2E_ROOT, das kein Eingang ist)
     was_enabled = await config_manager.is_module_enabled("filewatcher")
     await config_manager.set_module_enabled("filewatcher", False)
+    os.makedirs(INBOX, exist_ok=True)
 
     tests = [
         test_us1_inbox_to_immich,

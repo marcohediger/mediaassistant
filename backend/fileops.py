@@ -90,6 +90,7 @@ class OpResult:
     immich_status: str | None = None  # upload: created / duplicate / restored
     owned: bool = True  # False: the asset belongs to another job (or none); the job holds a ref
     albums_added: list = field(default_factory=list)
+    albums_created: list = field(default_factory=list)  # albums that did not exist and were created
     tags_written: list = field(default_factory=list)
     tags_failed: list = field(default_factory=list)
     old_asset_id: str | None = None  # replace: the asset that was replaced
@@ -758,9 +759,10 @@ def _split_dst(src: str, dst: str) -> tuple[str, str]:
 
 async def register_existing(job, kind: str, location: str, sha256: str | None = None,
                             size: int | None = None, *, verified: bool | None = None,
-                            checksum: str | None = None, take_over: bool = False) -> FileCopy:
+                            checksum: str | None = None, take_over: bool = False,
+                            intake: str | None = None) -> FileCopy:
     """Record a copy that came into the system without fileops (inbox scan,
-    an asset found in Immich). No ledger row: nothing on disk changes.
+    an asset found in Immich). Nothing on disk changes.
 
     Local kinds: without sha256 the file is hashed now (verified). With a
     given sha256 it is trusted but unverified, unless verified=True. If the
@@ -773,17 +775,37 @@ async def register_existing(job, kind: str, location: str, sha256: str | None = 
     stale — the older file left through a path the register did not see —
     and becomes 'moved'; the new job owns the file. Without it the new job
     only gets a reference.
+
+    ``intake`` is given only by the input that created the job (actor, e.g.
+    ``input:inbox``, ``input:immich``). The first such call for a job writes
+    the ledger row ``register`` — done at once, nothing was moved: where the
+    job's content was taken in and its hash (or Immich checksum) then. Later
+    calls never write one, so each job has at most one.
     """
     if kind not in KINDS:
         raise ValueError(f"fileops: unknown kind {kind!r}")
     jref = await _job_ref(job)
     notes: list[str] = []
+
+    async def record_intake(session, row: FileCopy) -> None:
+        if not intake or jref.id is None:
+            return
+        if (await session.execute(select(FileOp.id).where(
+                FileOp.job_id == jref.id, FileOp.op == "register").limit(1))).first():
+            return
+        session.add(FileOp(job_id=jref.id, op="register", dst_kind=kind, dst=row.location,
+                           dst_copy_id=row.id, sha256_after=row.sha256, size=row.size, actor=intake,
+                           state="done", finished_at=datetime.now(),
+                           detail={"checksum": checksum} if checksum else None))
+        await session.flush()
+
     if kind == "immich":
         async with async_session() as session:
             row = await _claim(session, jref.id, kind, location, sha256, size, notes,
                                verified=bool(verified))
             if checksum:
                 row.checksum = checksum
+            await record_intake(session, row)
             await session.commit()
         return row
 
@@ -812,6 +834,7 @@ async def register_existing(job, kind: str, location: str, sha256: str | None = 
                 await session.flush()
         row = await _claim(session, jref.id, kind, location, sha256, st.st_size, notes,
                            verified=bool(verified))
+        await record_intake(session, row)
         await session.commit()
     for note in notes:
         await log_warning(LOG_SOURCE, f"{jref.debug_key} Register korrigiert", note)
@@ -1819,9 +1842,10 @@ async def _upload_row(jref: _JobRef, row: FileCopy, key: str | None, *, actor: s
                                "Grösse weichen von der Quelle ab")
 
     albums_added: list[str] = []
+    albums_created: list[str] = []
     if albums:
         try:
-            albums_added = await ic.add_asset_to_albums(asset_id, albums, api_key=key)
+            albums_added = await ic.add_asset_to_albums(asset_id, albums, api_key=key, created=albums_created)
         except Exception as exc:
             logger.warning("albums for %s: %s", asset_id, exc)
         missing_albums = [a for a in albums if a not in albums_added]
@@ -1836,6 +1860,8 @@ async def _upload_row(jref: _JobRef, row: FileCopy, key: str | None, *, actor: s
                                                      created=status == "created", notes=adopt_notes)
                 entry = await session.get(FileOp, op_id)
                 new_detail = dict(entry.detail or {}, status=status, owned=owned, albums_added=albums_added)
+                if albums_created:
+                    new_detail["albums_created"] = albums_created
                 if adopt_notes:
                     new_detail["notes"] = adopt_notes
                 await _finish(session, op_id, "done", dst_kind="immich", dst=asset_id,
@@ -1854,7 +1880,7 @@ async def _upload_row(jref: _JobRef, row: FileCopy, key: str | None, *, actor: s
                    f"#{op_id} → Asset {asset_id} ({how}; Prüfsumme und Grösse geprüft{shared})")
     return OpResult(op_id, copy_row.id, asset_id, sha, size, identical=status != "created",
                     asset_id=asset_id, immich_status=status, owned=owned, albums_added=albums_added,
-                    notes=notes)
+                    albums_created=albums_created, notes=notes)
 
 
 async def _apply_tags(asset_id: str, names: list[str], carry: list[dict], key: str | None,
@@ -1917,9 +1943,11 @@ async def replace(job, old, new_src, *, actor: str, tags=None, description: str 
        MA's ``tags``, the ``description`` (None keeps the old asset's) and
        the old rating.
     4. The old asset goes to Immich's trash, never force-deleted — only if
-       the job owns it and no other job references it; otherwise it stays
-       and ``old_kept`` says why. The verified new version is the second
-       copy that allows the trash.
+       the job owns it, no other job references it and step 2 succeeded
+       (otherwise albums, favorite, shared links and stack would exist only
+       on the trashed asset, R-18a); else it stays and ``old_kept`` says
+       why. The verified new version is the second copy that allows the
+       trash.
 
     `old` is a FileCopy, its id or the asset id; `new_src` as for upload().
     If Immich answers that the new content is the old asset (same checksum),
@@ -1970,6 +1998,7 @@ async def replace(job, old, new_src, *, actor: str, tags=None, description: str 
     notes = list(up.notes)
     exif = (old_info or {}).get("exifInfo") or {}
     carry, desc, rating = [], description, None
+    links_error = None
     if new_id == old_id:
         notes.append("gleicher Inhalt wie das alte Asset — es bleibt, Tags und Beschreibung werden gesetzt")
     else:
@@ -1977,7 +2006,8 @@ async def replace(job, old, new_src, *, actor: str, tags=None, description: str 
             try:
                 await ic.copy_asset_links(old_id, new_id, sidecar=False, api_key=key)
             except Exception as exc:
-                notes.append(f"Alben/Favorit/Stack nicht übernommen: {_describe(exc)}")
+                links_error = _describe(exc)
+                notes.append(f"Alben/Favorit/Stack nicht übernommen: {links_error}")
         dropped = {_tag_value(t) for t in (drop_tags or ()) if t}
         carry = [t for t in ((old_info or {}).get("tags") or [])
                  if isinstance(t, dict) and t.get("id") and t.get("value") not in dropped]
@@ -1998,7 +2028,14 @@ async def replace(job, old, new_src, *, actor: str, tags=None, description: str 
 
     old_trashed, old_kept, trash_op = False, None, None
     if new_id != old_id:
-        if old_state == ic.ASSET_PRESENT:
+        if old_state == ic.ASSET_PRESENT and links_error:
+            # Albums, favorite, shared links and stack live only on the old
+            # asset now: trashing it would lose them (R-18a). Both stay.
+            old_kept = (f"Alben, Favorit, Shared Links und Stack nicht auf das neue Asset übertragen "
+                        f"({links_error}) — altes Asset bleibt, damit nichts verloren geht")
+            await log_warning(LOG_SOURCE, f"{k} Altes Asset bleibt in Immich: {old_id}",
+                              f"#{op_id} neues Asset {new_id}; {old_kept}")
+        elif old_state == ic.ASSET_PRESENT:
             try:
                 current = await _set_asset_state(old_row, "present")
                 trashed = await _trash_asset_row(jref, current, key, actor=actor,
@@ -2035,7 +2072,8 @@ async def replace(job, old, new_src, *, actor: str, tags=None, description: str 
     await log_info(LOG_SOURCE, f"{k} In Immich ersetzt: {name}", f"#{op_id} Asset {old_id} → {new_id}; {after}")
     return OpResult(op_id, up.copy_id, new_id, up.sha256, up.size, identical=new_id == old_id,
                     asset_id=new_id, immich_status=up.immich_status, owned=up.owned,
-                    albums_added=up.albums_added, tags_written=written, tags_failed=tags_failed,
+                    albums_added=up.albums_added, albums_created=up.albums_created,
+                    tags_written=written, tags_failed=tags_failed,
                     old_asset_id=old_id, old_trashed=old_trashed, old_kept=old_kept, notes=notes)
 
 

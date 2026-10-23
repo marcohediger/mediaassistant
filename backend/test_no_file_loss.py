@@ -696,97 +696,60 @@ async def main():
                 os.remove(p)
 
     # ==================================================================
-    # F1: Drei Gates für deaktivierten "Ordner-Tag" — Unit-Tests für
-    # Fix A (IA-02), Fix B (IA-07), Fix C (duplicates merge) ohne
-    # Pipeline-Loop, gegen die echte is_folder_tags_active-Funktion.
-    # Ordner-Tags sind ein Schalter des Verarbeitungs-Sets (globales Modul
-    # und Verzeichnis-Schalter gibt es nicht mehr); ein Job ohne set_id
-    # gehört zum ersten Set — dessen Schalter wird umgelegt.
+    # F1: Ordnerstruktur AUS — die Optionen des Sets (Tag-Baum, Alben)
+    # werden zur Laufzeit gelesen; ein im IA-02-Ergebnis gespeicherter
+    # Ordner (folder_path, alte folder_tags) darf bei ausgeschalteten
+    # Optionen weder Tags noch Alben erzeugen (folder_path.folder_targets,
+    # benutzt von IA-07, IA-08 und der Duplikat-Zusammenführung). Ein Job
+    # ohne set_id gehört zum ersten Set — dessen Optionen werden umgelegt.
     # ==================================================================
-    print("\n── F1: Ordner-Tag AUS — Gate-Tests A/B/C ──")
-    from file_operations import is_folder_tags_active
-    from pipeline.step_ia02_duplicates import _extract_folder_tags
+    print("\n── F1: Ordnerstruktur AUS — Gate-Tests ──")
+    from folder_path import folder_options, folder_targets
+    from models import ProcessingSet
     from sets import get_set
 
-    # Set-Schalter sichern + AUS schalten
     async with async_session() as session:
         first_set = await get_set(session, None)
         first_set_id = first_set.id
-        original_set_ft = first_set.folder_tags
-        first_set.folder_tags = False
+        saved = (first_set.folder_tag_mode, first_set.folder_albums)
+        first_set.folder_tag_mode = "none"
+        first_set.folder_albums = False
         await session.commit()
 
-    # Job mit subfolder-path bauen
     class _FakeJob:
+        id = None
         source_inbox_path = "/inbox"
         original_path = "/inbox/Ferien_Mallorca/foto.jpg"
         folder_tags = True
         set_id = None
-        step_result = None
+        step_result = {
+            "IA-01": {"file_type": "JPEG", "has_exif": True},
+            "IA-02": {"status": "duplicate", "folder_path": "Ferien_Mallorca",
+                      "folder_tags": ["Ferien_Mallorca", "Ferien", "Mallorca"]},
+        }
 
     fake_job = _FakeJob()
+    try:
+        check("F1-pre Optionen aus",
+              (await folder_options(fake_job)).any is False, "")
+        off = await folder_targets(fake_job)
+        check("F1a aus: keine Ordner-Tags trotz gespeichertem Ordner", off.tag_paths == [] and off.flat_tags == [],
+              f"got={off}")
+        check("F1b aus: kein Album trotz gespeichertem Ordner", off.albums == [], f"got={off.albums}")
 
-    # Sanity-Check: is_folder_tags_active liefert False bei Modul aus
-    check("F1-pre is_folder_tags_active = False bei Set-Schalter aus",
-          await is_folder_tags_active(fake_job) is False,
-          "")
-
-    # Fix A: _extract_folder_tags läuft sync und ist NICHT direkt gegated
-    # — die Gate ist im Caller _handle_duplicate. Wir simulieren den Caller-
-    # Pfad durch das gleiche Pattern (= die Production-Gate testen).
-    folder_tags_a = _extract_folder_tags(fake_job) if await is_folder_tags_active(fake_job) else []
-    check("F1a Fix A: bei Set-Schalter aus liefert _extract_folder_tags-Pfad []",
-          folder_tags_a == [],
-          f"got={folder_tags_a}")
-
-    # Fix B: IA-07 mit cached IA-02 folder_tags + Modul aus → keine Tags
-    from pipeline import step_ia07_exif_write
-    # Simulierte step_results: IA-02 hat noch alte cached folder_tags
-    fake_job.step_result = {
-        "IA-01": {"file_type": "JPEG", "has_exif": True},
-        "IA-02": {"status": "duplicate",
-                  "folder_tags": ["Ferien_Mallorca", "Ferien", "Mallorca"]},
-        "IA-05": {"type": "", "tags": [], "description": "", "source": "", "quality": ""},
-    }
-    # Direct-extract der IA-07 Logik die gegated wurde — wir bauen die
-    # gleiche keyword-collection wie IA-07 nach
-    folder_tags_active_b = await is_folder_tags_active(fake_job)
-    keywords_b = []
-    if folder_tags_active_b:
-        ia02_ft = (fake_job.step_result.get("IA-02") or {}).get("folder_tags", [])
-        for t in ia02_ft:
-            if t and t not in keywords_b:
-                keywords_b.append(t)
-    check("F1b Fix B: bei Set-Schalter aus IA-07 liest cached IA-02 nicht",
-          keywords_b == [],
-          f"got={keywords_b}")
-
-    # Fix C: routers/duplicates donor_ft Merge
-    folder_tags_active_c = await is_folder_tags_active(fake_job)
-    donor_ft_input = ["Ferien_Mallorca", "Ferien", "Mallorca"]
-    donor_ft_after_gate: list[str] = []
-    if folder_tags_active_c:
-        donor_ft_after_gate = donor_ft_input
-    check("F1c Fix C: bei Set-Schalter aus donor_ft Merge liefert []",
-          donor_ft_after_gate == [],
-          f"got={donor_ft_after_gate}")
-
-    # Sanity (positive): mit Set-Schalter AN müssten alle drei eine
-    # nicht-leere Liste liefern → das verifiziert dass die Gates nicht
-    # overshooten
-    from models import ProcessingSet
-    async with async_session() as session:
-        (await session.get(ProcessingSet, first_set_id)).folder_tags = True
-        await session.commit()
-    folder_tags_a_on = _extract_folder_tags(fake_job) if await is_folder_tags_active(fake_job) else []
-    check("F1d Sanity: bei Set-Schalter AN liefert _extract_folder_tags Tags",
-          len(folder_tags_a_on) > 0,
-          f"got={folder_tags_a_on}")
-
-    # State zurücksetzen
-    async with async_session() as session:
-        (await session.get(ProcessingSet, first_set_id)).folder_tags = original_set_ft
-        await session.commit()
+        async with async_session() as session:
+            ps = await session.get(ProcessingSet, first_set_id)
+            ps.folder_tag_mode = "nested"
+            ps.folder_albums = True
+            await session.commit()
+        on = await folder_targets(fake_job)
+        check("F1c an: Tag-Baum und Album (Gates schiessen nicht über)",
+              on.tag_paths == ["Ordner/Ferien_Mallorca"] and on.albums == ["Ferien_Mallorca"], f"got={on}")
+    finally:
+        async with async_session() as session:
+            ps = await session.get(ProcessingSet, first_set_id)
+            ps.folder_tag_mode, ps.folder_albums = saved
+            await session.commit()
 
     # ==================================================================
     # Zusammenfassung

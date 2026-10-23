@@ -41,12 +41,27 @@ async def get_user_api_key(user_id: int) -> str | None:
         return fernet.decrypt(user.api_key.encode()).decode()
 
 
+MA_DEVICE_ID = "MediaAssistant"  # Immich 2.x: deviceId of MediaAssistant's uploads
+MA_METADATA_KEY = "mediaassistant"  # Immich 3.x: asset metadata key that marks them (R-24)
+
+
+def _upload_marker() -> dict:
+    from version import VERSION
+    return {"uploader": "MediaAssistant", "version": VERSION}
+
+
 async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
                        sidecar_path: str | None = None, api_key: str | None = None) -> dict:
     """Upload a file to Immich and optionally add it to albums (created from folder tags).
 
     If sidecar_path is provided and the file exists, it is uploaded alongside the
     asset as sidecarData so Immich reads metadata from the XMP sidecar.
+
+    The upload carries MediaAssistant's marker: the asset metadata
+    ``mediaassistant`` (Immich 3.x) and deviceId ``MediaAssistant`` (2.x, which
+    3.x drops). The Immich input skips assets that carry either, so an upload
+    of MediaAssistant never comes back as a new job (R-24). An Immich that
+    rejects the metadata key gets the upload without it.
     """
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
@@ -64,7 +79,7 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
     backoff_delays = [30, 60, 120]
     resp = None
 
-    for attempt in range(max_retries + 1):
+    async def post(with_marker: bool) -> httpx.Response:
         async with httpx.AsyncClient(timeout=timeout) as client:
             from contextlib import ExitStack
             with ExitStack() as stack:
@@ -75,17 +90,28 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
                     files["sidecarData"] = (os.path.basename(sidecar_path), sidecar_fh)
                 # deviceAssetId/deviceId are required by Immich 2.x. Immich 3.x
                 # removed both from the API: it accepts and silently drops them,
-                # and asset responses no longer carry deviceId — so on 3.x the
-                # poller cannot recognise MediaAssistant's own uploads by it.
-                resp = await client.post(
-                    f"{url}/api/assets",
-                    headers=headers,
-                    data={"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
-                          "deviceId": "MediaAssistant",
-                          "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                          "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()},
-                    files=files,
-                )
+                # and asset responses no longer carry deviceId. There the poller
+                # recognises MediaAssistant's uploads by the metadata marker
+                # (R-24, docs/IMMICH_3_VERHALTEN.md f).
+                data = {"deviceAssetId": f"mediaassistant-{filename}-{int(stat.st_mtime)}",
+                        "deviceId": MA_DEVICE_ID,
+                        "fileCreatedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                        "fileModifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()}
+                if with_marker:
+                    data["metadata"] = json.dumps([{"key": MA_METADATA_KEY, "value": _upload_marker()}])
+                return await client.post(f"{url}/api/assets", headers=headers, data=data, files=files)
+
+    with_marker = True
+    for attempt in range(max_retries + 1):
+        resp = await post(with_marker)
+        if with_marker and resp.status_code == 400 and "metadata" in resp.text.lower():
+            # An Immich that does not accept this metadata key (2.x checks
+            # keys against its own list): upload without the marker, the
+            # poller recognises such uploads by deviceId there.
+            with_marker = False
+            logger.info("Immich rejected the upload marker for '%s' (%s), uploading without it",
+                        filename, resp.text[:120])
+            resp = await post(with_marker)
 
         # Non-5xx: accept result (success or client error)
         if resp.status_code < 500:
@@ -130,6 +156,27 @@ async def upload_asset(file_path: str, album_names: list[str] | None = None, *,
     if albums_added:
         result["albums_added"] = albums_added
     return result
+
+
+async def has_upload_marker(asset_id: str, *, api_key: str | None = None) -> bool:
+    """Whether an asset carries the marker upload_asset() sets (Immich 3.x).
+
+    True only for a 200 on GET /api/assets/<id>/metadata/mediaassistant;
+    False when Immich says the key (or the asset) is not found. Anything
+    else raises: the caller must not take "cannot tell" for "not ours".
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(f"{url}/api/assets/{asset_id}/metadata/{MA_METADATA_KEY}",
+                                headers={"x-api-key": api_key})
+    if resp.status_code == 200:
+        return True
+    if resp.status_code in (400, 404) and "not found" in _server_message(resp).lower():
+        return False
+    raise RuntimeError(f"Immich metadata check failed: HTTP {resp.status_code} — "
+                       f"{_server_message(resp) or resp.text[:120]}")
 
 
 def _sha1_b64(path: str) -> str:
@@ -352,8 +399,11 @@ async def safe_replace_asset(
     return new
 
 
-async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dict, name: str) -> str | None:
-    """Find an existing album by name or create a new one. Returns album ID."""
+async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dict, name: str,
+                               created: list | None = None) -> str | None:
+    """Find an existing album by name or create a new one. Returns album ID.
+
+    ``created`` collects the name when the album had to be created."""
     # Search existing albums
     resp = await client.get(f"{url}/api/albums", headers=headers)
     if resp.status_code == 200:
@@ -368,7 +418,10 @@ async def _get_or_create_album(client: httpx.AsyncClient, url: str, headers: dic
         json={"albumName": name},
     )
     if resp.status_code in (200, 201):
-        return resp.json().get("id")
+        album_id = resp.json().get("id")
+        if album_id and created is not None:
+            created.append(name)
+        return album_id
     return None
 
 
@@ -517,8 +570,10 @@ async def untag_asset(asset_id: str, tag_name: str, *, api_key: str | None = Non
             raise RuntimeError(
                 f"List tags failed: HTTP {list_resp.status_code} — {list_resp.text[:200]}"
             )
+        # By value, not name: a nested tag "Ordner/…/2007" has the name
+        # "2007" too, and a flat tag is a root tag whose value is its name.
         tag_id = next(
-            (t["id"] for t in list_resp.json() if t.get("name") == safe_tag_name),
+            (t["id"] for t in list_resp.json() if _tag_value_of(t) == safe_tag_name),
             None,
         )
         if not tag_id:
@@ -566,7 +621,7 @@ async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None)
             # Tag already exists — Immich returns 400 (or 409) for duplicates
             list_resp = await client.get(f"{url}/api/tags", headers=headers)
             tags = list_resp.json() if list_resp.status_code == 200 else []
-            tag_id = next((t["id"] for t in tags if t.get("name") == safe_tag_name), None)
+            tag_id = next((t["id"] for t in tags if _tag_value_of(t) == safe_tag_name), None)
         else:
             raise RuntimeError(f"Create tag '{safe_tag_name}' failed: HTTP {resp.status_code} — {resp.text[:200]}")
 
@@ -581,6 +636,54 @@ async def tag_asset(asset_id: str, tag_name: str, *, api_key: str | None = None)
         )
 
     return {"status": "tagged", "tag_name": tag_name, "tag_id": tag_id, "asset_id": asset_id}
+
+
+def _tag_value_of(tag: dict) -> str:
+    """The full path of a tag ("A/B/C"); its name is only the last level."""
+    return str(tag.get("value") or tag.get("name") or "")
+
+
+async def ensure_tag_path(path: str, *, api_key: str | None = None) -> dict:
+    """Create a nested tag with all missing parents and return the leaf.
+
+    `PUT /api/tags` (upsert) splits the value at "/" and creates the parents;
+    `POST /api/tags` with a "/" in the name would create one tag *named*
+    "A/B/C" without parents — a broken tree (measured on Immich 3.1, see
+    docs/IMMICH_ORDNERSTRUKTUR.md). Idempotent.
+    """
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        raise RuntimeError("Immich URL or API key not configured")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(f"{url}/api/tags", headers={"x-api-key": api_key},
+                                json={"tags": [path]})
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Upsert tag '{path}' failed: HTTP {resp.status_code} — "
+                           f"{_server_message(resp) or resp.text[:200]}")
+    leaf = next((t for t in (resp.json() or []) if _tag_value_of(t) == path), None)
+    if not leaf or not leaf.get("id"):
+        raise RuntimeError(f"Tag '{path}' not returned by the upsert")
+    return leaf
+
+
+async def tag_asset_path(asset_id: str, path: str, *, api_key: str | None = None) -> dict:
+    """Attach a nested tag ("Ordner/Kategorie/Ereignis") to an asset — the
+    hierarchical counterpart of tag_asset(), which keeps tags flat. The
+    asset is assigned to the leaf; Immich shows it under every parent."""
+    leaf = await ensure_tag_path(path, api_key=api_key)
+    await tag_assets(leaf["id"], [asset_id], api_key=api_key)
+    return {"status": "tagged", "tag_name": path, "tag_id": leaf["id"], "asset_id": asset_id}
+
+
+async def untag_asset_path(asset_id: str, path: str, *, api_key: str | None = None) -> dict:
+    """Remove a nested tag from an asset, found by its full value. The tag
+    itself and its parents stay (Immich's tag cleanup sweeps empty ones)."""
+    tags = await list_tags(api_key=api_key)
+    tag_id = next((t["id"] for t in tags if _tag_value_of(t) == path and t.get("id")), None)
+    if not tag_id:
+        return {"status": "missing", "tag_name": path, "asset_id": asset_id}
+    await untag_assets(tag_id, [asset_id], api_key=api_key)
+    return {"status": "untagged", "tag_name": path, "tag_id": tag_id, "asset_id": asset_id}
 
 
 ASSET_INFO_TIMEOUT = 15
@@ -898,8 +1001,11 @@ async def restore_asset(asset_id: str, *, api_key: str | None = None) -> dict:
     return {"status": "restored", "asset_id": asset_id}
 
 
-async def add_asset_to_albums(asset_id: str, album_names: list[str], *, api_key: str | None = None) -> list[str]:
-    """Add an existing asset to one or more albums (created if they don't exist). Returns list of album names added."""
+async def add_asset_to_albums(asset_id: str, album_names: list[str], *, api_key: str | None = None,
+                              created: list | None = None) -> list[str]:
+    """Add an existing asset to one or more albums (created if they don't exist). Returns list of album names added.
+
+    ``created`` (optional) collects the names of the albums that had to be created."""
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key or not asset_id or not album_names:
         return []
@@ -908,7 +1014,7 @@ async def add_asset_to_albums(asset_id: str, album_names: list[str], *, api_key:
     async with httpx.AsyncClient(timeout=60) as client:
         for album_name in album_names:
             try:
-                album_id = await _get_or_create_album(client, url, headers, album_name)
+                album_id = await _get_or_create_album(client, url, headers, album_name, created)
                 if album_id:
                     resp = await client.put(
                         f"{url}/api/albums/{album_id}/assets",
