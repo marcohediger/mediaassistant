@@ -259,6 +259,10 @@
     setDlg.querySelectorAll("[data-when-tag-mode]").forEach(function (n) {
       n.classList.toggle("is-off", n.dataset.whenTagMode !== tagMode);
     });
+    // With the old word tags the album keeps its old name too.
+    setDlg.querySelectorAll("[data-album-for]").forEach(function (n) {
+      n.hidden = (n.dataset.albumFor === "legacy") !== (tagMode === "legacy");
+    });
     // Controls that only matter while a switch is on are greyed out.
     setDlg.querySelectorAll("[data-depends]").forEach(function (n) {
       const on = fieldInput(n.dataset.depends).checked;

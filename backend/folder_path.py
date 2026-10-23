@@ -10,15 +10,19 @@ Two options per processing set (docs/IMMICH_ORDNERSTRUKTUR.md, decisions of
 2026-10-23), independent of each other:
 
 * ``folder_tag_mode`` — what the folders become as tags:
-  ``none``; ``flat``: one flat tag per level (``Kategorie``, ``Ereignis``,
-  ``2019``), the way the old folder-tag switch tagged them, but cleaned;
+  ``none``;
+  ``flat``: one flat tag per cleaned level (``Kategorie``, ``Ereignis``,
+  ``2019``);
+  ``legacy``: exactly what the old folder-tag switch made (legacy_tags):
+  every word of every level and all levels joined, nothing cleaned — and
+  the album named the old way (legacy_album_name);
   ``nested``: one tag ``Ordner/<level>/<level>/…`` that Immich shows as a
   tree — a parent tag lists every picture below it.
 * ``folder_albums`` — one album per folder, named by its levels joined with
   spaces (``Kategorie Ereignis 2019``), as the old folder-tag switch named
   them.
 
-Rules, the same for both options:
+Rules, the same for both options (not for ``legacy``):
 
 * meaningless levels are dropped: month or day (``07``), a date
   (``2019-07``, ``2019-07-14``), ``DCIM``, camera folders (``104_PANA``,
@@ -48,12 +52,12 @@ _DROP = (
 _YEAR = re.compile(r"^(?:19|20)\d{2}$")
 
 
-TAG_MODES = ("none", "flat", "nested")
+TAG_MODES = ("none", "flat", "legacy", "nested")
 
 
 @dataclass
 class FolderOptions:
-    tag_mode: str = "none"  # none / flat / nested
+    tag_mode: str = "none"  # none / flat / legacy / nested
     albums: bool = False    # one album per folder
 
     @property
@@ -61,12 +65,21 @@ class FolderOptions:
         return self.tag_mode == "flat"
 
     @property
+    def legacy(self) -> bool:
+        return self.tag_mode == "legacy"
+
+    @property
+    def single(self) -> bool:
+        """Flat tags of either kind (flat or legacy)."""
+        return self.flat or self.legacy
+
+    @property
     def nested(self) -> bool:
         return self.tag_mode == "nested"
 
     @property
     def any(self) -> bool:
-        return self.flat or self.nested or self.albums
+        return self.single or self.nested or self.albums
 
 
 @dataclass
@@ -155,6 +168,33 @@ def album_name(rel: str | None) -> str | None:
     return " ".join(parts) if parts else None
 
 
+def _raw_levels(rel: str | None) -> list[str]:
+    return [p for p in (rel or "").split("/") if p and p != "."]
+
+
+def legacy_tags(rel: str | None) -> list[str]:
+    """The folder tags of the old switch, unchanged: every whitespace-separated
+    word of every level, then all levels joined with spaces — no level
+    dropped, numbers and technical names included (the old IA-02
+    _extract_folder_tags and IA-07 folder keywords)."""
+    parts = _raw_levels(rel)
+    tags: list[str] = []
+    for part in parts:
+        for word in part.split():
+            if word and word not in tags:
+                tags.append(word)
+    combined = " ".join(parts)
+    if combined and combined not in tags:
+        tags.append(combined)
+    return tags
+
+
+def legacy_album_name(rel: str | None) -> str | None:
+    """The album name of the old switch: all levels joined with spaces
+    (the old IA-08 _get_folder_album_names)."""
+    return " ".join(_raw_levels(rel)) or None
+
+
 def is_tag_path(value) -> bool:
     """A nested folder tag (as opposed to a flat keyword)."""
     return isinstance(value, str) and value.startswith(ROOT_TAG + "/")
@@ -226,15 +266,16 @@ def _add(items: list, value) -> None:
 
 async def folder_targets(job, *, ia02: dict | None = None,
                          options: FolderOptions | None = None) -> FolderTargets:
-    """Tags (flat or nested) and albums the job's file should carry.
+    """Tags (flat, legacy or nested) and albums the job's file should carry.
 
     The job's own folder plus the folders of duplicates merged into it
     (``donor_folder_paths``), each per the set's options. Albums the merged
     duplicates' assets were in (``donor_albums``) come along whatever the
     options say: they are the user's albums, not derived from folders.
-    Jobs from before the raw folder was recorded fall back to what the old
-    code stored: its flat tags (``folder_tags``) and album name
-    (``own_album``, else the last entry of ``folder_tags``).
+    What the old code stored for a job stays in use as it did there: its
+    flat tags (``folder_tags``, which a merge filled with the donors' too)
+    with flat or legacy tags, and — when the folder itself is unknown — its
+    album name (``own_album``, else the last entry of ``folder_tags``).
     """
     record = _ia02(job, ia02)
     opts = options or await folder_options(job)
@@ -248,15 +289,17 @@ async def folder_targets(job, *, ia02: dict | None = None,
             if opts.flat:
                 for level in tag_levels(rel):
                     _add(out.flat_tags, level)
+            if opts.legacy:
+                for tag in legacy_tags(rel):
+                    _add(out.flat_tags, tag)
             if opts.albums:
-                _add(out.albums, album_name(rel))
-        if not own:
-            legacy = record.get("folder_tags") or []
-            if opts.flat:
-                for word in legacy:
-                    _add(out.flat_tags, word)
-            if opts.albums:
-                _add(out.albums, record.get("own_album") or (legacy[-1] if legacy else None))
+                _add(out.albums, legacy_album_name(rel) if opts.legacy else album_name(rel))
+        legacy = record.get("folder_tags") or []
+        if opts.single:
+            for word in legacy:
+                _add(out.flat_tags, word)
+        if opts.albums and not own:
+            _add(out.albums, record.get("own_album") or (legacy[-1] if legacy else None))
     for name in record.get("donor_albums") or []:
         _add(out.albums, name)
     return out

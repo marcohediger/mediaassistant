@@ -206,8 +206,8 @@ async def migrate_to_sets() -> None:
 
         # Group directories by what they do. Folder tags only ever worked when
         # both the directory switch and the global module were on. They made
-        # flat keywords and one album per folder, which the set keeps as tag
-        # mode "flat" plus albums (database._migrate_columns does the same
+        # word keywords and one album per folder, which the set keeps as tag
+        # mode "legacy" plus albums (database._migrate_columns does the same
         # for sets that existed before).
         groups: dict[tuple, list] = {}
         for row in inboxes:
@@ -226,7 +226,7 @@ async def migrate_to_sets() -> None:
                 name = " + ".join(m.label for m in members)
             ps = ProcessingSet(
                 name=name, description="", active=True, position=pos, **schedule,
-                folder_tags=folder_tags, folder_tag_mode="flat" if folder_tags else "none",
+                folder_tags=folder_tags, folder_tag_mode="legacy" if folder_tags else "none",
                 folder_albums=folder_tags,
                 dry_run=dry_run, ocr_enabled=ocr_enabled, ocr_mode=ocr_mode, **meta,
                 target_mode="immich" if use_immich else "library",

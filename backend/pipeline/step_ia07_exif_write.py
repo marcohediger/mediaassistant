@@ -58,13 +58,13 @@ async def execute(job, session) -> dict:
     # Collect keywords
     keywords = []
 
-    # Folder structure as tags (set option, read at runtime): flat — one
-    # keyword per folder level, like any other keyword — or nested, which
-    # goes into the file as TagsList/HierarchicalSubject, never as a flat
-    # keyword. Albums are IA-08's business.
+    # Folder structure as tags (set option, read at runtime): flat or legacy
+    # — keywords like any other — or nested, which goes into the file as
+    # TagsList/HierarchicalSubject, never as a flat keyword. Albums are
+    # IA-08's business.
     options = await folder_options(job)
     tag_paths: list[str] = []
-    if options.flat or options.nested:
+    if options.single or options.nested:
         folder = await folder_targets(job, options=options)
         tag_paths = folder.tag_paths
         keywords += [t for t in folder.flat_tags if t not in keywords]

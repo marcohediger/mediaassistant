@@ -336,17 +336,18 @@ geänderte Regeln später ohne Quelldatei neu anzuwenden.
 
 ### Nachtrag zu Entscheid 1 (2026-10-23)
 
-Die Tag-Hälfte ist eine **Auswahl aus drei**, nicht ein Schalter: ein
+Die Tag-Hälfte ist eine **Auswahl aus vier**, nicht ein Schalter: ein
 ausgeschalteter Schalter hätte verborgen, dass bis anhin einzelne Tags entstanden.
-„Ordner als Alben" bleibt ein eigener Schalter und lässt sich mit jeder der drei
-kombinieren.
+„Keine", „Einzelne Tags pro Ordner" (bereinigt), „Einzelne Tags, Wörter getrennt
+(bisher)" (genau das alte Verhalten) und „Verschachtelte Tags". „Ordner als Alben"
+bleibt ein eigener Schalter und lässt sich mit jeder der vier kombinieren.
 
 ## Umsetzung (2026-10-23)
 
 | Teil | Wo |
 |---|---|
 | Regeln, eine Funktion statt vier Kopien | `backend/folder_path.py` (`levels`, `tag_path`, `album_name`, `folder_targets`) |
-| Set-Felder | `folder_tag_mode` (`none` / `flat` / `nested`), `folder_albums`; `folder_tags` bleibt nur für die Migration |
+| Set-Felder | `folder_tag_mode` (`none` / `flat` / `legacy` / `nested`), `folder_albums`; `folder_tags` bleibt nur für die Migration |
 | Roher Ordner | `step_result['IA-02']['folder_path']` (relativ zum Eingang, unbereinigt); nach einem Retry aus dem Protokoll (`file_ops`) wiedergefunden. Duplikat-Zusammenführung: `donor_folder_paths` |
 | Datei/Sidecar | bei `nested`: `TagsList` und `HierarchicalSubject` mit **allen** Tags der Datei (Immich liest dann nur noch `TagsList`); `dc:subject`/IPTC `Keywords` bleiben flach |
 | Immich | `PUT /api/tags` (Upsert mit Eltern), Zuordnung per ID, Vergleich über `value` (`immich_client.tag_asset_path`/`untag_asset_path`); flache Tags werden jetzt ebenfalls über `value` gesucht |
@@ -360,10 +361,14 @@ unter einer Ebene mit demselben Jahr fallen zusammen; Jahr bei Tags eigene Ebene
 im Album an die Ebene davor gehängt; höchstens 4 Ebenen. Wurzel des Baums: `Ordner`.
 Album-Name: die Ebenen mit Leerzeichen verbunden, wie bisher.
 
-**Migration des alten Schalters:** `folder_tags` an → `folder_tag_mode = flat` und
-`folder_albums` an; aus → `none` und aus. Unterschied zu bisher bei „flach": eine
-Ebene ergibt ein Tag, Ordnernamen werden nicht mehr in Wörter zerlegt, und es gibt
-keinen zusätzlichen zusammengesetzten Tag (der steckt im Album-Namen). Jobs von
-vorher (nur `folder_tags` im IA-02-Ergebnis) behalten ihre alten flachen Tags und
-ihren Album-Namen.
+Die Regeln gelten für `flat`, `nested` und die Alben. `legacy` ist das alte
+Verhalten unverändert (`folder_path.legacy_tags`, `legacy_album_name`, gegen eine
+Kopie des alten Codes getestet): jedes Wort jeder Ebene, dazu alle Ebenen zusammen
+als ein Tag, nichts weggelassen; das Album heisst nach allen Ebenen.
+
+**Migration des alten Schalters:** `folder_tags` an → `folder_tag_mode = legacy` und
+`folder_albums` an; aus → `none` und aus. Für bestehende Sets ändert sich damit
+nichts. (Auf Dev lief die Migration einmal mit `flat`; diese Daten bleiben.) Jobs von
+vorher (nur `folder_tags` im IA-02-Ergebnis) behalten bei `flat`/`legacy` ihre alten
+Tags und ihren Album-Namen; Zusammenführung und Retry behandeln `legacy` wie `flat`.
 
