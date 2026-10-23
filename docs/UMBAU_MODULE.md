@@ -181,6 +181,16 @@ IA-01 EXIF ─┬─> IA-02 Duplikat (Schranke: Duplikat → Stopp, vor allen Ne
 | R-21 keine Spur | Protokoll + Papierkorb. |
 | R-23 Ordner-Aufräumen | Prüfung über echte Enthaltensein-Beziehung. |
 
+### Neu seit der Inventur (2026-10-23)
+
+| Risiko | Befund | Lösung |
+|---|---|---|
+| R-24 | **Eigene Uploads werden unter Immich 3.x nicht mehr erkannt.** Der Poller filtert MAs Uploads über `deviceId`, das 3.x nicht mehr liefert; es bleibt nur `_known_asset_ids`, mit einem Wettlauf zwischen Upload und Job-Commit → Phantom-Duplikate. Betrifft Live (Immich 3.1), Entscheid: mit 3.0.0 lösen. | Eigene Uploads über das Register (`file_copies`/`asset_refs`) erkennen, bevor der Upload als erledigt gilt; zusätzlich ein eigenes Upload-Metadatum (`metadata` mit Schlüssel `mediaassistant`, unter 3.1 gemessen). |
+| R-25 | **Der Poller holte unter 3.x auch archivierte und versteckte Assets** (z. B. Video-Hälften von Live-Fotos), weil die Suche ohne Sichtbarkeit alles ausser „gesperrt" liefert. Betrifft Live. | Auf dem Branch behoben (`visibility: timeline`, Commit 8ffaf01). |
+| R-12 (weiter) | `_force_reupload` bleibt auch bei Wiederaufnahme hängen (pop auf der falschen Kopie). | wie R-12: Laufparameter statt Steuerwert. |
+| R-05b (schwerer) | Liegt eine Inbox in einer Ablage, ist die Datei endgültig weg, nicht einmal in `error/`. | Inbox innerhalb einer Ablage wird abgelehnt; Ziel-Reservierung verhindert Selbstlöschung. |
+| R-18, R-22 | Unter 3.1 gemessen und bestätigt (`docs/IMMICH_3_VERHALTEN.md`). | wie oben. |
+
 ## Oberfläche
 
 - **Dashboard „Letzte Verarbeitungen" und Verarbeitungs-Log:** jede Zeile
