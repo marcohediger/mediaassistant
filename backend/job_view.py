@@ -6,7 +6,8 @@ Every template and script that shows a job's modules reads ``module_blocks()``
 table ``module_runs``) switches only this module from step_result to the runs;
 the output stays the same:
 
-    module_blocks(job, t) -> list of 11 dicts, in module order:
+    module_blocks(job, t) -> list of dicts, in module order (IA-09 only when it
+    mailed something or failed, see step_visible):
         module        "IA-01" … "IA-11"
         label         translated module name (i18n "steps")
         status        ok | running | warning | error | skipped | duplicate |
@@ -190,13 +191,27 @@ def _detail_of(code: str, status: str, result, h: dict) -> str:
     return _ok_detail(code, result, h)
 
 
+def step_visible(code: str, result) -> bool:
+    """Whether a module belongs in the workflow view of a job.
+
+    IA-09 only mails when a job failed; in every other run it reports
+    "module disabled" / "no errors to report", which is noise in the
+    workflow. It shows up only when it sent something or failed itself.
+    """
+    if code != "IA-09":
+        return True
+    return isinstance(result, dict) and (bool(result.get("sent")) or result.get("status") == "error")
+
+
 def module_blocks(job, t: dict | None = None) -> list[dict]:
-    """The 11 modules of `job` as blocks (see the module docstring)."""
+    """The modules of `job` as blocks (see the module docstring)."""
     t = t or {}
     h, steps = _h(t), t.get("steps", {})
     results = job.step_result if isinstance(job.step_result, dict) else {}
     blocks = []
     for code in MODULES:
+        if not step_visible(code, results.get(code)):
+            continue
         status = _status_of(job, code, results)
         tone, icon = STATUS_TONES[status]
         blocks.append({

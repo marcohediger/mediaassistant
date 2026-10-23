@@ -123,7 +123,7 @@
                 "model": t.job_detail.ai_model, "image_one": t.job_detail.ai_images_one, "image_many": t.job_detail.ai_images_many,
                 "context": t.job_detail.ai_context, "answer": t.job_detail.ai_answer, "none": t.job_detail.no_steps
              } | tojson }}'>
-            {% for step, result in (job.step_result or {}).items() %}
+            {% for step, result in (job.step_result or {}).items() if step_visible(step, result) %}
             {% set st = result.get('status') if result is mapping else none %}
             {% set tone = STEP_TONES.get(st, STEP_OK) if result is mapping else ('is-neutral', 'info', '') %}
             {% set reason = result.get('reason') if result is mapping and result.get('reason') is string else '' %}

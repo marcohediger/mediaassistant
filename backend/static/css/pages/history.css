@@ -142,7 +142,7 @@ tr.hist-row.is-open > * { background: var(--ui-row-hover); border-bottom-color: 
 .job-modules-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.55rem; }
 .job-modules-title { margin: 0; font-size: var(--ui-fs-sm); font-weight: 600; color: var(--text); }
 .job-modules-desc { font-size: var(--ui-fs-xs); color: var(--text-muted); }
-.mod-bar { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 0.35rem; }
+.mod-bar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.35rem; }
 .mod-cell {
     display: flex; flex-direction: column; align-items: stretch; gap: 0.3rem; min-width: 0;
     margin: 0; padding: 0.3rem 0.2rem 0.25rem; font: inherit; color: var(--text-muted);

@@ -97,7 +97,12 @@ def test_module_blocks():
     job = SimpleNamespace(status="processing", current_step="IA-06", step_result=sr, updated_at=None)
     blocks = job_view.module_blocks(job, T)
     by = {b["module"]: b for b in blocks}
-    report("Elf Blöcke in Modul-Reihenfolge", [b["module"] for b in blocks] == list(job_view.MODULES))
+    # IA-09 (notification) only appears when it mailed something or failed
+    report("Blöcke in Modul-Reihenfolge, ohne Benachrichtigung", [b["module"] for b in blocks] == [m for m in job_view.MODULES if m != "IA-09"])
+    report("Benachrichtigung erscheint nur, wenn sie etwas verschickt hat",
+           not job_view.step_visible("IA-09", {"status": "skipped", "reason": "module disabled"})
+           and job_view.step_visible("IA-09", {"sent": True, "errors_reported": 1})
+           and job_view.step_visible("IA-09", {"status": "error"}))
     report("IA-01 ok mit Kurzinfo", by["IA-01"]["status"] == "ok" and "640 × 480" in by["IA-01"]["detail"],
            by["IA-01"]["detail"])
     report("Fehler in IA-03 ist eine Warnung (weicher Schritt)",
@@ -161,11 +166,11 @@ async def test_flow(job: Job):
     resp = await api("GET", f"/api/history/job/{key}")
     data = resp.json()
     report("/api/history/job antwortet", resp.status_code == 200 and data.get("debug_key") == key, str(resp.status_code))
-    report("…mit elf Modulen", len(data.get("modules", [])) == 11)
+    report("…mit allen Modulen ausser der Benachrichtigung", len(data.get("modules", [])) == 10)
     report("…und dem Exemplar", any(c["id"] == row.id and c["state"] == "present" for c in data.get("copies", [])))
     resp = await api("GET", f"/api/history/modules?keys={key},HIST-gibt-es-nicht")
     jobs = resp.json().get("jobs", {})
-    report("/api/history/modules liefert nur vorhandene Jobs", list(jobs) == [key] and len(jobs[key]["modules"]) == 11)
+    report("/api/history/modules liefert nur vorhandene Jobs", list(jobs) == [key] and len(jobs[key]["modules"]) == 10)
     report("Unbekannter Job: 404", (await api("GET", "/api/history/job/HIST-gibt-es-nicht")).status_code == 404)
 
     t = await fileops.trash(job, row.id, actor="user:delete", reason="Test: Benutzer löscht", allow_last_copy=True)
