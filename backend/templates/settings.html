@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ t.settings.title }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/settings.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/settings.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
 {%- macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
@@ -237,11 +237,11 @@
 {% include "settings/_ai_dialog.html" %}
 
 <script id="settings-data" type="application/json">{{ {"accesses": accesses, "i18n": t.sets, "i18n_settings": t.settings, "edit": request.query_params.get("edit")} | tojson }}</script>
-<link rel="stylesheet" href="/static/css/lists.css?v={{ version }}">
-<link rel="stylesheet" href="/static/css/editor.css?v={{ version }}">
-<script src="/static/js/settings.js?v={{ version }}"></script>
-<script src="/static/js/lists.js?v={{ version }}"></script>
-<script src="/static/js/ai_backends.js?v={{ version }}"></script>
+<link rel="stylesheet" href="/static/css/lists.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/editor.css?v={{ asset_v }}">
+<script src="/static/js/settings.js?v={{ asset_v }}"></script>
+<script src="/static/js/lists.js?v={{ asset_v }}"></script>
+<script src="/static/js/ai_backends.js?v={{ asset_v }}"></script>
 <script>
 // The save bar says so once a field of the big form has changed.
 (function () {

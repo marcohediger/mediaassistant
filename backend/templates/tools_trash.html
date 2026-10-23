@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ t.history.trash_title }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/history.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
 {% from "_modules.html" import history_strings with context %}
 {% set h = t.history %}

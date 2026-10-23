@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ t.duplicates.heading }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/duplicates.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/duplicates.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
 {% set d = t.duplicates %}
 {% macro icon(name, size=16) -%}

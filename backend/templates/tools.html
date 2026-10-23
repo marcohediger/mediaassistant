@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t.tools.title }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v={{ version }}">
-<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/pages/history.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
 {% macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>

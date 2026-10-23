@@ -274,3 +274,19 @@ body[data-theme="light"] .lst-toast { box-shadow: 0 10px 30px rgba(16, 24, 40, 0
 
 /* An Immich input that exists but is switched off. */
 .lst-meta.lst-off { color: var(--text-muted); opacity: 0.7; }
+
+/* Sets table: long paths are clipped and the inputs/target cells may wrap,
+   so one long base or inbox path no longer pushes the table wider than its
+   card (the actions column ended up behind a scrollbar). The full path is
+   in the set editor. */
+#section-sets .lst-table td { white-space: normal; }
+#section-sets .lst-table .lst-meta { display: inline-flex; max-width: 100%; }
+#section-sets .lst-table .lst-path {
+    display: inline-block; max-width: 15rem; vertical-align: middle;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+@media (max-width: 1280px) {
+    #section-sets .lst-table .lst-path { max-width: 10rem; }
+    #section-sets .lst-table tr > * { padding-left: 0.6rem; padding-right: 0.6rem; }
+}
+#section-sets .lst-table tr > :nth-child(3) { white-space: nowrap; }  /* schedule: "Nur manuell" on one line */
