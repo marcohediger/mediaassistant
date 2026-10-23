@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, Text, Boolean, DateTime, JSON, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import Column, Integer, Text, Boolean, DateTime, JSON, UniqueConstraint, Index, text
+from sqlalchemy.orm import DeclarativeBase, synonym
 from datetime import datetime, timezone
 
 
@@ -163,3 +163,114 @@ class ProcessingSet(Base):
 
     created_at = Column(DateTime, default=lambda: datetime.now())
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+# ---------------------------------------------------------------------------
+# Data safety: ledger, copy register, references (used by fileops.py only)
+# ---------------------------------------------------------------------------
+
+class FileOp(Base):
+    """Append-only ledger of every file operation.
+
+    A row is written as 'intent' before the disk is touched and set exactly
+    once to 'done', 'failed' or 'reconciled' afterwards. While a row is
+    open, fileops may fill in what it learns on the way (final destination,
+    hashes). Rows are never deleted; the triggers in FILE_OPS_GUARDS enforce
+    both rules in the database itself.
+    """
+    __tablename__ = "file_ops"
+    __table_args__ = (
+        Index("idx_file_ops_job", "job_id", "id"),
+        Index("idx_file_ops_state", "state", "created_at"),
+        Index("idx_file_ops_copy", "copy_id"),
+        # At most one open operation that changes or removes a given source:
+        # a second one fails on insert instead of racing the first.
+        Index("uq_file_ops_open_src", "src_kind", "src", unique=True,
+              sqlite_where=text("state = 'intent' AND op IN "
+                                "('move', 'trash', 'restore', 'purge', 'write_metadata', 'replace')")),
+    )
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer)  # owner job (jobs.id); NULL only for system-wide operations
+    run_id = Column(Integer)  # module run that caused it (module_runs.id, later)
+    op = Column(Text, nullable=False)  # move/copy/download/upload/replace/write_metadata/trash/restore/purge
+    src_kind = Column(Text)  # local/work/temp/sidecar/takeout_json/immich/trash
+    src = Column(Text)  # path or asset id
+    dst_kind = Column(Text)
+    dst = Column(Text)  # final destination; NULL until the content is placed and verified
+    copy_id = Column(Integer)  # file_copies row the operation acts on
+    dst_copy_id = Column(Integer)  # file_copies row that holds the result
+    sha256_before = Column(Text)
+    sha256_after = Column(Text)
+    size = Column(Integer)
+    actor = Column(Text, nullable=False)  # module code (IA-08), user action (user:keep) or system:<task>
+    reason = Column(Text)  # why (trash, purge)
+    state = Column(Text, nullable=False, default="intent")  # intent/done/failed/reconciled
+    error = Column(Text)
+    detail = Column(JSON)  # plan (dst_dir, filename, part file) and notes
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    finished_at = Column(DateTime)
+
+
+# Executed at startup (database._migrate_columns). Kept here so the schema of
+# the ledger lives in one place and tests can recreate them after cleanup.
+FILE_OPS_GUARDS = [
+    "CREATE TRIGGER IF NOT EXISTS trg_file_ops_no_delete BEFORE DELETE ON file_ops "
+    "BEGIN SELECT RAISE(ABORT, 'file_ops is append-only'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_file_ops_finished BEFORE UPDATE ON file_ops "
+    "WHEN OLD.state <> 'intent' "
+    "BEGIN SELECT RAISE(ABORT, 'file_ops row is already finished'); END",
+]
+
+
+class FileCopy(Base):
+    """One physical copy of a job's content: a file on disk or an Immich asset.
+
+    A location (path or asset id) holds at most one 'present' row, whatever
+    its kind — two jobs cannot both own the same file unnoticed. A job that
+    uses a copy it does not own is listed in asset_refs.
+    """
+    __tablename__ = "file_copies"
+    __table_args__ = (
+        Index("uq_file_copies_present", "location", unique=True,
+              sqlite_where=text("state = 'present'")),
+        Index("idx_file_copies_job", "job_id"),
+        Index("idx_file_copies_sha", "sha256"),
+        Index("idx_file_copies_trash", "state", "trashed_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer)  # owner (jobs.id)
+    kind = Column(Text, nullable=False)  # local/immich/work/temp/sidecar/takeout_json
+    location = Column(Text, nullable=False)  # path, or asset id for kind immich
+    sha256 = Column(Text)
+    size = Column(Integer)
+    checksum = Column(Text)  # Immich's own checksum (SHA-1, base64) for kind immich
+    state = Column(Text, nullable=False, default="present")  # present/trashed/moved/deleted/missing
+    verified_at = Column(DateTime)  # content last confirmed (hash or Immich check)
+    trash_location = Column(Text)  # where a trashed copy lies (local trash)
+    trashed_at = Column(DateTime)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+
+class AssetRef(Base):
+    """A job that uses a copy it does not own.
+
+    Mostly shared Immich assets (kind 'immich', location = asset id); also
+    local files whose identical content another job already had in place.
+    A copy with references from other jobs is never trashed or replaced.
+    """
+    __tablename__ = "asset_refs"
+    __table_args__ = (
+        UniqueConstraint("kind", "location", "job_id", name="uq_asset_refs"),
+        Index("idx_asset_refs_job", "job_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    kind = Column(Text, nullable=False, default="immich")
+    location = Column(Text, nullable=False)
+    job_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+
+    asset_id = synonym("location")
