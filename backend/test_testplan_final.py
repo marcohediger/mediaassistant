@@ -134,12 +134,14 @@ async def s3_web():
         ("/api/version", "Version"),
         ("/api/dashboard", "Dashboard JSON"),
         ("/", "Root"),
-        ("/login", "Login Page"),
         ("/review", "Review"),
         ("/logs", "Logs"),
         ("/settings", "Settings"),
         ("/duplicates", "Duplicates"),
     ]
+    # The login page only exists with SSO (AUTH_MODE=oidc).
+    if os.environ.get("AUTH_MODE", "").lower() == "oidc":
+        endpoints.append(("/login", "Login Page"))
     async with AsyncClient(follow_redirects=True, timeout=10) as c:
         for path, label in endpoints:
             try:

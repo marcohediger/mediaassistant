@@ -121,7 +121,9 @@ async def main():
     # ── T6: Web-Endpoints erreichbar ──
     print("\n── T6: Web-Endpoints nach Refactoring ──")
     import urllib.request
-    endpoints = ["/version", "/api/health", "/login"]
+    endpoints = ["/api/version", "/api/health"]
+    if os.environ.get("AUTH_MODE", "").lower() == "oidc":  # login page only with SSO
+        endpoints.append("/login")
     for ep in endpoints:
         try:
             resp = urllib.request.urlopen(f"http://localhost:8000{ep}", timeout=5)
