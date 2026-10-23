@@ -3,11 +3,11 @@ import os
 import subprocess
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from config import config_manager
 from database import async_session
 from models import Job
-from system_logger import log_info
+from system_logger import log_info, log_warning
 
 router = APIRouter(prefix="/api")
 
@@ -123,18 +123,89 @@ async def cleanup_status_endpoint():
     return JSONResponse(_cleanup_progress)
 
 
+_ORPHAN_SKIP = "skip"
+
+
+async def _orphan_reason(row, copies: list, check_immich: bool) -> str | None:
+    """Why a settled job counts as orphan, None if it still has its content,
+    or _ORPHAN_SKIP when that cannot be told now (Immich not checked or not
+    reachable).
+
+    The register first: a present copy the job owns or references. Local
+    copies pass a cheap check (file there, size as registered); only a
+    copy failing it is verified, which re-hashes it and marks it missing
+    when it is gone. Without a copy that checks out, the job's target
+    decides, as before the register — never original_path alone, where
+    another file may lie under the same name (R-01/R-02).
+    """
+    import fileops
+    from immich_client import asset_exists
+
+    immich_unknown = False
+    for c in copies:
+        if c.kind == "immich":
+            if not check_immich:
+                immich_unknown = True
+                continue
+            try:
+                checked = await fileops.verify(c.id, actor="system:orphan_scan")
+            except Exception:
+                immich_unknown = True  # API error: never orphan on a guess
+                continue
+            if checked.state in ("present", "locked"):
+                return None
+            continue
+        if c.kind not in ("local", "work"):
+            continue
+        try:
+            st = await asyncio.to_thread(os.stat, c.location)
+            if c.size is None or st.st_size == c.size:
+                return None
+        except OSError:
+            pass
+        try:
+            if (await fileops.verify(c.id, actor="system:orphan_scan")).state == "present":
+                return None
+        except Exception:
+            continue
+
+    path = row.target_path
+    if path and path.startswith("immich:"):
+        if not check_immich:
+            return _ORPHAN_SKIP
+        try:
+            return None if await asset_exists(path[len("immich:"):]) else "immich asset gone"
+        except Exception:
+            return _ORPHAN_SKIP
+    if path:
+        return None if await asyncio.to_thread(os.path.exists, path) else "file gone"
+    if immich_unknown:
+        return _ORPHAN_SKIP
+    # No target at all: only the job's own content at original_path counts.
+    if row.original_path and row.file_hash:
+        from file_operations import sha256
+        try:
+            if await asyncio.to_thread(sha256, row.original_path) == row.file_hash:
+                return None
+            return "foreign file at original_path"
+        except OSError:
+            return "file gone"
+    return "no path"
+
+
 async def _scan_orphans_in_background(check_immich: bool):
     """Scan all settled jobs (done/duplicate/review) and mark those whose
-    file no longer exists as 'orphan'. Stores the previous status in
-    error_message for possible un-orphan recovery.
+    content is gone as 'orphan'. Stores the previous status in
+    error_message for possible un-orphan recovery. Changes nothing on disk
+    or in Immich; the register is brought in line where a copy is missing.
     """
     from datetime import datetime
-    from immich_client import asset_exists
+    from models import AssetRef, FileCopy
     from sqlalchemy import update as sql_update
 
     SETTLED_STATES = ("done", "duplicate", "review")
     BATCH_SIZE = 200
-    offset = 0
+    last_id = 0
     total_checked = 0
     total_orphaned = 0
     total_immich_skipped = 0
@@ -151,62 +222,58 @@ async def _scan_orphans_in_background(check_immich: bool):
         pass
 
     while True:
+        # Keyset paging: rows marked orphan leave the filter, so an offset
+        # would skip the rows behind them.
         async with async_session() as session:
             result = await session.execute(
-                select(Job.id, Job.debug_key, Job.status, Job.target_path, Job.original_path)
-                .where(Job.status.in_(SETTLED_STATES))
+                select(Job.id, Job.debug_key, Job.status, Job.target_path, Job.original_path,
+                       Job.file_hash)
+                .where(Job.status.in_(SETTLED_STATES), Job.id > last_id)
                 .order_by(Job.id)
-                .offset(offset)
                 .limit(BATCH_SIZE)
             )
             rows = result.all()
+            if rows:
+                ids = [r.id for r in rows]
+                own = (await session.execute(select(FileCopy).where(
+                    FileCopy.job_id.in_(ids), FileCopy.state.in_(("present", "locked"))))).scalars().all()
+                refs = (await session.execute(select(AssetRef.job_id, FileCopy).join(
+                    FileCopy, (FileCopy.location == AssetRef.location) & (FileCopy.kind == AssetRef.kind)
+                ).where(AssetRef.job_id.in_(ids), FileCopy.state.in_(("present", "locked"))))).all()
 
         if not rows:
             break
+        last_id = rows[-1].id
+        copies: dict[int, list] = {}
+        for c in own:
+            copies.setdefault(c.job_id, []).append(c)
+        for jid, c in refs:
+            copies.setdefault(jid, []).append(c)
 
         orphan_ids = []
         for row in rows:
             total_checked += 1
-            path = row.target_path or row.original_path
-            if not path:
-                # No path at all → orphan
-                orphan_ids.append((row.id, row.status, "no path"))
-                continue
+            reason = await _orphan_reason(row, copies.get(row.id, []), check_immich)
+            if reason == _ORPHAN_SKIP:
+                total_immich_skipped += 1
+            elif reason:
+                orphan_ids.append((row.id, row.status, reason))
 
-            if path.startswith("immich:"):
-                if not check_immich:
-                    total_immich_skipped += 1
-                    continue
-                asset_id = path[7:]
-                try:
-                    exists = await asset_exists(asset_id)
-                except Exception:
-                    # API error → don't mark as orphan, skip cautiously
-                    continue
-                if not exists:
-                    orphan_ids.append((row.id, row.status, "immich asset gone"))
-                continue
-
-            # Local path
-            if not os.path.exists(path):
-                orphan_ids.append((row.id, row.status, "file gone"))
-
-        # Mark this batch as orphan
+        # Mark this batch as orphan — only rows still in the state we judged
         if orphan_ids:
             async with async_session() as session:
                 for jid, prev_status, reason in orphan_ids:
-                    await session.execute(
+                    res = await session.execute(
                         sql_update(Job)
-                        .where(Job.id == jid)
+                        .where(Job.id == jid, Job.status == prev_status)
                         .values(
                             status="orphan",
                             error_message=f"Auto-orphaned from {prev_status} ({reason}) at {datetime.now().isoformat(timespec='seconds')}",
                         )
                     )
+                    total_orphaned += res.rowcount or 0
                 await session.commit()
-            total_orphaned += len(orphan_ids)
 
-        offset += BATCH_SIZE
         _cleanup_progress["current"] = total_checked
         # Tiny pause to avoid blocking the event loop / DB pool
         await asyncio.sleep(0.05)
@@ -413,19 +480,79 @@ async def cleanup_orphans_endpoint(request: Request):
     return RedirectResponse(url="/logs?tab=jobs&status=orphan", status_code=303)
 
 
-async def _run_cleanup_stale_errors():
-    """Background task: verify each candidate's done counterpart still
-    resolves (local file exists, or Immich asset exists), then bulk-delete
-    the verified IDs. Updates _cleanup_progress as it goes.
+async def _verified_copy(job_id: int, target_path: str | None, immich_asset_id: str | None,
+                         *, actor: str) -> str | None:
+    """Where the job still has a copy of its content that checks out now:
+    'local', 'immich' or None.
 
-    Uses two separate queries instead of a correlated subquery — at
-    scale (4k+ errors × 150k+ done jobs without a filename index) the
-    correlated subquery degenerated to O(M·N) and made the task hang
-    indefinitely on `loading candidates`.
+    The register comes first: a present copy (or an asset MediaAssistant
+    locked) that verifies against its hash or Immich. Jobs from before the
+    register, and placements a not yet migrated step made without telling
+    it, fall back to their target: the library file exists, or the Immich
+    asset does. original_path is never evidence — another file can lie
+    there under the same name (R-01/R-02).
     """
-    import os
-    from sqlalchemy import delete
+    import fileops
     from immich_client import asset_exists
+
+    found_immich = False
+    for row in await fileops.copies(job_id, states=("present", "locked")):
+        if row.kind not in ("local", "work", "immich"):
+            continue
+        try:
+            checked = await fileops.verify(row.id, actor=actor)
+        except Exception:
+            continue  # Immich unreachable: an unchecked copy does not count
+        if checked.kind != "immich" and checked.state == "present":
+            return "local"
+        if checked.kind == "immich" and checked.state in ("present", "locked"):
+            found_immich = True
+    if found_immich:
+        return "immich"
+    tp = target_path or ""
+    asset = tp[len("immich:"):] if tp.startswith("immich:") else (immich_asset_id if not tp else None)
+    if asset:
+        try:
+            return "immich" if await asset_exists(asset) else None
+        except Exception:
+            return None
+    if tp and await asyncio.to_thread(os.path.isfile, tp):
+        return "local"
+    return None
+
+
+async def _jobs_with_history(job_ids: list[int]) -> set[int]:
+    """Jobs the ledger or the register knows: their rows must stay. Ledger
+    rows are never deleted, and SQLite hands a deleted job's id to the next
+    new job, which would then inherit the old job's copies and history."""
+    from models import AssetRef, FileCopy, FileOp
+    found: set[int] = set()
+    for i in range(0, len(job_ids), 500):
+        chunk = job_ids[i:i + 500]
+        async with async_session() as session:
+            for stmt in (
+                select(FileOp.job_id).where(FileOp.job_id.in_(chunk)),
+                select(FileCopy.job_id).where(FileCopy.job_id.in_(chunk)),
+                select(AssetRef.job_id).where(AssetRef.job_id.in_(chunk)),
+            ):
+                found.update(j for (j,) in (await session.execute(stmt.distinct())).all())
+    return found
+
+
+async def _run_cleanup_stale_errors():
+    """Background task: delete error jobs ("Datei nicht auffindbar", no
+    target) whose content verifiably lives on in another job.
+
+    Identity is the content hash, never the filename (R-13): an error job
+    is stale only if a done/duplicate job with the same file_hash still has
+    a copy that checks out (register first, its target as fallback). Error
+    jobs without a hash, or known to the ledger/register, are kept.
+    Updates _cleanup_progress as it goes.
+
+    Two separate queries instead of a correlated subquery — at scale (4k+
+    errors × 150k+ done jobs) the correlated form degenerated to O(M·N).
+    """
+    from sqlalchemy import delete
 
     deleted = 0
     skipped = 0
@@ -435,61 +562,56 @@ async def _run_cleanup_stale_errors():
         # Step 1 — error candidates ("Datei nicht auffindbar", target=None)
         async with async_session() as session:
             r = await session.execute(
-                select(Job.id, Job.filename).where(
+                select(Job.id, Job.file_hash).where(
                     Job.status == "error",
                     Job.error_message.like("%Datei nicht auffindbar%"),
                     Job.target_path.is_(None),
                 )
             )
-            error_rows = r.fetchall()  # [(id, filename), ...]
+            error_rows = r.fetchall()  # [(id, file_hash), ...]
+        no_hash = sum(1 for _, h in error_rows if not h)
 
         _cleanup_progress["total"] = len(error_rows)
         _cleanup_phase("loading_done_counterparts")
 
-        # Step 2 — for the filenames involved, fetch the latest done/duplicate
-        # target_path (one bulk query, batched to stay under SQLite's IN-list
-        # cap on very large filename sets).
-        filename_to_target: dict[str, str] = {}
-        unique_filenames = list({fn for _, fn in error_rows if fn})
+        # Step 2 — done/duplicate jobs with the same content hash (batched to
+        # stay under SQLite's IN-list cap), newest first.
+        by_hash: dict[str, list] = {}
+        unique_hashes = list({h for _, h in error_rows if h})
         BATCH = 500
-        for i in range(0, len(unique_filenames), BATCH):
-            chunk = unique_filenames[i:i + BATCH]
+        for i in range(0, len(unique_hashes), BATCH):
+            chunk = unique_hashes[i:i + BATCH]
             async with async_session() as session:
                 r = await session.execute(
-                    select(Job.filename, Job.target_path, Job.id)
-                    .where(
-                        Job.filename.in_(chunk),
-                        Job.status.in_(("done", "duplicate")),
-                        Job.target_path.isnot(None),
-                        Job.target_path != "",
-                    )
+                    select(Job.id, Job.file_hash, Job.target_path, Job.immich_asset_id)
+                    .where(Job.file_hash.in_(chunk), Job.status.in_(("done", "duplicate")))
                     .order_by(Job.id.desc())
                 )
-                # Keep only the latest target_path per filename
-                for fn, tp, _ in r.fetchall():
-                    filename_to_target.setdefault(fn, tp)
+                for row in r.fetchall():
+                    by_hash.setdefault(row.file_hash, []).append(row)
             await asyncio.sleep(0)  # yield each batch
 
-        # Build the candidates list (only error jobs that have a counterpart)
-        rows = [(jid, filename_to_target[fn]) for jid, fn in error_rows
-                if fn in filename_to_target]
+        rows = [(jid, by_hash[h]) for jid, h in error_rows if h and h in by_hash]
 
         _cleanup_progress["total"] = len(rows)
         _cleanup_progress["current"] = 0
         _cleanup_phase("verifying_targets")
 
+        verdicts: dict[int, bool] = {}  # counterpart job id -> has a verified copy
         verified_ids = []
-        for idx, (job_id, done_target) in enumerate(rows, 1):
-            if done_target.startswith("immich:"):
-                asset_id = done_target.split(":", 1)[1]
-                try:
-                    if await asset_exists(asset_id):
-                        verified_ids.append(job_id)
-                    else:
-                        skipped += 1
-                except Exception:
-                    skipped += 1
-            elif os.path.exists(done_target):
+        for idx, (job_id, counterparts) in enumerate(rows, 1):
+            ok = False
+            for c in counterparts:
+                if c.id == job_id:
+                    continue
+                if c.id not in verdicts:
+                    verdicts[c.id] = await _verified_copy(
+                        c.id, c.target_path, c.immich_asset_id,
+                        actor="system:cleanup_stale_errors") is not None
+                if verdicts[c.id]:
+                    ok = True
+                    break
+            if ok:
                 verified_ids.append(job_id)
             else:
                 skipped += 1
@@ -498,25 +620,34 @@ async def _run_cleanup_stale_errors():
             if idx % 50 == 0:
                 await asyncio.sleep(0)
 
+        history = await _jobs_with_history(verified_ids)
+        verified_ids = [j for j in verified_ids if j not in history]
         deleted = len(verified_ids)
         if verified_ids:
             _cleanup_phase("deleting")
             async with async_session() as session:
-                await session.execute(delete(Job).where(Job.id.in_(verified_ids)))
+                keys = (await session.execute(
+                    select(Job.debug_key).where(Job.id.in_(verified_ids[:20])))).scalars().all()
+            sample = ", ".join(k or "?" for k in keys) + (" …" if deleted > 20 else "")
+            await log_info("api", f"Stale-Error-Cleanup: {deleted} veraltete Fehler-Jobs werden gelöscht",
+                           f"Inhalt per Hash in einem anderen Job geprüft vorhanden: {sample}")
+            async with async_session() as session:
+                for i in range(0, len(verified_ids), BATCH):
+                    await session.execute(delete(Job).where(Job.id.in_(verified_ids[i:i + BATCH])))
                 await session.commit()
 
-        try:
-            detail = (f"Kandidaten: {len(rows)}, verifiziert: {deleted}, "
-                      f"übersprungen (Ziel nicht erreichbar): {skipped}")
-            await log_info("api", f"Stale-Error-Cleanup: {deleted} veraltete Error-Jobs gelöscht", detail)
-        except Exception:
-            pass
+        detail = (f"Kandidaten mit gleichem Inhalt: {len(rows)}, gelöscht: {deleted}, "
+                  f"übersprungen (kein geprüftes Exemplar): {skipped}, behalten (im Protokoll): "
+                  f"{len(history)}, ohne Hash (nie gelöscht): {no_hash}")
+        await log_info("api", f"Stale-Error-Cleanup: {deleted} veraltete Fehler-Jobs gelöscht", detail)
 
-        _cleanup_finish(result={"deleted": deleted, "skipped": skipped, "candidates": len(rows)})
+        _cleanup_finish(result={"deleted": deleted, "skipped": skipped, "candidates": len(rows),
+                                "kept_history": len(history), "no_hash": no_hash})
     except Exception as exc:
         import traceback
         try:
-            await log_info("api", "Stale-Error-Cleanup failed", f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
+            await log_warning("api", "Stale-Error-Cleanup fehlgeschlagen",
+                              f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
         except Exception:
             pass
         _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
@@ -541,12 +672,20 @@ async def cleanup_stale_errors_endpoint(request: Request):
 
 
 async def _run_cleanup_stuck_duplicate_winners():
-    """Background task: classify stuck duplicate-winner jobs into 3 buckets
-    (re-queue / mark-done / skip) and process each. Updates _cleanup_progress."""
-    import os
+    """Background task: kept duplicates ("kept via …") that stayed in status
+    'duplicate'. Each is judged by its OWN copy, checked against the
+    register (R-13) — never by another job's filename:
+
+    - a verified local copy → re-queued (IA-01..IA-07 kept), so IA-08
+      finally places it;
+    - only a verified Immich asset → it is placed already → 'done';
+    - nothing that checks out → left alone and counted as skipped (a lost
+      file must stay visible, not be hidden behind 'done').
+    """
     from datetime import datetime
     from sqlalchemy import func as sql_func, update
 
+    actor = "system:cleanup_stuck_duplicates"
     requeued = 0
     raced = 0
     try:
@@ -554,53 +693,45 @@ async def _run_cleanup_stuck_duplicate_winners():
 
         async with async_session() as session:
             candidates = await session.execute(
-                select(Job).where(
+                select(Job.id, Job.debug_key, Job.target_path, Job.immich_asset_id).where(
                     Job.status == "duplicate",
                     sql_func.json_extract(Job.step_result, '$."IA-02".status') == "skipped",
                     sql_func.json_extract(Job.step_result, '$."IA-02".reason').like("%kept via%"),
                 )
             )
-            jobs = candidates.scalars().all()
+            jobs = candidates.all()
 
         _cleanup_progress["total"] = len(jobs)
         _cleanup_phase("classifying")
 
-        # Filenames that have a verified 'done' counterpart in the DB.
-        filenames_with_done: set[str] = set()
-        if jobs:
-            async with async_session() as session:
-                done_rows = await session.execute(
-                    select(Job.filename).where(
-                        Job.status == "done",
-                        Job.target_path.isnot(None),
-                        Job.target_path != "",
-                        Job.filename.in_([j.filename for j in jobs]),
-                    ).distinct()
-                )
-                filenames_with_done = {r[0] for r in done_rows.fetchall()}
-
-        requeue_ids = []
-        done_ids = []
-        skip_ids = []
-        for job in jobs:
-            tp = job.target_path or ""
-            if tp and not tp.startswith("immich:") and os.path.exists(tp):
+        requeue_ids, done_ids, skip_ids = [], [], []
+        where: dict[int, str | None] = {}
+        for idx, job in enumerate(jobs, 1):
+            where[job.id] = await _verified_copy(job.id, job.target_path, job.immich_asset_id, actor=actor)
+            if where[job.id] == "local":
                 requeue_ids.append(job.id)
-            elif job.filename in filenames_with_done:
+            elif where[job.id] == "immich":
                 done_ids.append(job.id)
             else:
                 skip_ids.append(job.id)
+            _cleanup_progress["current"] = idx
+            if idx % 25 == 0:
+                await asyncio.sleep(0)
 
         # Reset counter so the progress bar reflects the work loop, not the scan loop.
         _cleanup_progress["current"] = 0
         _cleanup_phase("requeueing")
 
         from pipeline.reprocess import prepare_job_for_reprocess
+        keys = {j.id: j.debug_key for j in jobs}
         for idx, job_id in enumerate(requeue_ids, 1):
+            await log_info("api", f"{keys[job_id]} Behaltenes Duplikat wird neu eingereiht",
+                           "eigenes Exemplar geprüft; IA-01..IA-07 bleiben, IA-08 legt die Datei ab")
             async with async_session() as session:
                 fresh = await session.get(Job, job_id)
                 if not fresh or fresh.status != "duplicate":
                     raced += 1
+                    moved = None
                 else:
                     moved = await prepare_job_for_reprocess(
                         session, fresh,
@@ -608,36 +739,39 @@ async def _run_cleanup_stuck_duplicate_winners():
                         move_file=True,
                         commit=True,
                     )
-                    if moved:
-                        requeued += 1
-                    else:
-                        if fresh.filename in filenames_with_done:
-                            done_ids.append(job_id)
-                        else:
-                            skip_ids.append(job_id)
+            if moved:
+                requeued += 1
+                await log_info("api", f"{keys[job_id]} Behaltenes Duplikat neu eingereiht")
+            elif moved is not None:
+                skip_ids.append(job_id)
+                await log_warning("api", f"{keys[job_id]} Behaltenes Duplikat nicht eingereiht",
+                                  "Datei liess sich nicht für die Wiederaufnahme bereitstellen")
             _cleanup_progress["current"] = idx
             if idx % 25 == 0:
                 await asyncio.sleep(0)
 
         _cleanup_phase("marking_done")
-        marked_done = len(done_ids)
+        marked_done = 0
         if done_ids:
+            sample = ", ".join(keys[j] or "?" for j in done_ids[:20]) + (" …" if len(done_ids) > 20 else "")
+            await log_info("api", f"Stuck-Duplicate-Winner-Cleanup: {len(done_ids)} Jobs werden auf 'done' gesetzt",
+                           f"eigenes Immich-Asset geprüft vorhanden: {sample}")
             async with async_session() as session:
-                await session.execute(
+                res = await session.execute(
                     update(Job)
-                    .where(Job.id.in_(done_ids))
+                    .where(Job.id.in_(done_ids), Job.status == "duplicate")
                     .values(status="done", error_message=None, completed_at=datetime.now())
                 )
                 await session.commit()
+                marked_done = res.rowcount or 0
+            raced += len(done_ids) - marked_done
 
         total = requeued + marked_done
         skipped = len(skip_ids)
-        try:
-            detail = (f"re-queued: {requeued}, marked done: {marked_done}, "
-                      f"skipped (no done counterpart): {skipped}, raced: {raced}")
-            await log_info("api", f"Stuck-Duplicate-Winner-Cleanup: {total} Jobs bereinigt", detail)
-        except Exception:
-            pass
+        detail = (f"neu eingereiht: {requeued}, auf done gesetzt (Immich-Asset geprüft): {marked_done}, "
+                  f"übersprungen (kein geprüftes eigenes Exemplar): {skipped}, zwischenzeitlich geändert: {raced}")
+        log = log_warning if skipped else log_info
+        await log("api", f"Stuck-Duplicate-Winner-Cleanup: {total} Jobs bereinigt", detail)
 
         _cleanup_finish(result={
             "requeued": requeued, "marked_done": marked_done,
@@ -646,8 +780,8 @@ async def _run_cleanup_stuck_duplicate_winners():
     except Exception as exc:
         import traceback
         try:
-            await log_info("api", "Stuck-Duplicate-Winner-Cleanup failed",
-                           f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
+            await log_warning("api", "Stuck-Duplicate-Winner-Cleanup fehlgeschlagen",
+                              f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
         except Exception:
             pass
         _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
@@ -658,9 +792,8 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
     """Start stuck duplicate-winner cleanup as a background task.
 
     Returns 409 if any cleanup is already running. Progress is reported via
-    /api/jobs/cleanup-status. The classifier reads `target_path` and queries
-    the DB for 'done' counterparts to decide between re-queue / mark-done / skip
-    so we never wrongly flag a job as 'done' without a verified counterpart.
+    /api/jobs/cleanup-status. Each job is judged by its own copy, checked
+    against the register (re-queue / mark-done / skip), never by filename.
     """
     if _cleanup_progress["running"]:
         return JSONResponse(
@@ -756,23 +889,199 @@ async def pipeline_status_endpoint():
     })
 
 
-@router.post("/job/{debug_key}/delete")
-async def delete_job_endpoint(debug_key: str):
+JOB_DELETE_ACTOR = "user:delete_job"
+JOB_DELETE_REASON = "Job vom Benutzer gelöscht"
+
+
+async def _text(section: str, key: str, **fmt) -> str:
+    """A translated string in the configured UI language."""
+    from i18n import DEFAULT_LANGUAGE, load_lang
+    lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
+    text = load_lang(lang).get(section, {}).get(key, key)
+    return text.format(**fmt) if fmt else text
+
+
+def _wants_json(request: Request | None) -> bool:
+    if request is None:
+        return False
+    return ("application/json" in request.headers.get("accept", "")
+            or request.headers.get("x-requested-with", "") == "fetch")
+
+
+async def _other_users_of_path(job_id: int, path: str) -> list[str]:
+    """Other jobs whose old fields still point at `path` (from before the
+    register: two jobs can share a library target, live 44 of them)."""
+    variants = {path, os.path.normpath(path)}
     async with async_session() as session:
-        result = await session.execute(select(Job).where(Job.debug_key == debug_key))
-        job = result.scalar()
-        if not job:
-            return RedirectResponse(url="/logs?tab=jobs", status_code=303)
+        return list((await session.execute(select(Job.debug_key).where(
+            Job.id != job_id, Job.status != "deleted",
+            or_(Job.target_path.in_(variants), Job.original_path.in_(variants)),
+        ))).scalars().all())
 
-        # Delete associated files
-        from file_operations import safe_remove_with_log
-        for path in [job.target_path, job.original_path]:
-            if path and os.path.exists(path):
-                await asyncio.to_thread(safe_remove_with_log, path)
 
-        await session.delete(job)
+async def _trash_job_copies(job_id: int, target_path: str | None, immich_asset_id: str | None,
+                            dry_run: bool) -> dict:
+    """Move the job's own copies into the trash (R-02).
+
+    Only what the register attributes to this job is touched; whatever lies
+    at original_path is never looked at. A copy is verified first: a row
+    whose file is gone or holds other content (a new file under an old
+    name) is only marked, never removed. Jobs from before the register get
+    their library target (plus .xmp/.log next to it) registered first,
+    unless another job's fields point at the same file or it is a dry run
+    (whose target_path is only where the file *would* have gone, R-07).
+    Immich assets stay in Immich, as before this rebuild.
+    """
+    import fileops
+    from models import AssetRef
+
+    out = {"trashed": [], "removed": [], "gone": [], "refused": [], "failed": [], "immich_kept": []}
+
+    async def dispose(row):
+        name = os.path.basename(row.location)
+        try:
+            if row.kind == "temp":
+                # Derived file (IA-04 conversion): nothing to restore it for.
+                await fileops.discard(job_id, row.id, actor=JOB_DELETE_ACTOR, reason=JOB_DELETE_REASON)
+                out["removed"].append(name)
+                return
+            checked = await fileops.verify(row.id, actor=JOB_DELETE_ACTOR)
+            if checked.state != "present":
+                out["gone"].append(name)
+                return
+            await fileops.trash(job_id, row.id, actor=JOB_DELETE_ACTOR, reason=JOB_DELETE_REASON,
+                                allow_last_copy=True)
+            out["trashed"].append(name)
+        except fileops.FileOpRefused as exc:
+            out["refused"].append((name, str(exc)))
+        except Exception as exc:
+            out["failed"].append((name, str(exc) or type(exc).__name__))
+
+    rows = await fileops.copies(job_id)
+    handled = {r.location for r in rows}
+    for row in rows:
+        if row.kind == "immich":
+            out["immich_kept"].append(row.location)
+        else:
+            await dispose(row)
+
+    if target_path and target_path.startswith("immich:"):
+        asset = target_path[len("immich:"):]
+        if asset and asset not in handled and asset not in out["immich_kept"]:
+            out["immich_kept"].append(asset)
+    elif target_path and not dry_run:
+        main = os.path.abspath(os.path.normpath(target_path))
+        others = None
+        for path, kind in ((main, "local"), (main + ".xmp", "sidecar"), (main + ".log", "sidecar")):
+            if path in handled or not await asyncio.to_thread(os.path.isfile, path):
+                continue
+            if others is None:
+                others = await _other_users_of_path(job_id, target_path)
+            if others:
+                out["refused"].append((os.path.basename(path),
+                                       await _text("job_detail", "delete_shared", keys=", ".join(others))))
+                continue
+            try:
+                row = await fileops.register_existing(job_id, kind, path)
+            except Exception as exc:
+                out["failed"].append((os.path.basename(path), f"{type(exc).__name__}: {exc}"))
+                continue
+            await dispose(row)
+    if immich_asset_id and immich_asset_id not in handled and immich_asset_id not in out["immich_kept"]:
+        out["immich_kept"].append(immich_asset_id)
+
+    # A deleted job uses nothing any more: its references must not keep
+    # another job's copy from ever being trashed.
+    async with async_session() as session:
+        refs = (await session.execute(select(AssetRef.kind, AssetRef.location).where(
+            AssetRef.job_id == job_id))).all()
+    for kind, location in refs:
+        await fileops.drop_ref(job_id, kind, location)
+    out["refs_dropped"] = len(refs)
+    return out
+
+
+async def _delete_summary(out: dict) -> str:
+    lines = [await _text("job_detail", "delete_done")]
+    if out["trashed"]:
+        lines.append(await _text("job_detail", "delete_trashed", files=", ".join(out["trashed"])))
+    if out["removed"]:
+        lines.append(await _text("job_detail", "delete_removed", files=", ".join(out["removed"])))
+    if out["gone"]:
+        lines.append(await _text("job_detail", "delete_gone", files=", ".join(out["gone"])))
+    for name, why in out["refused"]:
+        lines.append(await _text("job_detail", "delete_refused", file=name, reason=why))
+    for name, why in out["failed"]:
+        lines.append(await _text("job_detail", "delete_failed", file=name, reason=why))
+    for asset in out["immich_kept"]:
+        lines.append(await _text("job_detail", "delete_immich_kept", asset=asset))
+    if not (out["trashed"] or out["removed"] or out["refused"] or out["failed"]):
+        lines.append(await _text("job_detail", "delete_nothing"))
+    return "\n".join(lines)
+
+
+@router.post("/job/{debug_key}/delete")
+async def delete_job_endpoint(debug_key: str, request: Request = None):
+    """Delete a job on the user's request.
+
+    The job's own copies go to the trash (30 days), via fileops; nothing at
+    original_path is ever touched (R-02) and Immich assets stay in Immich.
+    The row stays, with status 'deleted' and a note of what happened, so
+    the ledger keeps its job. Queued and processing jobs belong to the
+    worker and are refused.
+    """
+    from datetime import datetime
+    from sqlalchemy import update
+
+    async with async_session() as session:
+        job = (await session.execute(select(Job).where(Job.debug_key == debug_key))).scalar()
+    if not job:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "detail": await _text("job_detail", "not_found")},
+                                status_code=404)
+        return RedirectResponse(url="/logs?tab=jobs", status_code=303)
+    detail_url = f"/logs/job/{debug_key}"
+    previous = job.status
+
+    # Claim: the worker and a retry only take queued / terminal-but-not-
+    # deleted jobs, so after this nobody else works on the row.
+    async with async_session() as session:
+        claim = await session.execute(
+            update(Job).where(Job.id == job.id, Job.status.notin_(("queued", "processing")))
+            .values(status="deleted", completed_at=datetime.now()))
+        await session.commit()
+    if claim.rowcount != 1:
+        message = await _text("job_detail", "delete_busy")
+        await log_warning("api", f"{debug_key} Löschen verweigert: Job wird gerade verarbeitet",
+                          f"Status: {previous}")
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "detail": message}, status_code=409)
+        return RedirectResponse(url=detail_url, status_code=303)
+
+    await log_info("api", f"{debug_key} Job wird gelöscht (Benutzer)",
+                   f"Status vorher: {previous}; Ziel: {job.target_path or '—'}; "
+                   f"original_path wird nicht angefasst")
+    try:
+        out = await _trash_job_copies(job.id, job.target_path, job.immich_asset_id, bool(job.dry_run))
+    except Exception as exc:
+        out = {"trashed": [], "removed": [], "gone": [], "refused": [], "immich_kept": [],
+               "failed": [("—", f"{type(exc).__name__}: {exc}")], "refs_dropped": 0}
+    summary = await _delete_summary(out)
+    async with async_session() as session:
+        await session.execute(update(Job).where(Job.id == job.id).values(error_message=summary))
         await session.commit()
 
-    await log_info("api", f"Job deleted: {debug_key}")
-    return RedirectResponse(url="/logs?tab=jobs", status_code=303)
+    detail = (f"Papierkorb: {len(out['trashed'])}, entfernt (temporär): {len(out['removed'])}, "
+              f"nicht mehr vorhanden: {len(out['gone'])}, verweigert: {len(out['refused'])}, "
+              f"fehlgeschlagen: {len(out['failed'])}, in Immich belassen: {len(out['immich_kept'])}, "
+              f"Verweise entfernt: {out['refs_dropped']}")
+    if out["refused"] or out["failed"]:
+        await log_warning("api", f"{debug_key} Job gelöscht, nicht alle Dateien entfernt", detail)
+    else:
+        await log_info("api", f"{debug_key} Job gelöscht (Benutzer)", detail)
+    if _wants_json(request):
+        return JSONResponse({"ok": not out["failed"], "status": "deleted", "detail": summary,
+                             "trashed": out["trashed"], "refused": [n for n, _ in out["refused"]],
+                             "failed": [n for n, _ in out["failed"]]})
+    return RedirectResponse(url=detail_url, status_code=303)
 

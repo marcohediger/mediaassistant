@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync descriptions from step_result to Immich for all done jobs.
+"""OBSOLETE (refuses to run without --obsolete-ok). Sync descriptions from step_result to Immich for all done jobs.
 
 Writes the IA-07 description_written to Immich via PUT /api/assets/{id}
 for every job that has a description and an Immich asset ID.
@@ -16,7 +16,23 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+# OBSOLETE (rebuild "Module & Datensicherheit", 2026-10). One-shot after an old description bug.
+# It refuses to run unless --obsolete-ok is given explicitly.
+OBSOLETE_REASON = (
+    "This one-shot pushed the IA-07 description of every done job to Immich once, after an old\n"
+    "bug. It overwrites whatever description the asset has now, including text a user edited in\n"
+    "Immich since (inventory I4, risk R-19), and leaves no trace in the ledger."
+)
+
+
+def _refuse_unless_forced() -> None:
+    if "--obsolete-ok" not in sys.argv:
+        print("OBSOLETE — not run.\n" + OBSOLETE_REASON + "\nOnly with --obsolete-ok, and only after reading the script.")
+        sys.exit(2)
+
+
 async def main():
+    _refuse_unless_forced()
     dry_run = "--dry-run" in sys.argv
 
     from database import init_db, async_session
