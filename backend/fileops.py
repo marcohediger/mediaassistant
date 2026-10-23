@@ -2847,7 +2847,8 @@ async def prune_empty_dirs(job, start_dir: str, stop_at: str | None, *, actor: s
     out of review or trashed leaves no empty folder; a start_dir in no base
     path (an inbox outside the library, reprocess/, a temp folder) stays.
 
-    What stays, always: stop_at itself and everything outside it; anything
+    What stays, always: stop_at itself and everything outside it; the first
+    level below a set's base path (category roots, unknown/, error/); anything
     in the trash (``.papierkorb``); every input folder and library base
     path of any set and the job's own inbox (an inbox may lie inside a
     library; the climb ends below it); every folder that holds anything but
@@ -2883,6 +2884,11 @@ async def prune_empty_dirs(job, start_dir: str, stop_at: str | None, *, actor: s
         holding = [p for p in map(os.path.realpath, kept)
                    if os.path.commonpath([p, stop]) == stop and os.path.commonpath([p, start]) == p]
         stop = max([stop, *holding], key=len)
+        if stop in {os.path.realpath(b) for b in bases}:
+            # The first level below a base path is the library's structure
+            # (category roots, unknown/, error/), on a NAS possibly with
+            # permissions of its own: it stays, even when empty.
+            stop = os.path.join(stop, os.path.relpath(start, stop).split(os.sep)[0])
         if start == stop:
             return []
         removed = await asyncio.to_thread(prune_empty_dirs_blocking, start, stop)

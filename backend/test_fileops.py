@@ -593,8 +593,8 @@ async def test_prune_empty_dirs(set_id):
     write(os.path.join(chain, ".DS_Store"), b"junk")
     write(os.path.join(chain, "@eaDir", "thumb.jpg"), b"junk")
     removed = await fileops.prune_empty_dirs(job, chain, BASE, actor="test")
-    report("Nur Systemreste: Ordnerkette bis unter den Basis-Pfad entfernt, Basis-Pfad bleibt",
-           removed == [chain, os.path.dirname(chain), os.path.join(BASE, "prune")] and os.path.isdir(BASE),
+    report("Nur Systemreste: Ordnerkette entfernt, die erste Ebene unter dem Basis-Pfad bleibt",
+           removed == [chain, os.path.dirname(chain)] and os.path.isdir(os.path.join(BASE, "prune")),
            f"{removed}")
 
     keep_dir = mkdirs("prune2", "x")
@@ -648,9 +648,9 @@ async def test_prune_after_move_and_trash(set_id):
     write(src, blob("prune-auto"))
     out_dir = f"{ROOT}/reprocess-auto"
     res = await fileops.move(job, src, out_dir + "/", actor="test")
-    report("Aus der Ablage verschoben: leere Ordner bis unter den Basis-Pfad entfernt",
-           not os.path.exists(f"{BASE}/kat") and os.path.isdir(BASE) and os.path.isfile(res.location),
-           f"kat={os.path.exists(f'{BASE}/kat')}")
+    report("Aus der Ablage verschoben: leerer Ordner entfernt, erste Ebene (Kategorie) bleibt",
+           not os.path.exists(f"{BASE}/kat/ort") and os.path.isdir(f"{BASE}/kat") and os.path.isfile(res.location),
+           f"ort={os.path.exists(f'{BASE}/kat/ort')} kat={os.path.isdir(f'{BASE}/kat')}")
 
     keep = f"{BASE}/kat2/keep.txt"
     write(keep, b"vom Benutzer")
