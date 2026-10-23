@@ -318,3 +318,18 @@ geänderte Regeln später ohne Quelldatei neu anzuwenden.
 8. Sichert das Handy B-Inhalte schon per Immich-App? Dann meldet Immich beim Upload `duplicate`; bei Option 3 entstünden Doppel.
 9. Migration: Der Eingang verbraucht die Dateien (nach dem Upload in den Papierkorb). Läuft sie auf einer Kopie der NAS-Freigabe oder auf dem Original?
 10. Muss die Struktur auch in der **Mobile-App** navigierbar sein? (Tags dort nicht geprüft.)
+
+## Entscheide (2026-10-23)
+
+1. **Zwei Optionen pro Set, einzeln einschaltbar und kombinierbar:**
+   „Ordner als verschachtelte Tags" (Tag-Baum, z. B. `Ordner/Kategorie/Ereignis`)
+   und „Ordner als Alben" (ein Album pro Ereignis).
+2. **Technische Zweige** (Handy-Importe, Messenger, SD-Backup, Drohne) werden vor
+   der Migration auf dem NAS aus der kuratierten Sammlung heraus sortiert; es braucht
+   dafür keine Regel „Zweige ausschliessen". Geräte-Backups laufen in einem eigenen
+   Set ohne Ordner-Optionen.
+3. **Reine Jahres-Ebene je nach Option:** bei den Tags eine eigene Ebene
+   (`Kategorie/Ereignis/JJJJ` — ein Ereignis über alle Jahre ansehbar), bei den
+   Alben an den Eltern angehängt (`Ereignis JJJJ` — ein Album pro Jahr).
+4. Bedeutungslose Ebenen (Monat, Datum, `DCIM`, Kamera-Ordner, „Photos from JJJJ")
+   und doppelte Ebenen fallen bei beiden Optionen weg.
