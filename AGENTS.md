@@ -308,7 +308,7 @@ echte DB) und verifiziert das Endergebnis:
 | **US-1: Inbox → Immich** | Datei in Inbox → Pipeline → Upload zu Immich → Asset existiert + Tags korrekt |
 | **US-2: Inbox → Lokale Ablage** | Datei in Inbox → Pipeline → Datei in Library → EXIF-Tags geschrieben |
 | **US-3: Immich-Poller** | Asset in Immich (vom Handy) → Poller erkennt → Pipeline → Tags in Immich |
-| **US-4: Poller ignoriert eigene** | MA lädt Datei hoch → Poller überspringt (deviceId-Filter) → kein Duplikat |
+| **US-4: Poller ignoriert eigene** | MA lädt Datei hoch → Poller überspringt (Register, offene Upload-Absicht oder Metadatum `mediaassistant`; `deviceId` nur noch für Immich 2.x) → kein Duplikat |
 | **US-5: Duplikat Keep** | Datei 2× einlesen → Duplikat erkannt → "Behalten" → 1 Asset in Immich, kein Verlust |
 | **US-6: Duplikat Keep (Shared-Asset)** | Inbox + Poller = gleiche asset_id → "Behalten" → Asset bleibt in Immich |
 | **US-7: Batch-Clean** | 2 Duplikate → Batch-Clean → Best bleibt, Donor weg, Asset in Immich OK |
