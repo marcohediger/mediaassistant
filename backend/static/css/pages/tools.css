@@ -6,6 +6,10 @@
 .tools-card .ui-icon-tile { align-self: flex-start; margin-top: 0.1rem; }
 .tools-text { margin: 0; max-width: 80ch; font-size: var(--ui-fs-sm); line-height: 1.55; color: var(--text-muted); }
 
+/* Library paths under the sidecar option: one chip each, wrapping between chips */
+.tools-paths { margin-top: 0.15rem; }
+.tools-paths-more { align-self: center; font-size: var(--ui-fs-xs); color: var(--text-muted); }
+
 /* Pattern presets: a row of small buttons under the pattern field */
 .tools-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.35rem; }
 .tools-presets-label { margin-right: 0.25rem; font-size: var(--ui-fs-xs); font-weight: 600; color: var(--text-muted); }

@@ -743,7 +743,8 @@
     "merge_orphans": "Damaged spellings with no intact counterpart — there is nothing here to guess from. They are left untouched; fix them by hand or delete them with the pattern tool above:",
     "subtitle": "Clean up and unify keywords in the XMP sidecars and in Immich.",
     "presets": "Presets",
-    "more": "{n} more"
+    "more": "{n} more",
+    "paths_more": "and {n} more"
   },
   "sets": {
     "title": "Processing sets",

@@ -79,7 +79,15 @@
                 <label class="ui-option">
                     <span class="ui-option-text">
                         <span class="ui-option-title">{{ t.tools.scope_sidecars }}</span>
-                        <span class="ui-option-desc">{{ t.tools.tags_hint }} <code class="ui-code">{{ library_path }}</code></span>
+                        <span class="ui-option-desc">{{ t.tools.tags_hint }}</span>
+                        {# One chip per library; past four only three and "N more" (all in the title) #}
+                        {% set shown = library_paths if library_paths | length <= 4 else library_paths[:3] %}
+                        <span class="ui-tags tools-paths">
+                            {%- for p in shown %}<code class="ui-path">{{ p }}</code>{% endfor -%}
+                            {%- if shown | length < library_paths | length %}
+                            <span class="tools-paths-more" title="{{ library_paths[3:] | join('\n') }}">{{ t.tools.paths_more | replace('{n}', (library_paths | length - 3) | string) }}</span>
+                            {%- endif %}
+                        </span>
                     </span>
                     {{ switch('do_sidecars', True, 'sidecarInvalidate()') }}
                 </label>

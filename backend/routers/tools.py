@@ -951,7 +951,7 @@ async def tools_page(request: Request):
         sets = [{"id": i, "name": n} for i, n in (await session.execute(
             select(ProcessingSet.id, ProcessingSet.name).order_by(ProcessingSet.position, ProcessingSet.id))).all()]
     return await render(request, "tools.html", {
-        "library_path": ", ".join(await library_roots()),
+        "library_paths": await library_roots(),
         # The rerun card's set choice (Module neu ausführen für ein Set).
         "sets": sets,
     })
