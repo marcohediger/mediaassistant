@@ -179,7 +179,16 @@ class FileGuard:
 
     def foreign_changes(self) -> list[Change]:
         foreign = []
+        before_files = [p for p, e in self._before.items() if e[0] == "f"]
         for c in self.changes():
+            if c.kind == "deleted" and c.is_dir:
+                # A folder that held nothing but the story's own files was
+                # emptied by the story (fileops prunes such folders); a folder
+                # carries no content. One that held a foreign file, or nothing
+                # at all, still counts.
+                inside = [f for f in before_files if is_under(f, c.path)]
+                if inside and all(any(is_under(f, o) for o in self.own) for f in inside):
+                    continue
             if any(fnmatch.fnmatch(c.path, pat) for pat in self.ignore):
                 continue
             if any(is_under(c.path, o) for o in self.own):
