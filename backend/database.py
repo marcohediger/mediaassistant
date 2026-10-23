@@ -3,7 +3,7 @@ import os
 import re
 import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from models import Base, Module, InboxDirectory, FILE_OPS_GUARDS
+from models import Base, Module, InboxDirectory, FILE_OPS_GUARDS, MODULE_CODES, MODULE_RUNS_GUARDS, RUN_RESULT_STATUSES
 
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")
 
@@ -140,6 +140,8 @@ async def _migrate_columns(conn):
 
     await _rebuild_library_categories(conn)
     await _jobs_autoincrement(conn)
+    await _register_autoincrement(conn)
+    await _migrate_module_runs(conn)
 
 
 async def _jobs_autoincrement(conn):
@@ -147,47 +149,162 @@ async def _jobs_autoincrement(conn):
 
     Without it SQLite hands the id of the newest deleted job to the next new
     job, which then inherits the deleted job's register, reference and ledger
-    rows -- it could "own" copies of another file. SQLite cannot add
-    AUTOINCREMENT in place, so the table is rebuilt with every row, id and
-    index kept. The sequence starts above the highest job id any table has
-    seen, so an id already reused by the ledger cannot come back either.
+    rows -- it could "own" copies of another file. The sequence starts above
+    the highest job id any table has seen, so an id already reused by the
+    ledger cannot come back either.
+    """
+    await _ensure_autoincrement(conn, "jobs", referencing=[
+        ("file_ops", "job_id"), ("file_copies", "job_id"), ("asset_refs", "job_id"), ("module_runs", "job_id")])
+
+
+async def _register_autoincrement(conn):
+    """The same for the register, the references and the module runs, once.
+
+    The ledger points at register rows (file_ops.copy_id / dst_copy_id) and
+    module runs at each other (copied_from_run_id) and are pointed at by
+    the ledger (file_ops.run_id). A reused id would make a ledger row speak
+    about another file's copy — e.g. the trash reason job_view shows.
+    Production never deletes these rows; test cleanups did.
+    """
+    await _ensure_autoincrement(conn, "file_copies", referencing=[("file_ops", "copy_id"), ("file_ops", "dst_copy_id")])
+    await _ensure_autoincrement(conn, "asset_refs")
+    await _ensure_autoincrement(conn, "module_runs", referencing=[
+        ("module_runs", "copied_from_run_id"), ("file_ops", "run_id")])
+
+
+async def _ensure_autoincrement(conn, table: str, referencing=()):
+    """Give `table`.id AUTOINCREMENT, once.
+
+    SQLite cannot add AUTOINCREMENT in place, so the table is rebuilt with
+    every row, id, index and trigger kept, and the row count is checked. The
+    sequence starts above the highest id ever seen: the table's own and
+    every id the (table, column) pairs in `referencing` point at (tables
+    that do not exist yet are skipped). A missing table, or one that has
+    AUTOINCREMENT already, is left alone.
     """
     t = sqlalchemy.text
     sql = (await conn.execute(t(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"))).scalar()
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=:name"), {"name": table})).scalar()
     if not sql or "AUTOINCREMENT" in sql.upper():
         return
     new_sql = re.sub(r"\bid INTEGER NOT NULL,", "id INTEGER PRIMARY KEY AUTOINCREMENT,", sql, count=1)
     new_sql = re.sub(r",\s*PRIMARY KEY \(id\)", "", new_sql, count=1)
-    if new_sql == sql or "PRIMARY KEY (id)" in new_sql or "AUTOINCREMENT" not in new_sql:
-        raise RuntimeError("jobs: unexpected schema, AUTOINCREMENT migration aborted")
-    new_sql = new_sql.replace("CREATE TABLE jobs", "CREATE TABLE jobs_new", 1)
+    renamed = re.sub(rf'^CREATE TABLE\s+"?{re.escape(table)}"?(?=\s*\()', f"CREATE TABLE {table}_new", new_sql, count=1)
+    if new_sql == sql or "PRIMARY KEY (id)" in new_sql or "AUTOINCREMENT" not in new_sql or renamed == new_sql:
+        raise RuntimeError(f"{table}: unexpected schema, AUTOINCREMENT migration aborted")
 
-    index_sqls = [r[0] for r in (await conn.execute(t(
-        "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='jobs' AND sql IS NOT NULL"))).all()]
-    columns = ", ".join(f'"{r[1]}"' for r in (await conn.execute(t("PRAGMA table_info(jobs)"))).all())
+    companions = [r[0] for r in (await conn.execute(t(
+        "SELECT sql FROM sqlite_master WHERE type IN ('index', 'trigger') AND tbl_name=:name AND sql IS NOT NULL "
+        "ORDER BY type"), {"name": table})).all()]
+    columns = ", ".join(f'"{r[1]}"' for r in (await conn.execute(t(f'PRAGMA table_info("{table}")'))).all())
     tables = {r[0] for r in (await conn.execute(t("SELECT name FROM sqlite_master WHERE type='table'"))).all()}
-    high = (await conn.execute(t("SELECT COALESCE(MAX(id), 0) FROM jobs"))).scalar()
-    for table in ("file_ops", "file_copies", "asset_refs"):
-        if table in tables:
-            high = max(high, (await conn.execute(t(f"SELECT COALESCE(MAX(job_id), 0) FROM {table}"))).scalar())
-    count = (await conn.execute(t("SELECT COUNT(*) FROM jobs"))).scalar()
+    high = (await conn.execute(t(f'SELECT COALESCE(MAX(id), 0) FROM "{table}"'))).scalar()
+    for other, column in referencing:
+        if other in tables:
+            high = max(high, (await conn.execute(t(f'SELECT COALESCE(MAX("{column}"), 0) FROM "{other}"'))).scalar())
+    count = (await conn.execute(t(f'SELECT COUNT(*) FROM "{table}"'))).scalar()
     log = logging.getLogger("mediaassistant.database")
     # The DB log table is not usable inside this startup transaction.
-    log.warning("Umbau der Tabelle jobs (IDs nie wiederverwenden, R-26): %d Jobs, einmalig", count)
+    log.warning("Umbau der Tabelle %s (IDs nie wiederverwenden, R-26): %d Zeilen, einmalig", table, count)
 
-    await conn.execute(t(new_sql))
-    await conn.execute(t(f"INSERT INTO jobs_new ({columns}) SELECT {columns} FROM jobs"))
-    copied = (await conn.execute(t("SELECT COUNT(*) FROM jobs_new"))).scalar()
+    await conn.execute(t(renamed))
+    await conn.execute(t(f'INSERT INTO {table}_new ({columns}) SELECT {columns} FROM "{table}"'))
+    copied = (await conn.execute(t(f"SELECT COUNT(*) FROM {table}_new"))).scalar()
     if copied != count:
-        raise RuntimeError(f"jobs: copied {copied} of {count} rows, AUTOINCREMENT migration aborted")
-    await conn.execute(t("DROP TABLE jobs"))
-    await conn.execute(t("ALTER TABLE jobs_new RENAME TO jobs"))
-    for index_sql in index_sqls:
-        await conn.execute(t(index_sql))
-    await conn.execute(t("DELETE FROM sqlite_sequence WHERE name = 'jobs'"))
-    await conn.execute(t("INSERT INTO sqlite_sequence (name, seq) VALUES ('jobs', :seq)"), {"seq": high})
-    log.warning("Umbau der Tabelle jobs abgeschlossen: %d Jobs, nächste ID über %d", copied, high)
+        raise RuntimeError(f"{table}: copied {copied} of {count} rows, AUTOINCREMENT migration aborted")
+    await conn.execute(t(f'DROP TABLE "{table}"'))
+    await conn.execute(t(f'ALTER TABLE {table}_new RENAME TO "{table}"'))
+    for companion in companions:
+        await conn.execute(t(companion))
+    await conn.execute(t("DELETE FROM sqlite_sequence WHERE name = :name"), {"name": table})
+    await conn.execute(t("INSERT INTO sqlite_sequence (name, seq) VALUES (:name, :seq)"), {"name": table, "seq": high})
+    log.warning("Umbau der Tabelle %s abgeschlossen: %d Zeilen, nächste ID über %d", table, copied, high)
+
+
+async def _migrate_module_runs(conn) -> dict | None:
+    """Take the module results in jobs.step_result over into module_runs,
+    once (rebuild step 3, docs/UMBAU_MODULE.md; runs.py writes from then on).
+
+    Every entry IA-01 … IA-11 becomes a finished run, trigger 'migrated',
+    attempt 1 (earlier runs were overwritten and cannot be recovered):
+    status from the result, finished at the job's completed_at or
+    updated_at. The other keys become job values (jobs.job_data): run
+    parameters ("_…") only while the job's run is not over (queued,
+    processing) — in a finished job they are leftovers and are dropped, as
+    run_pipeline drops them at the end of a run (R-12) — and the duplicate
+    plan and merge record always. step_result is rewritten only for the
+    jobs that lost a key; for every other job it already is the view.
+
+    Runs when jobs.job_data is added, inside the startup transaction: one
+    INSERT … SELECT over json_each, then the few jobs with other keys. The
+    guards are (re)created on every start. Returns counts, None if done before.
+    """
+    import json
+    import time
+    t = sqlalchemy.text
+    for sql in MODULE_RUNS_GUARDS:
+        await conn.execute(t(sql))
+    columns = {r[1] for r in (await conn.execute(t("PRAGMA table_info(jobs)"))).all()}
+    if "job_data" in columns:
+        return None
+    log = logging.getLogger("mediaassistant.database")
+    started = time.monotonic()
+    await conn.execute(t("ALTER TABLE jobs ADD COLUMN job_data JSON"))
+    modules = ", ".join(f"'{m}'" for m in MODULE_CODES)
+    statuses = ", ".join(f"'{s}'" for s in RUN_RESULT_STATUSES)
+    is_object = "j.step_result IS NOT NULL AND json_valid(j.step_result) AND json_type(j.step_result) = 'object'"
+    jobs = (await conn.execute(t(f"SELECT COUNT(*) FROM jobs j WHERE {is_object} AND j.step_result <> '{{}}'"))).scalar()
+    # The DB log table is not usable inside this startup transaction.
+    log.warning("Übernahme der Modul-Ergebnisse in module_runs (einmalig): %d Jobs mit step_result", jobs)
+
+    # Same rules as runs.result_status / runs.result_error.
+    status = (f"CASE WHEN e.type = 'object' AND json_extract(e.value, '$.status') IN ({statuses}) "
+              "THEN json_extract(e.value, '$.status') "
+              "WHEN e.type = 'object' AND json_extract(e.value, '$._skipped') THEN 'skipped' ELSE 'ok' END")
+    inserted = (await conn.execute(t(f"""
+        INSERT INTO module_runs (job_id, module, attempt, "trigger", status, result, error, finished_at)
+        SELECT j.id, e.key, 1, 'migrated', {status},
+               CASE e.type WHEN 'object' THEN e.value WHEN 'array' THEN e.value WHEN 'null' THEN 'null'
+                    WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_quote(e.value) END,
+               CASE WHEN e.type = 'object' AND json_extract(e.value, '$.status') IN ('error', 'warning')
+                    THEN NULLIF(COALESCE(json_extract(e.value, '$.reason'), '')
+                                || CASE WHEN json_extract(e.value, '$.reason') IS NOT NULL
+                                         AND json_extract(e.value, '$.traceback') IS NOT NULL
+                                        THEN char(10) || char(10) ELSE '' END
+                                || COALESCE(json_extract(e.value, '$.traceback'), ''), '') END,
+               COALESCE(j.completed_at, j.updated_at)
+        FROM jobs j, json_each(j.step_result) e
+        WHERE {is_object} AND e.key IN ({modules})
+          AND NOT EXISTS (SELECT 1 FROM module_runs r WHERE r.job_id = j.id AND r.module = e.key)
+        ORDER BY j.id"""))).rowcount
+
+    kept = dropped = other = 0
+    rows = (await conn.execute(t(
+        f"SELECT j.id, j.status, j.step_result FROM jobs j WHERE {is_object} AND EXISTS "
+        f"(SELECT 1 FROM json_each(j.step_result) e WHERE e.key NOT IN ({modules}))"))).all()
+    for job_id, job_status, raw in rows:
+        step_result = json.loads(raw)
+        values = {}
+        for key, value in step_result.items():
+            if key in MODULE_CODES:
+                continue
+            if key.startswith("_") and job_status not in ("queued", "processing"):
+                dropped += 1
+                continue
+            values[key] = value
+            if key.startswith("_"):
+                kept += 1
+            else:
+                other += 1
+        view = {k: v for k, v in step_result.items() if k in MODULE_CODES or k in values}
+        await conn.execute(t("UPDATE jobs SET job_data = :data, step_result = :view WHERE id = :id"),
+                           {"data": json.dumps(values), "view": json.dumps(view), "id": job_id})
+    counts = {"jobs": jobs, "runs": inserted, "params_kept": kept, "params_dropped": dropped,
+              "values": other, "seconds": round(time.monotonic() - started, 1)}
+    log.warning("Übernahme in module_runs abgeschlossen: %d Läufe aus %d Jobs; Laufparameter %d übernommen, "
+                "%d verworfen (Job beendet); %d weitere Job-Werte; %.1f s",
+                inserted, jobs, kept, dropped, other, counts["seconds"])
+    return counts
 
 
 async def _rebuild_library_categories(conn):

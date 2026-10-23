@@ -2,21 +2,27 @@
 
 Every template and script that shows a job's modules reads ``module_blocks()``
 (directly, or through the JSON endpoints in routers/history.py) and never
-``jobs.step_result`` itself. Step 3 of the rebuild (docs/UMBAU_MODULE.md,
-table ``module_runs``) switches only this module from step_result to the runs;
-the output stays the same:
+``jobs.step_result`` itself. With the job's module runs (``job_runs()``,
+table ``module_runs``) the blocks come from the runs; without them (the
+server-rendered strip and bar) from the derived view step_result, which
+gives the same status and detail:
 
-    module_blocks(job, t) -> list of dicts, in module order (IA-09 only when it
-    mailed something or failed, see step_visible):
+    module_blocks(job, t, runs=None) -> list of dicts, in module order (IA-09
+    only when it mailed something or failed, see step_visible):
         module        "IA-01" … "IA-11"
         label         translated module name (i18n "steps")
         status        ok | running | warning | error | skipped | duplicate |
-                      dry_run | not_run   (later also queued, superseded)
+                      dry_run | not_run | queued
         status_label  translated status
         tone, icon    design-system tone class (is-success …) and sprite icon
         detail        one short line (reason, target, counts), may be ""
-        duration_s    seconds, None while unknown (step_result has no timing)
-        attempts      number of runs, None while unknown
+        duration_s    seconds of the current run, None while unknown
+        attempts      number of runs, None without runs
+        trigger, trigger_label   how the current run came about (None without runs)
+        earlier       the earlier attempts, oldest first (empty without runs):
+                      attempt, trigger(_label), status(_label), tone, icon —
+                      the outcome the attempt had —, started_at, finished_at,
+                      duration_s, error (first line), copied_from_run_id
 
 The ledger (file_ops) and register (file_copies, asset_refs) are only read
 here; every change goes through fileops.py.
@@ -38,7 +44,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 from sqlalchemy import func, or_, select
 
 from database import async_session
-from models import AssetRef, FileCopy, FileOp, Job, ProcessingSet
+from models import AssetRef, FileCopy, FileOp, Job, ModuleRun, ProcessingSet, RUN_RESULT_STATUSES
 
 MODULES = tuple(f"IA-{n:02d}" for n in range(1, 12))
 # A failure in these modules fails the job; elsewhere it only warns
@@ -57,6 +63,7 @@ STATUS_TONES = {
     "not_run": ("is-neutral", "circle"),
     "queued": ("is-neutral", "clock"),
     "superseded": ("is-neutral", "circle"),
+    "interrupted": ("is-neutral", "x-circle"),
 }
 
 OP_ICONS = {
@@ -222,29 +229,125 @@ def step_visible(code: str, result) -> bool:
     return isinstance(result, dict) and (bool(result.get("sent")) or result.get("status") == "error")
 
 
-def module_blocks(job, t: dict | None = None) -> list[dict]:
-    """The modules of `job` as blocks (see the module docstring)."""
+def _result_tone(code: str, run_status: str) -> str:
+    """Block status of a finished run: a failure outside the critical
+    modules only warns, like in the pipeline."""
+    if run_status == "error":
+        return "error" if code in CRITICAL else "warning"
+    return run_status if run_status in STATUS_TONES else "ok"
+
+
+def _duration(run) -> float | None:
+    if run is None or run.started_at is None or run.finished_at is None:
+        return None
+    return round(max((run.finished_at - run.started_at).total_seconds(), 0.0), 1)
+
+
+def _outcome(code: str, run) -> str:
+    """What an attempt came to: the status its result stands for, also once
+    superseded; 'interrupted' for one superseded while it ran."""
+    if run.status in RUN_RESULT_STATUSES:
+        return _result_tone(code, run.status)
+    if run.status != "superseded":
+        return run.status  # queued, running
+    if run.result is None:
+        return "interrupted" if run.started_at is not None else "not_run"
+    import runs as _runs  # runs.py writes; only its status rule is used here
+    return _result_tone(code, _runs.result_status(run.result))
+
+
+def _attempt_entry(code: str, run, h: dict) -> dict:
+    status = _outcome(code, run)
+    tone, icon = STATUS_TONES[status]
+    return {
+        "id": run.id,
+        "attempt": run.attempt,
+        "trigger": run.trigger,
+        "trigger_label": h.get(f"trigger_{run.trigger}", run.trigger),
+        "status": status,
+        "status_label": h.get(f"status_{status}", status),
+        "tone": tone,
+        "icon": icon,
+        "superseded": run.status == "superseded",
+        "started_at": stamp(run.started_at),
+        "finished_at": stamp(run.finished_at),
+        "duration_s": _duration(run),
+        "error": _first_line(run.error, 240),
+        "copied_from_run_id": run.copied_from_run_id,
+    }
+
+
+def _block(code: str, status: str, result, h: dict, steps: dict) -> dict:
+    tone, icon = STATUS_TONES[status]
+    return {
+        "module": code,
+        "label": steps.get(code, code),
+        "status": status,
+        "status_label": h.get(f"status_{status}", status),
+        "tone": tone,
+        "icon": icon,
+        "detail": _detail_of(code, status, result, h),
+        "duration_s": None,
+        "attempts": None,
+        "trigger": None,
+        "trigger_label": None,
+        "earlier": [],
+    }
+
+
+def module_blocks(job, t: dict | None = None, runs=None) -> list[dict]:
+    """The modules of `job` as blocks (see the module docstring); `runs`:
+    all module runs of the job (job_runs), else the step_result view."""
     t = t or {}
     h, steps = _h(t), t.get("steps", {})
-    results = job.step_result if isinstance(job.step_result, dict) else {}
+    if runs is None:
+        results = job.step_result if isinstance(job.step_result, dict) else {}
+        return [_block(code, _status_of(job, code, results), results.get(code), h, steps)
+                for code in MODULES if step_visible(code, results.get(code))]
+
+    by_module: dict[str, list] = {}
+    for run in sorted(runs, key=lambda r: r.id):
+        by_module.setdefault(run.module, []).append(run)
     blocks = []
     for code in MODULES:
-        if not step_visible(code, results.get(code)):
+        mod_runs = by_module.get(code, [])
+        current = next((r for r in reversed(mod_runs) if r.status != "superseded"), None)
+        finished = current is not None and current.status in RUN_RESULT_STATUSES
+        result = current.result if finished else None
+        if not step_visible(code, result):
             continue
-        status = _status_of(job, code, results)
-        tone, icon = STATUS_TONES[status]
-        blocks.append({
-            "module": code,
-            "label": steps.get(code, code),
-            "status": status,
-            "status_label": h.get(f"status_{status}", status),
-            "tone": tone,
-            "icon": icon,
-            "detail": _detail_of(code, status, results.get(code), h),
-            "duration_s": None,
-            "attempts": None,
-        })
+        if current is None:
+            status = "running" if job.status == "processing" and job.current_step == code else "not_run"
+        elif finished:
+            status = _result_tone(code, current.status)
+        else:
+            status = current.status  # running or queued
+        block = _block(code, status, result, h, steps)
+        block.update(
+            duration_s=_duration(current) if finished else None,
+            attempts=len(mod_runs),
+            trigger=current.trigger if current is not None else None,
+            trigger_label=h.get(f"trigger_{current.trigger}", current.trigger) if current is not None else None,
+            earlier=[_attempt_entry(code, r, h) for r in mod_runs if r is not current],
+        )
+        blocks.append(block)
     return blocks
+
+
+async def job_runs(job_ids) -> dict[int, list]:
+    """{job id: its module runs, oldest first} — read only."""
+    ids = list(dict.fromkeys(job_ids))
+    out: dict[int, list] = {job_id: [] for job_id in ids}
+    if not ids:
+        return out
+    async with async_session() as session:
+        for i in range(0, len(ids), 500):
+            rows = (await session.execute(
+                select(ModuleRun).where(ModuleRun.job_id.in_(ids[i:i + 500])).order_by(ModuleRun.id)
+            )).scalars().all()
+            for run in rows:
+                out[run.job_id].append(run)
+    return out
 
 
 def strip_summary(blocks: list[dict], t: dict | None = None) -> str:

@@ -17,6 +17,7 @@ from sqlalchemy import select, update
 
 import fileops
 import immich_client
+import runs
 from config import config_manager
 from database import async_session
 from inputs.common import needs_immich_download
@@ -127,7 +128,8 @@ async def fetch_immich_source(job_id: int) -> bool:
                 skip_reason = f"gleicher Inhalt bereits verarbeitet ({earlier})"
                 job.status = "skipped"
                 job.file_hash = digest
-                job.step_result = {"IA-08": {"status": "skipped", "reason": skip_reason}}
+                await runs.apply(session, job, {"IA-08": {"status": "skipped", "reason": skip_reason}},
+                                 trigger=None, keep_open=False)
                 job.completed_at = datetime.now()
             else:
                 job.original_path = path
@@ -215,13 +217,16 @@ async def _requeue_or_fail(row, cutoff: datetime | None) -> None:
         values = dict(status="error", error_message=(
             f"Stale bei {row.current_step} — Quelldatei nicht mehr vorhanden: {row.original_path}"))
     else:
-        sr.pop(row.current_step, None)  # the stuck step re-runs from scratch
-        values = dict(status="queued", retry_count=retry, step_result=sr)
+        values = dict(status="queued", retry_count=retry)
     query = update(Job).where(Job.id == row.id, Job.status == "processing")
     if cutoff is not None:
         query = query.where(Job.updated_at < cutoff)
     async with async_session() as session:
         res = await session.execute(query.values(**values))
+        if res.rowcount == 1 and values["status"] == "queued" and row.current_step in runs.MODULES:
+            # The stuck step re-runs from scratch: its run is superseded.
+            await runs.supersede(session, await session.get(Job, row.id), [row.current_step],
+                                 reason="hing (Watchdog)")
         await session.commit()
     if res.rowcount != 1:
         return

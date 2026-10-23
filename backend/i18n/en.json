@@ -1257,6 +1257,18 @@
     "labels_album_new": "new",
     "labels_album_new_title": "Album was created for this",
     "labels_tags_empty": "No tags written.",
-    "labels_planned": "planned (dry run)"
+    "labels_planned": "planned (dry run)",
+    "status_interrupted": "Interrupted",
+    "attempt_label": "Attempt {n}",
+    "attempts_one": "1 earlier attempt",
+    "attempts_many": "{n} earlier attempts",
+    "attempt_replaced": "replaced",
+    "attempts_title": "Attempts",
+    "trigger_pipeline": "Processing",
+    "trigger_retry": "Retry",
+    "trigger_rerun": "Manual",
+    "trigger_cascade": "Follow-up",
+    "trigger_copied": "Copied",
+    "trigger_migrated": "From old data"
   }
 }

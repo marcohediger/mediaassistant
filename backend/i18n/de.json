@@ -1257,6 +1257,18 @@
     "labels_album_new": "neu",
     "labels_album_new_title": "Album wurde dafür neu angelegt",
     "labels_tags_empty": "Keine Tags geschrieben.",
-    "labels_planned": "geplant (Probelauf)"
+    "labels_planned": "geplant (Probelauf)",
+    "status_interrupted": "Unterbrochen",
+    "attempt_label": "Versuch {n}",
+    "attempts_one": "1 früherer Versuch",
+    "attempts_many": "{n} frühere Versuche",
+    "attempt_replaced": "ersetzt",
+    "attempts_title": "Versuche",
+    "trigger_pipeline": "Verarbeitung",
+    "trigger_retry": "Wiederholung",
+    "trigger_rerun": "Von Hand",
+    "trigger_cascade": "Folgelauf",
+    "trigger_copied": "Übernommen",
+    "trigger_migrated": "Aus Altbestand"
   }
 }

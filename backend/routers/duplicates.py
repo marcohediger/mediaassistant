@@ -15,9 +15,9 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy import or_, select, update
-from sqlalchemy.orm.attributes import flag_modified
 
 import fileops
+import runs
 from config import config_manager
 from database import async_session
 from file_operations import (
@@ -795,9 +795,8 @@ def _without_plan(step_result) -> dict:
     return sr
 
 
-def _drop_plan(job) -> None:
-    job.step_result = _without_plan(job.step_result)
-    flag_modified(job, "step_result")
+async def _drop_plan(session, job) -> None:
+    await runs.set_values(session, job, {PLAN_KEY: None})
 
 
 async def _claim_group(kept_id: int, member_ids: list[int], *, source: str, user_kept: bool,
@@ -855,10 +854,7 @@ async def _claim_group(kept_id: int, member_ids: list[int], *, source: str, user
         claimed = (await session.execute(select(Job).where(Job.id.in_(list(seen)))
                                          .execution_options(populate_existing=True))).scalars().all()
         for job in claimed:
-            sr = dict(job.step_result or {})
-            sr[PLAN_KEY] = plan
-            job.step_result = sr
-            flag_modified(job, "step_result")
+            await runs.set_values(session, job, {PLAN_KEY: plan})
         await session.commit()
     _ACTIVE.update(seen)
     return {j.id: j for j in claimed}, plan, None
@@ -871,7 +867,7 @@ async def _release(plan: dict, job_ids) -> None:
             if job.status != RESOLVING or ((job.step_result or {}).get(PLAN_KEY) or {}).get("id") != plan["id"]:
                 continue
             job.status = plan["prev"].get(str(job.id), "duplicate")
-            _drop_plan(job)
+            await _drop_plan(session, job)
         await session.commit()
 
 
@@ -1019,6 +1015,19 @@ async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _
             ia02_skip[key] = ia02[key]
     return _Merge(sr, notes, keywords, taken, description, own_description, donor_albums,
                   analysis_donor, ia02_skip)
+
+
+async def _source_runs(session, results: dict, donors) -> dict[str, int]:
+    """{module: the donor's run} for results marked copied_from=<donor key>."""
+    by_key = {d.debug_key: d for d in donors}
+    sources = {}
+    for code, result in results.items():
+        donor = by_key.get(result.get("copied_from")) if isinstance(result, dict) else None
+        if donor is not None and code in runs.MODULES:
+            run = await runs.current(session, donor.id, code)
+            if run is not None:
+                sources[code] = run.id
+    return sources
 
 
 def _promotion_step_result(merge: _Merge) -> tuple[dict, set]:
@@ -1386,16 +1395,20 @@ async def _carry_out(members: dict, plan: dict, *, source: str, user_kept: bool)
         promoted_ok = True
         if kept_prev == "duplicate":
             step_result, keep_steps = _promotion_step_result(merge)
-            job.step_result = step_result
-            flag_modified(job, "step_result")
             if promoted:
                 job.immich_asset_id = promoted
             run_params = {"_force_reupload": True} if job.immich_asset_id else None
             # fileops writes in sessions of its own: nothing may be flushed here yet.
             with session.no_autoflush:
+                # What the kept job takes over becomes runs of its own
+                # (trigger 'copied', the donor's run as the source), written
+                # once its file is in place.
+                taken = {k: v for k, v in step_result.items() if k in keep_steps}
+                sources = await _source_runs(session, taken, donors)
                 promoted_ok = await prepare_job_for_reprocess(
-                    session, job, keep_steps=keep_steps, inject_steps={"IA-02": merge.ia02_skip},
-                    run_params=run_params, move_file=True, commit=False, actor=actor)
+                    session, job, keep_steps=keep_steps, inject_steps=taken,
+                    run_params=run_params, move_file=True, commit=False, actor=actor,
+                    inject_trigger="copied", inject_sources=sources)
             if promoted_ok:
                 job.error_message = f"Promoted ({source})"
                 if merge.analysis_donor is not None:
@@ -1405,15 +1418,15 @@ async def _carry_out(members: dict, plan: dict, *, source: str, user_kept: bool)
             else:
                 # Nothing moved: the job stays a visible duplicate, ready for another try.
                 job.status = "duplicate"
-                job.step_result = _without_plan(kept.step_result)
+                await _drop_plan(session, job)
                 job.target_path = kept.target_path
                 job.original_path = kept.original_path
                 job.error_message = ("Behalten, aber die Datei konnte nicht für die Verarbeitung bereitgestellt "
                                      "werden — bitte erneut behalten")
                 problems.append(_problem("kept_not_moved", job.error_message, name=kept.filename))
         else:
-            job.step_result = merge.step_result
-            flag_modified(job, "step_result")
+            await runs.apply(session, job, merge.step_result, trigger="copied",
+                             sources=await _source_runs(session, merge.step_result, donors))
             job.status = kept_prev
             if kept_prev == "error":
                 job.error_message = ((kept.error_message or "").rstrip()
@@ -1426,7 +1439,7 @@ async def _carry_out(members: dict, plan: dict, *, source: str, user_kept: bool)
             row = rows.get(donor.id)
             if row is None:
                 continue
-            _drop_plan(row)
+            await _drop_plan(session, row)
             if out["ok"]:
                 row.status = "deleted"
                 row.error_message = f"Duplicate deleted ({source}). Kept: {kept.debug_key}"
@@ -1584,8 +1597,7 @@ async def _claim_single(job, action: str) -> dict | None:
             await session.rollback()
             return None
         row = await session.get(Job, job.id)
-        row.step_result = dict(row.step_result or {}, **{PLAN_KEY: plan})
-        flag_modified(row, "step_result")
+        await runs.set_values(session, row, {PLAN_KEY: plan})
         await session.commit()
     _ACTIVE.add(job.id)
     return plan
@@ -1631,8 +1643,7 @@ async def not_duplicate(request: Request):
                 # No copy of the file anywhere: it stays a visible duplicate (D7).
                 row.status = "duplicate"
                 row.target_path = job.target_path
-                row.step_result = _without_plan(job.step_result)
-                flag_modified(row, "step_result")
+                await _drop_plan(session, row)
                 row.error_message = "Kein Duplikat: Datei nicht auffindbar — nichts geändert"
             await session.commit()
     finally:
@@ -1684,7 +1695,7 @@ async def delete_duplicate(request: Request):
                 out["notes"].append(f"{os.path.basename(row.location)}: {exc}")
         async with async_session() as session:
             row = await session.get(Job, job.id)
-            _drop_plan(row)
+            await _drop_plan(session, row)
             if out["ok"]:
                 row.status = "deleted"
                 row.error_message = "Duplicate deleted (manually)"

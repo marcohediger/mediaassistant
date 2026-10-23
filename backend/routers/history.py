@@ -93,7 +93,7 @@ async def job_history(debug_key: str):
     if job is None:
         return JSONResponse({"error": "not_found"}, status_code=404)
     t = await _t()
-    blocks = job_view.module_blocks(job, t)
+    blocks = job_view.module_blocks(job, t, runs=(await job_view.job_runs([job.id]))[job.id])
     return {
         "debug_key": job.debug_key,
         "filename": job.filename,
@@ -117,9 +117,10 @@ async def modules_of(keys: str = ""):
     t = await _t()
     async with async_session() as session:
         jobs = (await session.execute(select(Job).where(Job.debug_key.in_(wanted)))).scalars().all()
+    runs = await job_view.job_runs([job.id for job in jobs])
     out = {}
     for job in jobs:
-        blocks = job_view.module_blocks(job, t)
+        blocks = job_view.module_blocks(job, t, runs=runs[job.id])
         out[job.debug_key] = {"signature": job_view.job_signature(job), "modules": blocks,
                               "summary": job_view.strip_summary(blocks, t)}
     return {"jobs": out}

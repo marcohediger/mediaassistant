@@ -20,16 +20,19 @@ All of them share the same steps:
    `.xmp` sidecar travels along, the `.log` of the previous run is
    dropped), an Immich asset is downloaded into a work copy of its own
    (R-03).
-3. Reset `step_result` (keep / drop / inject policies; the run
-   parameters of the previous run are always dropped), flip the job to
-   `status='queued'`. The pipeline worker takes over from there.
+3. Reset the module results (keep / drop / inject policies; the run
+   parameters of the previous run are always dropped): the runs of the
+   dropped modules are superseded, injected results become runs of their
+   own (runs.py), and the job goes to `status='queued'`. The pipeline
+   worker takes over from there.
 
 Run parameters are control values for exactly one pipeline run (e.g.
 `_force_reupload` from the duplicate review, `_retry_previous_immich_tags`
-from a retry). They are stored in `step_result` under keys starting with
-an underscore, read by steps through `pipeline.run_params(job)`, survive a
-crash of that run (the resumed run gets them again) and are removed by
-run_pipeline when the run ends. Every reset here drops the old ones.
+from a retry). They are job values (jobs.job_data, shown in `step_result`)
+under keys starting with an underscore, read by steps through
+`pipeline.run_params(job)`, survive a crash of that run (the resumed run
+gets them again) and are removed by run_pipeline when the run ends. Every
+reset here drops the old ones.
 """
 
 import asyncio
@@ -38,9 +41,9 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm.attributes import flag_modified
 
 import fileops
+import runs
 from database import async_session
 from file_operations import sha256 as _sha256
 from models import AssetRef, FileCopy, FileOp, Job
@@ -434,18 +437,25 @@ async def materialize(job, source: Source, *, actor: str = ACTOR) -> tuple[str, 
 def point_job_at(job, path: str, sidecar: str | None) -> None:
     """The job's file now lies at `path` (in REPROCESS_DIR). A local
     target_path is stale now; an `immich:<id>` reference stays so the job
-    remains linked to its Immich data."""
+    remains linked to its Immich data. (A kept IA-07 that names the moved
+    sidecar is updated by prepare_job_for_reprocess.)"""
     job.original_path = path
     if not _is_immich_target(job.target_path):
         job.target_path = None
-    if sidecar:
-        # A step that is kept (not re-run) still points at the old sidecar.
-        sr = dict(job.step_result or {})
-        ia07 = sr.get("IA-07")
-        if isinstance(ia07, dict) and ia07.get("sidecar_path"):
-            sr["IA-07"] = dict(ia07, sidecar_path=sidecar)
-            job.step_result = sr
-            flag_modified(job, "step_result")
+
+
+async def _follow_sidecar(session, job, sidecar: str | None) -> None:
+    """A kept (not re-run) IA-07 still names the sidecar's old place: its
+    result is carried on in a new run that names the new one."""
+    if not sidecar:
+        return
+    ia07 = await runs.current(session, job.id, "IA-07")
+    if ia07 is None or not runs.is_done(ia07) or not isinstance(ia07.result, dict) \
+            or not ia07.result.get("sidecar_path"):
+        return
+    await runs.record(session, job, "IA-07", dict(ia07.result, sidecar_path=sidecar), trigger="retry",
+                      copied_from_run_id=ia07.id, error=ia07.error, params=ia07.params,
+                      started_at=ia07.started_at, finished_at=ia07.finished_at)
 
 
 def missing_source_message(notes: list[str]) -> str:
@@ -478,10 +488,7 @@ async def resume_prepare_source(session, job, *, actor: str = ACTOR) -> tuple[bo
     except fileops.FileOpError as exc:
         return False, notes + [str(exc)]
     point_job_at(job, path, sidecar)
-    sr = dict(job.step_result or {})
-    sr.pop(PREPARE_SOURCE, None)
-    job.step_result = sr
-    flag_modified(job, "step_result")
+    await runs.set_values(session, job, {PREPARE_SOURCE: None})
     await session.commit()
     await log_info("reprocess", f"{job.debug_key} unterbrochenen Retry fortgesetzt",
                    f"Quelle {source.location} → {path}")
@@ -496,7 +503,8 @@ _PIPELINE_ORDER = [
 ]
 
 
-def _reset_step_results(
+async def _reset_step_results(
+    session,
     job,
     *,
     keep_steps: set[str] | None,
@@ -504,31 +512,45 @@ def _reset_step_results(
     drop_step_codes: set[str] | None = None,
     inject_steps: dict[str, dict] | None,
     run_params: dict | None = None,
-) -> None:
-    """Apply the chosen step_result reset policy in-place on `job`.
+    inject_trigger: str = "rerun",
+    inject_sources: dict[str, int] | None = None,
+) -> list:
+    """Apply the chosen reset policy to `job`'s module runs (runs.py).
 
     Policies (combinable, applied in order):
     - The previous run's parameters (keys starting with "_") are always
       dropped: a reset starts a new run, which gets only what the caller
       passes (R-12: a leaked _force_reupload used to survive every retry).
-    - keep_steps: if set, keep ONLY these step codes (drop everything else)
+    - keep_steps: if set, keep ONLY these step codes (and job values) —
+      everything else is dropped
     - drop_step_statuses: drop step codes whose result has one of these
       statuses (e.g. {"error", "warning"} for retry of soft failures).
     - drop_step_codes: drop these step codes regardless of status — used
       to act on `error_message="Warnungen in: IA-XX"` even when the cached
       step_result no longer carries the warning status. Live-Vorfall
       MA-2026-28121 vor v2.28.35.
-    - inject_steps: merge these synthetic step results in last (e.g.
-      {"IA-02": {"status": "skipped", "reason": "..."}}); keys starting
-      with "_" are run parameters, like run_params.
+    - inject_steps: these results are set last (e.g.
+      {"IA-02": {"status": "skipped", "reason": "..."}}), each as a run of
+      its own with `inject_trigger` ('rerun' = set by a user action,
+      'copied' = taken over from another job) and the source run from
+      `inject_sources`; keys starting with "_" are run parameters, like
+      run_params, other keys job values.
     - run_params: parameters for the next run (e.g. {"_force_reupload": True}).
+
+    A dropped module's current run is superseded (it stays in the history);
+    a kept one stays current.
 
     **Cascade**: when ANY step is dropped (via either status or explicit
     code), every step that runs *after* it in the pipeline order is
     dropped too. Otherwise the cached downstream results would still
     reflect the OLD output of the dropped step. Live-Vorfälle MA-2026-28111
     (v2.28.33), MA-2026-28121 (v2.28.35).
+
+    Does not commit. Returns snapshots of the runs that were current before
+    and are not any more (for runs.restore).
     """
+    await runs.adopt(session, job)
+    before = {m: runs.snapshot(r) for m, r in (await runs.current_runs(session, job.id)).items()}
     current = {k: v for k, v in (job.step_result or {}).items() if not is_run_param(k)}
 
     if keep_steps is not None:
@@ -560,8 +582,9 @@ def _reset_step_results(
     if run_params:
         current.update(run_params)
 
-    job.step_result = current
-    flag_modified(job, "step_result")
+    await runs.apply(session, job, current, trigger=inject_trigger, sources=inject_sources, keep_open=False)
+    after = await runs.current_runs(session, job.id)
+    return [run for module, run in before.items() if module not in after or after[module].id != run.id]
 
 
 async def prepare_job_for_reprocess(
@@ -576,6 +599,8 @@ async def prepare_job_for_reprocess(
     move_file: bool = True,
     commit: bool = True,
     actor: str = ACTOR,
+    inject_trigger: str = "rerun",
+    inject_sources: dict[str, int] | None = None,
 ) -> bool:
     """Reset `job` for a fresh pipeline run and (optionally) commit.
 
@@ -586,15 +611,18 @@ async def prepare_job_for_reprocess(
     With move_file the job's own content is located (`find_source`) and
     brought into REPROCESS_DIR (`materialize`). The file operations commit
     in sessions of their own, so the caller's session must not hold
-    flushed writes at that point (SQLite has one write lock).
+    flushed writes at that point (SQLite has one write lock). The module
+    runs are written afterwards: from then on the session holds the lock
+    until the caller commits.
 
     Args:
         session: active SQLAlchemy AsyncSession the job is bound to.
         job: ORM Job instance to reset.
         keep_steps: if given, only these step codes survive the reset.
         drop_step_statuses: drop step results with these statuses.
-        inject_steps: synthetic step results merged in last.
+        inject_steps: results set last, each a run of its own (see _reset_step_results).
         run_params: parameters for exactly the next run (keys start with "_").
+        inject_trigger, inject_sources: trigger and source runs of the injected results.
         move_file: when True (default), bring the file + sidecar into the
             internal reprocess dir. Set False for in-place reprocessing.
         commit: when True (default), commit the session at the end.
@@ -618,16 +646,21 @@ async def prepare_job_for_reprocess(
             await log_warning("reprocess", f"{job.debug_key} Neuverarbeitung: Datei nicht bereitgestellt",
                               f"{source.location}: {exc}")
             return False
-        point_job_at(job, path, sidecar)
 
-    _reset_step_results(
+    await _reset_step_results(
+        session,
         job,
         keep_steps=keep_steps,
         drop_step_statuses=drop_step_statuses,
         drop_step_codes=drop_step_codes,
         inject_steps=inject_steps,
         run_params=run_params,
+        inject_trigger=inject_trigger,
+        inject_sources=inject_sources,
     )
+    if move_file:
+        point_job_at(job, path, sidecar)
+        await _follow_sidecar(session, job, sidecar)
 
     job.status = "queued"
     job.error_message = None

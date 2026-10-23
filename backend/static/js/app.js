@@ -233,15 +233,71 @@
       st.appendChild(histEl("span", "ui-sr-only", b.status_label));
       const detail = histEl("span", "hist-mod-detail", b.detail || "");
       if (b.detail) detail.title = b.detail;
-      const meta = [];
-      if (b.duration_s != null) meta.push(b.duration_s < 10 ? b.duration_s.toFixed(1) + " s" : Math.round(b.duration_s) + " s");
-      if (b.attempts > 1) meta.push(b.attempts + "×");
-      li.append(st, histEl("span", "hist-mod-code", b.module), histEl("span", "hist-mod-label", b.label), detail,
-        histEl("span", "hist-mod-meta", meta.join(" · ")));
+      li.dataset.module = b.module;
+      const meta = histEl("span", "hist-mod-meta", b.duration_s != null ? histSeconds(b.duration_s) : "");
+      li.append(st, histEl("span", "hist-mod-code", b.module), histEl("span", "hist-mod-label", b.label), detail, meta);
+      // "2×" opens the earlier attempts below the row
+      const n = (b.earlier || []).length;
+      if (n) {
+        const label = n === 1 ? histText("attempts_one") : histText("attempts_many", {n: n});
+        const btn = histEl("button", "hist-mod-attempts", (b.attempts || n + 1) + "×");
+        btn.insertAdjacentHTML("beforeend", dashIcon("chevron-down", 12));
+        btn.type = "button";
+        btn.title = label;
+        btn.setAttribute("aria-label", label + ": " + b.module + " " + b.label);
+        btn.setAttribute("aria-expanded", "false");
+        const list = histAttemptList(b);
+        list.classList.add("hist-runs");
+        list.hidden = true;
+        btn.addEventListener("click", () => {
+          list.hidden = !list.hidden;
+          btn.setAttribute("aria-expanded", String(!list.hidden));
+        });
+        if (meta.textContent) meta.appendChild(document.createTextNode(" · "));
+        meta.appendChild(btn);
+        li.appendChild(list);
+      }
       ol.appendChild(li);
     }
     return ol;
   }
+
+  function histSeconds(s) {
+    return s < 10 ? s.toFixed(1) + " s" : Math.round(s) + " s";
+  }
+
+  // Earlier attempts of a module (module_runs): status, time, error
+  function histAttemptList(b) {
+    const ol = histEl("ol", "hist-runs-list");
+    for (const a of b.earlier || []) {
+      const li = histEl("li", "hist-run");
+      li.dataset.s = a.status;
+      const st = histIconEl("span", "ui-status " + a.tone, a.icon, null, 13);
+      st.title = a.status_label;
+      st.appendChild(histEl("span", "ui-sr-only", a.status_label));
+      const head = histEl("div", "hist-run-head");
+      head.append(histEl("strong", "hist-run-title", histText("attempt_label", {n: a.attempt})),
+        histEl("span", "hist-run-status", a.status_label));
+      if (a.trigger_label) head.appendChild(histBadge(a.trigger_label));
+      if (a.superseded) head.appendChild(histEl("span", "hist-run-meta", histText("attempt_replaced")));
+      const when = a.finished_at || a.started_at;
+      if (when || a.duration_s != null) {
+        head.appendChild(histEl("time", "hist-run-time",
+          [when, a.duration_s != null ? histSeconds(a.duration_s) : null].filter(Boolean).join(" · ")));
+      }
+      const body = histEl("div", "hist-run-body");
+      body.appendChild(head);
+      if (a.error) {
+        const err = histEl("p", "hist-run-error", a.error);
+        err.title = a.error;
+        body.appendChild(err);
+      }
+      li.append(st, body);
+      ol.appendChild(li);
+    }
+    return ol;
+  }
+
 
   // Timeline of a job: the intake ("Erfasst") first, then the ledger oldest
   // first. Consecutive housekeeping (op.housekeeping, see job_view) folds
@@ -327,10 +383,16 @@
   function histReplaceKeepOpen(box, ...nodes) {
     const open = new Set(Array.from(box.querySelectorAll(".hist-op-group[data-group] > .hist-op-body > details[open]"))
       .map((d) => d.closest(".hist-op-group").dataset.group));
+    const runsOpen = new Set(Array.from(box.querySelectorAll(".hist-mod[data-module] > .hist-runs:not([hidden])"))
+      .map((l) => l.closest(".hist-mod").dataset.module));
     box.replaceChildren(...nodes);
     for (const id of open) {
       const det = box.querySelector(`.hist-op-group[data-group="${CSS.escape(id)}"] > .hist-op-body > details`);
       if (det) det.open = true;
+    }
+    for (const mod of runsOpen) {
+      const btn = box.querySelector(`.hist-mod[data-module="${CSS.escape(mod)}"] .hist-mod-attempts`);
+      if (btn) btn.click();
     }
   }
 
@@ -749,6 +811,25 @@
       }
     }
 
+    // Earlier attempts of a module at the top of its step result; again
+    // after the step results were rebuilt (updateJobDetail)
+    let attemptBlocks = null;
+    const stepsBox = document.getElementById("step-results");
+    if (stepsBox) stepsBox.addEventListener("ma:steps-rendered", () => renderAttempts(attemptBlocks));
+    function renderAttempts(blocks) {
+      attemptBlocks = blocks;
+      for (const b of blocks || []) {
+        const body = document.querySelector(`#step-results details.ui-step[data-step="${CSS.escape(b.module)}"] .ui-step-body`);
+        if (!body) continue;
+        const old = body.querySelector(":scope > .step-attempts");
+        if (old) old.remove();
+        if (!(b.earlier || []).length) continue;
+        const box = histEl("div", "step-attempts");
+        box.append(histEl("p", "step-attempts-title", histText("attempts_title")), histAttemptList(b));
+        body.prepend(box);
+      }
+    }
+
     async function refresh() {
       let data;
       try {
@@ -763,6 +844,7 @@
       if (sig === last) return;
       last = sig;
       renderBar(data.modules, data.summary);
+      renderAttempts(data.modules);
       if (opsBox) { histReplaceKeepOpen(opsBox, histOps(data.ops, data.intake)); opsBox.removeAttribute("aria-busy"); }
       if (labelsBox) { labelsBox.replaceChildren(...histLabels(data.labels)); labelsBox.removeAttribute("aria-busy"); }
       if (copiesBox) {
