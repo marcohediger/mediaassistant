@@ -44,7 +44,7 @@ Upgrade fasst sie nicht an.
 
 | Änderung in 3.x | Wirkung auf MA | Stand |
 |---|---|---|
-| `deviceId`, `deviceAssetId` aus Upload und Asset-Antwort entfernt | Upload mit den Feldern geht weiter (`201`, Felder werden verworfen). Der Poller-Filter `deviceId != "MediaAssistant"` (`inputs/immich.py`) greift nie mehr. | Felder bleiben im Upload (Pflicht in 2.x), Kommentar ergänzt. Poller: offen |
+| `deviceId`, `deviceAssetId` aus Upload und Asset-Antwort entfernt | Upload mit den Feldern geht weiter (`201`, Felder werden verworfen). Der Poller-Filter `deviceId != "MediaAssistant"` (`inputs/immich.py`) greift nie mehr. | Felder bleiben im Upload (Pflicht in 2.x), Kommentar ergänzt. Poller: erkennt eigene Uploads über das Register und das Upload-Metadatum `mediaassistant` (R-24, behoben) |
 | Suche: `visibility` weggelassen → alle ausser `locked` (2.x: nur `timeline`) | Poller-Abfrage hätte archivierte und versteckte Assets (Video-Hälfte von Live-Fotos) geholt. Tag-Zählung und -Auflistung umfassen jetzt auch archivierte und versteckte Assets. | `get_recent_assets` fixiert `timeline`; Tag-Werkzeuge bewusst unverändert |
 | `locked` nur mit erhöhter Sitzung | `POST /api/search/statistics {"visibility":"locked"}` → `401 {"message":"Elevated permission is required"}` mit API-Key | Tag-Werkzeuge sehen gesperrte Assets nicht |
 | Fehlerformat (Zod) | Validierung: `400 {"message":"Validation failed","errors":[{"path":["id"],"message":"Invalid UUID",…}]}`. Nicht gefunden/kein Zugriff: `400 {"message":"Not found or no asset.read access"}` (kein 404) | `_server_message` funktioniert weiter |
@@ -52,7 +52,7 @@ Upgrade fasst sie nicht an.
 | Legacy-Feld `isArchived` | `PUT /api/assets {"ids":[…],"isArchived":true}` → `204`, aber **ohne Wirkung** | Fallback in `archive_asset` ist auf 3.x wirkungslos, Hauptweg `visibility:"archive"` geht |
 | `POST /api/tags` mit unbekanntem Feld `type` | `201`; doppelter Name → `400 {"message":"A tag with that name already exists"}` | `tag_asset` funktioniert |
 | Suchantwort | `nextPage` (Text oder `null`) bleibt, `total` ist veraltet, `nextCursor` gibt es in 3.1 nicht | Paging in MA bedient beide |
-| Album-Antwort ohne `assets`, `owner`, `ownerId`; Filter `shared` → `isShared` | `get_asset_albums` (`?assetId=`) unberührt. `test_ftag_immich.py` liest `album["assets"]` und findet so nie ein Album. | Test anzupassen |
+| Album-Antwort ohne `assets`, `owner`, `ownerId`; Filter `shared` → `isShared` | `get_asset_albums` (`?assetId=`) unberührt. `test_ftag_immich.py` las `album["assets"]` und fand so nie ein Album. | Test entfernt (2026-10-23), ersetzt durch `test_folder_structure.py` |
 | Entfernt: `PUT /api/assets/{id}/original`, `GET /api/assets/random`, `POST /api/assets/exists`, `GET /api/assets/device/{id}` | von MA nicht benutzt | – |
 
 ## a) Löschen mit `force=false`
