@@ -11,7 +11,7 @@ from filewatcher import start_filewatcher
 from fileops import trash_maintenance
 from health_watcher import start_health_watcher
 from recovery import reconcile_file_operations
-from routers import dashboard, setup, settings, logs, api, duplicates, review, diagnostics, tools, processing_sets
+from routers import dashboard, setup, settings, logs, api, duplicates, review, diagnostics, tools, processing_sets, history
 
 # Configure logging for Docker stdout
 log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -101,3 +101,4 @@ app.include_router(duplicates.router)
 app.include_router(review.router)
 app.include_router(diagnostics.router)
 app.include_router(tools.router)
+app.include_router(history.router)

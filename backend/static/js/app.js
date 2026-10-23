@@ -6,9 +6,13 @@
   // ── Dashboard auto-refresh ──
   // The rows rendered here mirror the macros set_row / job_row in
   // templates/dashboard.html: change both together.
+  let dashHistory = null; // expandable rows of "Letzte Verarbeitungen"
+
   function initDashboard() {
     const statsGrid = document.getElementById("stats-grid");
     if (!statsGrid) return;
+    const recent = document.getElementById("recent-jobs");
+    if (recent) dashHistory = histRows(recent);
 
     setInterval(async () => {
       try {
@@ -18,7 +22,7 @@
         updateStats(data.stats);
         updateThroughput(data.throughput);
         updateSets(data.sets);
-        updateRecentJobs(data.recent_jobs);
+        await updateRecentJobs(data.recent_jobs);
       } catch (_) {}
     }, POLL_INTERVAL);
   }
@@ -86,7 +90,10 @@
       + `</tr>`;
   }
 
-  function updateRecentJobs(jobs) {
+  // Module blocks per job, refetched only for jobs that changed since the last poll
+  const dashBlocks = new Map(); // debug_key → {seen, signature, modules, summary}
+
+  async function updateRecentJobs(jobs) {
     const tbody = document.getElementById("recent-jobs");
     if (!tbody || !jobs) return;
     const card = document.getElementById("recent-jobs-card");
@@ -94,17 +101,51 @@
     if (card) card.hidden = !jobs.length;
     if (empty) empty.hidden = !!jobs.length;
 
-    dashReplaceRows(tbody, jobs.map((j) => {
+    const seen = (j) => `${j.status}|${j.current_step}|${j.updated_at}`;
+    const stale = jobs.filter((j) => j.debug_key && (dashBlocks.get(j.debug_key) || {}).seen !== seen(j));
+    if (stale.length) {
+      try {
+        const keys = stale.map((j) => encodeURIComponent(j.debug_key)).join(",");
+        const resp = await fetch(`/api/history/modules?keys=${keys}`, {headers: {"Accept": "application/json"}});
+        if (resp.ok) {
+          const found = (await resp.json()).jobs || {};
+          for (const j of stale) {
+            if (found[j.debug_key]) dashBlocks.set(j.debug_key, Object.assign({seen: seen(j)}, found[j.debug_key]));
+          }
+        }
+      } catch (_) { /* rows keep their last blocks */ }
+    }
+
+    const html = jobs.map((j) => {
       const msg = j.error_message || "";
-      return `<tr>`
+      const blocks = dashBlocks.get(j.debug_key);
+      // Not fetched (yet): keep the strip the row already shows
+      const old = blocks ? null : tbody.querySelector(`tr.hist-row[data-key="${CSS.escape(j.debug_key || "")}"] .mod-strip`);
+      const strip = blocks ? histStripHTML(blocks.modules, blocks.summary) : (old ? old.outerHTML : "");
+      const sig = blocks ? blocks.signature : (old ? old.closest("tr").dataset.sig : "");
+      return `<tr class="hist-row" data-key="${dashEscAttr(j.debug_key)}" data-sig="${dashEscAttr(sig)}">`
         + `<td class="ui-col-icon">${statusBadge(j.status, true)}</td>`
         + `<th scope="row"><div class="dash-job"><a class="dash-job-name" href="/logs/job/${dashEscAttr(j.debug_key)}" title="${dashEscAttr(j.filename)}">${esc(j.filename || "—")}</a>`
         + `<span class="dash-job-key">${esc(j.debug_key || "—")}</span></div></th>`
-        + `<td class="dash-col-step">${esc(j.current_step || "—")}</td>`
+        + `<td class="hist-col-mods dash-col-mods">${strip}</td>`
         + `<td class="cell-msg${j.status === "error" ? " is-error" : ""}" title="${dashEscAttr(msg)}">${esc(msg)}</td>`
         + `<td class="ui-num dash-col-time">${esc(j.updated_at)}</td>`
+        + `<td class="ui-col-actions hist-col-toggle">${histToggleHTML(j.filename || j.debug_key)}</td>`
         + `</tr>`;
-    }).join(""));
+    }).join("");
+    // Focus on a chevron survives the re-render
+    const focused = tbody.contains(document.activeElement) && document.activeElement.closest(".hist-toggle")
+      ? document.activeElement.closest("tr.hist-row").dataset.key : null;
+    if (tbody._dashHtml !== html) {
+      dashReplaceRows(tbody, html);
+      if (dashHistory) dashHistory.reattach();
+      if (focused) {
+        const btn = tbody.querySelector(`tr.hist-row[data-key="${CSS.escape(focused)}"] .hist-toggle`);
+        if (btn) btn.focus();
+      }
+    } else if (dashHistory) {
+      dashHistory.refresh();
+    }
   }
 
   // Sprite icon, same markup as the icon() macro in dashboard.html
@@ -115,6 +156,366 @@
   // esc() for attribute values: also the double quote
   function dashEscAttr(str) {
     return esc(str).replace(/"/g, "&quot;");
+  }
+
+  // ── Data safety: module strip, expandable rows, ledger, copies ──
+  // Data comes from job_view.py through /api/history/*. The strip and the
+  // chevron mirror the macros in templates/_modules.html: change both
+  // together. User data goes in with textContent only.
+  let histStrings = null;
+  function histText(key, vars) {
+    if (!histStrings) {
+      const blob = document.getElementById("history-strings");
+      histStrings = blob ? JSON.parse(blob.textContent) : {};
+    }
+    let s = histStrings[key] || "";
+    for (const [k, v] of Object.entries(vars || {})) s = s.split("{" + k + "}").join(String(v));
+    return s;
+  }
+
+  function histBlockTitle(b) {
+    return `${b.module} ${b.label}: ${b.status_label}` + (b.detail ? ` — ${b.detail}` : "");
+  }
+
+  function histStripHTML(blocks, summary) {
+    return `<span class="mod-strip" role="img" aria-label="${dashEscAttr(summary)}">`
+      + (blocks || []).map((b) => `<span class="mod-b" data-s="${dashEscAttr(b.status)}" title="${dashEscAttr(histBlockTitle(b))}"></span>`).join("")
+      + `</span>`;
+  }
+
+  function histToggleHTML(name) {
+    const label = histText("expand");
+    return `<button type="button" class="ui-icon-btn ui-icon-btn-sm hist-toggle" aria-expanded="false" data-name="${dashEscAttr(name)}"`
+      + ` aria-label="${dashEscAttr(label + ": " + name)}" title="${dashEscAttr(label)}">${dashIcon("chevron-down", 16)}</button>`;
+  }
+
+  function histEl(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  // Element with a sprite icon in front of an optional text
+  function histIconEl(tag, cls, icon, text, size, spin) {
+    const e = histEl(tag, cls);
+    e.innerHTML = `<svg class="ui-i${spin ? " ui-spin" : ""}" width="${size || 14}" height="${size || 14}" aria-hidden="true" focusable="false"><use href="#ui-i-${icon}"/></svg>`;
+    if (text) e.appendChild(document.createTextNode(text));
+    return e;
+  }
+
+  function histBadge(text, tone) {
+    return histEl("span", "ui-badge" + (tone ? " " + tone : ""), text);
+  }
+
+  function histState(text, isError) {
+    const box = histIconEl("div", "hist-panel-state" + (isError ? " is-error" : ""),
+      isError ? "alert-circle" : "loader", null, 16, !isError);
+    box.appendChild(histEl("span", "", text));
+    return box;
+  }
+
+  function histSection(title, body, count) {
+    const sec = histEl("section", "hist-sec");
+    const h = histEl("h3", "hist-sec-title", title);
+    if (count) h.appendChild(histEl("span", "ui-count", String(count)));
+    sec.append(h, body);
+    return sec;
+  }
+
+  function histModules(blocks) {
+    const ol = histEl("ol", "hist-mods");
+    for (const b of blocks || []) {
+      const li = histEl("li", "hist-mod");
+      li.dataset.s = b.status;
+      const st = histIconEl("span", "ui-status " + b.tone, b.icon, null, 14, b.status === "running");
+      st.title = b.status_label;
+      st.appendChild(histEl("span", "ui-sr-only", b.status_label));
+      const detail = histEl("span", "hist-mod-detail", b.detail || "");
+      if (b.detail) detail.title = b.detail;
+      const meta = [];
+      if (b.duration_s != null) meta.push(b.duration_s < 10 ? b.duration_s.toFixed(1) + " s" : Math.round(b.duration_s) + " s");
+      if (b.attempts > 1) meta.push(b.attempts + "×");
+      li.append(st, histEl("span", "hist-mod-code", b.module), histEl("span", "hist-mod-label", b.label), detail,
+        histEl("span", "hist-mod-meta", meta.join(" · ")));
+      ol.appendChild(li);
+    }
+    return ol;
+  }
+
+  function histOps(ops) {
+    if (!ops || !ops.length) return histEl("p", "hist-sec-empty", histText("ops_empty"));
+    const ol = histEl("ol", "hist-ops");
+    for (const op of ops) {
+      const li = histEl("li", "hist-op");
+      li.dataset.state = op.state;
+      const tile = histIconEl("span", "ui-icon-tile ui-icon-tile-sm " + op.tone, op.icon, null, 14);
+      tile.title = op.state_label;
+      const body = histEl("div", "hist-op-body");
+      const head = histEl("div", "hist-op-head");
+      head.append(histEl("strong", "hist-op-title", op.op_label), histBadge(op.state_label, op.tone),
+        histEl("time", "hist-op-time", op.finished_at || op.created_at || ""));
+      body.appendChild(head);
+      if (op.src || op.dst) {
+        const path = histEl("div", "hist-op-path");
+        if (op.src) {
+          if (op.src_kind_label) path.appendChild(histBadge(op.src_kind_label));
+          path.appendChild(histEl("code", "ui-path", op.src));
+        }
+        const toOther = op.dst && op.dst !== op.src;
+        if (toOther || (op.dst_kind && op.dst_kind !== op.src_kind)) {
+          path.appendChild(histEl("span", "hist-op-arrow", "→"));
+          if (op.dst_kind_label) path.appendChild(histBadge(op.dst_kind_label));
+          if (toOther) path.appendChild(histEl("code", "ui-path", op.dst));
+        }
+        body.appendChild(path);
+      }
+      const meta = histEl("div", "hist-op-meta");
+      if (op.hash) {
+        meta.appendChild(histIconEl("span", "ui-cell-meta " + (op.hash === "verified" ? "is-ok" : "is-changed"),
+          op.hash === "verified" ? "check" : "pencil", op.hash_label, 13));
+      }
+      for (const text of [op.actor_label, op.reason, op.note]) if (text) meta.appendChild(histEl("span", "", text));
+      if (meta.childNodes.length) body.appendChild(meta);
+      if (op.error) body.appendChild(histEl("p", "hist-op-error", op.error));
+      li.append(tile, body);
+      ol.appendChild(li);
+    }
+    return ol;
+  }
+
+  const COPY_ICONS = {present: "check-circle", trashed: "trash", missing: "alert-circle", deleted: "x-circle",
+    moved: "arrow-right", locked: "lock"};
+
+  // opts.restore(copy, button): adds a "Wiederherstellen" button to trashed copies.
+  // Copies that moved on or are gone for good fold away below the current ones.
+  function histCopies(copies, opts) {
+    if (!copies || !copies.length) return histEl("p", "hist-sec-empty", histText("copies_empty"));
+    const past = copies.filter((c) => c.state === "moved" || c.state === "deleted");
+    const current = copies.filter((c) => !past.includes(c));
+    const list = histCopyList(current, opts);
+    if (!past.length) return list;
+    const box = histEl("div", "hist-copies-wrap");
+    const more = histEl("details", "hist-copies-past");
+    more.appendChild(histEl("summary", "", past.length === 1 ? histText("copies_older_one")
+      : histText("copies_older", {n: past.length})));
+    more.appendChild(histCopyList(past, opts));
+    if (current.length) box.appendChild(list);
+    box.appendChild(more);
+    return box;
+  }
+
+  function histCopyList(copies, opts) {
+    const ul = histEl("ul", "hist-copies");
+    for (const c of copies) {
+      const li = histEl("li", "hist-copy");
+      li.dataset.state = c.state;
+      const head = histEl("div", "hist-copy-head");
+      head.append(histBadge(c.kind_label), histIconEl("span", "ui-status " + c.tone, COPY_ICONS[c.state] || "circle", c.state_label, 14));
+      if (c.shared && c.owner_key) head.appendChild(histEl("span", "hist-copy-meta", histText("shared_from", {key: c.owner_key})));
+      head.appendChild(histEl("span", "hist-copy-meta",
+        c.verified_at ? histText("verified_at", {when: c.verified_at}) : histText("never_verified")));
+      li.append(head, histEl("code", "ui-path", c.location));
+      if (c.state === "trashed") {
+        const trash = histEl("div", "hist-copy-trash");
+        if (c.trash_location) trash.append(histBadge(histText("kind_trash")), histEl("code", "ui-path", c.trash_location));
+        if (c.remaining_label) trash.appendChild(histBadge(c.remaining_label, c.remaining_days != null && c.remaining_days <= 3 ? "is-warning" : ""));
+        if (opts && opts.restore && c.can_restore) {
+          const btn = histIconEl("button", "ui-btn ui-btn-secondary ui-btn-xs", "retry", histText("restore"), 14);
+          btn.type = "button";
+          btn.setAttribute("aria-label", histText("restore") + ": " + (c.name || c.location));
+          btn.addEventListener("click", () => opts.restore(c, btn));
+          trash.appendChild(btn);
+        }
+        li.appendChild(trash);
+      }
+      ul.appendChild(li);
+    }
+    return ul;
+  }
+
+  // Expanded row content: modules left, ledger and copies right
+  function histPanel(data) {
+    const panel = histEl("div", "hist-panel");
+    const grid = histEl("div", "hist-panel-grid");
+    const side = histEl("div", "hist-panel-side");
+    side.append(histSection(histText("ops_title"), histOps(data.ops), (data.ops || []).length),
+      histSection(histText("copies_title"), histCopies(data.copies), (data.copies || []).length));
+    grid.append(histSection(histText("modules"), histModules(data.modules)), side);
+    const foot = histEl("div", "hist-panel-foot");
+    const open = histEl("a", "ui-btn ui-btn-ghost ui-btn-sm", histText("open_job"));
+    open.href = "/logs/job/" + encodeURIComponent(data.debug_key);
+    open.insertAdjacentHTML("beforeend", dashIcon("chevron-right", 14));
+    foot.appendChild(open);
+    panel.append(grid, foot);
+    return panel;
+  }
+
+  async function histFetchJob(key) {
+    const resp = await fetch(`/api/history/job/${encodeURIComponent(key)}`, {headers: {"Accept": "application/json"}});
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+
+  // Expandable rows: tbody rows `tr.hist-row[data-key][data-sig]` with a
+  // `.hist-toggle` button. A click on the row or the chevron opens a detail
+  // row below it, filled lazily from /api/history/job/<key>. After the rows
+  // were re-rendered (live refresh), reattach() puts the open panels back and
+  // reloads those whose job changed (data-sig).
+  function histRows(tbody) {
+    const open = new Map(); // key → {panel, sig, loading}
+    const rowOf = (key) => tbody.querySelector(`tr.hist-row[data-key="${CSS.escape(key)}"]`);
+    const columns = () => {
+      const head = tbody.closest("table").querySelector("thead tr");
+      return head ? head.children.length : 1;
+    };
+
+    function setToggle(row, isOpen) {
+      row.classList.toggle("is-open", isOpen);
+      const btn = row.querySelector(".hist-toggle");
+      if (!btn) return;
+      const label = histText(isOpen ? "collapse" : "expand");
+      btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      btn.setAttribute("aria-label", label + ": " + (btn.dataset.name || row.dataset.key));
+      btn.title = label;
+      if (isOpen) btn.setAttribute("aria-controls", "hist-d-" + row.dataset.key);
+      else btn.removeAttribute("aria-controls");
+    }
+
+    function place(key, entry) {
+      const row = rowOf(key);
+      if (!row) return false;
+      let detail = row.nextElementSibling;
+      if (!detail || !detail.classList.contains("hist-detail") || detail.dataset.for !== key) {
+        detail = histEl("tr", "hist-detail");
+        detail.dataset.for = key;
+        detail.id = "hist-d-" + key;
+        const cell = histEl("td");
+        cell.colSpan = columns();
+        detail.appendChild(cell);
+        row.after(detail);
+      }
+      if (entry.panel.parentNode !== detail.firstChild) detail.firstChild.appendChild(entry.panel);
+      setToggle(row, true);
+      return true;
+    }
+
+    async function load(key, entry) {
+      entry.loading = true;
+      try {
+        const data = await histFetchJob(key);
+        entry.sig = data.signature;
+        entry.panel.replaceChildren(...histPanel(data).childNodes);
+      } catch (e) {
+        if (!entry.sig) entry.panel.replaceChildren(histState(histText("load_failed") + " (" + e.message + ")", true));
+      } finally {
+        entry.loading = false;
+      }
+    }
+
+    function close(key) {
+      open.delete(key);
+      const detail = tbody.querySelector(`tr.hist-detail[data-for="${CSS.escape(key)}"]`);
+      if (detail) detail.remove();
+      const row = rowOf(key);
+      if (row) setToggle(row, false);
+    }
+
+    function toggle(key) {
+      if (open.has(key)) { close(key); return; }
+      const entry = {panel: histEl("div", "hist-panel"), sig: null, loading: false};
+      entry.panel.appendChild(histState(histText("loading")));
+      open.set(key, entry);
+      place(key, entry);
+      load(key, entry);
+    }
+
+    tbody.addEventListener("click", (e) => {
+      const row = e.target.closest("tr.hist-row");
+      if (!row || !tbody.contains(row)) return;
+      const btn = e.target.closest(".hist-toggle");
+      // Links and other controls in the row keep their own meaning
+      if (!btn && e.target.closest("a, button, input, select, textarea, label, summary")) return;
+      // Selecting text is not a click on the row
+      if (!btn && window.getSelection && String(window.getSelection()) !== "") return;
+      toggle(row.dataset.key);
+    });
+
+    function refresh() {
+      for (const [key, entry] of open) {
+        const row = rowOf(key);
+        if (row && !entry.loading && entry.sig && row.dataset.sig && row.dataset.sig !== entry.sig) load(key, entry);
+      }
+    }
+
+    return {
+      reattach() {
+        for (const [key, entry] of Array.from(open)) {
+          if (!place(key, entry)) open.delete(key); // the job left the list
+        }
+        refresh();
+      },
+      refresh,
+    };
+  }
+
+  // Restore one trashed copy after a confirmation. Resolves to null when
+  // cancelled, else {ok, title, text} for histAlert.
+  async function histRestore(copy, btn) {
+    const isImmich = copy.kind === "immich";
+    const dir = (copy.location || "").replace(/\/[^/]*$/, "") || "/";
+    const yes = await confirmAsk({
+      title: histText("restore_title"),
+      text: isImmich ? histText("restore_immich", {id: copy.location})
+        : histText("restore_local", {file: copy.name || copy.location, dir: dir}),
+      ok: histText("restore"),
+    });
+    if (!yes) return null;
+    if (btn) { btn.disabled = true; btn.setAttribute("aria-busy", "true"); }
+    try {
+      const resp = await fetch(`/api/history/copies/${encodeURIComponent(copy.id)}/restore`, {
+        method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"},
+      });
+      let data = {};
+      try { data = await resp.json(); } catch (_) {}
+      if (resp.ok && data.ok) {
+        return {ok: true, title: histText("restore_done", {location: data.location || copy.location}),
+          text: (data.notes || []).join(" · ")};
+      }
+      return {ok: false, title: histText(data.refused ? "restore_refused" : "restore_failed"),
+        text: data.error || "HTTP " + resp.status};
+    } catch (e) {
+      return {ok: false, title: histText("restore_failed"), text: e.message};
+    } finally {
+      if (btn) { btn.disabled = false; btn.removeAttribute("aria-busy"); }
+    }
+  }
+
+  // Result of an action as a ui-alert in `box` (replaces the previous one)
+  function histAlert(box, result) {
+    if (!box) return;
+    box.replaceChildren();
+    if (!result) return;
+    const alert = histIconEl("div", "ui-alert ui-alert-sm " + (result.ok ? "is-success" : "is-error"),
+      result.ok ? "check-circle" : "alert-circle", null, 16);
+    alert.setAttribute("role", result.ok ? "status" : "alert");
+    const body = histEl("div", "ui-alert-body");
+    body.appendChild(histEl("p", "ui-alert-title", result.title));
+    if (result.text) body.appendChild(histEl("p", "ui-alert-text", result.text));
+    const close = histIconEl("button", "ui-icon-btn ui-icon-btn-sm", "x", null, 16);
+    close.type = "button";
+    close.setAttribute("aria-label", uiText("close"));
+    close.title = uiText("close");
+    close.addEventListener("click", () => box.replaceChildren());
+    alert.append(body, close);
+    box.appendChild(alert);
+  }
+
+  // Expandable rows of the job log (server-rendered, no live refresh)
+  function initHistoryTables() {
+    document.querySelectorAll("tbody[data-history-rows]").forEach((tbody) => {
+      if (tbody.id !== "recent-jobs") histRows(tbody);
+    });
   }
 
   // ── Job Detail auto-refresh ──
@@ -155,6 +556,92 @@
         updateJobDetail(job);
       } catch (_) {}
     }, POLL_INTERVAL);
+
+    initJobHistory(debugKey);
+  }
+
+  // Module bar, ledger ("Verlauf") and copies ("Exemplare") of the job detail
+  // page, all from /api/history/job/<key>. The bar mirrors module_bar() in
+  // templates/_modules.html.
+  function initJobHistory(debugKey) {
+    const bar = document.getElementById("job-module-bar");
+    const opsBox = document.getElementById("job-ops");
+    const copiesBox = document.getElementById("job-copies");
+    const alertBox = document.getElementById("job-copies-alert");
+    const opsCount = document.getElementById("job-ops-count");
+    const copiesCount = document.getElementById("job-copies-count");
+    if (!bar && !opsBox && !copiesBox) return;
+
+    // A module block opens its step result below
+    if (bar) {
+      bar.addEventListener("click", (e) => {
+        const cell = e.target.closest(".mod-cell");
+        if (!cell) return;
+        const step = document.querySelector(`#step-results details.ui-step[data-step="${CSS.escape(cell.dataset.step)}"]`);
+        const target = step || document.getElementById("step-results");
+        if (!target) return;
+        if (step) {
+          step.open = true;
+          step.classList.add("is-flash");
+          setTimeout(() => step.classList.remove("is-flash"), 1200);
+        }
+        target.scrollIntoView({block: "center", behavior: "smooth"});
+        const summary = step && step.querySelector("summary");
+        if (summary) summary.focus({preventScroll: true});
+      });
+    }
+
+    let last = null;
+    async function restore(copy, btn) {
+      const result = await histRestore(copy, btn);
+      if (!result) return;
+      histAlert(alertBox, result);
+      last = null;
+      await refresh();
+    }
+
+    function renderBar(blocks, summary) {
+      if (!bar) return;
+      bar.setAttribute("aria-label", summary);
+      for (const b of blocks) {
+        const cell = bar.querySelector(`.mod-cell[data-step="${CSS.escape(b.module)}"]`);
+        if (!cell) continue;
+        const title = histBlockTitle(b);
+        cell.dataset.s = b.status;
+        cell.title = title;
+        cell.querySelector(".mod-b").dataset.s = b.status;
+        cell.querySelector(".ui-sr-only").textContent = title;
+      }
+    }
+
+    async function refresh() {
+      let data;
+      try {
+        data = await histFetchJob(debugKey);
+      } catch (e) {
+        if (last === null) {
+          if (opsBox) opsBox.replaceChildren(histState(histText("load_failed"), true));
+          if (copiesBox) copiesBox.replaceChildren(histState(histText("load_failed"), true));
+        }
+        return;
+      }
+      const sig = JSON.stringify([data.modules, data.ops, data.copies]);
+      if (sig === last) return;
+      last = sig;
+      renderBar(data.modules, data.summary);
+      if (opsBox) { opsBox.replaceChildren(histOps(data.ops)); opsBox.removeAttribute("aria-busy"); }
+      if (copiesBox) {
+        const pastOpen = !!copiesBox.querySelector(".hist-copies-past[open]");
+        copiesBox.replaceChildren(histCopies(data.copies, {restore}));
+        const past = copiesBox.querySelector(".hist-copies-past");
+        if (past && pastOpen) past.open = true;
+      }
+      if (opsCount) { opsCount.textContent = String(data.ops.length); opsCount.hidden = !data.ops.length; }
+      if (copiesCount) { copiesCount.textContent = String(data.copies.length); copiesCount.hidden = !data.copies.length; }
+    }
+
+    refresh();
+    setInterval(refresh, POLL_INTERVAL);
   }
 
   function updateJobDetail(job) {
@@ -183,8 +670,9 @@
     }
 
     // Target path (use data-field attribute)
+    // A dry run's planned target (IA-08 step result, rendered by the page) stays
     const targetEl = document.querySelector("[data-field='target_path']");
-    if (targetEl) {
+    if (targetEl && !(targetEl.dataset.planned && !job.target_path)) {
       targetEl.textContent = job.target_path || "—";
       targetEl.classList.toggle("is-empty", !job.target_path);
     }
@@ -580,6 +1068,18 @@
           </${tag}>`;
         })
         .join("");
+      // The last inventory check found discrepancies: one quiet row below the modules
+      const inv = data.inventory;
+      if (inv && inv.href) {
+        list.insertAdjacentHTML("beforeend", `<div class="ui-menu-sep" role="separator"></div>
+          <a class="sm-row sm-misconfigured sm-inventory" href="${esc(inv.href)}">
+            <span class="sm-dot" aria-hidden="true"></span>
+            <span class="sm-text">
+              <span class="sm-name">${esc(inv.label)}</span>
+              <span class="sm-detail">${esc(inv.detail)}</span>
+            </span>
+          </a>`);
+      }
     }
 
     async function refresh() {
@@ -596,6 +1096,7 @@
 
   // ── Init ──
   initDashboard();
+  initHistoryTables();
   initJobDetail();
   initLightbox();
   initMenus();
@@ -603,5 +1104,9 @@
   initStatusMenu();
 
   // For the pages' own scripts
-  window.MA = { confirm: confirmAsk, confirmOptions };
+  window.MA = {
+    confirm: confirmAsk, confirmOptions,
+    history: { text: histText, el: histEl, iconEl: histIconEl, badge: histBadge, state: histState,
+               restore: histRestore, alert: histAlert },
+  };
 })();

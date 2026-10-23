@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ t.logs.title }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/logs.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/logs.css?v={{ version }}">
+<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
 {% block content %}
 {% from "_status.html" import status_badge with context %}
+{% from "_modules.html" import module_strip, history_toggle, history_strings with context %}
 {% macro icon(name, size=16, cls='') -%}
 <svg class="ui-i{{ ' ' ~ cls if cls else '' }}" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
@@ -421,14 +423,16 @@ async function cleanupOrphans(ev) {
                 <th scope="col">{{ t.logs.file }}</th>
                 <th scope="col">{{ t.logs.time }}</th>
                 <th scope="col" class="lc-source">{{ t.logs.source }}</th>
-                <th scope="col" class="lc-step">{{ t.logs.step }}</th>
+                <th scope="col" class="lc-mods">{{ t.history.modules }}</th>
                 <th scope="col">{{ t.logs.message }}</th>
                 <th scope="col" class="lc-target">{{ t.logs.target }}</th>
+                <th scope="col" class="ui-col-actions"><span class="ui-sr-only">{{ t.history.expand }}</span></th>
             </tr>
         </thead>
-        <tbody>
+        {# Rows expand in place (app.js histRows): modules, file operations, copies #}
+        <tbody data-history-rows>
             {% for job in jobs %}
-            <tr class="log-row log-{{ job.status }}">
+            <tr class="log-row log-{{ job.status }} hist-row" data-key="{{ job.debug_key }}" data-sig="{{ job_signature(job) }}">
                 <td class="cell-status lc-status">{{ status_badge(job.status, icon_only=True) }}{% if job.dry_run %}{{ dry_mark() }}{% endif %}</td>
                 <th scope="row" class="lc-file">
                     <div class="ui-cell-stack">
@@ -448,14 +452,19 @@ async function cleanupOrphans(ev) {
                     </div>
                 </td>
                 <td class="ui-nowrap lc-source">{{ job.source_label or '—' }}</td>
-                <td class="ui-nowrap lc-step"><span class="logs-step">{{ job.current_step or '—' }}</span></td>
+                <td class="hist-col-mods lc-mods">{{ module_strip(job) }}</td>
                 <td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }} lc-msg" title="{{ job.error_message or '' }}">{{ job.error_message.split('\n')[0] if job.error_message else '' }}</td>
-                <td class="lc-target"><span class="logs-path" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</span></td>
+                {# A dry run keeps its would-be target in the IA-08 step result only #}
+                {% set ia08 = job.step_result.get('IA-08') if job.dry_run and job.step_result is mapping else none %}
+                {% set target = job.target_path or (ia08.get('target_path') if ia08 is mapping else none) or '' %}
+                <td class="lc-target"><span class="logs-path" title="{{ target }}">{{ target or '—' }}</span></td>
+                <td class="ui-col-actions hist-col-toggle lc-toggle">{{ history_toggle(job) }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
+{{ history_strings() }}
 {% else %}
 <div class="ui-card">
     <div class="ui-empty">

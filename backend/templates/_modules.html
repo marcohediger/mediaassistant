@@ -1,0 +1,39 @@
+{# Module blocks of a job (data-safety rebuild). Import with context:
+       {% from "_modules.html" import module_strip, history_toggle, history_strings with context %}
+   The blocks come from job_view.module_blocks() — never from step_result.
+   app.js (histStripHTML, histToggleHTML) renders the same markup on live
+   refresh: change both together. #}
+
+{%- macro block_title(b) -%}
+{{ b.module }} {{ b.label }}: {{ b.status_label }}{% if b.detail %} — {{ b.detail }}{% endif %}
+{%- endmacro -%}
+
+{# Eleven small blocks; one tooltip each, one summary for screen readers #}
+{% macro module_strip(job) -%}
+{%- set blocks = module_blocks(job, t) -%}
+<span class="mod-strip" role="img" aria-label="{{ strip_summary(blocks, t) }}">
+{%- for b in blocks %}<span class="mod-b" data-s="{{ b.status }}" title="{{ block_title(b) }}"></span>{% endfor -%}
+</span>
+{%- endmacro %}
+
+{# Chevron that expands a row; label includes the file name #}
+{% macro history_toggle(job) -%}
+<button type="button" class="ui-icon-btn ui-icon-btn-sm hist-toggle" aria-expanded="false" data-name="{{ job.filename or job.debug_key }}"
+        aria-label="{{ t.history.expand }}: {{ job.filename or job.debug_key }}" title="{{ t.history.expand }}"><svg class="ui-i" width="16" height="16" aria-hidden="true" focusable="false"><use href="#ui-i-chevron-down"/></svg></button>
+{%- endmacro %}
+
+{# Module bar of the job detail page: one button per module #}
+{% macro module_bar(job) -%}
+{%- set blocks = module_blocks(job, t) -%}
+<div class="mod-bar" id="job-module-bar" role="group" aria-label="{{ strip_summary(blocks, t) }}">
+{%- for b in blocks %}
+<button type="button" class="mod-cell" data-s="{{ b.status }}" data-step="{{ b.module }}" title="{{ block_title(b) }}">
+<span class="mod-b" data-s="{{ b.status }}"></span><span class="mod-cell-code"><span class="mod-cell-pre">IA-</span>{{ b.module[3:] }}</span><span class="ui-sr-only">{{ block_title(b) }}</span></button>
+{%- endfor %}
+</div>
+{%- endmacro %}
+
+{# Texts for the hist* helpers in app.js #}
+{% macro history_strings() -%}
+<script type="application/json" id="history-strings">{{ t.history | tojson }}</script>
+{%- endmacro %}

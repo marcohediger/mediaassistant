@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t.tools.title }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v={{ version }}">
+<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
 {% block content %}
 {% macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
@@ -17,6 +18,34 @@
 </div>
 
 <div class="ui-stack ui-stack-lg">
+
+{# Data safety: trash and inventory check (routers/history.py); the badges
+   are filled from /api/history/overview by the script at the end. #}
+<section class="tools-safety" aria-labelledby="safety-title">
+    <div class="ui-section-head">
+        <div class="ui-section-head-text"><h2 class="ui-section-title" id="safety-title">{{ t.history.tools_section }}</h2></div>
+    </div>
+    <div class="ui-grid-2">
+        <a class="ui-card" href="/tools/papierkorb">
+            <span class="ui-icon-tile is-warning">{{ icon('trash', 18) }}</span>
+            <span class="tools-safety-text">
+                <span class="tools-safety-title">{{ t.history.trash_title }}</span>
+                <span class="tools-safety-desc">{{ t.history.tools_trash_desc }}</span>
+                <span class="tools-safety-meta"><span class="ui-badge" id="tools-trash-badge" hidden></span></span>
+            </span>
+            {{ icon('chevron-right') }}
+        </a>
+        <a class="ui-card" href="/tools/bestand">
+            <span class="ui-icon-tile is-accent">{{ icon('database', 18) }}</span>
+            <span class="tools-safety-text">
+                <span class="tools-safety-title">{{ t.history.inv_title }}</span>
+                <span class="tools-safety-desc">{{ t.history.tools_inv_desc }}</span>
+                <span class="tools-safety-meta"><span class="ui-badge" id="tools-inv-badge" hidden></span></span>
+            </span>
+            {{ icon('chevron-right') }}
+        </a>
+    </div>
+</section>
 
 <section class="ui-card tools-card" id="section-sidecar-tags" aria-labelledby="tags-title">
     <div class="ui-card-head">
@@ -524,5 +553,44 @@ function renderMerge(res) {
     }
     box.innerHTML = h;
 }
+</script>
+<script>
+// Counts on the two data-safety entries
+document.addEventListener('DOMContentLoaded', function () {
+    var H = {{ {
+        "trash_count": t.history.tools_trash_count, "trash_empty": t.history.tools_trash_empty,
+        "inv_found": t.history.tools_inv_found, "inv_found_one": t.history.tools_inv_found_one,
+        "inv_ok": t.history.tools_inv_ok, "inv_never": t.history.tools_inv_never, "inv_running": t.history.tools_inv_running
+    } | tojson }};
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function when(iso) {
+        var d = new Date(iso);
+        return isNaN(d) ? iso : pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+    function badge(id, text, tone) {
+        var el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'ui-badge' + (tone ? ' ' + tone : '');
+        el.hidden = false;
+    }
+    fetch('/api/history/overview', {headers: {'Accept': 'application/json'}})
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+            if (!d) { return; }
+            var n = d.trash.total;
+            badge('tools-trash-badge', n ? H.trash_count.replace('{n}', n) : H.trash_empty, n ? 'is-warning' : '');
+            var inv = d.inventory;
+            if (d.inventory_running) {
+                badge('tools-inv-badge', H.inv_running, 'is-info');
+            } else if (!inv || !inv.finished_at) {
+                badge('tools-inv-badge', H.inv_never, '');
+            } else if (inv.discrepancies) {
+                var tpl = inv.discrepancies === 1 ? H.inv_found_one : H.inv_found;
+                badge('tools-inv-badge', tpl.replace('{when}', when(inv.finished_at)).replace('{n}', inv.discrepancies), 'is-error');
+            } else {
+                badge('tools-inv-badge', H.inv_ok.replace('{when}', when(inv.finished_at)), 'is-success');
+            }
+        }).catch(function () { /* the entries work without the counts */ });
+});
 </script>
 {% endblock %}

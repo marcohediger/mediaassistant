@@ -502,7 +502,8 @@ _MODULE_SECTIONS = {
 async def modules_json():
     """Module health for the status menu in the navbar, polled on every page."""
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
-    modules = await _get_module_status(load_lang(lang))
+    i18n = load_lang(lang)
+    modules = await _get_module_status(i18n)
     states = {m["status"] for m in modules}
     if "error" in states:
         overall = "error"
@@ -523,4 +524,16 @@ async def modules_json():
             }
             for m in modules
         ],
+        # Subtle hint below the modules while the last inventory check found discrepancies
+        "inventory": await _inventory_hint(i18n),
     }
+
+
+async def _inventory_hint(i18n: dict) -> dict | None:
+    try:
+        from routers.history import inventory_hint
+        return await inventory_hint(i18n)
+    except Exception:
+        import logging
+        logging.getLogger("mediaassistant.dashboard").exception("inventory hint failed")
+        return None

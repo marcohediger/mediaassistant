@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ t.dashboard.title }} — MediaAssistant{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/css/pages/dashboard.css?v={{ version }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/dashboard.css?v={{ version }}">
+<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
 {% block content %}
 {% from "_status.html" import status_badge with context %}
+{% from "_modules.html" import module_strip, history_toggle, history_strings with context %}
 {% set d = t.dashboard %}
 {# Sprite icon; app.js (dashIcon) writes the same markup on live refresh. #}
 {% macro icon(name, size=16) -%}
@@ -23,15 +25,17 @@
 </tr>
 {%- endmacro %}
 
-{# One recent job; app.js (updateRecentJobs) renders the same row from /api/dashboard. #}
+{# One recent job; app.js (updateRecentJobs) renders the same row from /api/dashboard
+   and /api/history/modules. A click on the row or the chevron expands it. #}
 {% macro job_row(job) -%}
 {% set msg = job.error_message or '' %}
-<tr>
+<tr class="hist-row" data-key="{{ job.debug_key }}" data-sig="{{ job_signature(job) }}">
 <td class="ui-col-icon">{{ status_badge(job.status, icon_only=True) }}</td>
 <th scope="row"><div class="dash-job"><a class="dash-job-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename or '' }}">{{ job.filename or '—' }}</a><span class="dash-job-key">{{ job.debug_key or '—' }}</span></div></th>
-<td class="dash-col-step">{{ job.current_step or '—' }}</td>
+<td class="hist-col-mods dash-col-mods">{{ module_strip(job) }}</td>
 <td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }}" title="{{ msg }}">{{ msg }}</td>
 <td class="ui-num dash-col-time">{{ job.updated_at.strftime('%d.%m. %H:%M:%S') if job.updated_at else '—' }}</td>
+<td class="ui-col-actions hist-col-toggle">{{ history_toggle(job) }}</td>
 </tr>
 {%- endmacro %}
 
@@ -145,12 +149,13 @@
                 <tr>
                     <th scope="col" class="ui-col-icon"><span class="ui-sr-only">{{ d.status }}</span></th>
                     <th scope="col">{{ d.file }}</th>
-                    <th scope="col" class="dash-col-step">{{ d.step }}</th>
+                    <th scope="col" class="dash-col-mods">{{ t.history.modules }}</th>
                     <th scope="col">{{ d.message }}</th>
                     <th scope="col" class="ui-num">{{ d.time }}</th>
+                    <th scope="col" class="ui-col-actions"><span class="ui-sr-only">{{ t.history.expand }}</span></th>
                 </tr>
             </thead>
-            <tbody id="recent-jobs">
+            <tbody id="recent-jobs" data-history-rows>
             {%- for job in recent_jobs %}{{ job_row(job) }}{% endfor -%}
             </tbody>
         </table>
@@ -161,6 +166,7 @@
 </section>
 
 <div class="ui-toast-region" id="dash-toasts" aria-live="polite"></div>
+{{ history_strings() }}
 
 <script>
 (function () {

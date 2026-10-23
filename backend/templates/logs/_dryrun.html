@@ -124,8 +124,13 @@
                             <span class="logs-key">{{ job.debug_key }}</span>
                         </div>
                     </th>
-                    <td class="ui-nowrap lc-cat">{{ job.step_result.get('IA-08', {}).get('category', '—') if job.step_result else '—' }}</td>
-                    <td class="lc-target"><span class="logs-path" title="{{ job.target_path or '' }}">{{ job.target_path or '—' }}</span></td>
+                    {# IA-08 keeps the would-be location of a dry run in its step result only;
+                       job.target_path stays empty (older dry runs still have it there) #}
+                    {% set ia08 = job.step_result.get('IA-08') if job.step_result is mapping else none %}
+                    {% set ia08 = ia08 if ia08 is mapping else {} %}
+                    {% set planned = ia08.get('target_path') or job.target_path or '' %}
+                    <td class="ui-nowrap lc-cat">{{ ia08.get('category', '—') }}</td>
+                    <td class="lc-target"><span class="logs-path" title="{{ planned }}">{{ planned or '—' }}</span></td>
                 </tr>
                 {% endfor %}
             </tbody>

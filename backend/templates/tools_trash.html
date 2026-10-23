@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}{{ t.history.trash_title }} — MediaAssistant{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pages/history.css?v={{ version }}">{% endblock %}
+{% block content %}
+{% from "_modules.html" import history_strings with context %}
+{% set h = t.history %}
+{% macro icon(name, size=16) -%}
+<svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
+{%- endmacro %}
+
+<div class="ui-page-head">
+    <div class="ui-page-head-text">
+        <a class="ui-page-back" href="/tools">{{ icon('chevron-left') }}{{ h.back_tools }}</a>
+        <h1 class="ui-page-title">{{ h.trash_title }} <span class="ui-badge ui-badge-lg" id="trash-total" hidden></span></h1>
+        <p class="ui-page-sub" id="trash-sub">{{ h.trash_sub | replace('{days}', retention_days) | replace('{immich_days}', retention_days) }}</p>
+    </div>
+</div>
+
+<div class="ui-toolbar trash-toolbar">
+    <div class="ui-segmented" role="group" aria-label="{{ h.filter_label }}" id="trash-filter">
+        <button type="button" class="ui-seg" data-kind="" aria-pressed="true">{{ h.filter_all }} <span class="ui-count" data-count="total">0</span></button>
+        <button type="button" class="ui-seg" data-kind="local" aria-pressed="false">{{ icon('hard-drive') }}{{ h.filter_local }} <span class="ui-count" data-count="local">0</span></button>
+        <button type="button" class="ui-seg" data-kind="immich" aria-pressed="false">{{ icon('cloud') }}{{ h.filter_immich }} <span class="ui-count" data-count="immich">0</span></button>
+    </div>
+    <span class="ui-toolbar-meta" id="trash-meta" aria-live="polite"></span>
+</div>
+
+<div id="trash-alert" class="trash-alert"></div>
+
+<div id="trash-list" aria-busy="true">
+    <div class="ui-card ui-card-body"><span class="ui-skeleton hist-skel"></span><span class="ui-skeleton hist-skel"></span></div>
+</div>
+
+<nav class="ui-pagination" id="trash-pages" aria-label="{{ t.logs.page }}" hidden>
+    <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" data-page="prev">{{ icon('chevron-left') }}{{ h.prev }}</button>
+    <span class="ui-pagination-info" id="trash-page-info"></span>
+    <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" data-page="next">{{ h.next }}{{ icon('chevron-right') }}</button>
+</nav>
+
+{{ history_strings() }}
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const H = MA.history;
+    const T = H.text;
+    const list = document.getElementById("trash-list");
+    const alertBox = document.getElementById("trash-alert");
+    const filter = document.getElementById("trash-filter");
+    const pages = document.getElementById("trash-pages");
+    const params = new URLSearchParams(location.search);
+    let state = {kind: ["local", "immich"].includes(params.get("kind")) ? params.get("kind") : "", page: Math.max(1, parseInt(params.get("page"), 10) || 1)};
+    let current = null;
+
+    function remember() {
+        const q = new URLSearchParams();
+        if (state.kind) q.set("kind", state.kind);
+        if (state.page > 1) q.set("page", state.page);
+        history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q : ""));
+    }
+
+    function emptyState(filtered) {
+        const card = H.el("div", "ui-card");
+        const box = H.el("div", "ui-empty");
+        const ico = H.iconEl("span", "ui-empty-icon is-success", filtered ? "filter" : "trash", null, 22);
+        box.append(ico, H.el("p", "ui-empty-title", filtered ? T("trash_empty_filtered") : T("trash_empty_title")));
+        if (!filtered) box.appendChild(H.el("p", "ui-empty-text", T("trash_empty_text")));
+        card.appendChild(box);
+        return card;
+    }
+
+    function row(e) {
+        const tr = document.createElement("tr");
+        const name = H.el("th");
+        name.scope = "row";
+        name.className = "trash-c-file";
+        const nameBox = H.el("div", "trash-name");
+        const strong = H.el("strong", "", e.filename || e.name);
+        strong.title = e.filename || e.name;
+        nameBox.appendChild(strong);
+        if (e.debug_key) {
+            const a = H.el("a", "trash-key ui-link", e.debug_key);
+            a.href = "/logs/job/" + encodeURIComponent(e.debug_key);
+            nameBox.appendChild(a);
+        } else {
+            nameBox.appendChild(H.el("span", "trash-key", T("no_job")));
+        }
+        name.appendChild(nameBox);
+
+        const where = H.el("td", "trash-c-where");
+        const whereBox = H.el("div", "trash-where");
+        const path = H.el("code", "ui-path", e.location);
+        if (e.trash_location) path.title = T("in_trash", {path: e.trash_location});
+        whereBox.append(H.badge(e.kind_label), path);
+        where.appendChild(whereBox);
+
+        const when = H.el("td", "trash-c-when trash-when", e.trashed_at || "—");
+        const reason = H.el("td", "trash-c-reason");
+        reason.appendChild(H.el("span", "trash-reason", e.reason || "—"));
+        if (e.actor_label) reason.appendChild(H.el("span", "trash-actor", e.actor_label));
+        const left = H.el("td", "trash-c-left");
+        if (e.remaining_label) left.appendChild(H.badge(e.remaining_label, e.remaining_days != null && e.remaining_days <= 3 ? "is-warning" : ""));
+
+        const actions = H.el("td", "ui-col-actions trash-c-actions");
+        const btn = H.iconEl("button", "ui-btn ui-btn-secondary ui-btn-sm", "retry", T("restore"), 14);
+        btn.type = "button";
+        btn.setAttribute("aria-label", T("restore") + ": " + (e.filename || e.name));
+        btn.addEventListener("click", async function () {
+            const result = await H.restore(e, btn);
+            if (!result) return;
+            H.alert(alertBox, result);
+            load(); // also after a refusal: the row may be stale
+        });
+        actions.appendChild(btn);
+        tr.append(name, where, when, reason, left, actions);
+        return tr;
+    }
+
+    function render(data) {
+        current = data;
+        document.querySelectorAll("[data-count]").forEach(function (el) { el.textContent = String(data.counts[el.dataset.count] || 0); });
+        const total = document.getElementById("trash-total");
+        total.textContent = data.counts.total === 1 ? T("entries_one") : T("entries", {n: data.counts.total});
+        total.hidden = !data.counts.total;
+        document.getElementById("trash-sub").textContent = T("trash_sub", {days: data.retention_days, immich_days: data.immich_trash_days});
+        document.getElementById("trash-meta").textContent = data.total ? (data.total === 1 ? T("entries_one") : T("entries", {n: data.total})) : "";
+        filter.querySelectorAll(".ui-seg").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.kind === data.kind ? "true" : "false"); });
+        list.removeAttribute("aria-busy");
+        if (!data.entries.length) {
+            list.replaceChildren(emptyState(!!data.kind && data.counts.total > 0));
+            pages.hidden = true;
+            return;
+        }
+        const card = H.el("div", "ui-table-card");
+        const table = H.el("table", "ui-table trash-table");
+        table.setAttribute("aria-label", T("trash_title"));
+        const head = H.el("thead");
+        const hr = H.el("tr");
+        [["col_file"], ["col_where"], ["col_when"], ["col_reason"], ["col_left"], ["col_actions", "ui-col-actions"]].forEach(function (c) {
+            const th = H.el("th", c[1] || "", T(c[0]));
+            th.scope = "col";
+            hr.appendChild(th);
+        });
+        head.appendChild(hr);
+        const body = H.el("tbody");
+        data.entries.forEach(function (e) { body.appendChild(row(e)); });
+        table.append(head, body);
+        card.appendChild(table);
+        list.replaceChildren(card);
+        pages.hidden = data.pages <= 1;
+        document.getElementById("trash-page-info").textContent = T("page", {page: data.page, pages: data.pages});
+        pages.querySelector('[data-page="prev"]').disabled = data.page <= 1;
+        pages.querySelector('[data-page="next"]').disabled = data.page >= data.pages;
+    }
+
+    async function load() {
+        list.setAttribute("aria-busy", "true");
+        try {
+            const q = new URLSearchParams({kind: state.kind, page: state.page});
+            const resp = await fetch("/api/history/trash?" + q, {headers: {"Accept": "application/json"}});
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            const data = await resp.json();
+            if (data.page > data.pages && data.pages >= 1 && state.page !== data.pages) {
+                state.page = data.pages;
+                remember();
+                return load();
+            }
+            render(data);
+        } catch (err) {
+            list.removeAttribute("aria-busy");
+            list.replaceChildren(H.state(T("load_failed") + " (" + err.message + ")", true));
+        }
+    }
+
+    filter.addEventListener("click", function (ev) {
+        const btn = ev.target.closest(".ui-seg");
+        if (!btn) return;
+        state = {kind: btn.dataset.kind, page: 1};
+        remember();
+        load();
+    });
+    pages.addEventListener("click", function (ev) {
+        const btn = ev.target.closest("[data-page]");
+        if (!btn || !current) return;
+        state.page = Math.min(current.pages, Math.max(1, state.page + (btn.dataset.page === "next" ? 1 : -1)));
+        remember();
+        load();
+    });
+    load();
+});
+</script>
+{% endblock %}
