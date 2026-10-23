@@ -117,8 +117,13 @@ async def next_debug_key() -> str:
 async def create_job_safe(*, filename, original_path, source_label, set_id,
                           source_inbox_path=None, folder_tags=False, dry_run=False,
                           use_immich=False, immich_asset_id=None, immich_user_id=None,
-                          file_hash=None) -> Job | None:
-    """Create a queued Job with collision-free debug_key from the in-memory counter."""
+                          file_hash=None, immich_checksum=None) -> Job | None:
+    """Create a queued Job with collision-free debug_key from the in-memory counter.
+
+    The job's source is recorded in the copy register right away (see
+    register_job_source); `immich_checksum` is the asset's checksum from
+    Immich's search answer, if known.
+    """
     global _key_counter
     debug_key = await next_debug_key()
     try:
@@ -140,10 +145,36 @@ async def create_job_safe(*, filename, original_path, source_label, set_id,
             )
             session.add(job)
             await session.commit()
-            return job
     except IntegrityError:
         logger.error(f"debug_key collision for {filename} key={debug_key} — resetting counter")
         # Reset counter so next call re-reads from DB
         async with _key_counter_lock:
             _key_counter = None
-    return None
+        return None
+    await register_job_source(job, file_hash=file_hash, immich_checksum=immich_checksum)
+    return job
+
+
+async def register_job_source(job, *, file_hash=None, immich_checksum=None) -> None:
+    """Record where a new job's content is, in the copy register (fileops).
+
+    Inbox file: a local copy owned by the job; if the register still lists
+    an older job's file with the same content at that path, that entry is
+    stale and the new job takes the path over. Immich asset: an unverified
+    copy of kind immich — the worker confirms its content when it downloads
+    the original. Only registers, nothing is moved. A failure is logged and
+    does not stop the job; fileops registers an unknown source on first use.
+    """
+    import fileops
+    from system_logger import log_warning
+
+    path = job.original_path or ""
+    try:
+        if job.immich_asset_id and path.startswith(IMMICH_PENDING):
+            await fileops.register_existing(job, "immich", job.immich_asset_id, checksum=immich_checksum)
+        elif path and os.path.isfile(path):
+            await fileops.register_existing(job, "local", path, sha256=file_hash, take_over=True)
+    except Exception as e:
+        logger.warning("register %s failed: %s", job.debug_key, e)
+        await log_warning("filewatcher", f"{job.debug_key} Eintrag im Exemplar-Register fehlgeschlagen",
+                          f"{path}: {type(e).__name__}: {e}")

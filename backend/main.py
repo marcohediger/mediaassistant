@@ -8,7 +8,9 @@ from config import config_manager
 from database import init_db, seed_inbox_from_env
 from sets import migrate_to_sets
 from filewatcher import start_filewatcher
+from fileops import trash_maintenance
 from health_watcher import start_health_watcher
+from recovery import reconcile_file_operations
 from routers import dashboard, setup, settings, logs, api, duplicates, review, diagnostics, tools, processing_sets
 
 # Configure logging for Docker stdout
@@ -41,6 +43,13 @@ async def _supervise(name: str, coro):
             pass
 
 
+async def _start_processing(shutdown_event: asyncio.Event):
+    # File operations a crash left open are settled first: the filewatcher
+    # starts the worker, which would begin new operations on the same files.
+    await reconcile_file_operations()
+    await start_filewatcher(shutdown_event)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -50,13 +59,15 @@ async def lifespan(app: FastAPI):
     # LIBRARY_BASE_PATH end up in its first set.
     await migrate_to_sets()
     shutdown_event = asyncio.Event()
-    watcher_task = asyncio.create_task(_supervise("filewatcher", start_filewatcher(shutdown_event)))
+    watcher_task = asyncio.create_task(_supervise("filewatcher", _start_processing(shutdown_event)))
     health_task = asyncio.create_task(_supervise("health_watcher", start_health_watcher(shutdown_event)))
+    trash_task = asyncio.create_task(_supervise("papierkorb", trash_maintenance(shutdown_event)))
     yield
     shutdown_event.set()
     watcher_task.cancel()
     health_task.cancel()
-    for t in (watcher_task, health_task):
+    trash_task.cancel()
+    for t in (watcher_task, health_task, trash_task):
         try:
             await t
         except asyncio.CancelledError:
