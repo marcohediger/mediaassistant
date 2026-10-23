@@ -242,13 +242,12 @@ Schritte 1 und 2 bringen den grössten Sicherheitsgewinn und kommen deshalb zuer
 - **Papierkorb:** Löschen → Wiederherstellen → Datei und Asset wieder da.
 - **Modul einzeln:** Geocoding neu → IA-07/IA-08 laufen nach, Tags in Immich aktualisiert.
 
-## Offene Entscheide
+## Entscheide (2026-10-23)
 
-1. **Ort des lokalen Papierkorbs:** im Basis-Pfad des Sets (`.papierkorb/`,
-   gleicher Datenträger, im Dateimanager sichtbar — Vorschlag) oder zentral in
-   `/app/data/papierkorb` (kann auf einem anderen, kleineren Datenträger liegen).
-2. **Dev-Immich auf 3.1.0 aktualisieren** — nötig, weil Papierkorb- und
-   Kopier-Verhalten auf der Live-Version geprüft werden müssen. Dev enthält nur
-   Testdaten.
-3. **Alte Dateien in `reprocess/`** (live 18 362 Verweise): nach der ersten
-   Bestandsprüfung eine Liste zum Aufräumen vorlegen — nie automatisch löschen.
+1. **Lokaler Papierkorb im Basis-Pfad des Sets:** `<Basis-Pfad>/.papierkorb/` —
+   gleicher Datenträger wie die Ablage, im Dateimanager sichtbar.
+2. **Dev-Immich wird auf 3.1.0 aktualisiert** (wie Produktion, Issue #48), damit
+   Papierkorb- und Kopier-Verhalten auf der Live-Version geprüft werden.
+3. **Start mit Schritt 0 und 1.**
+4. Offen bleibt: alte Dateien in `reprocess/` (live 18 362 Verweise) — nach der
+   ersten Bestandsprüfung eine Liste zum Aufräumen vorlegen, nie automatisch löschen.
