@@ -433,11 +433,10 @@ async def test_us5_duplicate_keep():
             r2 = await session.execute(select(Job).where(Job.id == job2_id))
             j1, j2 = r1.scalar(), r2.scalar()
 
-            _, deleted, _, _flush = await _resolve_duplicate_group(
-                session, j1, [j1, j2],
-                source="e2e-us5", user_kept=True,
-            )
-            await session.commit()
+        # The resolution writes in sessions of its own; the caller only reads.
+        _, deleted, _, _problems = await _resolve_duplicate_group(
+            j1, [j1, j2], source="e2e-us5", user_kept=True,
+        )
 
         check("US5-03 Donor geloescht", deleted == 1)
 
@@ -489,7 +488,9 @@ async def test_us6_shared_asset_keep():
             status="duplicate", target_path=dup_path,
             immich_asset_id=asset_id,  # GLEICHE asset_id!
             debug_key=f"E2E-US6-DUP-{TS}",
-            file_hash=job1.file_hash,
+            # The donor's hash is that of its own file: the resolution moves
+            # a donor's file to the trash only when its content checks out.
+            file_hash=sha256(dup_path),
             step_result={
                 "IA-01": {"file_type": "JPEG", "file_size": 100},
                 "IA-02": {"status": "duplicate", "match_type": "exact",
@@ -509,11 +510,9 @@ async def test_us6_shared_asset_keep():
         r2 = await session.execute(select(Job).where(Job.id == poller_id))
         j1, j2 = r1.scalar(), r2.scalar()
 
-        _, _, _, _flush = await _resolve_duplicate_group(
-            session, j1, [j1, j2],
-            source="e2e-us6", user_kept=True,
-        )
-        await session.commit()
+    _, _, _, _problems = await _resolve_duplicate_group(
+        j1, [j1, j2], source="e2e-us6", user_kept=True,
+    )
 
     # KRITISCH: Asset muss noch in Immich existieren
     exists = await asset_exists(asset_id)
@@ -567,11 +566,9 @@ async def test_us7_batch_clean():
             members = [j1, j2]
             best = max(members, key=lambda j: _quality_score(j))
 
-            _, deleted, errors, _flush = await _resolve_duplicate_group(
-                session, best, members,
-                source="e2e-us7-batch",
-            )
-            await session.commit()
+        _, deleted, errors, _problems = await _resolve_duplicate_group(
+            best, members, source="e2e-us7-batch",
+        )
 
         check("US7-03 Donor geloescht", deleted == 1)
         check("US7-04 Keine Errors", errors == 0)
@@ -832,12 +829,9 @@ async def test_us12_keep_with_tag_merge():
             r2 = await session.execute(select(Job).where(Job.id == job2_id))
             j1, j2 = r1.scalar(), r2.scalar()
 
-            merge_notes, _, _, flush = await _resolve_duplicate_group(
-                session, j1, [j1, j2],
-                source="e2e-us12", user_kept=True,
-            )
-            await session.commit()
-        await flush()
+        merge_notes, _, _, _problems = await _resolve_duplicate_group(
+            j1, [j1, j2], source="e2e-us12", user_kept=True,
+        )
 
         check("US12-03 Folder-Tags gemergt",
               any("folder_tags" in n for n in merge_notes),
@@ -905,12 +899,12 @@ async def test_us13_batch_clean_all():
             if j1 and j2 and (j1.status == "duplicate" or j2.status == "duplicate"):
                 members = [j1, j2]
                 best = max(members, key=lambda j: _quality_score(j))
-                _, d, _, flush = await _resolve_duplicate_group(
-                    session, best, members, source="e2e-us13-batch")
-                await session.commit()
-                await flush()
-                total_kept += 1
-                total_deleted += d
+            else:
+                continue
+        # The resolution writes in sessions of its own; the caller only reads.
+        _, d, _, _problems = await _resolve_duplicate_group(best, members, source="e2e-us13-batch")
+        total_kept += 1
+        total_deleted += d
 
     check("US13-02 3 Gruppen aufgeloest", total_kept == 3, f"kept={total_kept}")
     check("US13-03 3 Donors geloescht", total_deleted == 3, f"deleted={total_deleted}")

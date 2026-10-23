@@ -106,17 +106,17 @@ async def main():
     print("\n── T5: resolve_filepath ──")
     j = Job(filename="test.jpg", original_path="/tmp/resolve_test.jpg", target_path=None, debug_key="RT-1")
     open("/tmp/resolve_test.jpg", "w").close()
-    check("T5a original_path existiert", resolve_filepath(j) == "/tmp/resolve_test.jpg")
+    check("T5a original_path existiert", await resolve_filepath(j) == "/tmp/resolve_test.jpg")
 
     j.target_path = "/tmp/resolve_target.jpg"
     open("/tmp/resolve_target.jpg", "w").close()
-    check("T5b target_path bevorzugt", resolve_filepath(j) == "/tmp/resolve_target.jpg")
+    check("T5b target_path bevorzugt", await resolve_filepath(j) == "/tmp/resolve_target.jpg")
 
     safe_remove("/tmp/resolve_test.jpg")
     safe_remove("/tmp/resolve_target.jpg")
     j.target_path = None
     j.original_path = "/tmp/gone.jpg"
-    check("T5c nicht-existent → original_path", resolve_filepath(j) == "/tmp/gone.jpg")
+    check("T5c nicht-existent → original_path", await resolve_filepath(j) == "/tmp/gone.jpg")
 
     # ── T6: Web-Endpoints erreichbar ──
     print("\n── T6: Web-Endpoints nach Refactoring ──")

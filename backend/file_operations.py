@@ -4,6 +4,7 @@ Every file operation that appears in more than one module belongs here.
 Do NOT reimplement these with raw os/shutil calls elsewhere.
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -134,25 +135,159 @@ async def get_duplicate_dir(job) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Path resolution
+# Where a job's file is — the register (fileops) first
 # ---------------------------------------------------------------------------
 
-def resolve_filepath(job) -> str:
-    """Find the actual file path, checking target, original, and temp paths.
+_LOCAL_COPY_KINDS = ("local", "work")
+# A copy in Immich's locked folder (NSFW) is out of the API key's sight, not lost.
+_HELD_STATES = ("present", "locked")
 
-    Prefers target_path, then original_path (only if the file exists there),
-    then falls back to the IA-04 converted temp file.
+
+def _local_path(path: str | None) -> str | None:
+    """A job path that names a file on disk (not immich: / immich-pending:)."""
+    if not path or path.startswith("immich:") or path.startswith("immich-pending:"):
+        return None
+    return os.path.abspath(os.path.normpath(path))
+
+
+def job_asset_ids(job) -> list[str]:
+    """Immich assets the job's own fields name (immich_asset_id, immich:<id> target)."""
+    ids = []
+    target = job.target_path or ""
+    if target.startswith("immich:") and target[len("immich:"):]:
+        ids.append(target[len("immich:"):])
+    if job.immich_asset_id and job.immich_asset_id not in ids:
+        ids.append(job.immich_asset_id)
+    return ids
+
+
+def _field_hashes(job) -> set[str]:
+    """Content hashes the job's fields know: at scan time, and after IA-07
+    rewrote the file in place (direct mode)."""
+    ia07 = (job.step_result or {}).get("IA-07")
+    after_write = ia07.get("file_hash") if isinstance(ia07, dict) else None
+    return {h for h in (job.file_hash, after_write) if h}
+
+
+async def present_owners(locations) -> dict:
+    """{location: owner job id} of the present register rows at these places."""
+    from database import async_session
+    from models import FileCopy
+    from sqlalchemy import select
+    locations = [loc for loc in locations if loc]
+    if not locations:
+        return {}
+    async with async_session() as session:
+        rows = (await session.execute(select(FileCopy.location, FileCopy.job_id).where(
+            FileCopy.location.in_(locations), FileCopy.state == "present"))).all()
+    return {loc: owner for loc, owner in rows}
+
+
+async def resolve_filepath(job) -> str | None:
+    """The job's file on disk, for showing it (thumbnail, preview, facts).
+
+    The register comes first: a present local copy the job owns (kind local
+    or work). Without one, target_path and then original_path — each only if
+    a file exists there and the register does not list that place for
+    another job (a stale original_path where a newer job's file lies now).
+    The IA-04 JPEG is never returned: it is a converted preview, not the
+    job's file.
+
+    Nothing found: target_path or original_path as before, so a caller can
+    still show where the file should be. Nothing here is a licence to move
+    or delete what lies at that path — that takes job_copies().
     """
-    if job.target_path and os.path.exists(job.target_path):
-        return job.target_path
-    if job.original_path and os.path.exists(job.original_path):
-        return job.original_path
-    # Fallback: IA-04 converted temp file
-    convert_result = (job.step_result or {}).get("IA-04", {})
-    temp_path = convert_result.get("temp_path")
-    if temp_path and os.path.exists(temp_path):
-        return temp_path
+    if getattr(job, "id", None) is not None:
+        import fileops
+        for row in reversed(await fileops.copies(job)):
+            if row.kind in _LOCAL_COPY_KINDS and os.path.isfile(row.location):
+                return row.location
+    candidates = [p for p in (_local_path(job.target_path), _local_path(job.original_path)) if p]
+    owners = await present_owners(candidates)
+    for path in candidates:
+        owner = owners.get(path)
+        if (owner is None or owner == getattr(job, "id", None)) and os.path.isfile(path):
+            return path
     return job.target_path or job.original_path
+
+
+async def job_copies(job, *, check: bool = True) -> tuple[list, list[str]]:
+    """The copies a job owns or uses, as register rows (fileops.FileCopy).
+
+    Registered copies come as they are. The old job fields are taken on
+    first touch: a local target_path whose content is one of the job's known
+    hashes is registered for the job; an Immich asset in immich_asset_id or
+    an immich: target is registered the way trash_asset()/replace() would.
+    original_path is only ever used through the register — it is often
+    stale (R-01, R-02). With ``check`` every copy is checked now (re-hash,
+    or the asset's state in Immich) and only the ones that hold up are
+    returned (present, or locked by MediaAssistant); an Immich check that
+    cannot be made counts as not holding up.
+
+    Returns (rows, notes): notes say what was not taken and why (German,
+    for system logs and messages).
+    """
+    import fileops
+    from database import async_session
+    from models import AssetRef, FileCopy
+    from sqlalchemy import select
+
+    notes: list[str] = []
+    rows = list(await fileops.copies(job, states=_HELD_STATES))
+    async with async_session() as session:
+        ref_locations = list((await session.execute(
+            select(AssetRef.location).where(AssetRef.job_id == job.id))).scalars().all())
+        if ref_locations:
+            rows += list((await session.execute(select(FileCopy).where(
+                FileCopy.location.in_(ref_locations), FileCopy.state.in_(_HELD_STATES),
+                FileCopy.job_id != job.id))).scalars().all())
+    seen = {r.location for r in rows}
+
+    target = _local_path(job.target_path)
+    if target and target not in seen and os.path.isfile(target):
+        owner = (await present_owners([target])).get(target)
+        if owner is not None and owner != job.id:
+            notes.append(f"{target}: im Register einem anderen Job zugeordnet")
+        else:
+            hashes = _field_hashes(job)
+            digest = await asyncio.to_thread(sha256, target)
+            if not hashes:
+                notes.append(f"{target}: Inhalt nicht prüfbar (kein Hash des Jobs bekannt)")
+            elif digest not in hashes:
+                notes.append(f"{target}: anderer Inhalt als die Datei des Jobs")
+            else:
+                rows.append(await fileops.register_existing(job, "local", target, sha256=digest,
+                                                            verified=True))
+                seen.add(target)
+
+    for asset_id in job_asset_ids(job):
+        if asset_id in seen:
+            continue
+        try:
+            row = await fileops.immich_copy(job, asset_id, check=False)
+        except fileops.FileOpError as exc:
+            notes.append(f"Asset {asset_id}: {exc}")
+            continue
+        if row.state in _HELD_STATES:
+            rows.append(row)
+            seen.add(asset_id)
+        else:
+            notes.append(f"Asset {asset_id}: im Register '{row.state}'")
+
+    if not check:
+        return rows, notes
+    held = []
+    for row in rows:
+        try:
+            checked = await fileops.verify(row)
+        except fileops.FileOpError as exc:
+            notes.append(f"{row.location}: nicht prüfbar ({exc})")
+            continue
+        if checked.state in _HELD_STATES:
+            held.append(checked)
+        else:
+            notes.append(f"{row.location}: {checked.state}")
+    return held, notes
 
 
 # ---------------------------------------------------------------------------

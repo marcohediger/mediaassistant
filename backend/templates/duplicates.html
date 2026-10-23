@@ -60,14 +60,32 @@
     </div>
 </div>
 
+<div class="ui-stack ui-stack-lg">
+{% if notice %}
+{% set ntext = (d['msg_' ~ notice.code] or d.msg_generic) | replace('{name}', notice.name) | replace('{detail}', notice.detail) | replace('{n}', notice.n) %}
+<div class="ui-alert is-{{ notice.tone }}" role="{{ 'alert' if notice.tone == 'error' else 'status' }}">
+    {{ icon({'error': 'alert-circle', 'warning': 'alert-triangle', 'success': 'check-circle'}.get(notice.tone, 'info'), 18) }}
+    <div class="ui-alert-body"><p class="ui-alert-text">{{ ntext }}</p></div>
+</div>
+{% endif %}
 {% if groups %}
 <div id="dup-groups-container" class="dp-groups">
 {% for group in groups %}
 {% include "_dup_group.html" %}
 {% endfor %}
 </div>
+{% else %}
+<div class="ui-card">
+    <div class="ui-empty">
+        <span class="ui-empty-icon is-success">{{ icon('check-circle', 22) }}</span>
+        <p class="ui-empty-title">{{ d.empty_title }}</p>
+        <p class="ui-empty-text">{{ d.empty_text }}</p>
+    </div>
+</div>
+{% endif %}
+</div>
 
-{% if total_pages > 1 %}
+{% if groups and total_pages > 1 %}
 <nav class="ui-pagination dp-pagination" aria-label="{{ d.page_info | replace('{p}', current_page | string) | replace('{n}', total_pages | string) }}">
     {% if current_page > 1 %}
     <a href="/duplicates?page={{ current_page - 1 }}" class="ui-btn ui-btn-secondary ui-btn-sm dp-page-step" aria-label="{{ d.prev }}" title="{{ d.prev }}">{{ icon('chevron-left') }}</a>
@@ -97,16 +115,6 @@
     </select>
     {% endif %}
 </nav>
-{% endif %}
-
-{% else %}
-<div class="ui-card">
-    <div class="ui-empty">
-        <span class="ui-empty-icon is-success">{{ icon('check-circle', 22) }}</span>
-        <p class="ui-empty-title">{{ d.empty_title }}</p>
-        <p class="ui-empty-text">{{ d.empty_text }}</p>
-    </div>
-</div>
 {% endif %}
 
 <template id="dp-no-preview"><span class="ui-thumb-placeholder">{{ icon('image', 24) }}{{ d.no_preview }}</span></template>
@@ -167,13 +175,15 @@ function showProgress(data) {
 
     if (data.done) {
         progressText.textContent = DP_TEXT.batchDone
-            .replace('{kept}', data.kept).replace('{deleted}', data.deleted).replace('{errors}', data.errors);
-        track.classList.add(data.errors > 0 ? 'is-warning' : 'is-success');
+            .replace('{kept}', data.kept).replace('{deleted}', data.deleted).replace('{errors}', data.errors)
+            .replace('{skipped}', data.skipped || 0);
+        track.classList.add(data.errors > 0 || data.skipped > 0 ? 'is-warning' : 'is-success');
         setTimeout(() => window.location.reload(), 3000);
     } else {
         progressText.textContent = DP_TEXT.batchProgress
             .replace('{current}', data.current).replace('{total}', data.total)
-            .replace('{kept}', data.kept).replace('{deleted}', data.deleted).replace('{errors}', data.errors);
+            .replace('{kept}', data.kept).replace('{deleted}', data.deleted).replace('{errors}', data.errors)
+            .replace('{skipped}', data.skipped || 0);
     }
 }
 

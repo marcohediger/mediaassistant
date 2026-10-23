@@ -25,6 +25,14 @@
     {% endif %}
 </div>
 
+<div class="ui-stack">
+{% if notice %}
+{% set ntext = (r['msg_' ~ notice.code] or r.msg_generic) | replace('{name}', notice.name) | replace('{detail}', notice.detail) | replace('{n}', notice.n) %}
+<div class="ui-alert is-{{ notice.tone }}" role="{{ 'alert' if notice.tone == 'error' else 'status' }}">
+    {{ icon({'error': 'alert-circle', 'warning': 'alert-triangle', 'success': 'check-circle'}.get(notice.tone, 'info'), 18) }}
+    <div class="ui-alert-body"><p class="ui-alert-text">{{ ntext }}</p></div>
+</div>
+{% endif %}
 {% if items %}
 <div class="rv-list">
 {% for item in items %}
@@ -117,6 +125,7 @@
     </div>
 </div>
 {% endif %}
+</div>
 
 <template id="rv-no-preview"><span class="ui-thumb-placeholder">{{ icon('image', 22) }}{{ r.no_preview }}</span></template>
 

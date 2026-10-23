@@ -210,6 +210,14 @@ async def create_job(path: str, *, set_id: int, inbox: str | None = None,
         return job.id
 
 
+async def set_fields(job_id: int, **fields):
+    async with async_session() as s:
+        job = await s.get(Job, job_id)
+        for name, value in fields.items():
+            setattr(job, name, value)
+        await s.commit()
+
+
 async def get_job(job_id: int) -> Job | None:
     async with async_session() as s:
         return await s.get(Job, job_id)
@@ -434,6 +442,12 @@ async def test_r07():
     b = await create_job(b_src, set_id=real_set, inbox=box.inbox, step_result=no_exif)
     await run_pipeline(b)
     jb = await get_job(b)
+    if jd1.target_path is None and jd1.status != "review" and has_file(jb.target_path):
+        # R-07a holds now: a dry run leaves no such state behind. A dry-run job an
+        # older version left in the review queue still exists in old databases;
+        # give D exactly that state, so the review actions are tested against it.
+        await set_fields(d1, status="review", target_path=jb.target_path)
+        jd1 = await get_job(d1)
     if not (has_file(jb.target_path) and jb.target_path == jd1.target_path):
         raise Precondition(f"B liegt nicht am Testlauf-Pfad: B={jb.status} {jb.target_path}, D={jd1.target_path}")
     guard = FileGuard([box.root], own=[d1_src]).snapshot()
@@ -457,6 +471,9 @@ async def test_r07():
     b2 = await create_job(b2_src, set_id=real_set, inbox=box.inbox, step_result=no_exif)
     await run_pipeline(b2)
     jd2, jb2 = await get_job(d2), await get_job(b2)
+    if jd2.target_path is None and jd2.status != "review" and has_file(jb2.target_path):
+        await set_fields(d2, status="review", target_path=jb2.target_path)  # as in R-07b
+        jd2 = await get_job(d2)
     if not (has_file(jb2.target_path) and jb2.target_path == jd2.target_path and jd2.status == "review"):
         raise Precondition(f"B2/D2 nicht wie erwartet: B2={jb2.target_path}, D2={jd2.status} {jd2.target_path}")
     guard = FileGuard([box.root], own=[d2_src], may_create=[box.lib]).snapshot()
@@ -536,6 +553,46 @@ async def test_r10b():
     actual(f"nach Absturz: status={mid.status}, Steps im step_result={len(mid.step_result or {})}; "
            f"nach Neustart: status={ja.status}, target_path={where(ja.target_path)} existiert: "
            f"{os.path.exists(library_file)}; Datei liegt unbemerkt in {in_reprocess}.")
+
+    section("R-10b (2)", "Absturz NACH dem Verschieben nach reprocess/, vor dem Umstellen des Jobs",
+            "Wie oben, aber der Absturz kommt, nachdem die Datei in reprocess/ liegt und bevor "
+            "original_path/status committet sind (der Job steht auf 'processing', die alten "
+            "Step-Ergebnisse sind schon verworfen). Neustart: requeue + run_pipeline.",
+            "Der Neustart setzt die Vorbereitung fort: der Job läuft mit seiner Datei aus reprocess/ "
+            "und endet 'done' mit verifizierter Kopie in der Ablage; nichts bleibt unbemerkt liegen.")
+    src2 = make_jpeg(os.path.join(box.inbox, f"IMG_{TAG}_10b2.JPG"))
+    a2 = await create_job(src2, set_id=set_id, inbox=box.inbox, step_result=pre_results())
+    await run_pipeline(a2)
+    if (await get_job(a2)).status != "done":
+        raise Precondition("Erstlauf (2) nicht done")
+
+    def crash_after_move(*_a, **_k):
+        raise SimulatedCrash("file in reprocess/, job fields not committed")
+
+    crashed = False
+    with patched(reprocess_mod, "REPROCESS_DIR", box.reprocess), \
+            patched(reprocess_mod, "point_job_at", crash_after_move):
+        try:
+            await reset_job_for_retry(a2)
+        except SimulatedCrash:
+            crashed = True
+    mid = await get_job(a2)
+    if not crashed:
+        raise Precondition("Absturz (2) wurde nicht ausgelöst")
+    # The resumed run re-runs IA-01..IA-07; pre-fill them (the marker stays).
+    sr = dict(mid.step_result or {})
+    sr.update(pre_results())
+    await set_step_result(a2, sr)
+    with patched(reprocess_mod, "REPROCESS_DIR", box.reprocess):
+        await run_until_done(a2)
+    ja2 = await get_job(a2)
+    res = await check_no_file_lost([a2], search_roots=[box.root])
+    left = [n for n in os.listdir(box.reprocess) if "_10b2" in n] if os.path.isdir(box.reprocess) else []
+    report(risk, "R-10b (2) fortgesetzt: 'done' mit verifizierter Kopie, nichts in reprocess/ liegen geblieben",
+           ja2.status == "done" and res.ok and not left and is_under(ja2.target_path or "", box.lib),
+           f"status={ja2.status}, target_path={where(ja2.target_path)}; {res.summary()}; in reprocess/: {left}")
+    actual(f"nach Absturz: status={mid.status}, original_path={where(mid.original_path)}, Marker "
+           f"vorhanden: {'_prepare_source' in (mid.step_result or {})}; nach Neustart: status={ja2.status}.")
 
 
 # ---------------------------------------------------------------------------
@@ -1082,14 +1139,21 @@ async def test_r17():
             "Die Sidecar mit den erzeugten Metadaten liegt neben der Datei in error/ (oder sonst erhalten).")
     src2 = make_jpeg(os.path.join(box.inbox, f"FOTO_{TAG}_17b.JPG"))
     j2 = await create_job(src2, set_id=set_id, inbox=box.inbox, step_result=sr)
-    real_move = step_ia08_sort.safe_move
+    import fileops as fileops_mod
 
-    def disk_full(s, dst, context=""):
-        if is_under(dst, box.lib) and not dst.endswith(".xmp"):
-            raise OSError(errno.ENOSPC, "No space left on device", dst)
-        return real_move(s, dst, context)
+    class _DiskFullFileops:
+        """IA-08's view of fileops: its move into the library hits a full disk.
+        _move_to_error (pipeline/__init__) keeps the real module."""
 
-    with patched(step_ia08_sort, "safe_move", disk_full):
+        def __getattr__(self, name):
+            return getattr(fileops_mod, name)
+
+        async def move(self, job, s, dst, **kw):
+            if is_under(dst, box.lib) and not dst.endswith(".xmp"):
+                raise OSError(errno.ENOSPC, "No space left on device", dst)
+            return await fileops_mod.move(job, s, dst, **kw)
+
+    with patched(step_ia08_sort, "fileops", _DiskFullFileops()):
         await run_pipeline(j2)
     jj2 = await get_job(j2)
     if jj2.status != "error" or not has_file(jj2.target_path):
