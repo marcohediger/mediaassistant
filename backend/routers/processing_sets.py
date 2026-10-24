@@ -76,6 +76,7 @@ async def serialize(session, ps: ProcessingSet) -> dict:
         "window_start": ps.window_start or "22:00", "window_end": ps.window_end or "06:00",
         "scheduled_days": ps.scheduled_days or "", "scheduled_time": ps.scheduled_time or "23:00",
         "folder_tag_mode": ps.folder_tag_mode or "none", "folder_albums": bool(ps.folder_albums),
+        "tag_groups": bool(ps.tag_groups),
         "dry_run": bool(ps.dry_run),
         "ocr_enabled": bool(ps.ocr_enabled), "ocr_mode": ps.ocr_mode or "smart",
         "metadata_write_mode": ps.metadata_write_mode or "direct", "google_json": bool(ps.google_json),
@@ -122,6 +123,7 @@ async def summaries() -> list[dict]:
             "library_base_path": ps.library_base_path,
             "rules": rule_counts.get(ps.id, 0),
             "folder_tag_mode": ps.folder_tag_mode or "none", "folder_albums": bool(ps.folder_albums),
+            "tag_groups": bool(ps.tag_groups),
             "ocr_enabled": bool(ps.ocr_enabled), "dry_run": bool(ps.dry_run),
             "metadata_write_mode": ps.metadata_write_mode or "direct",
             "queue": queue.get(ps.id, 0),
@@ -352,6 +354,10 @@ async def save_set(request: Request, set_id: int):
         ps.scheduled_days = days
         ps.folder_tag_mode = tag_mode
         ps.folder_albums = bool(data.get("folder_albums", data.get("folder_tags")))
+        # An editor page loaded before the option existed does not send it:
+        # the set keeps what it has.
+        if "tag_groups" in data:
+            ps.tag_groups = bool(data.get("tag_groups"))
         ps.dry_run = bool(data.get("dry_run"))
         ps.ocr_enabled = bool(data.get("ocr_enabled"))
         ps.ocr_mode = data["ocr_mode"]

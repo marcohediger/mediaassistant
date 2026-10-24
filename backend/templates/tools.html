@@ -160,6 +160,47 @@
     <div id="merge_result" class="tools-result"></div>
 </section>
 
+{# Switch a set's photos in Immich over to tag groups (tag_groups_migration.py):
+   IA-07 + IA-08 again in Immich's API mode, then the empty tags. #}
+<section class="ui-card tools-card" id="section-tag-groups" aria-labelledby="groups-title">
+    <div class="ui-card-head">
+        <span class="ui-icon-tile is-accent">{{ icon('tag', 18) }}</span>
+        <div class="ui-card-head-text">
+            <h2 class="ui-card-title" id="groups-title">{{ t.tools.groups_title }}</h2>
+            <p class="ui-card-desc">{{ t.tools.groups_desc }}</p>
+        </div>
+    </div>
+    <div class="ui-card-body ui-form">
+        <p class="tools-text">{{ t.tools.groups_hint }}</p>
+        <div class="ui-field">
+            <label class="ui-label" for="groups_set">{{ t.tools.groups_set }}</label>
+            <select class="ui-select" id="groups_set" onchange="groupsInvalidate()">
+                {%- for s in sets %}
+                <option value="{{ s.id }}"{% if s.tag_groups %} data-groups="1"{% endif %}>{{ s.name }}{% if s.tag_groups %} · {{ t.tools.groups_on }}{% else %} · {{ t.tools.groups_off }}{% endif %}</option>
+                {%- endfor %}
+            </select>
+        </div>
+        <div class="ui-option-list">
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.tools.groups_foreign }}</span>
+                    <span class="ui-option-desc" id="groups_foreign_desc">{{ t.tools.groups_foreign_desc }}</span>
+                </span>
+                {{ switch('groups_foreign', False, 'groupsInvalidate()') }}
+            </label>
+        </div>
+    </div>
+    <div class="ui-card-foot tools-actions">
+        <button type="button" class="ui-btn ui-btn-primary" id="btn_groups_scan" onclick="groupsRun('scan')">{{ icon('search') }}{{ t.tools.groups_scan }}</button>
+        <button type="button" class="ui-btn ui-btn-danger" id="btn_groups_apply" disabled onclick="groupsApply()">{{ icon('tag') }}{{ t.tools.groups_apply }}</button>
+        <button type="button" class="ui-btn ui-btn-secondary" id="btn_groups_cancel" style="display: none;" onclick="groupsCancel()">{{ icon('x') }}{{ t.tools.cancel }}</button>
+        <span id="groups_state" class="tools-state" role="status" aria-live="polite"></span>
+        <div class="ui-progress ui-progress-sm tools-progress" id="groups_progress" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-labelledby="groups-title" hidden><div class="ui-progress-bar"></div></div>
+    </div>
+    <div id="groups_result" class="tools-result"></div>
+</section>
+
 {# Run single modules again for a whole set (rerun.js, initToolsCard). The set
    list in the settings links here with ?rerun_set=<id>#section-rerun. #}
 <section class="ui-card tools-card" id="section-rerun" aria-labelledby="rerun-tools-title">
@@ -360,12 +401,23 @@ function sidecarResume() {
                     pollMerge();
                     return;
                 }
+                if (p.task === 'tag_groups') {
+                    groupsBusy(true);
+                    pollGroups();
+                    return;
+                }
                 sidecarBusy(true);
                 if (p.task === 'sidecar_tags') {
                     pollSidecar();
                 } else {
                     setState('sidecar_state', L.other_task);
                 }
+                return;
+            }
+            if (p.task === 'tag_groups' && p.result) {
+                groupsRestore(p.result);
+                renderGroups(p.result);
+                groupsBusy(false);
                 return;
             }
             if (p.task === 'tag_merge' && p.result) {
@@ -400,6 +452,126 @@ function sidecarBusy(on) {
 function sidecarFail(msg) {
     setState('sidecar_state', msg, true);
     sidecarBusy(false);
+}
+
+// --- Tags in Gruppen umstellen ---------------------------------------------
+var GROUPS_READY = false;
+function groupsForm() {
+    var body = new URLSearchParams();
+    body.append('set_id', document.getElementById('groups_set').value);
+    if (document.getElementById('groups_foreign').checked) { body.append('foreign', '1'); }
+    return body;
+}
+function groupsInvalidate() {
+    GROUPS_READY = false;
+    document.getElementById('btn_groups_apply').disabled = true;
+    document.getElementById('groups_result').innerHTML = '';
+}
+function groupsBusy(on) {
+    document.getElementById('btn_groups_scan').disabled = on;
+    document.getElementById('btn_groups_apply').disabled = on || !GROUPS_READY;
+    var c = document.getElementById('btn_groups_cancel');
+    c.style.display = on ? '' : 'none';
+    c.disabled = false;
+    if (!on) { showProgress('groups_progress', null); }
+}
+function groupsFail(msg) {
+    setState('groups_state', msg, true);
+    groupsBusy(false);
+}
+function groupsRun(mode) {
+    setState('groups_state', L.running);
+    groupsBusy(true);
+    fetch('/tools/groups/' + mode, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: groupsForm()
+    }).then(function (r) { return r.json(); })
+      .then(function (d) {
+          if (!d.ok) { groupsFail(d.detail); return; }
+          pollGroups();
+      }).catch(function (e) { groupsFail(String(e)); });
+}
+function groupsApply() {
+    if (!confirm(L.groups_apply_confirm)) { return; }
+    groupsRun('apply');
+}
+function groupsCancel() {
+    document.getElementById('btn_groups_cancel').disabled = true;
+    fetch('/tools/tags/cancel', {method: 'POST'});
+}
+function groupsRestore(res) {
+    if (res.set_id) { document.getElementById('groups_set').value = String(res.set_id); }
+    document.getElementById('groups_foreign').checked = !!res.include_foreign;
+}
+function pollGroups() {
+    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
+      .then(function (p) {
+          if (p.running) {
+              var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
+              setState('groups_state', phaseText(p) + n);
+              showProgress('groups_progress', p);
+              setTimeout(pollGroups, 1000);
+              return;
+          }
+          if (p.error) { groupsFail(p.error); return; }
+          setState('groups_state', '');
+          renderGroups(p.result);
+          groupsBusy(false);
+      }).catch(function (e) { groupsFail(String(e)); });
+}
+function groupsFill(text, values) {
+    return text.replace(/\{(\w+)\}/g, function (m, k) {
+        return Object.prototype.hasOwnProperty.call(values, k) ? '<strong>' + esc(values[k]) + '</strong>' : m;
+    });
+}
+function rootsLine(im) {
+    return line(groupsFill(L.groups_res_roots, {roots: im.roots, present: im.groups_present.length, groups: im.groups,
+                                                others: im.others, above: im.above_groups}));
+}
+function renderGroups(res) {
+    var out = document.getElementById('groups_result');
+    if (!res) { out.innerHTML = ''; return; }
+    var h = '';
+    if (res.mode === 'groups_scan') {
+        var j = res.jobs || {};
+        if (!j.found) { out.innerHTML = note(esc(L.groups_err_set), 'error'); return; }
+        h += line(groupsFill(j.groups ? L.groups_res_jobs_on : L.groups_res_jobs_off,
+                       {set: j.set_name, immich: j.in_immich, convert: res.to_convert}));
+        if (j.locked) { h += hint(groupsFill(L.groups_res_locked, {n: j.locked})); }
+        h += rootsLine(res.immich);
+        if (res.immich.others_sample.length) {
+            h += tags(res.immich.others_sample.map(function (n) { return tag(n); }));
+        }
+        h += line(groupsFill(L.groups_res_empty, {n: res.empty}));
+        if (res.empty_sample.length) { h += tags(res.empty_sample.map(function (n) { return tag(n); })); }
+        if (res.foreign_empty) {
+            h += hint(groupsFill(L.groups_res_foreign, {n: res.foreign_empty}));
+            h += tags(res.foreign_sample.map(function (n) { return tag(n); }));
+        }
+        if (res.kept_locked) { h += hint(groupsFill(L.groups_res_kept_locked, {n: res.kept_locked})); }
+        GROUPS_READY = !res.cancelled && (res.to_convert > 0 || res.empty > 0);
+        out.innerHTML = h;
+        if (!GROUPS_READY) { out.innerHTML += note(esc(L.groups_res_nothing), 'success'); }
+        return;
+    }
+    var c = (res.converted || {}).counts || {};
+    h += line(groupsFill(L.groups_res_converted, {done: c.done || 0, unchanged: c.unchanged || 0,
+                                            failed: c.failed || 0, refused: Object.keys((res.converted || {}).refused || {}).reduce(function (n, k) { return n + res.converted.refused[k]; }, 0)}));
+    if (res.converted && res.converted.error) { h += note(esc(res.converted.error), 'error'); }
+    if (res.repaired) {
+        h += line(groupsFill(L.groups_res_repaired, {checked: res.repaired.checked,
+                                                     n: (res.repaired.repaired || [])[0] || 0, left: res.repaired.still_wrong}));
+    }
+    if (res.deleted) { h += line(groupsFill(L.groups_res_deleted, {n: res.deleted.deleted, failed: res.deleted.failed})); }
+    h += line(groupsFill(L.groups_res_before_after, {before: res.before.roots, after: (res.after || res.before).roots,
+                                               others: (res.after || res.before).others}));
+    if (res.foreign_empty) {
+        h += hint(groupsFill(L.groups_res_foreign, {n: res.foreign_empty}));
+        h += tags(res.foreign_sample.map(function (n) { return tag(n); }));
+    }
+    GROUPS_READY = false;
+    out.innerHTML = h + (res.cancelled ? note(esc(L.cancelled || ''), 'warning') : '');
 }
 
 function pollSidecar() {

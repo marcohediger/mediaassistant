@@ -942,14 +942,96 @@ async def _start(request: Request, worker, *, require_preview: bool = False) -> 
     return JSONResponse({"ok": True})
 
 
+# --- Tags in Gruppen umstellen (tag_groups_migration.py) ----------------------
+
+_last_groups: dict = {}
+
+
+async def _groups_scan(set_id: int, include_foreign: bool):
+    """Preview: the set's jobs to convert, the root tags, the empty tags."""
+    import tag_groups_migration as mig
+    from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
+
+    def progress(done, total):
+        _cleanup_progress["current"], _cleanup_progress["total"] = done, total
+    try:
+        _cleanup_phase("groups_checking")
+        result = await mig.preview(set_id, include_foreign=include_foreign, progress=progress,
+                                   cancelled=_cancelled)
+        _last_groups.clear()
+        if result["jobs"].get("found"):
+            _last_groups.update(set_id=set_id, include_foreign=include_foreign)
+        _cleanup_finish(result={"mode": "groups_scan", "set_id": set_id, "include_foreign": include_foreign,
+                                "cancelled": _cancelled(), **result})
+        await log_info("tools", f"Tags in Gruppen umstellen, Vorschau: {result['to_convert']} Jobs umzustellen",
+                       f"Set {set_id}; leere eigene Tags {result['empty']}, fremde leere {result['foreign_empty']}, "
+                       f"Wurzeln {result['immich']['roots']}")
+    except Exception as e:
+        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+
+
+async def _groups_apply(set_id: int, include_foreign: bool):
+    import tag_groups_migration as mig
+    from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
+
+    def progress(done, total):
+        _cleanup_progress["current"], _cleanup_progress["total"] = done, total
+
+    def phase(name):
+        _cleanup_progress["current"], _cleanup_progress["total"] = 0, 0
+        _cleanup_phase(name)
+    try:
+        result = await mig.run(set_id, include_foreign=include_foreign, phase=phase, progress=progress,
+                               cancelled=_cancelled)
+        _last_groups.clear()
+        _cleanup_finish(result={"mode": "groups_apply", "set_id": set_id, "cancelled": _cancelled(), **result})
+    except Exception as e:
+        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+
+
+async def _groups_start(request: Request, worker, *, require_preview: bool = False) -> JSONResponse:
+    from routers.api import _cleanup_progress, _cleanup_reset
+    form = await request.form()
+    try:
+        set_id = int(form.get("set_id") or 0)
+    except ValueError:
+        set_id = 0
+    include_foreign = bool(form.get("foreign"))
+    if not set_id:
+        return JSONResponse({"ok": False, "detail": await _t("groups_err_set")}, status_code=400)
+    if _cleanup_progress.get("running"):
+        return JSONResponse({"ok": False, "detail": await _t("err_busy")}, status_code=409)
+    if require_preview and (_last_groups.get("set_id") != set_id
+                            or bool(_last_groups.get("include_foreign")) != include_foreign):
+        return JSONResponse({"ok": False, "detail": await _t("err_no_preview")}, status_code=409)
+    _cancel["requested"] = False
+    _cleanup_reset("tag_groups")
+    asyncio.create_task(worker(set_id, include_foreign))
+    return JSONResponse({"ok": True})
+
+
+@router.post("/groups/scan")
+async def scan_tag_groups(request: Request):
+    """Preview only — reads the jobs and Immich's tags, changes nothing."""
+    return await _groups_start(request, _groups_scan)
+
+
+@router.post("/groups/apply")
+async def apply_tag_groups(request: Request):
+    """Convert the previewed set and delete the empty tags — refused without
+    a preview of the same set and choice."""
+    return await _groups_start(request, _groups_apply, require_preview=True)
+
+
 @router.get("")
 async def tools_page(request: Request):
     from sqlalchemy import select
     from database import async_session
     from models import ProcessingSet
     async with async_session() as session:
-        sets = [{"id": i, "name": n} for i, n in (await session.execute(
-            select(ProcessingSet.id, ProcessingSet.name).order_by(ProcessingSet.position, ProcessingSet.id))).all()]
+        sets = [{"id": i, "name": n, "tag_groups": bool(g)} for i, n, g in (await session.execute(
+            select(ProcessingSet.id, ProcessingSet.name, ProcessingSet.tag_groups)
+            .order_by(ProcessingSet.position, ProcessingSet.id))).all()]
     return await render(request, "tools.html", {
         "library_paths": await library_roots(),
         # The rerun card's set choice (Module neu ausführen für ein Set).

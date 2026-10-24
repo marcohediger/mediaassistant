@@ -4,7 +4,8 @@ import os
 import subprocess
 from functools import partial
 
-from folder_path import folder_options, folder_targets, is_tag_path
+from folder_path import folder_options, folder_targets, is_folder_tree
+import tag_groups
 from system_logger import log_info
 
 
@@ -27,20 +28,40 @@ _EXIFTOOL_TIMEOUT = 30
 
 
 async def execute(job, session) -> dict:
+    """IA-07, see _execute. A result made with the set's tag groups on names
+    the scheme it used (``tag_groups: tag_groups.SCHEME``): the tool that
+    switches a set's photos over (tag_groups_migration.py) tells converted
+    jobs — and those made with roots named differently — by it."""
+    result = await _execute(job, session)
+    if isinstance(result, dict) and await tag_groups.enabled(job):
+        result["tag_groups"] = tag_groups.SCHEME
+    return result
+
+
+async def _execute(job, session) -> dict:
     """IA-07: EXIF-Tags (Keywords, Description) zurück in die Datei schreiben.
 
     In a rerun (run parameter ``_rerun``) the keywords and the description
     this job wrote last time (``_previous_keywords_written``,
-    ``_previous_description_written``) are taken out where the new run no
-    longer has them. An Immich job in the rerun's API mode writes no file:
-    the result only names what IA-08 sets through the API
-    (``write_mode: "immich_api"``).
+    ``_previous_tag_paths_written``, ``_previous_description_written``) are
+    taken out where the new run no longer has them. An Immich job in the
+    rerun's API mode writes no file: the result only names what IA-08 sets
+    through the API (``write_mode: "immich_api"``).
+
+    With the set's tag groups on (tag_groups.py) every tag is a path below
+    one of the five roots, except the AI's content tags, which stay flat:
+    paths and content tags go into TagsList/HierarchicalSubject
+    (``tag_paths_written``, the entries IA-08 tags in Immich), the levels
+    and the content tags as flat words into dc:subject / IPTC Keywords
+    (``keywords_written``). The category is the one IA-08 sorts by
+    (step_ia08_sort.decide_category).
     """
     from pipeline.reprocess import run_params
     params = run_params(job)
     rerun = params.get("_rerun") if isinstance(params.get("_rerun"), dict) else None
     api_mode = rerun is not None and bool(job.use_immich) and rerun.get("immich", "api") == "api"
     previous_keywords = [k for k in (params.get("_previous_keywords_written") or []) if isinstance(k, str) and k]
+    previous_paths = [p for p in (params.get("_previous_tag_paths_written") or []) if isinstance(p, str) and p]
     previous_description = params.get("_previous_description_written") or ""
 
     ext = os.path.splitext(job.original_path)[1].lower()
@@ -76,8 +97,9 @@ async def execute(job, session) -> dict:
 
     # Folder structure as tags (set option, read at runtime): flat or legacy
     # — keywords like any other — or nested, which goes into the file as
-    # TagsList/HierarchicalSubject, never as a flat keyword. Albums are
-    # IA-08's business.
+    # TagsList/HierarchicalSubject, never as a flat keyword. With tag groups
+    # every kind is a path below "04 Album". Albums are IA-08's business.
+    grouped = await tag_groups.enabled(job)
     options = await folder_options(job)
     tag_paths: list[str] = []
     if options.single or options.nested:
@@ -85,28 +107,35 @@ async def execute(job, session) -> dict:
         tag_paths = folder.tag_paths
         keywords += [t for t in folder.flat_tags if t not in keywords]
 
-    # From AI analysis (type + tags + source)
-    # Skip the literal "unknown" type — it gets set as a default when IA-05
-    # failed and would otherwise pollute the file/Immich with a useless tag.
-    ai_type = ai_result.get("type")
-    if ai_type and ai_type != "unknown":
-        keywords.append(ai_type)
-    if ai_result.get("tags"):
-        keywords.extend(ai_result["tags"])
-    if ai_result.get("source"):
-        keywords.append(ai_result["source"])
-    if ai_result.get("quality") == "blurry":
-        keywords.append("blurry")
+    if grouped:
+        from pipeline.step_ia08_sort import decide_category
+        decision = await decide_category(job, session)
+        tag_paths = tag_groups.grouped_tags(category_label=decision.label, ai=ai_result, geo=geo_result,
+                                            ocr=ocr_result, folder_paths=tag_paths)
+        keywords = tag_groups.flat_words(tag_paths)
+    else:
+        # From AI analysis (type + tags + source)
+        # Skip the literal "unknown" type — it gets set as a default when IA-05
+        # failed and would otherwise pollute the file/Immich with a useless tag.
+        ai_type = ai_result.get("type")
+        if ai_type and ai_type != "unknown":
+            keywords.append(ai_type)
+        if ai_result.get("tags"):
+            keywords.extend(ai_result["tags"])
+        if ai_result.get("source"):
+            keywords.append(ai_result["source"])
+        if ai_result.get("quality") == "blurry":
+            keywords.append("blurry")
 
-    # From geocoding (all available fields)
-    for geo_field in ("country", "state", "city", "suburb"):
-        val = geo_result.get(geo_field)
-        if val and val not in keywords:
-            keywords.append(val)
+        # From geocoding (all available fields)
+        for geo_field in ("country", "state", "city", "suburb"):
+            val = geo_result.get(geo_field)
+            if val and val not in keywords:
+                keywords.append(val)
 
-    # From OCR — just flag that text was detected (actual text is in UserComment)
-    if ocr_result.get("has_text"):
-        keywords.append("OCR")
+        # From OCR — just flag that text was detected (actual text is in UserComment)
+        if ocr_result.get("has_text"):
+            keywords.append("OCR")
 
     # Build description
     description_parts = []
@@ -123,8 +152,9 @@ async def execute(job, session) -> dict:
 
     description = " ".join(description_parts)
 
-    # Own keywords of the last run that this run no longer has (rerun).
+    # Own keywords and tag paths of the last run that this run no longer has (rerun).
     stale_keywords = [k for k in dict.fromkeys(previous_keywords) if k not in keywords]
+    stale_paths = [p for p in dict.fromkeys(previous_paths) if p not in tag_paths]
 
     # Collect OCR text early (used by all modes)
     ocr_text = ""
@@ -162,7 +192,8 @@ async def execute(job, session) -> dict:
 
     # TagsList: written for the tag tree, and kept in step wherever the file
     # already has one — Immich reads only TagsList then (see _tags_list).
-    tags_list, stale_tags = await asyncio.to_thread(_tags_list, look_at, keywords, tag_paths, stale_keywords)
+    tags_list, stale_tags = await asyncio.to_thread(_tags_list, look_at, keywords, tag_paths, stale_keywords,
+                                                    stale_paths=stale_paths, grouped=grouped)
 
     if not keywords and not tag_paths and not stale_tags and not description and not takeout \
             and not stale_keywords:
@@ -412,7 +443,7 @@ def _as_list(value) -> list[str]:
 
 
 def _tags_list(sources: list[str], keywords: list[str], tag_paths: list[str],
-               stale_keywords=()) -> tuple[list[str], list[str]]:
+               stale_keywords=(), *, stale_paths=(), grouped: bool = False) -> tuple[list[str], list[str]]:
     """Every tag of the file as TagsList entries ("/" separates levels), and
     the folder-tree entries that no longer apply.
 
@@ -426,7 +457,14 @@ def _tags_list(sources: list[str], keywords: list[str], tag_paths: list[str],
     not see this run's keywords; folder-tree entries ("Ordner/…") the
     current rules no longer produce are removed. ([], []) when the file has
     no TagsList and no tree is to be written. ``stale_keywords`` (own
-    keywords of the last run, rerun) are removed as flat entries as well.
+    keywords of the last run, rerun) are removed as flat entries as well,
+    ``stale_paths`` (own tag paths of the last run) as paths.
+
+    With tag groups (``grouped``) MediaAssistant's flat keywords stay out
+    of TagsList — Immich would show each as a tag of its own next to the
+    roots — and flat entries equal to one of them (this run's or the last
+    run's) are removed, except the content tags, which ``tag_paths``
+    carries as one-level entries; the file's other entries stay.
     """
     merged: dict = {}
     by_file = {e.get("SourceFile"): e for e in _exiftool_read(sources, ["TagsList", "HierarchicalSubject",
@@ -443,10 +481,15 @@ def _tags_list(sources: list[str], keywords: list[str], tag_paths: list[str],
         existing = ["/".join(p.replace("/", "|") for p in h.split("|")) for h in merged["HierarchicalSubject"]]
     else:
         existing = merged.get("Keywords") or []
-    gone = {k.replace("/", " - ") for k in stale_keywords} - {k.replace("/", " - ") for k in keywords}
-    stale = [e for e in dict.fromkeys(existing) if (is_tag_path(e) and e not in tag_paths) or e in gone]
+    flat = [k.replace("/", " - ") for k in keywords]
+    if grouped:
+        gone = {*flat, *(k.replace("/", " - ") for k in stale_keywords)}
+    else:
+        gone = {k.replace("/", " - ") for k in stale_keywords} - set(flat)
+    gone = (gone | set(stale_paths)) - set(tag_paths)
+    stale = [e for e in dict.fromkeys(existing) if (is_folder_tree(e) and e not in tag_paths) or e in gone]
     entries: list[str] = []
-    for entry in [*existing, *(k.replace("/", " - ") for k in keywords), *tag_paths]:
+    for entry in [*existing, *([] if grouped else flat), *tag_paths]:
         if entry and entry not in entries and entry not in stale:
             entries.append(entry)
     return entries, stale

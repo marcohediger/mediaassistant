@@ -84,6 +84,9 @@ async def _migrate_columns(conn):
          "ALTER TABLE processing_sets ADD COLUMN folder_tag_mode TEXT DEFAULT 'none'"),
         ("processing_sets", "folder_albums",
          "ALTER TABLE processing_sets ADD COLUMN folder_albums BOOLEAN DEFAULT 0"),
+        # Tag groups (tag_groups.py): off for every existing set.
+        ("processing_sets", "tag_groups",
+         "ALTER TABLE processing_sets ADD COLUMN tag_groups BOOLEAN DEFAULT 0"),
     ]
     added = set()
     for table, column, sql in migrations:

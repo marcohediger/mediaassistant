@@ -25,8 +25,10 @@ Stories:
   US-16: Neu ausführen: Immich-Job ohne lokale Kopie (Arbeitskopie), Variante "ersetzen"
   US-17: Neu ausführen: Ablage, Geocoding neu, Vorlage mit {CITY}
   US-18 … US-20: Ausführung nach Abhängigkeiten (parallel, Grenzen, kein doppelter Lauf)
+  US-21: Tag-Gruppen: Datei aus einem Unterordner mit GPS → fünf Wurzeln als Baum in Immich
+  US-22: Tag-Gruppen nachträglich eingeschaltet → Neu ausführen IA-07+IA-08 (API) ersetzt MAs flache Tags
 """
-import asyncio, contextlib, sys, os, time, shutil, random, hashlib
+import asyncio, contextlib, sys, os, time, shutil, random, hashlib, itertools
 sys.path.insert(0, "/app")
 os.environ.setdefault("DATABASE_PATH", "/app/data/mediaassistant.db")
 
@@ -132,6 +134,9 @@ async def get_immich_albums(asset_id):
     return await get_asset_albums(asset_id)
 
 
+_JOB_NO = itertools.count(1)
+
+
 async def create_and_run_job(filename, original_path, *, use_immich=True,
                              source_inbox_path=INBOX, folder_tags=False,
                              immich_user_id=None, set_id=None):
@@ -154,7 +159,8 @@ async def create_and_run_job(filename, original_path, *, use_immich=True,
             folder_tags=folder_tags,
             file_hash=file_hash,
             set_id=set_id,
-            debug_key=f"E2E-{TS}-{random.randint(1000, 9999)}",
+            # A counter, not a random number: two random keys of one run collided.
+            debug_key=f"E2E-{TS}-{next(_JOB_NO):04d}",
         )
         session.add(job)
         await session.commit()
@@ -174,7 +180,8 @@ _FOLDER_STORIES = {"assets": [], "tags": [], "albums": [], "root_existed": None}
 async def enable_set_folder_tags():
     """The folder options (tag mode, albums) belong to the processing set.
     Jobs without set_id run under the first set, so it gets nested tags and
-    albums; main() restores what it had."""
+    albums, without tag groups (the stories check the "Ordner" tree);
+    main() restores what it had."""
     from database import async_session
     from immich_client import list_tags
     from sets import get_set
@@ -183,9 +190,10 @@ async def enable_set_folder_tags():
     async with async_session() as session:
         ps = await get_set(session, None)
         if not _SAVED_SET_FOLDER_TAGS:
-            _SAVED_SET_FOLDER_TAGS.append((ps.id, ps.folder_tag_mode, ps.folder_albums))
+            _SAVED_SET_FOLDER_TAGS.append((ps.id, ps.folder_tag_mode, ps.folder_albums, ps.tag_groups))
         ps.folder_tag_mode = "nested"
         ps.folder_albums = True
+        ps.tag_groups = False
         await session.commit()
         return ps
 
@@ -198,11 +206,11 @@ async def restore_set_folder_tags():
     from database import async_session
     from immich_client import delete_asset, delete_tag, get_immich_config, list_tags
     from models import ProcessingSet
-    for set_id, mode, albums in _SAVED_SET_FOLDER_TAGS:
+    for set_id, mode, albums, groups in _SAVED_SET_FOLDER_TAGS:
         async with async_session() as session:
             ps = await session.get(ProcessingSet, set_id)
             if ps:
-                ps.folder_tag_mode, ps.folder_albums = mode, albums
+                ps.folder_tag_mode, ps.folder_albums, ps.tag_groups = mode, albums, groups
                 await session.commit()
     for aid in dict.fromkeys(_FOLDER_STORIES["assets"]):
         try:
@@ -1990,6 +1998,211 @@ async def test_us20_no_double_run():
         check("US20-06 danach normal beendet", job.status in ("done", "review"), f"{job.status} {job.error_message}")
 
 
+# ══════════════════════════════════════════════════════════════
+# Tag-Gruppen (US-21, US-22): helpers
+# ══════════════════════════════════════════════════════════════
+TG_TAGS_BEFORE: set = set()
+TG_FLAT: list[str] = []          # flat tags US-22's first run may have created
+TG_AI = {"type": "Persönliches Foto", "source": "Kamerafoto", "tags": [f"Konzert{TS}", "Bühne"],
+         "quality": "blurry", "description": "", "mood": "", "people_count": 0, "confidence": 0.9, "nsfw": False}
+
+
+async def tg_ia05(job, session):
+    return dict(TG_AI)
+
+
+async def tg_ia06(job, session):
+    return {"has_text": True, "text": "Eintritt"}
+
+
+class FakeSuburb(FakeGeo):
+    """FakeGeo with a suburb: the place as four levels."""
+
+    async def _answer(self, *args, **kwargs):
+        self.calls += 1
+        return {"country": "Schweiz", "state": self.city, "city": self.city, "suburb": "Länggasse",
+                "display_name": f"Länggasse, {self.city}, Schweiz"}
+
+
+async def tg_set(name, *, groups, folder_mode="none", albums=False):
+    from database import async_session
+    from models import ProcessingSet
+    set_id = await e2e_set(name, target_mode="immich", write_mode="direct")
+    async with async_session() as s:
+        ps = await s.get(ProcessingSet, set_id)
+        ps.tag_groups, ps.folder_tag_mode, ps.folder_albums = groups, folder_mode, albums
+        await s.commit()
+    return set_id
+
+
+async def refresh_from_sidecar(asset_id):
+    """Immich reads the asset's file and sidecar again; tags come from the
+    sidecar's TagsList (measured: a tag only in the sidecar comes back)."""
+    import httpx
+    from immich_client import get_immich_config
+    url, key = await get_immich_config()
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(f"{url}/api/assets/jobs", headers={"x-api-key": key},
+                         json={"assetIds": [asset_id], "name": "refresh-metadata"})
+    await asyncio.sleep(4)
+    return r.status_code
+
+
+async def cleanup_tag_group_stories():
+    """After the assets are gone: the tags US-21/US-22 created — below the
+    roots (a root only if it did not exist before), the content tags and the
+    flat ones of US-22's first run."""
+    import tag_groups as tg
+    from immich_client import delete_tag, list_tags
+    if not TG_TAGS_BEFORE:
+        return
+    # Twice: Immich deletes an asset in a job of its own, and a metadata job
+    # of the asset still queued can create a tag from its file once more.
+    for attempt in range(2):
+        await asyncio.sleep(3)
+        try:
+            tags = await list_tags()
+            by_id = {t["id"]: t for t in tags}
+            for t in tags:
+                value = t.get("value") or ""
+                if value in TG_TAGS_BEFORE:
+                    continue
+                parent = by_id.get(t.get("parentId"))
+                if parent is not None and parent.get("value") not in TG_TAGS_BEFORE:
+                    continue  # goes with its new parent
+                if tg.is_grouped(value) or value in tg.ROOTS or value in TG_FLAT or str(TS) in value:
+                    await delete_tag(t["id"])
+        except Exception as exc:
+            print(f"  cleanup: tag groups: {exc}")
+
+
+# ══════════════════════════════════════════════════════════════
+# US-21: Tag-Gruppen — fünf Wurzeln als Baum in Immich
+# ══════════════════════════════════════════════════════════════
+async def test_us21_tag_groups():
+    print("\n-- US-21: Tag-Gruppen: Unterordner + GPS -> fünf Wurzeln als Baum --")
+    import subprocess
+    import tag_groups as tg
+    from immich_client import get_asset_original, list_tags
+    if not TG_TAGS_BEFORE:
+        TG_TAGS_BEFORE.update(t.get("value") for t in await list_tags())
+    async with RerunStage():
+        set_id = await tg_set("us21", groups=True, folder_mode="nested")
+        top = f"Konzerte{TS}"
+        folder = f"{INBOX}/{top}/Gurten/2024"
+        os.makedirs(folder, exist_ok=True)
+        path = f"{folder}/__e2e_us21_{TS}.jpg"
+        make_unique_jpg(path)
+        add_gps(path)
+        CLEANUP_FILES.append(path)
+        with FakeSuburb("Bern"), replaced_step("IA-05", tg_ia05), replaced_step("IA-06", tg_ia06):
+            job_id = await create_and_run_job(f"__e2e_us21_{TS}.jpg", path, use_immich=True, set_id=set_id)
+        job = await get_job(job_id)
+        ia08 = (job.step_result or {}).get("IA-08") or {}
+        check("US21-01 Job done, Asset in Immich, IA-08 ohne Warnung",
+              job.status == "done" and bool(job.immich_asset_id) and ia08.get("status") != "warning",
+              f"{job.status} {job.error_message} {ia08.get('reason') or ''}")
+        if not job.immich_asset_id:
+            return
+        asset_id = job.immich_asset_id
+        CLEANUP_ASSETS.append(asset_id)
+        want = tg.grouped_tags(category_label="Persönliches Foto", ai=TG_AI,
+                               geo={"country": "Schweiz", "state": "Bern", "city": "Bern", "suburb": "Länggasse"},
+                               ocr={"has_text": True}, folder_paths=[f"{tg.ALBUM}/{top}/Gurten"])
+        check("US21-02 alle fünf Gruppen (Jahres-Ordner weggelassen), Inhalts-Tags flach",
+              [r for r in tg.ROOTS if any(p.startswith(r + "/") for p in want)] == list(tg.ROOTS)
+              and f"{tg.ALBUM}/{top}/Gurten" in want and f"Konzert{TS}" in want, f"{want}")
+        tags = sorted(await get_immich_tags(asset_id))
+        check("US21-03 Asset trägt genau die Gruppen-Pfade (an den Blättern) und die Inhalts-Tags, sonst nichts Flaches",
+              tags == sorted(want), f"{tags}")
+        by_value = {t.get("value"): t for t in await list_tags()}
+        tree_ok = all(by_value.get(r) and not by_value[r].get("parentId") for r in tg.ROOTS)
+        for p in want:
+            parts = p.split("/")
+            for i in range(1, len(parts)):
+                child, parent = by_value.get("/".join(parts[:i + 1])), by_value.get("/".join(parts[:i]))
+                tree_ok = tree_ok and bool(child and parent) and child.get("parentId") == parent.get("id")
+        check("US21-04 die fünf Wurzeln als Baum (Eltern-Tags mit Kindern)", tree_ok)
+        new_roots = sorted(v for v, t in by_value.items() if not t.get("parentId") and v not in TG_TAGS_BEFORE)
+        allowed = set(tg.ROOTS) | set(tg.content_tags(TG_AI))
+        check("US21-05 keine neue Wurzel ausser den Gruppen und den Inhalts-Tags (kein Jahr, kein Orts-/Ordnerwort)",
+              set(new_roots) <= allowed, f"{new_roots}")
+        original = await get_asset_original(asset_id)
+        tl = []
+        if original:
+            tmp = f"{E2E_ROOT}/us21_original.jpg"
+            with open(tmp, "wb") as f:
+                f.write(original[0])
+            out = subprocess.run(["exiftool", "-j", "-TagsList", tmp], capture_output=True)
+            v = (__import__("json").loads(out.stdout or b"[{}]") or [{}])[0].get("TagsList")
+            tl = [str(x) for x in (v if isinstance(v, list) else [v] if v else [])]
+        check("US21-06 Datei in Immich: TagsList mit den Pfaden", tl == want, f"{tl}")
+
+
+# ══════════════════════════════════════════════════════════════
+# US-22: Tag-Gruppen nachträglich — Neu ausführen IA-07+IA-08 (API)
+# ══════════════════════════════════════════════════════════════
+async def test_us22_tag_groups_rerun():
+    print("\n-- US-22: Tag-Gruppen eingeschaltet -> Neu ausführen IA-07+IA-08 (API) --")
+    import tag_groups as tg
+    import job_view
+    from database import async_session
+    from immich_client import list_tags, tag_asset
+    from models import ProcessingSet
+    from pipeline import rerun as rerun_plan
+    if not TG_TAGS_BEFORE:
+        TG_TAGS_BEFORE.update(t.get("value") for t in await list_tags())
+    async with RerunStage():
+        set_id = await tg_set("us22", groups=False)
+        path = f"{INBOX}/__e2e_us22_{TS}.jpg"
+        make_unique_jpg(path)
+        add_gps(path)
+        CLEANUP_FILES.append(path)
+        with FakeSuburb("Bern"), replaced_step("IA-05", tg_ia05), replaced_step("IA-06", tg_ia06):
+            job_id = await create_and_run_job(f"__e2e_us22_{TS}.jpg", path, use_immich=True, set_id=set_id)
+        job = await get_job(job_id)
+        if job.immich_asset_id:
+            CLEANUP_ASSETS.append(job.immich_asset_id)
+        flat = ["Persönliches Foto", "Kamerafoto", f"Konzert{TS}", "Bühne", "Schweiz", "Bern", "Länggasse",
+                "blurry", "OCR"]
+        TG_FLAT.extend(flat)
+        tags0 = await get_immich_tags(job.immich_asset_id) if job.immich_asset_id else []
+        check("US22-01 Erstlauf ohne Gruppen: MAs flache Tags in Immich",
+              job.status == "done" and set(flat) <= set(tags0) and not any(tg.is_grouped(t) for t in tags0),
+              f"{job.status} {tags0}")
+        if not job.immich_asset_id:
+            return
+        asset_id = job.immich_asset_id
+        user_tag = f"E2E-Eigenes-{TS}"
+        E2E_TAGS.append(user_tag)
+        await tag_asset(asset_id, user_tag)
+
+        async with async_session() as s:
+            (await s.get(ProcessingSet, set_id)).tag_groups = True
+            await s.commit()
+        rows = (await job_view.job_runs([job_id]))[job_id]
+        stale = (await rerun_plan.stale_modules([job], {job_id: rows}))[job_id]
+        check("US22-02 eingeschaltet: IA-07 und IA-08 veraltet", {"IA-07", "IA-08"} <= set(stale), f"{sorted(stale)}")
+
+        rid, item, prepared = await rerun_job(job_id, ["IA-07", "IA-08"], immich="api")
+        job = await get_job(job_id)
+        check("US22-03 Auftrag done, gleiches Asset", item.state == "done" and job.immich_asset_id == asset_id,
+              f"prep={prepared} item={item.state} {item.reason} {item.detail}")
+        want = tg.grouped_tags(category_label="Persönliches Foto", ai=TG_AI,
+                               geo={"country": "Schweiz", "state": "Bern", "city": "Bern", "suburb": "Länggasse"},
+                               ocr={"has_text": True})
+        tags = sorted(await get_immich_tags(asset_id))
+        check("US22-04 Gruppen-Pfade da, MAs flache Tags weg (Inhalts-Tags bleiben), Benutzer-Tag bleibt",
+              tags == sorted([*want, user_tag]), f"{tags}")
+        status = await refresh_from_sidecar(asset_id)
+        tags = sorted(await get_immich_tags(asset_id))
+        check("US22-05 auch in Immichs Sidecar: Neueinlesen bringt keinen flachen MA-Tag zurück",
+              status in (200, 204) and tags == sorted([*want, user_tag]), f"{status} {tags}")
+        ops = await ledger_ops(job_id)
+        check("US22-06 API-Modus: kein Upload, kein Ersetzen beim Neu ausführen",
+              len([o for o in ops if o.op in ("upload", "replace")]) == 1, f"{[(o.op, o.state) for o in ops]}")
+
+
 async def cleanup_rerun_stories():
     """Requests, items and sets of the rerun stories; the user tag and the album."""
     import httpx
@@ -2068,6 +2281,8 @@ async def main():
         test_us18_parallel_and_crash,
         test_us19_limits,
         test_us20_no_double_run,
+        test_us21_tag_groups,
+        test_us22_tag_groups_rerun,
     ]
     wanted = [a.lower() for a in sys.argv[1:]]
     if wanted:
@@ -2083,6 +2298,7 @@ async def main():
         await config_manager.set_module_enabled("filewatcher", was_enabled)
         await restore_set_folder_tags()
         await cleanup()
+        await cleanup_tag_group_stories()
         await cleanup_rerun_stories()
 
     # Summary

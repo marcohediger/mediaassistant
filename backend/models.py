@@ -157,6 +157,11 @@ class ProcessingSet(Base):
     folder_tag_mode = Column(Text, default="none")  # none / flat / legacy / nested
     folder_albums = Column(Boolean, default=False)
     folder_tags = Column(Boolean, default=False)  # legacy switch, superseded by the two above
+    # Tag groups (tag_groups.py): every tag MediaAssistant writes goes under
+    # one of five fixed roots (category, source, places, album, notes) — the
+    # AI's content tags stay flat; folder tags use the album root instead
+    # of "Ordner".
+    tag_groups = Column(Boolean, default=False)
     dry_run = Column(Boolean, default=False)
     ocr_enabled = Column(Boolean, default=False)
     ocr_mode = Column(Text, default="smart")  # smart = screenshots/documents only, always = every image

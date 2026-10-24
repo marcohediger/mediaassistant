@@ -49,7 +49,7 @@ DEFAULT_RULES = [
 # not among them: a copy starts polling from now, not from the original's past.
 COPIED_FIELDS = (
     "description", "schedule_mode", "interval_s", "window_start", "window_end",
-    "scheduled_days", "scheduled_time", "folder_tag_mode", "folder_albums", "dry_run", "ocr_enabled", "ocr_mode",
+    "scheduled_days", "scheduled_time", "folder_tag_mode", "folder_albums", "tag_groups", "dry_run", "ocr_enabled", "ocr_mode",
     "metadata_write_mode", "google_json",
     "target_mode", "library_base_path", "immich_user_id", "immich_input", "immich_poll",
     "immich_poll_user_id",

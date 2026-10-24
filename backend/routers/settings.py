@@ -116,7 +116,9 @@ async def settings_page(request: Request):
         else:
             success = translated
 
+    import tag_groups
     return await render(request, "settings.html", {
+        "tag_group_example": await tag_groups.editor_example(),
         "modules": type("M", (), modules)(),
         "cfg": type("C", (), cfg)(),
         "sets": sets,

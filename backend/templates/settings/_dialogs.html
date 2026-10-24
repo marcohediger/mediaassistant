@@ -23,6 +23,7 @@
     'chevron': '<path d="m6 9 6 6 6-6"/>',
     'plug': '<path d="M12 22v-5M9 8V2M15 8V2M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>',
     'key': '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4M21 2l-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>',
+    'tags': '<path d="m15 5 6.3 6.3a2.4 2.4 0 0 1 0 3.4L17 19"/><path d="M9.586 5.586A2 2 0 0 0 8.172 5H3a1 1 0 0 0-1 1v5.172a2 2 0 0 0 .586 1.414L8.29 18.29a2.426 2.426 0 0 0 3.42 0l3.58-3.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="6.5" cy="9.5" r=".5" fill="currentColor"/>',
 } -%}
 <svg class="ico" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">{{ paths[name] | safe }}</svg>
 {%- endmacro -%}
@@ -235,20 +236,74 @@
                 </div>
             </section>
 
-            <!-- Folder structure (folder_path.py) -->
+            <!-- Tags and folder structure (tag_groups.py, folder_path.py) -->
             <section class="tab-panel" role="tabpanel" id="tab-folder" aria-labelledby="tabbtn-folder" hidden>
                 <header class="panel-head">
                     <h3>{{ t.sets.tab_folder_tags }}</h3>
-                    <p>{{ t.sets.folder_desc }}</p>
+                    <p>{{ t.sets.tags_folder_desc }}</p>
                 </header>
                 <div class="panel-body">
+                    <div class="block">
+                        <div class="block-head">
+                            <h4>{{ t.sets.tag_groups_head }}</h4>
+                        </div>
+                        <div class="option-list">
+                            {{ option_switch('set-tag-groups', 'data-field="tag_groups"', t.sets.tag_groups_title, t.sets.tag_groups_desc) }}
+                        </div>
+                    </div>
+                    {#- Computed by tag_groups.editor_example() from the code that writes
+                        the tags; the root names come from tag_groups.ROOTS. Greyed out
+                        while the switch is off; the album row follows the folder tag mode. -#}
+                    {%- if tag_group_example %}
+                    <div class="callout folder-example tag-groups-example" data-depends="tag_groups">
+                        {{ icon('tags', 16) }}
+                        <div class="folder-example-body">
+                            <p class="callout-title">{{ t.sets.tag_groups_example_title }}</p>
+                            <p class="help-text">{{ t.sets.tag_groups_example_file | safe }}</p>
+                            <dl class="folder-example-list">
+                                {%- for root, values in tag_group_example.roots %}
+                                <div class="folder-example-row">
+                                    <dt>{{ icon('metadata', 14) }}<span>{{ root }}</span></dt>
+                                    {%- if root == tag_group_example.album_root %}
+                                    <dd>
+                                        {%- for mode, found in tag_group_example.album.items() %}
+                                        <span class="folder-example-chips" data-group-album-mode="{{ mode }}"{% if mode != 'none' %} hidden{% endif %}>
+                                            {%- for v in found %}<code>{{ v }}</code> {% else %}<span class="folder-example-none">{{ t.sets.folder_example_none_value }}</span>{% endfor -%}
+                                        </span>
+                                        {%- endfor %}
+                                    </dd>
+                                    {%- else %}
+                                    <dd class="folder-example-chips">{% for v in values %}<code>{{ v }}</code> {% endfor %}</dd>
+                                    {%- endif %}
+                                </div>
+                                {%- endfor %}
+                                {%- if tag_group_example.flat %}
+                                <div class="folder-example-row">
+                                    <dt>{{ icon('metadata', 14) }}<span>{{ t.sets.tag_groups_example_flat }}</span></dt>
+                                    <dd class="folder-example-chips">{% for v in tag_group_example.flat %}<code>{{ v }}</code> {% endfor %}</dd>
+                                </div>
+                                {%- endif %}
+                            </dl>
+                        </div>
+                    </div>
+                    {%- endif %}
+
+                    <div class="block-head block-head-split">
+                        <h4>{{ t.sets.folder_head }}</h4>
+                        <p>{{ t.sets.folder_desc }}</p>
+                    </div>
                     <fieldset class="field">
                         <legend class="field-label">{{ t.sets.folder_tag_mode }}</legend>
                         <div class="choice-cards cards-2">
                             {{ choice_card('set_folder_tag_mode', 'none', 'data-radio-field="folder_tag_mode"', t.sets.folder_tags_none_title, t.sets.folder_tags_none_desc) }}
                             {{ choice_card('set_folder_tag_mode', 'flat', 'data-radio-field="folder_tag_mode"', t.sets.folder_tags_flat_title, t.sets.folder_tags_flat_desc) }}
                             {{ choice_card('set_folder_tag_mode', 'legacy', 'data-radio-field="folder_tag_mode"', t.sets.folder_tags_legacy_title, t.sets.folder_tags_legacy_desc) }}
-                            {{ choice_card('set_folder_tag_mode', 'nested', 'data-radio-field="folder_tag_mode"', t.sets.folder_tags_nested_title, t.sets.folder_tags_nested_desc) }}
+                            {#- With tag groups the tree hangs below the album group, not "Ordner". -#}
+                            {%- set nested_desc -%}
+                            <span data-when-groups-off>{{ t.sets.folder_tags_nested_desc }}</span>
+                            {%- if tag_group_example %}<span data-when-groups hidden>{{ t.sets.folder_tags_nested_desc_groups | replace('{root}', tag_group_example.album_root) }}</span>{% endif -%}
+                            {%- endset %}
+                            {{ choice_card('set_folder_tag_mode', 'nested', 'data-radio-field="folder_tag_mode"', t.sets.folder_tags_nested_title, nested_desc) }}
                         </div>
                     </fieldset>
                     <div class="option-list">
@@ -286,6 +341,9 @@
                             </dl>
                         </div>
                     </div>
+                    {%- if tag_group_example %}
+                    <p class="field-note field-note-info" data-when-groups hidden>{{ icon('info', 14) }}<span>{{ t.sets.folder_groups_note | replace('{root}', tag_group_example.album_root) }}</span></p>
+                    {%- endif %}
                     <details class="disclosure">
                         <summary>{{ icon('info', 16) }}<span>{{ t.sets.folder_rules_title }}</span><span class="disclosure-chev">{{ icon('chevron', 16) }}</span></summary>
                         <div class="disclosure-body">

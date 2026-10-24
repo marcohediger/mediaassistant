@@ -276,6 +276,7 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_immich_trash.py` | Immich-3.x-Papierkorb: in den Papierkorb statt löschen, wiederherstellen, Zustand erkennen, Upload einer Datei im Papierkorb | `docker exec mediaassistant-dev python /app/test_immich_trash.py` |
 | `backend/test_history_view.py` | `job_view.module_blocks`, Verlauf, Exemplare, `/api/history/*`, Wiederherstellen, Bestandsprüfung, Zurück-Link | `docker exec mediaassistant-dev python /app/test_history_view.py` |
 | `backend/test_folder_structure.py` | Ordnerstruktur als Tags und Alben (`folder_path.py`, Optionen pro Set, `docs/IMMICH_ORDNERSTRUKTUR.md`) | `docker exec mediaassistant-dev python /app/test_folder_structure.py` |
+| `backend/test_tag_groups.py` | Tag-Gruppen (`tag_groups.py`, fünf Wurzeln `01 Kategorie` … `05 Hinweise`, Inhalts-Tags flach, Jahres-Ebene, Nachkontrolle in IA-08, TagsList, Fingerabdrücke, Neu ausführen hin und zurück, Duplikat-Merge) und das Werkzeug „Tags in Gruppen umstellen" (`tag_groups_migration.py`) gegen echtes Immich; Teile wählbar (`e1` … `e7`, `m`) | `docker exec mediaassistant-dev python /app/test_tag_groups.py` |
 | `backend/test_jobs_autoincrement.py` | R-26: Job-IDs werden nie zweimal vergeben (Umbau von `jobs` auf AUTOINCREMENT, optional auf Live-Kopie) | `docker exec mediaassistant-dev python /app/test_jobs_autoincrement.py [kopie.db]` |
 | `backend/test_no_direct_file_ops.py` | Wächter: keine destruktive Dateioperation ausserhalb von `fileops.py` (Datei:Zeile, `ALLOWLIST`) | `docker exec mediaassistant-dev python /app/test_no_direct_file_ops.py` |
 | `backend/test_no_direct_step_result.py` | Wächter: `jobs.step_result` schreibt nur `runs.py` — meldet jede direkte Zuweisung, `Job(step_result=…)`, `flag_modified`, `.values(step_result=…)` und SQL-Text, Tests eingeschlossen (Datei:Zeile, `ALLOWLIST`) | `docker exec mediaassistant-dev python /app/test_no_direct_step_result.py` |
@@ -356,6 +357,8 @@ echte DB) und verifiziert das Endergebnis:
 | **US-8: Kein Duplikat** | "Kein Duplikat" → volle Pipeline → Upload zu Immich → Asset + Tags korrekt |
 | **US-9: Retry nach Fehler** | Pipeline-Fehler → Retry → Datei landet korrekt in Immich |
 | **US-10: Folder-Tags → Album** | Datei in Subfolder → Album in Immich erstellt → Asset zugeordnet |
+| **US-21: Tag-Gruppen** | Datei in Unterordner mit GPS, Set mit Tag-Gruppen → fünf Wurzeln als Baum in Immich, Inhalts-Tags flach, TagsList in der Datei, keine anderen flachen MA-Tags |
+| **US-22: Tag-Gruppen nachträglich** | Job ohne Gruppen verarbeitet → eingeschaltet → IA-07+IA-08 neu (API) → flache MA-Tags weg ausser Inhalts-Tags (auch nach Neueinlesen der Sidecar), Gruppen da, Benutzer-Tag bleibt |
 | **US-11 … US-14: pHash, Keep, Batch-Clean** | pHash-Duplikat (andere Kompression), Keep mit Ordner-/Stichwort-Merge, Batch-Clean alle bzw. diese Seite |
 | **US-15: Geocoding neu (Immich)** | Modul einzeln neu → IA-07/IA-08 laufen nach → Tags in Immich per API aktualisiert; gleicher Ort → nichts kaskadiert |
 | **US-16: Immich-Job ohne lokale Kopie** | Handy-Upload neu ausführen über eine Arbeitskopie; Variante „Datei ersetzen"; Datum bleibt (Datei-Zeit aus Immich) |
