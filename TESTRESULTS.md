@@ -33,40 +33,41 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 
 ### Release-Übersicht (Test-Skript-Roll-ups)
 
-| Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | 2026-04-09 | 2026-04-13 | v2.29.1 | v2.31.0 | v2.31.1 | v2.31.2 | v3.0.0 | v3.0.1 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 | v2.28.66 | v2.28.73 | v2.29.1 | v2.31.0 | v2.31.1 | v2.31.2 | v3.0.0 | v3.0.1 |
-| **Commit** | – | – | – | – | `8ffc4c5` | `16f4b8c` | `6358dfe` | `e0356df` | `f0a3d63` | (this) | `47efaed` | (this) |
-| `test_duplicate_fix.py` | – | – | 26/26 ✅ | 26/26 ✅ | 34/34 ✅ | 34/34 ✅ | 34/34 ✅ | – | – | – | 28/28 ✅ | 28/28 ✅ |
-| `test_retry_file_lifecycle.py` | – | – | – | 46/46 ✅ | 110/110 ✅ | 110/110 ✅ | 110/110 ✅ | – | – | – | 110/110 ✅ | 110/110 ✅ |
-| `test_testplan_final.py` | – | 296/305 | 66/66 ✅ | 59/60 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | – | – | – | 51/51 ✅ | 51/51 ✅ |
-| `test_ai_backends.py` | – | – | – | – | – | 13/13 ✅ | 13/13 ✅ | – | – | – | 13/13 ✅ | 13/13 ✅ |
-| `test_ftag_immich.py` | – | – | – | – | – | – | 20/20 ✅ | – | – | 23/23 ✅ | entfernt | entfernt |
-| `test_keep_flow.py` | – | – | – | – | – | – | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ |
-| `test_v29_stress.py` | – | – | – | – | – | – | 41/41 ✅ | – | – | – | 40/40 ✅ | 40/40 ✅ |
-| `test_no_file_loss.py` | – | – | – | – | – | – | 19/20 ⚠️ | 34/34 ✅ | 38/38 ✅ | 43/43 ✅ | 43/43 ✅ | 43/43 ✅ |
-| `test_immich_dedup.py` | – | – | – | – | – | – | 18/18 ✅ | 18/18 ✅ | 18/18 ✅ | 18/18 ✅ | 15/15 ✅ | 23/23 ✅ (D12 neu) |
-| `test_e2e_user_stories.py` | – | – | – | – | – | – | – | 64/64 ✅ | – | – | 137/137 ✅ | 137/137 ✅ |
-| `test_v29_merge.py` | – | – | – | – | – | – | – | 45/45 ✅ | – | – | 60/60 ✅ | 60/60 ✅ |
-| `test_startup_imports.py` | – | – | – | – | – | – | – | – | – | – | 4/4 ✅ (auch am gebauten Image) | 4/4 ✅ (auch am gebauten Image) |
-| `test_no_direct_file_ops.py` | – | – | – | – | – | – | – | – | – | – | 0 Funde ✅ | 0 Funde ✅ |
-| `test_no_direct_step_result.py` | – | – | – | – | – | – | – | – | – | – | 0 Funde ✅ | 0 Funde ✅ |
-| `test_shared_functions.py` | – | – | – | – | – | – | – | – | – | – | 99/99 ✅ | 99/99 ✅ |
-| `test_deep_edge.py` | – | – | – | – | – | – | – | – | – | – | 33/33 ✅ | 33/33 ✅ |
-| `test_sets_e2e.py` | – | – | – | – | – | – | – | – | – | – | 54/54 ✅ | 54/54 ✅ |
-| `test_sets_migration.py` | – | – | – | – | – | – | – | – | – | – | 14/14 ✅ | 15/15 ✅ |
-| `test_jobs_autoincrement.py` | – | – | – | – | – | – | – | – | – | – | 23/23 ✅ | 23/23 ✅ |
-| `test_fileops.py` | – | – | – | – | – | – | – | – | – | – | 90/90 ✅ | 90/90 ✅ |
-| `test_fileops_immich.py` | – | – | – | – | – | – | – | – | – | – | 73/73 ✅ | 73/73 ✅ |
-| `test_immich_trash.py` | – | – | – | – | – | – | – | – | – | – | 19/19 ✅ | 19/19 ✅ |
-| `test_history_view.py` | – | – | – | – | – | – | – | – | – | – | 130/130 ✅ | 130/130 ✅ |
-| `test_folder_structure.py` | – | – | – | – | – | – | – | – | – | – | 141/141 ✅ | 141/141 ✅ |
-| `test_module_runs.py` | – | – | – | – | – | – | – | – | – | – | 72/72 ✅ | 72/72 ✅ |
-| `test_module_rerun.py` | – | – | – | – | – | – | – | – | – | – | 63/63 ✅ | 63/63 ✅ |
-| `test_executor.py` | – | – | – | – | – | – | – | – | – | – | 31/31 ✅ | 31/31 ✅ |
-| `test_data_safety_local.py` | – | – | – | – | – | – | – | – | – | – | 13/13 Risiken sicher ✅ | 13/13 Risiken sicher ✅ |
-| `test_data_safety_immich.py` | – | – | – | – | – | – | – | – | – | – | 16/16 Risiken sicher ✅ | 16/16 Risiken sicher ✅ |
-| `test_ia04_convert.py` | – | – | – | – | – | – | – | – | – | – | – | 5/5 ✅ |
+| Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | 2026-04-09 | 2026-04-13 | v2.29.1 | v2.31.0 | v2.31.1 | v2.31.2 | v3.0.0 | v3.0.1 | v3.0.2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 | v2.28.66 | v2.28.73 | v2.29.1 | v2.31.0 | v2.31.1 | v2.31.2 | v3.0.0 | v3.0.1 | v3.0.2 |
+| **Commit** | – | – | – | – | `8ffc4c5` | `16f4b8c` | `6358dfe` | `e0356df` | `f0a3d63` | (this) | `47efaed` | (this) | (this) |
+| `test_duplicate_fix.py` | – | – | 26/26 ✅ | 26/26 ✅ | 34/34 ✅ | 34/34 ✅ | 34/34 ✅ | – | – | – | 28/28 ✅ | 28/28 ✅ | 28/28 ✅ |
+| `test_retry_file_lifecycle.py` | – | – | – | 46/46 ✅ | 110/110 ✅ | 110/110 ✅ | 110/110 ✅ | – | – | – | 110/110 ✅ | 110/110 ✅ | 110/110 ✅ (Immich 3.3.5) |
+| `test_testplan_final.py` | – | 296/305 | 66/66 ✅ | 59/60 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | – | – | – | 51/51 ✅ | 51/51 ✅ | 51/51 ✅ (2 BLOCK: Fixtures) |
+| `test_ai_backends.py` | – | – | – | – | – | 13/13 ✅ | 13/13 ✅ | – | – | – | 13/13 ✅ | 13/13 ✅ | – |
+| `test_ftag_immich.py` | – | – | – | – | – | – | 20/20 ✅ | – | – | 23/23 ✅ | entfernt | entfernt | entfernt |
+| `test_keep_flow.py` | – | – | – | – | – | – | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ |
+| `test_v29_stress.py` | – | – | – | – | – | – | 41/41 ✅ | – | – | – | 40/40 ✅ | 40/40 ✅ | – |
+| `test_no_file_loss.py` | – | – | – | – | – | – | 19/20 ⚠️ | 34/34 ✅ | 38/38 ✅ | 43/43 ✅ | 43/43 ✅ | 43/43 ✅ | – |
+| `test_immich_dedup.py` | – | – | – | – | – | – | 18/18 ✅ | 18/18 ✅ | 18/18 ✅ | 18/18 ✅ | 15/15 ✅ | 23/23 ✅ (D12 neu) | 31/31 ✅ (D13 neu, Immich 3.3.5) |
+| `test_e2e_user_stories.py` | – | – | – | – | – | – | – | 64/64 ✅ | – | – | 137/137 ✅ | 137/137 ✅ | 137/137 ✅ (Immich 3.3.5) |
+| `test_v29_merge.py` | – | – | – | – | – | – | – | 45/45 ✅ | – | – | 60/60 ✅ | 60/60 ✅ | 60/60 ✅ |
+| `test_startup_imports.py` | – | – | – | – | – | – | – | – | – | – | 4/4 ✅ (auch am gebauten Image) | 4/4 ✅ (auch am gebauten Image) | 4/4 ✅ |
+| `test_no_direct_file_ops.py` | – | – | – | – | – | – | – | – | – | – | 0 Funde ✅ | 0 Funde ✅ | 0 Funde ✅ |
+| `test_no_direct_step_result.py` | – | – | – | – | – | – | – | – | – | – | 0 Funde ✅ | 0 Funde ✅ | 0 Funde ✅ |
+| `test_shared_functions.py` | – | – | – | – | – | – | – | – | – | – | 99/99 ✅ | 99/99 ✅ | – |
+| `test_deep_edge.py` | – | – | – | – | – | – | – | – | – | – | 33/33 ✅ | 33/33 ✅ | – |
+| `test_sets_e2e.py` | – | – | – | – | – | – | – | – | – | – | 54/54 ✅ | 54/54 ✅ | – |
+| `test_sets_migration.py` | – | – | – | – | – | – | – | – | – | – | 14/14 ✅ | 15/15 ✅ | – |
+| `test_jobs_autoincrement.py` | – | – | – | – | – | – | – | – | – | – | 23/23 ✅ | 23/23 ✅ | – |
+| `test_fileops.py` | – | – | – | – | – | – | – | – | – | – | 90/90 ✅ | 90/90 ✅ | – |
+| `test_fileops_immich.py` | – | – | – | – | – | – | – | – | – | – | 73/73 ✅ | 73/73 ✅ | 73/73 ✅ (Immich 3.3.5) |
+| `test_immich_trash.py` | – | – | – | – | – | – | – | – | – | – | 19/19 ✅ | 19/19 ✅ | 19/19 ✅ (Immich 3.3.5) |
+| `test_history_view.py` | – | – | – | – | – | – | – | – | – | – | 130/130 ✅ | 130/130 ✅ | 130/130 ✅ |
+| `test_folder_structure.py` | – | – | – | – | – | – | – | – | – | – | 141/141 ✅ | 141/141 ✅ | – |
+| `test_module_runs.py` | – | – | – | – | – | – | – | – | – | – | 72/72 ✅ | 72/72 ✅ | – |
+| `test_module_rerun.py` | – | – | – | – | – | – | – | – | – | – | 63/63 ✅ | 63/63 ✅ | – |
+| `test_executor.py` | – | – | – | – | – | – | – | – | – | – | 31/31 ✅ | 31/31 ✅ | – |
+| `test_data_safety_local.py` | – | – | – | – | – | – | – | – | – | – | 13/13 Risiken sicher ✅ | 13/13 Risiken sicher ✅ | 13/13 Risiken sicher ✅ |
+| `test_data_safety_immich.py` | – | – | – | – | – | – | – | – | – | – | 16/16 Risiken sicher ✅ | 16/16 Risiken sicher ✅ | 16/16 Risiken sicher ✅ (Immich 3.3.5) |
+| `test_ia04_convert.py` | – | – | – | – | – | – | – | – | – | – | – | 5/5 ✅ | – |
+| `test_dup_page_errors.py` | – | – | – | – | – | – | – | – | – | – | – | – | 30/30 ✅ (Immich 3.3.5) |
 
 ### IA01 — IA-01 EXIF auslesen (26 Tests)
 
