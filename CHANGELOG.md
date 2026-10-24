@@ -1,5 +1,56 @@
 # Changelog
 
+## v3.0.1 — 2026-10-24
+
+### Fix: „Behalten" liess alte Duplikat-Spender ohne Hash stehen
+
+Auf live liessen sich am ersten Tag mit 3.0.0 mehrere Duplikat-Gruppen
+nicht vollständig auflösen (MA-2026-1643, -3535, -5763, -6561): „Spender
+nicht aufgelöst … Inhalt nicht prüfbar (kein Hash des Jobs bekannt)". Die
+Spender blieben samt Immich-Asset als Duplikat stehen.
+
+Ursache: Diese Jobs waren im April hochgeladen worden (eigenes Asset),
+standen später ohne `file_hash` auf „Datei nicht auffindbar"; ein Retry
+unter 2.x lud das Original aus ihrem Asset herunter, ohne den Hash zu
+setzen, und IA-02 legte es unter `error/duplicates/` ab. Die Regel von 3.0
+lässt eine Datei nur in den Papierkorb, wenn ihr Inhalt als der des Jobs
+geprüft ist — ohne Hash ging das nicht.
+
+Jetzt prüft `job_copies()` eine solche Datei auch gegen die Prüfsumme
+(SHA-1) der **eigenen** Immich-Assets des Jobs: passt sie, ist es der
+Inhalt des Jobs. Eine fremde Datei am selben Pfad bleibt weiterhin
+unberührt (R-01). Neuer Test D12 in `test_immich_dedup.py` (Nachbau des
+Live-Falls, vorher rot) mit Gegenprobe D12b (fremde Datei). Die betroffenen
+Gruppen auf live lassen sich nach dem Update erneut mit „Behalten"
+auflösen.
+
+### Sicherheit: Image-Schwachstellen, ImageMagick entfernt
+
+Ein Scan des 3.0.0-Images (Trivy, Schweregrad hoch und kritisch) fand 301
+Funde, davon 7 kritisch. Behoben ist alles, wofür es einen Fix gibt:
+
+- **Pillow 12.3.0 → 13.0.0** (28 Funde, davon 5 kritisch) und **certifi
+  2026.7.22 → 2026.10.19** (1 kritisch), in `constraints.txt`.
+- **Debian-Sicherheitsupdates** werden beim Bauen eingespielt
+  (`apt-get upgrade`), z. B. libbrotli1.
+- **ImageMagick entfernt** (5 Pakete, 60 Funde ohne Debian-Fix). Die App
+  brauchte es nur an zwei Stellen in IA-04: für das erste Bild eines GIF
+  und als Ausweichweg, wenn `heif-convert` eine HEIC-Datei nicht lesen
+  kann. Beides macht jetzt Pillow mit pillow-heif. Nebenbei behoben: GIFs
+  wurden bisher gar nicht umgewandelt, weil `convert` im Container fehlte
+  (TESTPLAN LIM-01).
+
+Danach: 211 Funde, davon 1 kritisch, **keiner mit verfügbarem Fix**. Der
+Rest steckt in Debian-Paketen, für die Debian noch keine reparierte Version
+hat: ffmpeg und seine Bibliotheken (144, für Videos nötig), util-linux
+(36, Basissystem), libxml2 (8, davon der kritische; kommt mit ffmpeg) und
+Einzelne wie perl, ncurses, libtiff. Sie verschwinden mit dem nächsten
+Build, sobald Debian sie behebt.
+
+Getestet: neuer Test `test_ia04_convert.py` (GIF und HEIC-Ausweichweg ohne
+ImageMagick; vorher rot, jetzt grün); gesamtes Release-Gate auf dem neuen
+Image.
+
 ## v3.0.0 — 2026-10-23
 
 3.0.0 bündelt drei Umbauten: Verarbeitungs-Sets, ein neues Design und den
