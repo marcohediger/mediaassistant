@@ -336,6 +336,7 @@ async def diagnostics(request: Request):
         },
         "immich": {
             "url": immich_url,
+            "public_url": await config_manager.get("immich.public_url", ""),
             "api_key": await _secret_state("immich.api_key"),
             "extra_users": immich_users,
         },

@@ -885,6 +885,31 @@
     document.addEventListener("ma:job-refresh", refresh);
   }
 
+  // The job message with every other job's debug key linked to its page,
+  // like the template filter link_job_keys (routers/logs.py). Rebuilt only
+  // when the text changed, so a focused link survives the poll.
+  function setJobMessage(el, text, ownKey) {
+    if (el.dataset.raw === text) return;
+    el.dataset.raw = text;
+    el.replaceChildren();
+    const re = /\bMA-\d{4}-\d+\b/g;
+    let pos = 0, m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > pos) el.append(text.slice(pos, m.index));
+      if (m[0] === ownKey) {
+        el.append(m[0]);
+      } else {
+        const a = document.createElement("a");
+        a.className = "ui-link";
+        a.href = "/logs/job/" + encodeURIComponent(m[0]);
+        a.textContent = m[0];
+        el.append(a);
+      }
+      pos = m.index + m[0].length;
+    }
+    if (pos < text.length) el.append(text.slice(pos));
+  }
+
   function updateJobDetail(job) {
     // Status badge — only the main one tagged data-field="status".
     // Other .status-badge elements (e.g. the dry_run "Preview" badge)
@@ -932,7 +957,7 @@
       const box = msgEl.closest("[data-section='message']");
       const title = box.querySelector("[data-field='message_title']");
       const iconUse = box.querySelector("[data-field='message_icon']");
-      msgEl.textContent = job.error_message || "";
+      setJobMessage(msgEl, job.error_message || "", job.debug_key);
       box.classList.toggle("is-error", failed);
       box.classList.toggle("is-info", !failed);
       if (title) title.textContent = failed ? title.dataset.labelError : title.dataset.labelNote;

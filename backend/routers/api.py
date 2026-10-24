@@ -91,7 +91,7 @@ async def _bulk_reset_errors_in_background(job_ids: list[int]):
 # buttons are disabled in the UI while `running=True`.
 _cleanup_progress: dict = {
     "running": False,
-    "task": None,        # "orphans" | "stale_errors" | "stuck_duplicates"
+    "task": None,        # "orphans" | "stale_errors" | "stuck_duplicates" | "dup_errors" | Werkzeuge tasks
     "current": 0,
     "total": 0,
     "phase": "",         # phase key ("scanning", "verifying_targets", ...); the UI shows maintenance.phase_<key>
@@ -818,6 +818,191 @@ async def cleanup_stuck_duplicate_winners_endpoint(request: Request):
     _cleanup_reset("stuck_duplicates")
     asyncio.create_task(_run_cleanup_stuck_duplicate_winners())
     return JSONResponse({"status": "started", "task": "stuck_duplicates"})
+
+
+# ─── Resolved duplicate errors ──────────────────────────────────────
+# Error jobs IA-02 recorded as an exact duplicate whose own file is gone
+# (old data: a retry found no copy, "Datei nicht auffindbar"), while the
+# original still has its content. Nothing is lost; the job is noise. Marked
+# 'deleted' like a job deleted on its page (row and history stay); it owns
+# no copy, so no file and no asset is touched.
+
+DUP_ERRORS_ACTOR = "system:cleanup_duplicate_errors"
+DUP_ERRORS_LIST_MAX = 500
+_DUP_ERRORS_BUCKETS = ("cleanable", "kept_original", "kept_own_copy", "similar", "unchecked")
+
+
+async def _dup_error_jobs(job_ids: list[int] | None = None) -> list:
+    """Error jobs whose current IA-02 result says duplicate."""
+    from sqlalchemy import func as sql_func
+    query = select(Job).where(
+        Job.status == "error",
+        sql_func.json_extract(Job.step_result, '$."IA-02".status') == "duplicate",
+    )
+    if job_ids is not None:
+        query = query.where(Job.id.in_(job_ids))
+    async with async_session() as session:
+        return list((await session.execute(query.order_by(Job.id))).scalars().all())
+
+
+async def _classify_dup_error(job) -> tuple[str, dict]:
+    """Bucket of one candidate and what the preview shows about it.
+
+    cleanable: exact duplicate, no own copy, the original has a verified copy
+    now (pipeline.reprocess.duplicate_original). kept_own_copy: the job still
+    has content of its own (find_source, as a retry would) — a retry is the
+    way, not deleting. kept_original: nothing of the original checks out
+    (gone, in the trash, deleted job). similar: not an exact match, the
+    job's own file is missing — the user should compare. unchecked: the
+    check itself failed (e.g. Immich unreachable).
+    """
+    from pipeline import reprocess
+    ia02 = reprocess.duplicate_record(job) or {}
+    match_type = str(ia02.get("match_type") or "")
+    item = {"job_id": job.id, "debug_key": job.debug_key, "filename": job.filename,
+            "original": ia02.get("original_debug_key"), "match_type": match_type}
+    if match_type != "exact":
+        return "similar", item
+    try:
+        own, _ = await reprocess.find_source(job)
+        if own is not None:
+            item["where"] = own.kind
+            return "kept_own_copy", item
+        original = await reprocess.duplicate_original(job)
+    except Exception as exc:
+        item["reason"] = f"{type(exc).__name__}: {exc}"[:200]
+        return "unchecked", item
+    if original is None:
+        return "kept_original", item
+    item["where"] = original.where
+    return "cleanable", item
+
+
+async def _mark_dup_error_deleted(item: dict) -> bool:
+    """Mark one cleanable job deleted. Claims it from 'error' first: a job a
+    retry or another action took meanwhile is left alone (False)."""
+    from datetime import datetime
+    from sqlalchemy import update
+    import fileops
+    from models import AssetRef
+
+    key = item["debug_key"]
+    where = await _text("maintenance", f"dup_errors_where_{item['where']}")
+    note = await _text("maintenance", "dup_errors_note", original=item["original"], where=where)
+    await log_info("api", f"{key} Duplikat-Fehler wird als gelöscht markiert",
+                   f"kein eigenes Exemplar; Inhalt geprüft vorhanden als {item['original']} ({where}); "
+                   "keine Datei und kein Asset wird angefasst")
+    async with async_session() as session:
+        claim = await session.execute(
+            update(Job).where(Job.id == item["job_id"], Job.status == "error")
+            .values(status="deleted", error_message=note, completed_at=datetime.now()))
+        await session.commit()
+    if claim.rowcount != 1:
+        await log_info("api", f"{key} Duplikat-Fehler nicht markiert: Status inzwischen geändert")
+        return False
+    # A deleted job uses nothing any more (as on the job page): its
+    # references must not keep another job's copy from being trashed.
+    async with async_session() as session:
+        refs = (await session.execute(select(AssetRef.kind, AssetRef.location).where(
+            AssetRef.job_id == item["job_id"]))).all()
+    for kind, location in refs:
+        await fileops.drop_ref(item["job_id"], kind, location)
+    await log_info("api", f"{key} Duplikat-Fehler als gelöscht markiert",
+                   f"Original {item['original']} ({where}); Verweise entfernt: {len(refs)}")
+    return True
+
+
+async def _run_cleanup_dup_errors(mode: str, job_ids: list[int] | None):
+    """Background task. mode 'preview': classify every candidate, change
+    nothing. mode 'apply': classify the given jobs again (the state may have
+    changed since the preview) and mark the cleanable ones deleted."""
+    buckets: dict[str, list] = {b: [] for b in _DUP_ERRORS_BUCKETS}
+    deleted: list[dict] = []
+    changed = 0
+    try:
+        _cleanup_phase("loading_dup_errors")
+        jobs = await _dup_error_jobs(job_ids)
+        _cleanup_progress["total"] = len(jobs)
+        _cleanup_phase("checking_dup_errors")
+        for idx, job in enumerate(jobs, 1):
+            bucket, item = await _classify_dup_error(job)
+            buckets[bucket].append(item)
+            _cleanup_progress["current"] = idx
+            await asyncio.sleep(0)
+
+        if mode == "apply":
+            if job_ids:
+                found = {j.id for j in jobs}
+                changed += sum(1 for j in set(job_ids) if j not in found)
+            cleanable = buckets["cleanable"]
+            _cleanup_progress["current"] = 0
+            _cleanup_progress["total"] = len(cleanable)
+            _cleanup_phase("marking_deleted")
+            if cleanable:
+                sample = ", ".join(f"{i['debug_key']}→{i['original']}" for i in cleanable[:20])
+                await log_info("api", f"Duplikat-Fehler-Aufräumen: {len(cleanable)} Jobs werden als gelöscht markiert",
+                               f"Original jeweils geprüft vorhanden: {sample}{' …' if len(cleanable) > 20 else ''}")
+            for idx, item in enumerate(cleanable, 1):
+                if await _mark_dup_error_deleted(item):
+                    deleted.append(item)
+                else:
+                    changed += 1
+                _cleanup_progress["current"] = idx
+            detail = (f"als gelöscht markiert: {len(deleted)}, behalten (Original ohne geprüftes Exemplar): "
+                      f"{len(buckets['kept_original'])}, behalten (eigenes Exemplar): "
+                      f"{len(buckets['kept_own_copy'])}, ähnliche (nicht dabei): {len(buckets['similar'])}, "
+                      f"nicht prüfbar: {len(buckets['unchecked'])}, inzwischen geändert: {changed}")
+            await log_info("api", f"Duplikat-Fehler-Aufräumen: {len(deleted)} Jobs als gelöscht markiert", detail)
+
+        result = {"mode": mode,
+                  "counts": {b: len(items) for b, items in buckets.items()},
+                  **{b: items[:DUP_ERRORS_LIST_MAX] for b, items in buckets.items()}}
+        if mode == "apply":
+            result.update(deleted=len(deleted), deleted_jobs=deleted[:DUP_ERRORS_LIST_MAX], changed=changed)
+        _cleanup_finish(result=result)
+    except Exception as exc:
+        import traceback
+        try:
+            await log_warning("api", "Duplikat-Fehler-Aufräumen fehlgeschlagen",
+                              f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
+        except Exception:
+            pass
+        _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
+
+
+@router.post("/jobs/cleanup-duplicate-errors")
+async def cleanup_duplicate_errors_endpoint(request: Request):
+    """"Erledigte Duplikat-Fehler aufräumen" as a background task.
+
+    JSON body {"mode": "preview"} classifies every candidate and changes
+    nothing; {"mode": "apply", "job_ids": [...]} handles the jobs of the
+    preview, each checked again. Returns 409 while another cleanup runs;
+    progress and result via /api/jobs/cleanup-status (task "dup_errors").
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    mode = body.get("mode", "preview")
+    job_ids = None
+    if mode == "apply":
+        raw = body.get("job_ids")
+        if not isinstance(raw, list) or not raw or not all(isinstance(j, int) for j in raw):
+            return JSONResponse({"error": "job_ids_required"}, status_code=400)
+        job_ids = sorted(set(raw))
+    elif mode != "preview":
+        return JSONResponse({"error": "invalid_mode"}, status_code=400)
+    if _cleanup_progress["running"]:
+        return JSONResponse(
+            {"error": "another_cleanup_running", "task": _cleanup_progress["task"]},
+            status_code=409,
+        )
+
+    _cleanup_reset("dup_errors")
+    asyncio.create_task(_run_cleanup_dup_errors(mode, job_ids))
+    return JSONResponse({"status": "started", "task": "dup_errors", "mode": mode})
 
 
 @router.post("/trigger-scan")

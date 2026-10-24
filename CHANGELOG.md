@@ -127,6 +127,121 @@ obwohl das Tag danach am Asset hing, und führte es nicht in
 entfernen können. Jetzt zählt nach der Nachkontrolle, was wirklich am Asset
 hängt. Aufgefallen in US-21 (einmal in fünf Läufen).
 
+## v3.0.2 — 2026-10-24
+
+Fünf Meldungen aus dem Live-System (3.0.1), alle rund um die Duplikat-Seite
+und alte Duplikat-Fehler. Jede hat einen Reproducer gegen echtes Immich, der
+vor dem Fix rot war: der neue Test `test_dup_page_errors.py` und D13 in
+`test_immich_dedup.py`.
+
+### Fix: „Automatisch bereinigen" liess identische Gruppen stillschweigend stehen
+
+Nach „Automatisch bereinigen → Nur diese Seite" blieben auf live Gruppen
+stehen, z. B. MA-2026-6066 (erledigt, Immich-Asset, früher als beste
+Qualität übernommen) mit MA-2026-69653 (exaktes Duplikat in
+`error/duplicates/`). Der Lauf um 13:27 bearbeitete 8 Gruppen und liess
+diese aus, ohne sie mitzuzählen („0 skipped"); die Seite zeigte sie als
+„Ähnlich", obwohl der Spender „Identisch" war.
+
+Ursache: Die Gruppen-Merkmale (`all_exact`, `safe_for_batch`) lasen das
+IA-02-Ergebnis **jedes** Mitglieds, auch das des behaltenen Originals. Bei
+MA-2026-6066 ist das veraltete Geschichte von vor der Übernahme: „ähnlich"
+zu MA-2026-12230, das längst gelöscht ist. Jetzt bestimmen nur die
+Duplikat-Beziehungen die Art der Gruppe — das IA-02 der Mitglieder, die
+jetzt Duplikat sind; ein erledigtes Mitglied (Bibliothek oder Immich) zählt
+als Original. Ein fehlender pHash-Abstand zählt weiterhin nicht als 0 (D9).
+Gruppen, die „Automatisch bereinigen" bewusst auslässt (ähnliche Bilder,
+Entscheidung des Nutzers), zählen jetzt als übersprungen, mit Grund im
+System-Log, statt aus der Zusammenfassung zu verschwinden.
+
+Test D13 in `test_immich_dedup.py` baut die Live-Konstellation nach
+(Behaltener mit veraltetem „ähnlich"-IA-02 auf einen gelöschten Job, exakter
+Spender) und lässt den echten Bereinigungslauf über eine Seite laufen, die
+auf die Gruppen des Tests beschränkt ist: vorher Gruppe „ähnlich", nicht
+erfasst, 0 übersprungen; jetzt „identisch", Spender aufgelöst, eine
+daneben liegende wirklich ähnliche Gruppe bleibt unberührt und zählt als
+übersprungen.
+
+### Fix: Grossansicht zeigte HEIC-Fotos aus Immich nicht an
+
+Auf der Duplikat-Seite (ebenso in Review und auf der Job-Seite) blieb die
+Grossansicht für iPhone-Fotos in Immich leer. `/api/original/immich/<asset>`
+reichte die Originaldatei durch — für ein iPhone-Foto `image/heic`, das
+Chrome und Firefox nicht anzeigen können. Nur RAW-Endungen bekamen bisher
+die Vorschau von Immich.
+
+Jetzt entscheidet der Medientyp des Originals (`originalMimeType` aus der
+Asset-Info, sonst der Content-Type des Originals): JPEG, PNG, WebP und GIF
+kommen weiterhin als Original in voller Auflösung, alles andere (HEIC/HEIF,
+TIFF, RAW/DNG, Videos) als Vorschau-JPEG von Immich. Test L-01 … L-05: ein
+hochgeladenes HEIC kommt als `image/jpeg` (vorher `image/heic`), ein JPEG
+bleibt Byte für Byte das Original.
+
+### Fix: „In Immich öffnen" führte auf live ins Leere
+
+Der Link auf der Duplikat-Seite wurde aus `immich.url` gebaut. Auf live ist
+das die Docker-interne Adresse `http://immich_server:2283` — MediaAssistant
+braucht sie (siehe v2.32.10), der Browser kennt sie nicht.
+
+Neue Einstellung **„Adresse für Links im Browser"** (`immich.public_url`) im
+Abschnitt Immich: Unter dieser Adresse öffnet der Browser Immich. Sie gilt
+für jeden Link zu Immich (heute nur die Duplikat-Seite; Job-Seite, Logs und
+Review verlinken Immich nicht). Leer heisst wie bisher `immich.url`. Erlaubt
+ist eine `http://`- oder `https://`-Adresse mit Hostname, ein Schrägstrich
+am Ende fällt weg; das Feld prüft schon im Browser. Die Diagnose-API zeigt
+den Wert unter `immich.public_url`. Test P-01 … P-04.
+
+### Fix: Klare Meldung, wenn ein Duplikat ohne eigene Datei nicht neu verarbeitet werden kann
+
+Live MA-2026-56483 (IMG-20190803-WA0011.jpg) stand nach einem Retry auf
+„Datei nicht auffindbar — Retry abgebrochen. Kein geprüftes Exemplar dieses
+Jobs gefunden (weder lokal noch in Immich)." Das Foto war aber in Immich: als
+Asset von MA-2026-8857, das IA-02 als exaktes Original dieses Jobs
+festgehalten hatte (alte Daten, beide ohne `file_hash`). Den Retry
+abzulehnen ist richtig — ein Job nimmt nie das Exemplar eines anderen
+(R-01) —, die Meldung liess aber nach einer verlorenen Datei suchen.
+
+Jetzt prüft der abgelehnte Retry auch das Original, das IA-02 genannt hat,
+so wie ein Retry seine eigene Quelle sucht: lokales Exemplar mit geprüftem
+Hash oder Immich-Asset vorhanden (nicht im Papierkorb). Hat es ein geprüftes
+Exemplar, lautet die Meldung z. B. „Kein eigenes Exemplar. Derselbe Inhalt
+liegt als MA-2026-8857 vor (exaktes Duplikat, in Immich) — nichts verloren,
+der Job kann gelöscht werden." Bei einem ähnlichen Bild: „Ein ähnliches Bild
+liegt als … vor (ähnliches Duplikat, …) — die Datei dieses Jobs selbst
+fehlt; vor dem Löschen vergleichen." Ohne geprüftes Original bleibt die
+bisherige Meldung. Sie beginnt weiterhin mit „Datei nicht auffindbar", die
+Wartung und die Wiederaufnahme beim Start finden sie also wie bisher. Auf
+der Job-Seite sind Debug-Keys anderer Jobs in der Meldung jetzt Links (auch
+nach der Live-Aktualisierung). Test M-01 … M-07 (M-07: Original mit
+nicht prüfbarer lokaler Datei, aber vorhandenem Immich-Asset, wie
+MA-2026-8857).
+
+### Wartung: „Erledigte Duplikat-Fehler aufräumen"
+
+Neuer Eintrag im Wartungsmenü der Logs-Seite. Er findet Fehler-Jobs, die
+IA-02 als **exaktes** Duplikat festgehalten hat und deren Original jetzt ein
+geprüftes Exemplar hat (lokal mit neu berechnetem Hash oder Immich-Asset
+vorhanden, nicht im Papierkorb). Zuerst kommt eine Vorschau mit Zahlen und
+Liste (Job → Original, wo es liegt); erst die Bestätigung markiert die Jobs
+als gelöscht, so wie Löschen auf der Job-Seite seit 3.0: Die Zeile bleibt
+mit Verlauf, die Notiz nennt das Original, Verweise des Jobs werden
+entfernt. Keine Datei und kein Asset wird angefasst — diese Jobs haben kein
+eigenes Exemplar. Vor dem Markieren wird jeder Job nochmals geprüft und
+atomar von „Fehler" beansprucht; vorher und nachher steht je ein Eintrag im
+System-Log.
+
+Nicht dabei: ähnliche (pHash-)Duplikate — ihre eigene Datei fehlt, das soll
+der Nutzer ansehen —, Jobs mit eigenem Exemplar (dort ist Retry der Weg) und
+Jobs, deren Original kein geprüftes Exemplar hat. Auf der Live-Kopie vom
+September (81 Fehler-Jobs) sind 31 Fehler-Jobs exakte Duplikate, 19
+ähnliche, 29 „Datei nicht auffindbar" ohne Duplikat, 2 andere. Endpunkt
+`POST /api/jobs/cleanup-duplicate-errors` (`mode` `preview`, oder `apply`
+mit den Job-IDs der Vorschau), Fortschritt wie bei den anderen Wartungen
+über `/api/jobs/cleanup-status`. Test C-01 … C-14: exaktes Duplikat mit
+Original in Immich → aufgeräumt; Original nur im Immich-Papierkorb,
+ähnliches Duplikat und Job mit eigener Datei → bleiben; Protokoll
+`file_ops` unverändert; ein zweiter Lauf fasst nichts an.
+
 ## v3.0.1 — 2026-10-24
 
 ### Fix: „Behalten" liess alte Duplikat-Spender ohne Hash stehen
