@@ -1,4 +1,5 @@
 import html
+import re
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -15,6 +16,18 @@ def _sanitize(value: str) -> str:
     if not value:
         return value
     return html.escape(value.strip())
+
+
+_WEB_URL = re.compile(r"^https?://[^\s/?#\"'<>]+(/[^\s\"'<>]*)?$", re.IGNORECASE)
+
+
+def _public_url(value: str | None) -> str | None:
+    """immich.public_url as stored: an http(s) address without a trailing
+    slash, "" for none, None when the input is no such address."""
+    value = (value or "").strip().rstrip("/")
+    if not value:
+        return ""
+    return value if _WEB_URL.match(value) else None
 
 router = APIRouter(prefix="/settings")
 
@@ -76,6 +89,7 @@ async def _get_cfg() -> dict:
         "smtp_password_len": await _stored_key_len(stored_keys["smtp"]),
         "smtp_ssl": await config_manager.get("smtp.ssl", True),
         "immich_url": await config_manager.get("immich.url", ""),
+        "immich_public_url": await config_manager.get("immich.public_url", ""),
         # Length only — never the key itself. Renders as one placeholder dot
         # per character so a stored key is distinguishable from an empty field.
         "immich_api_key_len": await _stored_key_len(stored_keys["immich"]),
@@ -138,6 +152,13 @@ async def save_settings(request: Request):
         return RedirectResponse(
             url="/settings?msg=invalid_form&msg_type=error", status_code=302
         )
+    # Checked before anything is saved: the field is type="url" with a
+    # pattern, so only a hand-made request gets here.
+    public_url = _public_url(form.get("immich_public_url", ""))
+    if public_url is None:
+        return RedirectResponse(
+            url="/settings?msg=immich_public_url_invalid&msg_type=error", status_code=302
+        )
 
     # Module toggles
     for name in MODULE_NAMES:
@@ -193,6 +214,7 @@ async def save_settings(request: Request):
 
     # Immich
     await config_manager.set("immich.url", _sanitize(form.get("immich_url", "")))
+    await config_manager.set("immich.public_url", public_url)
     if form.get("immich_api_key"):
         await config_manager.set("immich.api_key", form["immich_api_key"], encrypted=True)
 

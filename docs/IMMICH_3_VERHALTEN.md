@@ -25,6 +25,10 @@ Der Kern ist als Test festgehalten:
 | Suche ohne `visibility` liefert in 3.x **alle** Sichtbarkeiten ausser `locked`. | `get_recent_assets` setzt jetzt `visibility: "timeline"` (Verhalten wie 2.x). |
 | Ein mit `lock_asset` gesperrtes Asset sieht der API-Key nicht mehr (GET und DELETE → 400). | Im Register darf ein gesperrtes Immich-Exemplar nicht als „missing" gelten; es lässt sich per API auch nicht mehr löschen. |
 
+## Upgrade 3.1.0 → 3.3.5 (2026-10-24)
+
+Produktion lief bereits 3.3.5. Nötig waren nur `IMMICH_VERSION=v3.3.5` und der neue Valkey-Digest samt strengerem Gesundheitscheck (`redis-cli ping | grep -q PONG`) aus der offiziellen `docker-compose.yml` des Releases; Postgres-Image unverändert. Vorher `pg_dumpall` gesichert. Assets, Tags und Alben vorher/nachher identisch (437 / 374 / 93), `test_immich_trash.py` 19/19 — die Messungen dieses Dokuments gelten auch für 3.3.5. Achtung: die GitHub-Registry antwortete zeitweise mit `toomanyrequests`/`unauthorized`; einfach später erneut ziehen.
+
 ## Upgrade 2.6.3 → 3.1.0
 
 | Bereich | Änderung | Auf Dev gemacht |
