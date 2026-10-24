@@ -311,7 +311,7 @@ Each processing set has its own base path and categories; target paths use place
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy (async), aiosqlite
 - **Database:** SQLite with WAL mode
-- **Container:** Docker with ExifTool, FFmpeg, libheif, ImageMagick
+- **Container:** Docker with ExifTool, FFmpeg, libheif (GIF and HEIC fallback via Pillow/pillow-heif)
 - **AI:** Any OpenAI-compatible Vision API (LM Studio, Ollama, etc.)
 - **Geocoding:** Nominatim, Photon, or Google Maps
 - **i18n:** German and English

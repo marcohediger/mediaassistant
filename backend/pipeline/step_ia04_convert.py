@@ -37,12 +37,8 @@ async def execute(job, session) -> dict:
                     capture_output=True, timeout=30, check=True
                 )
             except subprocess.CalledProcessError:
-                # Fallback: ImageMagick convert
-                await asyncio.to_thread(
-                    subprocess.run,
-                    ["convert", filepath, temp_path],
-                    capture_output=True, timeout=30, check=True
-                )
+                # Fallback: Pillow with pillow-heif (bundles its own libheif)
+                await asyncio.to_thread(_first_frame_to_jpeg, filepath, temp_path)
         elif ext in (".dng", ".cr2", ".nef", ".arw", ".tiff", ".tif"):
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -52,11 +48,7 @@ async def execute(job, session) -> dict:
             if result.stdout:
                 await asyncio.to_thread(_write_bytes, temp_path, result.stdout)
         elif ext == ".gif":
-            await asyncio.to_thread(
-                subprocess.run,
-                ["convert", f"{filepath}[0]", temp_path],
-                capture_output=True, timeout=30, check=True
-            )
+            await asyncio.to_thread(_first_frame_to_jpeg, filepath, temp_path)
         elif ext in VIDEO_EXTENSIONS:
             thumbnail_enabled = await config_manager.get("video.thumbnail_enabled", False)
             if not thumbnail_enabled:
@@ -83,7 +75,7 @@ async def execute(job, session) -> dict:
     except Exception as e:
         await discard_temp_files(job, _own_temp_paths(job.debug_key), actor="IA-04",
                                  reason="Konvertierung fehlgeschlagen")
-        logger.warning("%s HEIC/convert fallback fehlgeschlagen: %s", job.debug_key, e)
+        logger.warning("%s Konvertierung fehlgeschlagen: %s", job.debug_key, e)
         return {"converted": False, "reason": f"conversion failed: {e}"}
 
     return {"converted": False, "reason": "conversion produced no output"}
@@ -212,6 +204,18 @@ async def _ffmpeg_extract_frame(video_path: str, seek_time: float, output_path: 
         cmd,
         capture_output=True, timeout=30, check=True
     )
+
+
+def _first_frame_to_jpeg(src: str, dst: str) -> None:
+    """The first frame of an image Pillow can open (GIF; HEIC/HEIF through
+    pillow-heif) as a JPEG. Replaces ImageMagick's convert, which the image
+    no longer ships. Blocking: run it in a thread."""
+    from PIL import Image
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    with Image.open(src) as im:
+        im.seek(0)
+        im.convert("RGB").save(dst, "JPEG", quality=90)
 
 
 def _write_bytes(path: str, data: bytes):
