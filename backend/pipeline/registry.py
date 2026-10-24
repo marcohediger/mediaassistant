@@ -216,6 +216,7 @@ async def set_settings(session, set_id: int | None) -> dict:
         "set": {"id": ps.id, "google_json": bool(ps.google_json),
                 "write_mode": ps.metadata_write_mode or "direct",
                 "folder_tag_mode": ps.folder_tag_mode or "none", "folder_albums": bool(ps.folder_albums),
+                "tag_groups": bool(ps.tag_groups),
                 "ocr_enabled": bool(ps.ocr_enabled), "ocr_mode": ps.ocr_mode or "smart",
                 "base": ps.library_base_path or "/library"},
         "categories": [[c.key, c.label, c.path_template, bool(c.immich_archive)] for c in cats],
@@ -239,6 +240,11 @@ async def settings_snapshot(session, job, *, global_cfg: dict | None = None,
     return {**g, **s}
 
 
+def _groups_scheme() -> str:
+    from tag_groups import SCHEME
+    return SCHEME
+
+
 def _job_cfg(code: str, job, snap: dict) -> dict:
     s = snap.get("set") or {}
     if code == "IA-01":
@@ -253,15 +259,26 @@ def _job_cfg(code: str, job, snap: dict) -> dict:
         return {**snap["ai"], "categories": [c[:2] for c in snap["categories"]], "rules": snap["rules"]}
     if code == "IA-06":
         return {"ocr_enabled": s.get("ocr_enabled"), "ocr_mode": s.get("ocr_mode")}
+    # Tag groups (tag_groups.py) count only while on: a set that never had
+    # them keeps the fingerprints of its runs from before the option.
     if code == "IA-07":
-        return {"write_mode": s.get("write_mode"), "folder_tag_mode": s.get("folder_tag_mode"),
-                "folder_albums": s.get("folder_albums"), "dry_run": bool(getattr(job, "dry_run", False))}
+        cfg = {"write_mode": s.get("write_mode"), "folder_tag_mode": s.get("folder_tag_mode"),
+               "folder_albums": s.get("folder_albums"), "dry_run": bool(getattr(job, "dry_run", False))}
+        if s.get("tag_groups"):
+            # IA-07 then writes the category IA-08 sorts by: it reads the rules
+            # too. The scheme (root names) counts: renamed roots make it stale.
+            cfg.update(tag_groups=_groups_scheme(), categories=[c[:2] for c in snap["categories"]],
+                       rules=snap["rules"])
+        return cfg
     if code == "IA-08":
-        return {"use_immich": bool(getattr(job, "use_immich", False)),
-                "immich_user_id": getattr(job, "immich_user_id", None), "base": s.get("base"),
-                "categories": snap["categories"], "rules": snap["rules"],
-                "folder_tag_mode": s.get("folder_tag_mode"), "folder_albums": s.get("folder_albums"),
-                "dry_run": bool(getattr(job, "dry_run", False))}
+        cfg = {"use_immich": bool(getattr(job, "use_immich", False)),
+               "immich_user_id": getattr(job, "immich_user_id", None), "base": s.get("base"),
+               "categories": snap["categories"], "rules": snap["rules"],
+               "folder_tag_mode": s.get("folder_tag_mode"), "folder_albums": s.get("folder_albums"),
+               "dry_run": bool(getattr(job, "dry_run", False))}
+        if s.get("tag_groups"):
+            cfg["tag_groups"] = _groups_scheme()
+        return cfg
     return {}
 
 
@@ -282,9 +299,15 @@ def fingerprint(code: str, job, view: dict | None, snap: dict | None) -> str | N
         return None
     s = SPECS[code]
     ocr_mode = (snap.get("set") or {}).get("ocr_mode")
+    fields = read_fields(code, view or {}, ocr_mode=ocr_mode, hints=True)
+    if code == "IA-07" and (snap.get("set") or {}).get("tag_groups"):
+        # With tag groups IA-07 decides the category as IA-08 does
+        # (step_ia08_sort.decide_category): from IA-08's IA-01 fields.
+        ia01 = (view or {}).get("IA-01") if isinstance((view or {}).get("IA-01"), dict) else {}
+        fields["IA-01"] = {**fields.get("IA-01", {}), **{f: ia01.get(f) for f in SPECS["IA-08"].reads["IA-01"]}}
     payload = {"m": code, "v": s.fp_version,
                "file": getattr(job, "file_hash", None) if s.reads_file else None,
-               "in": read_fields(code, view or {}, ocr_mode=ocr_mode, hints=True),
+               "in": fields,
                "cfg": _job_cfg(code, job, snap)}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:32]
 

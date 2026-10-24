@@ -18,6 +18,7 @@ from sqlalchemy import or_, select, update
 
 import fileops
 import runs
+import tag_groups
 from config import config_manager
 from database import async_session
 from file_operations import (
@@ -918,6 +919,11 @@ async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _
     donor_albums: list[str] = list(ia02.get("donor_albums") or [])
     notes: list[str] = []
     options = await folder_options(kept)
+    # With tag groups only the donors' content tags come along as keywords:
+    # category, source, place and notes describe the kept file itself and
+    # have their groups (tag_groups.py); a donor's group words would come
+    # back as flat tags.
+    grouped = await tag_groups.enabled(kept)
     new_folders = 0
 
     for donor in donors:
@@ -940,8 +946,10 @@ async def _merge(kept, donors, prev: dict, *, source: str, user_kept: bool) -> _
         # kept job's set wants flat (or legacy) folder tags; otherwise its
         # folder comes along as a path only (and becomes whatever the set says).
         d_legacy = set() if options.single else set(d02.get("folder_tags") or [])
-        new_keywords = [k for k in (d07.get("keywords_written") or [])
-                        if k and k not in keywords and k not in d_legacy]
+        d05 = dsr.get("IA-05") if isinstance(dsr.get("IA-05"), dict) else {}
+        offered = (d05.get("tags") or []) if grouped else (d07.get("keywords_written") or [])
+        new_keywords = [k for k in offered
+                        if k and isinstance(k, str) and k not in keywords and k not in d_legacy]
         if new_keywords:
             keywords.extend(new_keywords)
             notes.append(f"keywords(+{len(new_keywords)})")
@@ -1260,13 +1268,24 @@ async def _apply_merge_in_immich(kept, asset_id: str, merge: _Merge, notes: list
     on_asset = {t.get("value") or t.get("name") for t in (info.get("tags") or []) if isinstance(t, dict)}
     written = set(((kept.step_result or {}).get("IA-08") or {}).get("immich_tags_written") or [])
     options = await folder_options(kept)
-    new_tags = [t for t in merge.keywords if t not in written and t.replace("/", " - ") not in on_asset]
-    if not options.any:
-        new_tags = [t for t in new_tags if t in merge.taken_keywords or t in written]
     folder = await folder_targets(kept, ia02=merge.step_result.get("IA-02") or {}, options=options)
-    new_tags += [t for t in folder.flat_tags
-                 if t not in new_tags and t not in written and t.replace("/", " - ") not in on_asset]
-    new_paths = [p for p in folder.tag_paths if p not in on_asset]
+    if await tag_groups.enabled(kept):
+        # Tag groups: the donors' content tags stay flat (never a bare year),
+        # the place of a donor whose GPS was taken over and the folders go
+        # into their groups (tag_groups.py).
+        new_tags = [t for t in tag_groups.content_tags({"tags": merge.taken_keywords})
+                    if t not in written and t not in on_asset]
+        ia03 = merge.step_result.get("IA-03") if isinstance(merge.step_result.get("IA-03"), dict) else {}
+        wanted = [tag_groups.place_path(ia03)] if ia03.get("copied_from") else []
+        new_paths = [p for p in dict.fromkeys([*wanted, *folder.tag_paths])
+                     if p and p not in on_asset and p not in written]
+    else:
+        new_tags = [t for t in merge.keywords if t not in written and t.replace("/", " - ") not in on_asset]
+        if not options.any:
+            new_tags = [t for t in new_tags if t in merge.taken_keywords or t in written]
+        new_tags += [t for t in folder.flat_tags
+                     if t not in new_tags and t not in written and t.replace("/", " - ") not in on_asset]
+        new_paths = [p for p in folder.tag_paths if p not in on_asset]
     added = 0
     for tag in new_tags:
         try:

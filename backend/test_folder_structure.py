@@ -451,7 +451,7 @@ async def create_set(name, std_id, *, mode, albums, target="immich", write_mode=
         source = await s.get(ProcessingSet, std_id)
         values = {f: getattr(source, f) for f in COPIED_FIELDS}
         values.update(description="P7 test set", active=True, schedule_mode="manual", interval_s=5,
-                      folder_tag_mode=mode, folder_albums=albums, folder_tags=False, dry_run=False,
+                      folder_tag_mode=mode, folder_albums=albums, folder_tags=False, tag_groups=False, dry_run=False,
                       target_mode=target, metadata_write_mode=write_mode, google_json=False,
                       library_base_path=os.path.join(SANDBOX, "lib"), immich_user_id=None,
                       immich_input=False, immich_poll=False, immich_poll_user_id=None, ocr_enabled=False)

@@ -34,10 +34,21 @@ Rules, the same for both options (not for ``legacy``):
   to the level above in an album name (``Ereignis 2019`` — one album per
   year);
 * at most ``MAX_LEVELS`` levels; deeper ones are cut.
+
+With the set's tag groups on (tag_groups.py) the folder tags go under the
+root ``tag_groups.ALBUM`` ("04 Album") instead of "Ordner" (``FolderOptions.group``), and every kind
+of them becomes a path: nested ``04 Album/A/B/C``, flat ``04 Album/A``,
+``04 Album/B``…, legacy ``04 Album/<each old tag>``. A pure year level
+(``2023``) is dropped there — ``Wandern/Alpstein/2023`` gives
+``04 Album/Wandern/Alpstein``, a folder of years only gives no tag — while
+a name that merely contains a year (``Tessin 2024``) stays. The albums are
+unchanged.
 """
 import os
 import re
 from dataclasses import dataclass, field
+
+from tag_groups import ALBUM as GROUP_ALBUM, is_grouped, level as group_level
 
 ROOT_TAG = "Ordner"
 MAX_LEVELS = 4
@@ -59,6 +70,7 @@ TAG_MODES = ("none", "flat", "legacy", "nested")
 class FolderOptions:
     tag_mode: str = "none"  # none / flat / legacy / nested
     albums: bool = False    # one album per folder
+    group: str | None = None  # tag groups on: the root of every folder tag (tag_groups.ALBUM)
 
     @property
     def flat(self) -> bool:
@@ -135,8 +147,22 @@ def levels(rel: str | None) -> list[str]:
     return out
 
 
-def tag_levels(rel: str | None) -> list[str]:
-    return levels(rel)[:MAX_LEVELS]
+def tag_levels(rel: str | None, *, years: bool = True) -> list[str]:
+    """Levels of the tag tree; without `years` pure year levels are dropped
+    (tag groups) before the depth is cut."""
+    found = levels(rel)
+    if not years:
+        kept: list[str] = []
+        for lvl in found:
+            if not is_year(lvl) and not (kept and _same(kept[-1], lvl)):
+                kept.append(lvl)
+        found = kept
+    return found[:MAX_LEVELS]
+
+
+def is_year(value) -> bool:
+    """A name that is only a year (``2019``), not one that contains it."""
+    return isinstance(value, str) and bool(_YEAR.match(value.strip()))
 
 
 def album_levels(rel: str | None) -> list[str]:
@@ -156,10 +182,14 @@ def album_levels(rel: str | None) -> list[str]:
     return out[:MAX_LEVELS]
 
 
-def tag_path(rel: str | None) -> str | None:
-    """Nested tag value for a relative folder, e.g. "Ordner/Kategorie/Ereignis"."""
-    parts = tag_levels(rel)
-    return "/".join([ROOT_TAG, *parts]) if parts else None
+def tag_path(rel: str | None, root: str = ROOT_TAG, *, years: bool = True) -> str | None:
+    """Nested tag value for a relative folder, e.g. "Ordner/Kategorie/Ereignis".
+    Below a tag group root (``years`` off) each level is cleaned like every
+    group value (tag_groups.level: no leading punctuation)."""
+    parts = tag_levels(rel, years=years)
+    if not years:
+        parts = [p for p in (group_level(p) for p in parts) if p]
+    return "/".join([root, *parts]) if parts else None
 
 
 def album_name(rel: str | None) -> str | None:
@@ -195,9 +225,15 @@ def legacy_album_name(rel: str | None) -> str | None:
     return " ".join(_raw_levels(rel)) or None
 
 
-def is_tag_path(value) -> bool:
-    """A nested folder tag (as opposed to a flat keyword)."""
+def is_folder_tree(value) -> bool:
+    """A nested folder tag below "Ordner"."""
     return isinstance(value, str) and value.startswith(ROOT_TAG + "/")
+
+
+def is_tag_path(value) -> bool:
+    """A tag path MediaAssistant writes as a tree — a nested folder tag or a
+    tag group (tag_groups.py) — as opposed to a flat keyword."""
+    return is_folder_tree(value) or is_grouped(value)
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +292,8 @@ async def folder_options(job) -> FolderOptions:
     if not processing_set:
         return FolderOptions()
     mode = processing_set.folder_tag_mode if processing_set.folder_tag_mode in TAG_MODES else "none"
-    return FolderOptions(tag_mode=mode, albums=bool(processing_set.folder_albums))
+    return FolderOptions(tag_mode=mode, albums=bool(processing_set.folder_albums),
+                         group=GROUP_ALBUM if processing_set.tag_groups else None)
 
 
 def _add(items: list, value) -> None:
@@ -276,28 +313,40 @@ async def folder_targets(job, *, ia02: dict | None = None,
     flat tags (``folder_tags``, which a merge filled with the donors' too)
     with flat or legacy tags, and — when the folder itself is unknown — its
     album name (``own_album``, else the last entry of ``folder_tags``).
+    With tag groups (``options.group``) every folder tag is a path below
+    that root: flat and legacy tags become ``04 Album/<tag>`` each, and
+    pure year levels are left out.
     """
     record = _ia02(job, ia02)
     opts = options or await folder_options(job)
     out = FolderTargets()
+
+    def single(tag):
+        if opts.group:
+            value = group_level(tag)
+            if value and not is_year(value):
+                _add(out.tag_paths, f"{opts.group}/{value}")
+        else:
+            _add(out.flat_tags, tag)
+
     if opts.any:
         own = await folder_path_of(job, record)
         paths = [own, *(record.get("donor_folder_paths") or [])]
         for rel in paths:
             if opts.nested:
-                _add(out.tag_paths, tag_path(rel))
+                _add(out.tag_paths, tag_path(rel, opts.group or ROOT_TAG, years=not opts.group))
             if opts.flat:
-                for level in tag_levels(rel):
-                    _add(out.flat_tags, level)
+                for level in tag_levels(rel, years=not opts.group):
+                    single(level)
             if opts.legacy:
                 for tag in legacy_tags(rel):
-                    _add(out.flat_tags, tag)
+                    single(tag)
             if opts.albums:
                 _add(out.albums, legacy_album_name(rel) if opts.legacy else album_name(rel))
         legacy = record.get("folder_tags") or []
         if opts.single:
             for word in legacy:
-                _add(out.flat_tags, word)
+                single(word)
         if opts.albums and not own:
             _add(out.albums, record.get("own_album") or (legacy[-1] if legacy else None))
     for name in record.get("donor_albums") or []:

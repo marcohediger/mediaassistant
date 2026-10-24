@@ -1,5 +1,132 @@
 # Changelog
 
+## v3.1.0 — in Arbeit
+
+### Feature: Tag-Gruppen pro Verarbeitungs-Set
+
+Neue Set-Option „Tags in Gruppen" (Register „Tags & Ordner", bisher
+„Ordnerstruktur"). Standard aus — nach dem Update ändert sich nichts, bis
+sie eingeschaltet wird. Eingeschaltet kommt jedes Tag, das MediaAssistant
+schreibt, unter eine von fünf festen Wurzeln — nur die Bildinhalt-Tags der
+KI bleiben einzelne, flache Tags wie bisher:
+
+| Wurzel | darunter | Beispiel |
+|---|---|---|
+| `01 Kategorie` | Kategorie nach Sortier-Regeln und KI | `01 Kategorie/Persönliches Foto` |
+| `02 Quelle` | Quelle laut KI | `02 Quelle/Kamerafoto` |
+| `03 Orte` | Land › Ort › Quartier (ohne Kanton) | `03 Orte/Schweiz/Bern/Länggasse` |
+| `04 Album` | Ordnerstruktur (statt „Ordner") | `04 Album/Wandern/Alpstein` |
+| `05 Hinweise` | `unscharf`, `Text erkannt` | `05 Hinweise/unscharf` |
+| *(ohne Wurzel)* | jedes Bildinhalt-Tag der KI | `Bühne` |
+
+Die zweistelligen Nummern stellen die Gruppen in Immichs Tag-Liste
+zuoberst: Immich listet Tags in der Reihenfolge seiner Datenbank
+(`ORDER BY value`, Postgres-Sortierung `en_US.utf8`), und die überspringt
+Satzzeichen und Symbole (`# + @ _ - .`) — nur eine Ziffer am Anfang kommt
+vor den Buchstaben (gemessen; `#…` und `+…` wurden verworfen). Mit Tag-Gruppen beginnt kein Tag, das MediaAssistant schreibt,
+mit etwas anderem als einem Buchstaben oder einer Ziffer: führende Zeichen
+fallen weg (`@beispielkonto` → `beispielkonto`, `-10%` → `10%`), bei Bildinhalt-Tags
+danach Jahres-Regel und Doppelte ohne Gross/klein; dasselbe für die Werte
+unter den Gruppen (Kategorie, Quelle, Orte, Ordner-Ebenen). Die Namen stehen an einer Stelle
+im Code (`tag_groups.ROOTS`); ein Ergebnis von IA-07 merkt sich, mit
+welchen Namen es geschrieben wurde, so lässt sich eine spätere Umbenennung
+mit dem Werkzeug unten nachziehen.
+
+- **Kategorie** ist in Datei und Immich dieselbe: IA-07 trifft jetzt
+  dieselbe Entscheidung wie IA-08 (`decide_category`: Review-Wahl, Sortier-
+  Regeln, EXIF-Standard, KI-Korrektur). Bisher stand in der Datei der
+  KI-Typ und in Immich zusätzlich die endgültige Kategorie.
+- **Orte:** Land, Ort, Quartier — ohne Kanton/Bundesland (sonst stand
+  `Schweiz/Bern/Bern`). Leere Ebenen fallen weg; ohne Ort nur das Land.
+- **Album:** die Art der Ordner-Tags bestimmt weiter die Form (verschachtelt
+  ein Pfad, pro Ordner je Ebene ein Kind, „bisher" die alten Wörter, keine
+  → nichts). Reine Jahres-Ordner fallen weg (`Wandern/Alpstein/2023` →
+  `04 Album/Wandern/Alpstein`), ein Name mit Jahr bleibt (`Tessin 2024`).
+  „Ordner als Alben" ist unverändert.
+- **Kein Tag aus nur einer Jahreszahl:** weder im Album-Baum noch als
+  Bildinhalt-Tag (liefert die KI ein Jahr, fällt es weg).
+- **Datei/Sidecar:** Pfade und Bildinhalt-Tags in `TagsList` und
+  `HierarchicalSubject`, alle Ebenen und Bildinhalt-Tags als einzelne Wörter
+  weiter in `dc:subject`/IPTC `Keywords`. MediaAssistants übrige flache
+  Wörter (Kategorie, Ort, Ordner, „blurry", „OCR") kommen nicht mehr in
+  `TagsList` und werden dort entfernt.
+- **Immich:** jeder Pfad über `PUT /api/tags` (Baum mit Eltern), das Asset
+  am Blatt; flach nur noch die Bildinhalt-Tags.
+- **Neu ausführen:** der Schalter zählt als Eingabe von IA-07 und IA-08
+  (nur solange er an ist — Sets ohne Gruppen behalten ihre Fingerabdrücke).
+  Ein Neu ausführen von IA-07+IA-08 im Immich-API-Modus ersetzt MAs alte
+  flache Tags durch die Gruppen, Bildinhalt-Tags und Tags des Nutzers
+  bleiben; Immich schreibt die `TagsList` seiner Sidecar dabei selbst nach
+  (gemessen), ein Neueinlesen bringt nichts zurück. In die Gegenrichtung
+  genauso. IA-08 vergleicht alte und neue Tags nach dem Wert in Immich
+  (`Vaz/Obervaz` = `Vaz - Obervaz`) und erkennt Pfade eines früheren
+  Schemas an ihrem Wert am Asset.
+- **Nachkontrolle in IA-08:** Hat ein Lauf mit Tag-Gruppen Tags in Immich
+  geändert, wartet IA-08 den Sidecar-/Extraktions-Zyklus von Immich ab
+  (erster Blick nach 1 s, dann bis zwei Blicke 0,75 s auseinander gleich
+  sind, höchstens 8 s) und korrigiert, was Immich zurückgesetzt hat
+  (höchstens 3 Runden, mit Protokolleintrag). Ein neuer Upload, bei dem Immich
+  die Tags schon aus der `TagsList` der Datei übernommen hat, wartet nicht.
+  Gemessen auf Immich 3.3.5: 1,8 s je Job, der Tags geändert hat (Umstellen
+  von 418 Jobs: Mittel 1,8 s, höchstens 1,9 s).
+- **Duplikat-Zusammenführung** mit Gruppen: von Spendern kommen nur deren
+  Bildinhalt-Tags (flach); Ort und Kategorie gehören zur behaltenen Datei.
+
+Getestet: `test_tag_groups.py` (Regeln, TagsList, Fingerabdrücke, sieben
+Abläufe gegen das echte Dev-Immich, das Werkzeug), E2E US-21 (fünf Wurzeln
+als Baum) und US-22 (nachträglich eingeschaltet, Neu ausführen) — beide
+gegen den Stand 3.0.1 rot, mit dem Feature grün.
+
+### Werkzeug: Tags in Gruppen umstellen
+
+Neue Karte auf der Werkzeug-Seite für bestehende Fotos: Vorschau (wie viele
+Fotos des Sets noch nicht zur Einstellung passen, oberste Tags in Immich,
+leere Tags) → Umstellen (IA-07+IA-08 neu im API-Modus über die bestehende
+Maschinerie „Neu ausführen", in Aufträgen zu höchstens 1000 Jobs) → danach
+leere Tags löschen. Gelöscht werden nur Tags, die kein Foto mehr trägt —
+gezählt über `POST /search/statistics` samt Papierkorb und versteckten
+Fotos. Fotos im gesperrten Ordner sieht ein API-Key nicht (gemessen: 401);
+deshalb löscht das Werkzeug ohne Zusatzschalter nur MediaAssistants eigene
+Tags und nie eines, das MA einem gesperrten Foto gegeben hat; mit dem
+Schalter „Auch fremde leere Tags löschen" jedes leere Tag. Ein Eltern-Tag
+fällt erst, wenn keines seiner Kinder mehr da ist. Auswahl der Jobs über
+die neue Marke `tag_groups` im IA-07-Ergebnis (sie nennt die Wurzeln, mit
+denen geschrieben wurde), nicht über „veraltet": Läufe aus der Zeit vor 3.0
+haben keinen Fingerabdruck und gelten nie als veraltet. Jobs ohne Set
+zählen zum ersten Set.
+
+**Nur Tags.** Die Läufe des Werkzeugs ändern nur Tags (Option `tags_only` von
+„Neu ausführen"): keine Ordner-Alben anlegen oder füllen, Beschreibung,
+Archiv und Sperre bleiben, wie sie sind — ein Album, aus dem der Nutzer ein
+Foto genommen oder das er gelöscht hat, bleibt so. Neue Fotos legen Alben
+weiter wie eingestellt an.
+
+**Nachkontrolle.** Immich 3.1 kann nach einer Reihe von Tag-Änderungen einen
+veralteten Stand zurückschreiben: jede Änderung stellt ein Sidecar-Schreiben
+ein, das die Tags des Assets erst beim Laufen liest und danach entsperrt; die
+folgende Metadaten-Extraktion übernimmt die Liste der Sidecar. Gemessen mit
+sechs Assets gleichzeitig (je 8 Tags dazu, 8 weg): auf 3.1.0 kamen bei allen
+1–4 alte Tags zurück und blieben, auf 3.3.5 (wie Produktion) in drei
+Messungen bei 1, 6 und 5 von 6. Beim Umstellen auf Dev (4 Jobs gleichzeitig) traf das
+145 von 399 Fotos, beim Umbenennen der Wurzeln danach 7. Das Werkzeug prüft deshalb nach dem Umstellen jedes Foto
+(was der letzte Lauf geschrieben hat, muss da sein; was MA früher für den Job
+schrieb — über die API oder als Stichwort in die Datei — muss weg; Jobs eines
+gemeinsamen Assets zusammen) und korrigiert nach, bis nichts mehr abweicht.
+Auf Dev danach: 0 abweichend, auch bei einer zweiten Prüfung. Seit IA-08
+selbst nachkontrolliert, fand die Nachkontrolle des Werkzeugs beim Umstellen
+auf 3.3.5 (418 Jobs) nur noch 2 Fotos; Alben blieben unverändert (93, keine
+Mitgliedschaft geändert).
+
+### Fix: Immich-Tag als fehlgeschlagen gemeldet, obwohl es am Asset hängt
+
+Beim Hochladen liest Immich die `TagsList` der Datei und legt dieselben
+Tags im selben Moment an wie MediaAssistants API-Aufruf; einer der beiden
+bekommt `HTTP 500 Failed to tag assets`. IA-08 meldete das als Warnung,
+obwohl das Tag danach am Asset hing, und führte es nicht in
+`immich_tags_written` — ein späteres Neu ausführen hätte es nicht mehr
+entfernen können. Jetzt zählt nach der Nachkontrolle, was wirklich am Asset
+hängt. Aufgefallen in US-21 (einmal in fünf Läufen).
+
 ## v3.0.1 — 2026-10-24
 
 ### Fix: „Behalten" liess alte Duplikat-Spender ohne Hash stehen

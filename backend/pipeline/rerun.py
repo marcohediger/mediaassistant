@@ -90,6 +90,9 @@ def validate(modules, options) -> tuple[list[str], dict]:
             opts[key] = value
         elif key == "immich" and value in IMMICH_MODES:
             opts[key] = value
+        elif key == "tags_only" and isinstance(value, bool):
+            # IA-08 changes tags only (the tool that switches a set to tag groups)
+            opts[key] = value
         else:
             raise RerunError("bad_option", detail=f"{key}={value!r}")
     return [c for c in MAIN if c in modules], opts
@@ -884,7 +887,8 @@ async def _prepare_claimed(item_id, request, job_id, prev, modules, options) -> 
         ia07 = cur["IA-07"].result if "IA-07" in cur and isinstance(cur["IA-07"].result, dict) else {}
         ia08 = cur["IA-08"].result if "IA-08" in cur and isinstance(cur["IA-08"].result, dict) else {}
         rr = {"rerun": request.id, "item": item_id, "modules": modules, "cascade": options["cascade"],
-              "hints": options["hints"], "immich": options["immich"], "prev_status": prev,
+              "hints": options["hints"], "immich": options["immich"],
+              "tags_only": bool(options.get("tags_only")), "prev_status": prev,
               "prev_error": job.error_message, "started_at": datetime.now().isoformat(timespec="seconds"),
               "source": source}
         values = {"_rerun": rr,
@@ -892,6 +896,7 @@ async def _prepare_claimed(item_id, request, job_id, prev, modules, options) -> 
                   "_retry_previous_immich_description":
                       ia08.get("description_written") or ia07.get("description_written") or None,
                   "_previous_keywords_written": list(ia07.get("keywords_written") or []) or None,
+                  "_previous_tag_paths_written": list(ia07.get("tag_paths_written") or []) or None,
                   "_previous_description_written": ia07.get("description_written") or None,
                   "_manual_category": ia08.get("category") if ia08.get("manual_review") else None}
         # Every run of this job with a higher id belongs to this rerun.

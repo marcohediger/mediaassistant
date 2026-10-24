@@ -150,6 +150,7 @@ body[data-theme="light"] .lst-card { border-color: #e2e5ea; box-shadow: 0 1px 2p
 .lst-feats { display: flex; align-items: center; gap: 0.6rem; }
 .lst-feat { display: inline-flex; line-height: 0; }
 .lst-feat-tags { color: var(--lst-c-tags); }
+.lst-feat-groups { color: var(--lst-c-tags); }
 .lst-feat-ocr { color: var(--lst-c-ocr); }
 .lst-feat-poll { color: var(--lst-c-poll); }
 .lst-feat-dry { color: var(--lst-c-dry); }

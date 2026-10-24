@@ -4,6 +4,8 @@ import hashlib
 import logging
 import os
 import re
+import time
+from dataclasses import dataclass
 from datetime import datetime
 
 logger = logging.getLogger("mediaassistant.pipeline.ia08")
@@ -22,6 +24,7 @@ from immich_client import (
     tag_asset, tag_asset_path, untag_asset, untag_asset_path, update_asset_description,
 )
 from folder_path import folder_targets, is_tag_path
+import tag_groups
 
 # Files the Immich input downloaded; IA-10 removes them together with their
 # temp dir (inventory S19), so IA-08 leaves them alone.
@@ -47,6 +50,7 @@ async def _tag_immich_asset(
     api_key: str | None = None,
     ia07_wrote_tags: bool = False,  # kept for compat, unused since v2.28.38
     previous_tags: list[str] | None = None,
+    stats: dict | None = None,
 ) -> tuple[list, list, list]:
     """Tag an Immich asset via the Immich API.
 
@@ -81,7 +85,8 @@ async def _tag_immich_asset(
       3. For every tag in `previous_tags` NOT in `tag_keywords`:
          DELETE via `untag_asset()`.
 
-    Returns (tags_written, tags_failed, tags_removed).
+    Returns (tags_written, tags_failed, tags_removed). `stats["writes"]`
+    counts the tag and untag calls made (for _settle_tags).
     """
     # Single GET — no poll. Used for dedup reporting + to know which
     # tags currently live on the asset.
@@ -91,9 +96,18 @@ async def _tag_immich_asset(
         existing_tags = {t["value"] for t in (info.get("tags") or [])}
 
     # Compare by the value Immich stores: the full path of a nested folder
-    # tag, the sanitised name of a flat one (tag_asset replaces "/" with " - ")
+    # tag or a tag group, the sanitised name of a flat one (tag_asset
+    # replaces "/" with " - ").
     def _sanitize(name: str) -> str:
         return name if is_tag_path(name) else name.replace("/", " - ")
+
+    # A name this job wrote last time with "/" that the asset carries as it
+    # is, is a path of an earlier scheme (roots renamed since).
+    def _old_path(name: str) -> bool:
+        return is_tag_path(name) or ("/" in name and name in existing_tags)
+
+    def _previous_value(name: str) -> str:
+        return name if _old_path(name) else name.replace("/", " - ")
 
     async def _tag(name: str) -> dict:
         if is_tag_path(name):
@@ -101,7 +115,7 @@ async def _tag_immich_asset(
         return await tag_asset(asset_id, name, api_key=api_key)
 
     async def _untag(name: str) -> dict:
-        if is_tag_path(name):
+        if _old_path(name):
             return await untag_asset_path(asset_id, name, api_key=api_key)
         return await untag_asset(asset_id, name, api_key=api_key)
     missing = [t for t in tag_keywords if _sanitize(t) not in existing_tags]
@@ -127,9 +141,10 @@ async def _tag_immich_asset(
     # new desired set. Limited to `previous_tags` specifically so that
     # user-added tags (via Immich UI) are preserved untouched.
     tags_removed: list[str] = []
+    wanted_values = {_sanitize(t) for t in tag_keywords}
     if previous_tags:
-        new_set = set(tag_keywords)
-        stale = [t for t in previous_tags if t and t not in new_set]
+        # By value: "Vaz/Obervaz" written before and "Vaz - Obervaz" now are one tag.
+        stale = [t for t in previous_tags if t and _previous_value(t) not in wanted_values]
         for tag_name in stale:
             try:
                 result = await _untag(tag_name)
@@ -143,9 +158,18 @@ async def _tag_immich_asset(
     # be present is actually there, and every tag that should be gone
     # really is gone. If the Immich race ate any writes, retry them
     # once. This is defence-in-depth on top of the inter-call delay.
-    if missing or (previous_tags and any(t for t in previous_tags if t not in set(tag_keywords))):
+    if missing or (previous_tags and any(t for t in previous_tags if t and _previous_value(t) not in wanted_values)):
         info2 = await get_asset_info(asset_id, api_key=api_key)
         final_set = {t["value"] for t in ((info2 or {}).get("tags") or [])}
+        # A write that failed although its tag is on the asset now — Immich's
+        # own reading of the uploaded file's TagsList created the same tag at
+        # the same moment — is no failure, and it is this job's tag (a later
+        # rerun must be able to remove it).
+        for tag_name in list(tags_failed):
+            if _sanitize(tag_name) in final_set:
+                tags_failed.remove(tag_name)
+                if tag_name not in tags_written:
+                    tags_written.append(tag_name)
         # Re-add any missing tag_keywords that got eaten by the race
         for tag_name in tag_keywords:
             if _sanitize(tag_name) not in final_set:
@@ -153,6 +177,8 @@ async def _tag_immich_asset(
                     await _tag(tag_name)
                     if tag_name not in tags_written:
                         tags_written.append(tag_name)
+                    if tag_name in tags_failed:
+                        tags_failed.remove(tag_name)
                     await asyncio.sleep(IMMICH_TAG_WRITE_DELAY_S)
                 except Exception as exc:
                     if tag_name not in tags_failed:
@@ -161,7 +187,8 @@ async def _tag_immich_asset(
         # Re-delete any stale tag that came back
         if previous_tags:
             for tag_name in previous_tags:
-                if tag_name and tag_name not in set(tag_keywords) and _sanitize(tag_name) in final_set:
+                if tag_name and _previous_value(tag_name) not in wanted_values \
+                        and _previous_value(tag_name) in final_set:
                     try:
                         await _untag(tag_name)
                         if tag_name not in tags_removed:
@@ -170,10 +197,87 @@ async def _tag_immich_asset(
                     except Exception as exc:
                         logger.warning("Retry-untag asset %s from '%s' failed: %s", asset_id, tag_name, exc)
 
+    if stats is not None:
+        stats["writes"] = stats.get("writes", 0) + len(missing) + len(tags_removed) + len(tags_failed)
     # Include pre-existing tags in written list for reporting
     already = [t for t in tag_keywords if _sanitize(t) in existing_tags]
     return already + tags_written, tags_failed, tags_removed
 
+
+
+# Immich 3.1 can put an old set of tags back after a run of tag changes:
+# each change queues a sidecar write that reads the asset's tags only when it
+# runs and then unlocks them, and the metadata extraction that follows
+# applies the sidecar's list (measured, docs/IMMICH_ORDNERSTRUKTUR.md). With
+# tag groups a run changes many tags at once, so IA-08 waits for that cycle
+# and checks. Bounded: first look after SETTLE_FIRST_S, then until two looks
+# SETTLE_POLL_S apart agree (at most SETTLE_MAX_S), at most SETTLE_ROUNDS
+# repairs.
+SETTLE_FIRST_S = 1.0
+SETTLE_POLL_S = 0.75
+SETTLE_MAX_S = 8.0
+SETTLE_ROUNDS = 3
+
+
+async def _stable_tags(asset_id: str, api_key: str | None) -> set | None:
+    start = time.monotonic()
+    await asyncio.sleep(SETTLE_FIRST_S)
+    last = None
+    while True:
+        info = await get_asset_info(asset_id, api_key=api_key)
+        if info is None:
+            return None
+        now = {t.get("value") for t in info.get("tags") or []}
+        if now == last or time.monotonic() - start >= SETTLE_MAX_S:
+            return now
+        last = now
+        await asyncio.sleep(SETTLE_POLL_S)
+
+
+async def _settle_tags(job, asset_id: str, tag_keywords: list[str], previous_tags: list[str],
+                       api_key: str | None) -> dict:
+    """Wait for Immich's sidecar/extraction cycle after this run's tag
+    changes, then make sure the asset carries this run's tags and none of
+    the last run's that are gone; repair and look again if not."""
+    def value(name):
+        return name if is_tag_path(name) else name.replace("/", " - ")
+
+    wanted = {value(t): t for t in tag_keywords}
+    # A previous name with "/" is a path (also of an earlier scheme) or a
+    # flat tag Immich stores with " - ": look for both.
+    gone = {v for n in previous_tags if n for v in ({n, n.replace("/", " - ")} if "/" in n else {n})
+            if v not in wanted}
+    start = time.monotonic()
+    repaired: list[str] = []
+    rounds = 0
+    missing: list[str] = list(tag_keywords)
+    for rounds in range(1, SETTLE_ROUNDS + 2):
+        on = await _stable_tags(asset_id, api_key)
+        if on is None:
+            break
+        missing = [wanted[v] for v in wanted if v not in on]
+        back = sorted(v for v in gone if v in on)
+        if not missing and not back or rounds > SETTLE_ROUNDS:
+            break
+        await log_info("IA-08", f"{job.debug_key} Immich hat alte Tags zurückgesetzt, wird korrigiert",
+                       f"Asset {asset_id}: fehlend {missing}, wieder da {back}")
+        for name in missing:
+            try:
+                await (tag_asset_path(asset_id, name, api_key=api_key) if is_tag_path(name)
+                       else tag_asset(asset_id, name, api_key=api_key))
+            except Exception as exc:
+                logger.warning("settle: tag %s on %s: %s", name, asset_id, exc)
+            await asyncio.sleep(0.1)
+        for v in back:
+            try:
+                await (untag_asset_path(asset_id, v, api_key=api_key) if "/" in v
+                       else untag_asset(asset_id, v, api_key=api_key))
+            except Exception as exc:
+                logger.warning("settle: untag %s on %s: %s", v, asset_id, exc)
+            await asyncio.sleep(0.1)
+        repaired += [*missing, *back]
+    return {"seconds": round(time.monotonic() - start, 1), "rounds": rounds, "repaired": repaired,
+            "missing": missing}
 
 
 # _parse_date, _sanitize_path_component, _validate_target_path
@@ -312,6 +416,82 @@ async def _match_sorting_rules(filename: str, exif: dict, session, is_video: boo
         if matched:
             return rule.target_category
     return None
+
+
+@dataclass
+class CategoryDecision:
+    """IA-08's category for a job. ``category`` is a category key, or
+    "skip" when a sorting rule excludes the file."""
+    category: str
+    lib_cat: object = None          # the set's LibraryCategory, None if it has none of that key
+    manual: str | None = None       # the category the user chose in the review (rerun)
+
+    @property
+    def label(self) -> str | None:
+        if self.category == "skip":
+            return None
+        return self.lib_cat.label if self.lib_cat else self.category.replace("_", " ").title()
+
+
+def _is_video(exif: dict) -> bool:
+    file_type = (exif.get("file_type") or "").upper()
+    return (exif.get("mime_type") or "").startswith("video/") or file_type in (
+        "MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
+
+
+async def decide_category(job, session) -> CategoryDecision:
+    """The category a job is sorted into: a category the user chose in the
+    review, else the first matching sorting rule of the job's set, else a
+    default from the EXIF data — then the AI's category corrects it.
+
+    Depends only on the job's filename, IA-01 and IA-05 results, the run
+    parameters and the set's rules and categories, so IA-07 makes the same
+    decision for the tag group "Kategorie" that IA-08 sorts by.
+    """
+    from pipeline.reprocess import run_params
+    from sets import find_category
+    step_results = job.step_result or {}
+    exif = step_results.get("IA-01", {})
+    ai_type = (step_results.get("IA-05") or {}).get("type", "")
+    manual_category = run_params(job).get("_manual_category")
+    filename = os.path.basename(job.original_path or "")
+    is_video = _is_video(exif)
+
+    # 1) Static sorting rules (always evaluated first) — a category the
+    # user chose in the review comes before rules and AI (rerun).
+    rule_category = None if manual_category else await _match_sorting_rules(
+        job.filename or filename, exif, session, is_video=is_video, set_id=job.set_id)
+    if rule_category == "skip":
+        return CategoryDecision("skip")
+
+    if manual_category:
+        category = manual_category
+    elif rule_category:
+        category = rule_category
+    else:
+        # No rule matched → default based on EXIF
+        has_no_exif = not exif.get("has_exif", False)
+        if has_no_exif:
+            category = "unknown"
+        else:
+            category = "personliches_video" if is_video else "personliches_foto"
+
+    # 2) AI verifies ALL files — AI returns a category label
+    if ai_type and not manual_category:
+        # Validate the AI category exists in this set, by label (ignore invalid/unknown)
+        ai_cat = await find_category(session, job.set_id, label=ai_type)
+
+        # AI overrides static result when it returns a valid, different category
+        if ai_cat and ai_cat.key != category and ai_cat.key not in ("error", "duplicate", "unknown"):
+            # Don't let AI override a video into a photo category or vice versa
+            if is_video and ai_cat.key == "personliches_foto":
+                category = "personliches_video"
+            elif not is_video and ai_cat.key == "personliches_video":
+                category = "personliches_foto"
+            else:
+                category = ai_cat.key
+    lib_cat = await find_category(session, job.set_id, key=category)
+    return CategoryDecision(category, lib_cat, manual_category)
 
 
 # ---------------------------------------------------------------------------
@@ -520,69 +700,31 @@ async def _execute(job, session) -> dict:
     previous_immich_tags = list(params.get("_retry_previous_immich_tags") or [])
     previous_descriptions = {d.strip() for d in [params.get("_retry_previous_immich_description")]
                              if isinstance(d, str) and d.strip()}
-    file_type = (exif.get("file_type") or "").upper()
-    mime = exif.get("mime_type", "")
-
     rerun = params.get("_rerun") if isinstance(params.get("_rerun"), dict) else None
-    manual_category = params.get("_manual_category")
+    decision = await decide_category(job, session)
+    manual_category = decision.manual
 
-    # Determine category: static rules first, then AI verifies and corrects
-    ai_type = ai_result.get("type", "")
-    # The wished name in the target folder is the name the file has now (a
-    # file that stays in its folder is not renamed); the rules match the
-    # job's own filename — original_path may be a work copy
-    # ("name_<debug_key>.jpg") or, in a rerun, "immich:<id>".
-    filename = os.path.basename(job.original_path)
-    is_video = mime.startswith("video/") or file_type in ("MP4", "MOV", "AVI", "MKV", "M4V", "3GP")
-
-    # 1) Static sorting rules (always evaluated first) — a category the
-    # user chose in the review comes before rules and AI (rerun).
-    rule_category = None if manual_category else await _match_sorting_rules(
-        job.filename or filename, exif, session, is_video=is_video, set_id=job.set_id)
-
-    if rule_category == "skip":
+    if decision.category == "skip":
         if rerun is not None:
             # A rerun never drops a finished job: the rule is reported, the
             # file and its targets stay as they are.
             return await _rule_skip_in_rerun(session, rerun)
         job.status = "skipped"
         return {"status": "skipped", "reason": "excluded by sorting rule"}
-
-    if manual_category:
-        category = manual_category
-    elif rule_category:
-        category = rule_category
-    else:
-        # No rule matched → default based on EXIF
-        has_no_exif = not exif.get("has_exif", False)
-        if has_no_exif:
-            category = "unknown"
-        else:
-            category = "personliches_video" if is_video else "personliches_foto"
-
-    # 2) AI verifies ALL files — AI returns a category label
-    if ai_type and not manual_category:
-        # Validate the AI category exists in this set, by label (ignore invalid/unknown)
-        from sets import find_category
-        ai_cat = await find_category(session, job.set_id, label=ai_type)
-
-        # AI overrides static result when it returns a valid, different category
-        if ai_cat and ai_cat.key != category and ai_cat.key not in ("error", "duplicate", "unknown"):
-            # Don't let AI override a video into a photo category or vice versa
-            if is_video and ai_cat.key == "personliches_foto":
-                category = "personliches_video"
-            elif not is_video and ai_cat.key == "personliches_video":
-                category = "personliches_foto"
-            else:
-                category = ai_cat.key
+    category = decision.category
+    # The wished name in the target folder is the name the file has now (a
+    # file that stays in its folder is not renamed); the rules match the
+    # job's own filename — original_path may be a work copy
+    # ("name_<debug_key>.jpg") or, in a rerun, "immich:<id>".
+    filename = os.path.basename(job.original_path)
 
     # Merge geocoding data into exif for path resolution
     if geo_result.get("country"):
         exif = {**exif, "country": geo_result["country"], "city": geo_result.get("city", "")}
 
     # Get path template from the set's categories
-    from sets import find_category, base_path_for
-    lib_cat = await find_category(session, job.set_id, key=category)
+    from sets import base_path_for
+    lib_cat = decision.lib_cat
     if lib_cat:
         path_template = lib_cat.path_template
     else:
@@ -615,12 +757,22 @@ async def _execute(job, session) -> dict:
 
     # All EXIF keywords are written by IA-07 (type, tags, source, geo, folder tags).
     # Build tag list for Immich tagging (category label + all IA-07 keywords).
-    cat_label = lib_cat.label if lib_cat else category.replace("_", " ").title()
-    tag_keywords = [cat_label]
     ia07_result = step_results.get("IA-07", {})
-    for kw in ia07_result.get("keywords_written", []):
-        if kw not in tag_keywords:
-            tag_keywords.append(kw)
+    grouped = await tag_groups.enabled(job)
+    if grouped:
+        # Tag groups: paths below the five roots plus the flat content tags
+        # (IA-07's tag_paths_written). The category is this step's decision
+        # (IA-07 makes the same one for the file); IA-07's flat words for
+        # other programs stay in the file only.
+        tag_keywords = [p for p in [tag_groups.path(tag_groups.CATEGORY, decision.label)] if p]
+        for p in ia07_result.get("tag_paths_written") or []:
+            if p not in tag_keywords and not p.startswith(tag_groups.CATEGORY + "/"):
+                tag_keywords.append(p)
+    else:
+        tag_keywords = [decision.label]
+        for kw in ia07_result.get("keywords_written", []):
+            if kw not in tag_keywords:
+                tag_keywords.append(kw)
 
     # Dry run: report where the file would go and change nothing — not the
     # file, not target_path, not the status. A would-be target_path or a
@@ -662,11 +814,17 @@ async def _execute(job, session) -> dict:
         # whatever IA-07 wrote last time (2.4).
         api_only = ia07_result.get("write_mode") == "immich_api" or (
             rerun is not None and rerun.get("immich", "api") == "api")
+        # A rerun "tags only" (the tool that switches a set to tag groups)
+        # changes tags and nothing else: no albums, description, archive or
+        # lock; what the previous run recorded for those stays.
+        tags_only = bool(rerun and rerun.get("tags_only"))
+        previous = await _previous_result(session, rerun) if tags_only else {}
         result = await _to_immich(
             job, category=category, tag_keywords=tag_keywords, ia07=ia07_result,
             ai_result=ai_result, sidecar_mode=sidecar_mode, sidecar_path=sidecar_path,
             should_archive=should_archive, previous_tags=previous_immich_tags,
-            previous_descriptions=previous_descriptions, api_only=api_only)
+            previous_descriptions=previous_descriptions, api_only=api_only, grouped=grouped,
+            tags_only=tags_only, previous=previous)
     else:
         result = await _to_library(job, category=category, target_dir=target_dir,
                                    wished_path=wished_path, sidecar_path=sidecar_path, base_path=base_path)
@@ -674,6 +832,16 @@ async def _execute(job, session) -> dict:
         result["manual_review"] = True
 
     return result
+
+
+async def _previous_result(session, rerun: dict | None) -> dict:
+    """IA-08's result before this rerun (the run it supersedes)."""
+    import runs
+    old_id = ((rerun or {}).get("superseded") or {}).get("IA-08")
+    if not old_id:
+        return {}
+    old = (await runs.by_ids(session, [old_id])).get(old_id)
+    return dict(old.result) if old is not None and isinstance(old.result, dict) else {}
 
 
 async def _rule_skip_in_rerun(session, rerun: dict) -> dict:
@@ -771,9 +939,14 @@ async def _to_library(job, *, category: str, target_dir: str, wished_path: str,
 # Immich target
 # ---------------------------------------------------------------------------
 
+_KEPT_IN_TAGS_ONLY = ("immich_albums_added", "immich_albums_created", "description_written",
+                      "description_kept", "immich_archived", "immich_locked")
+
+
 async def _to_immich(job, *, category: str, tag_keywords: list[str], ia07: dict, ai_result: dict,
                      sidecar_mode: bool, sidecar_path: str | None, should_archive: bool,
-                     previous_tags: list[str], previous_descriptions: set, api_only: bool = False) -> dict:
+                     previous_tags: list[str], previous_descriptions: set, api_only: bool = False,
+                     grouped: bool = False, tags_only: bool = False, previous: dict | None = None) -> dict:
     api_key = await _immich_key(job)
     src = job.original_path
     source_dir = os.path.dirname(src) if src else ""
@@ -787,6 +960,9 @@ async def _to_immich(job, *, category: str, tag_keywords: list[str], ia07: dict,
     tag_keywords = [*tag_keywords, *dict.fromkeys(
         t for t in [*folder.flat_tags, *folder.tag_paths] if t not in tag_keywords)]
     ma_desc = ia07.get("description_written") or ""
+    if tags_only:
+        album_names, ma_desc = None, ""
+    stats: dict = {}
 
     # After a crash the upload or replace may be done while the commit of
     # the job's asset id was lost. fileops committed it to the ledger.
@@ -802,21 +978,38 @@ async def _to_immich(job, *, category: str, tag_keywords: list[str], ia07: dict,
             job, asset_id, src=src, src_exists=src_exists, api_key=api_key, category=category,
             tag_keywords=tag_keywords, album_names=album_names, ma_desc=ma_desc,
             sidecar_mode=sidecar_mode, sidecar_path=sidecar_path,
-            previous_tags=previous_tags, previous_descriptions=previous_descriptions, api_only=api_only)
+            previous_tags=previous_tags, previous_descriptions=previous_descriptions, api_only=api_only,
+            stats=stats)
     else:
         result = await _upload(
             job, src=src, src_exists=src_exists, api_key=api_key, category=category,
             tag_keywords=tag_keywords, album_names=album_names, ma_desc=ma_desc,
             sidecar_path=sidecar_path, previous_tags=previous_tags,
-            previous_descriptions=previous_descriptions)
+            previous_descriptions=previous_descriptions, stats=stats)
     if resumed:
         result["resumed"] = True
     asset_id = result["immich_asset_id"]
 
-    # NSFW: move to the locked folder (after tags and description: a locked
-    # asset is invisible to the API key)
-    result["immich_locked"] = await _lock_nsfw(job, asset_id, ai_result)
-    result["immich_archived"] = await _archive(asset_id, should_archive, result["immich_locked"], api_key)
+    # Tag groups: wait for Immich's sidecar/extraction cycle and check the
+    # tags (see _settle_tags) — only when this run changed any.
+    if grouped and stats.get("writes"):
+        settled = await _settle_tags(job, asset_id, tag_keywords, previous_tags, api_key)
+        result["immich_tags_settled"] = settled
+        # A write that failed but is on the asset after the check is no failure.
+        failed = [t for t in result.get("immich_tags_failed") or [] if t in settled.get("missing", [])]
+        written = result.get("immich_tags_written") or []
+        result["immich_tags_written"] = [*written, *(t for t in result.get("immich_tags_failed") or []
+                                                    if t not in failed and t not in written)]
+        result["immich_tags_failed"] = failed
+
+    if tags_only:
+        result["tags_only"] = True
+        result.update({k: (previous or {})[k] for k in _KEPT_IN_TAGS_ONLY if k in (previous or {})})
+    else:
+        # NSFW: move to the locked folder (after tags and description: a
+        # locked asset is invisible to the API key)
+        result["immich_locked"] = await _lock_nsfw(job, asset_id, ai_result)
+        result["immich_archived"] = await _archive(asset_id, should_archive, result["immich_locked"], api_key)
 
     # The content is verified in Immich now; the local source can go.
     if src_exists:
@@ -832,7 +1025,7 @@ async def _to_immich(job, *, category: str, tag_keywords: list[str], ia07: dict,
 
 async def _upload(job, *, src: str, src_exists: bool, api_key, category: str, tag_keywords: list[str],
                   album_names, ma_desc: str, sidecar_path: str | None, previous_tags: list[str],
-                  previous_descriptions: set) -> dict:
+                  previous_descriptions: set, stats: dict | None = None) -> dict:
     """S11: a new upload. Success means the asset is present in Immich with
     the source's checksum; a duplicate of an asset in Immich's trash is
     restored instead of being taken for a copy (R-22)."""
@@ -847,7 +1040,7 @@ async def _upload(job, *, src: str, src_exists: bool, api_key, category: str, ta
     job.target_path = f"immich:{asset_id}"
 
     tags_written, tags_failed, tags_removed = await _tag_immich_asset(
-        asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags)
+        asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags, stats=stats)
     info = await get_asset_info(asset_id, api_key=api_key)
     description, kept = await _apply_description(asset_id, info, ma_desc, previous_descriptions, api_key)
 
@@ -878,7 +1071,7 @@ async def _upload(job, *, src: str, src_exists: bool, api_key, category: str, ta
 async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_key, category: str,
                         tag_keywords: list[str], album_names, ma_desc: str, sidecar_mode: bool,
                         sidecar_path: str | None, previous_tags: list[str],
-                        previous_descriptions: set, api_only: bool = False) -> dict:
+                        previous_descriptions: set, api_only: bool = False, stats: dict | None = None) -> dict:
     """S7: the job already has an asset (Immich input, retry, kept duplicate).
 
     Replaced only when the local file holds other bytes than the asset —
@@ -928,7 +1121,7 @@ async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_k
                 await log_warning("IA-08", f"{job.debug_key} Eintrag im Exemplar-Register fehlgeschlagen",
                                   f"Asset {asset_id}: {type(exc).__name__}: {exc}")
         tags_written, tags_failed, tags_removed = await _tag_immich_asset(
-            asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags)
+            asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags, stats=stats)
         albums_added, albums_created = [], []
         if album_names:
             try:
@@ -951,9 +1144,11 @@ async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_k
             drop_tags=[t for t in previous_tags if not is_tag_path(t)], albums=album_names,
             sidecar=sidecar_path if sidecar_mode else None, restore_trashed=True)
         asset_id = res.asset_id
+        if stats is not None:
+            stats["writes"] = stats.get("writes", 0) + 1  # the replace carried and set tags
         if res.identical:
             tags_written, tags_failed, tags_removed = await _tag_immich_asset(
-                asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags)
+                asset_id, tag_keywords, api_key=api_key, previous_tags=previous_tags, stats=stats)
         else:
             # Only MA's own tags count as written: the next retry removes
             # tags of this list that are no longer wanted, and the carried
@@ -967,7 +1162,7 @@ async def _update_asset(job, asset_id: str, *, src: str, src_exists: bool, api_k
             old_paths = [t for t in previous_tags if is_tag_path(t)]
             if paths or old_paths:
                 p_written, p_failed, p_removed = await _tag_immich_asset(
-                    asset_id, paths, api_key=api_key, previous_tags=old_paths)
+                    asset_id, paths, api_key=api_key, previous_tags=old_paths, stats=stats)
                 tags_written += p_written
                 tags_failed += p_failed
                 tags_removed += p_removed

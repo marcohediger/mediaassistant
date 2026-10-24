@@ -263,6 +263,14 @@
     setDlg.querySelectorAll("[data-album-for]").forEach(function (n) {
       n.hidden = (n.dataset.albumFor === "legacy") !== (tagMode === "legacy");
     });
+    // Tag groups: the example's album row follows the folder tag mode; the
+    // note below the folder options shows only while the groups are on.
+    setDlg.querySelectorAll("[data-group-album-mode]").forEach(function (n) {
+      n.hidden = n.dataset.groupAlbumMode !== tagMode;
+    });
+    const groups = fieldInput("tag_groups");
+    setDlg.querySelectorAll("[data-when-groups]").forEach(function (n) { n.hidden = !(groups && groups.checked); });
+    setDlg.querySelectorAll("[data-when-groups-off]").forEach(function (n) { n.hidden = !!(groups && groups.checked); });
     // Controls that only matter while a switch is on are greyed out.
     setDlg.querySelectorAll("[data-depends]").forEach(function (n) {
       const on = fieldInput(n.dataset.depends).checked;
@@ -711,7 +719,8 @@
     $("set-rules-empty").hidden = rules.length > 0;
     setMeta("inputs", String(dirs.length + (immich ? 1 : 0)));
     setMeta("rules", String(rules.length));
-    setMeta("folder", "", radioValue("folder_tag_mode") !== "none" || fieldInput("folder_albums").checked ? "on" : "off");
+    setMeta("folder", "", radioValue("folder_tag_mode") !== "none" || fieldInput("folder_albums").checked
+      || fieldInput("tag_groups").checked ? "on" : "off");
     setMeta("ocr", "", fieldInput("ocr_enabled").checked ? "on" : "off");
 
     const badges = $("set-badges");

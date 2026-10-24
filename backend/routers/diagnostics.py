@@ -258,6 +258,7 @@ async def diagnostics(request: Request):
                 "library_base_path_exists": os.path.isdir(base) if base else False,
                 "folder_tag_mode": ps.folder_tag_mode or "none",
                 "folder_albums": bool(ps.folder_albums),
+                "tag_groups": bool(ps.tag_groups),
                 "dry_run": bool(ps.dry_run),
                 "ocr_enabled": bool(ps.ocr_enabled),
                 "ocr_mode": ps.ocr_mode,
