@@ -1,6 +1,17 @@
 # Changelog
 
-## v3.1.0 — in Arbeit
+## v3.1.0 — 2026-10-24
+
+### Update-Hinweise
+
+- Nach dem Update ändert sich nichts: „Tags in Gruppen" ist in jedem Set aus.
+- Einschalten wirkt auf neue Fotos. Den Bestand stellt das Werkzeug „Tags in
+  Gruppen umstellen" um — bewusst starten: gemessen rund 2 s pro Foto (Dev,
+  410 Fotos in 13,6 min), bei rund 53 000 Fotos also gut einen Tag. Es lässt
+  sich abbrechen und später fortsetzen; es nimmt jedes Mal nur, was noch
+  nicht umgestellt ist. Alben bleiben dabei unverändert.
+- Tags in Immich nur über das Werkzeug „Tag-Aufräumen" löschen (Immich und
+  Sidecars), sonst kommen sie beim nächsten Einlesen aus der Sidecar zurück.
 
 ### Feature: Tag-Gruppen pro Verarbeitungs-Set
 
