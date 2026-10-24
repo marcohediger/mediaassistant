@@ -722,9 +722,12 @@ async def main():
     async with async_session() as session:
         first_set = await get_set(session, None)
         first_set_id = first_set.id
-        saved = (first_set.folder_tag_mode, first_set.folder_albums)
+        saved = (first_set.folder_tag_mode, first_set.folder_albums, first_set.tag_groups)
         first_set.folder_tag_mode = "none"
         first_set.folder_albums = False
+        # The expectations below are the plain folder tree ("Ordner/…"), not
+        # the tag groups ("04 Album/…"), whatever the dev set is set to.
+        first_set.tag_groups = False
         await session.commit()
 
     class _FakeJob:
@@ -759,7 +762,7 @@ async def main():
     finally:
         async with async_session() as session:
             ps = await session.get(ProcessingSet, first_set_id)
-            ps.folder_tag_mode, ps.folder_albums = saved
+            ps.folder_tag_mode, ps.folder_albums, ps.tag_groups = saved
             await session.commit()
 
     # ==================================================================
