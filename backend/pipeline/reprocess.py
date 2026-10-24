@@ -459,9 +459,81 @@ async def _follow_sidecar(session, job, sidecar: str | None) -> None:
                       started_at=ia07.started_at, finished_at=ia07.finished_at)
 
 
-def missing_source_message(notes: list[str]) -> str:
-    message = ("Datei nicht auffindbar — Retry abgebrochen. Kein geprüftes Exemplar dieses Jobs "
-               "gefunden (weder lokal noch in Immich).")
+@dataclass
+class DuplicateOriginal:
+    """The job IA-02 named as this job's original, with a copy that checks out now."""
+    debug_key: str
+    job_id: int
+    match_type: str  # IA-02's match type: "exact", "similar", "raw_jpg_pair"
+    where: str       # "immich" or "local"
+
+
+def duplicate_record(job) -> dict | None:
+    """IA-02's result if it recorded this job as a duplicate of another job."""
+    ia02 = (job.step_result or {}).get("IA-02")
+    if not isinstance(ia02, dict) or ia02.get("status") != "duplicate" or not ia02.get("original_debug_key"):
+        return None
+    return ia02
+
+
+async def duplicate_original(job) -> DuplicateOriginal | None:
+    """Where the content IA-02 matched this job with verifiably lives now.
+
+    Only the original's own copies count, found like a retry finds a job's
+    source (find_source on the original): a local copy whose hash checks out
+    now, or its Immich asset present (not in the trash). None when IA-02
+    named no original, the original is deleted or busy, its only file could
+    not be compared, or nothing checks out. Reads only, like find_source.
+    What is found is never a source for `job` itself: another job's copy is
+    never taken (R-01) — it only tells whether anything was lost.
+    """
+    ia02 = duplicate_record(job)
+    if ia02 is None:
+        return None
+    key = ia02["original_debug_key"]
+    async with async_session() as session:
+        original = (await session.execute(
+            select(Job).where(Job.debug_key == key, Job.id != job.id).order_by(Job.id.desc()).limit(1)
+        )).scalar()
+    if original is None or original.status in ("deleted", "queued", "processing"):
+        return None
+    try:
+        source, _ = await find_source(original)
+        if source is not None and not source.checked:
+            # A local file whose content cannot be compared (old job without
+            # a hash) proves nothing; the original's Immich asset may.
+            source = await _immich_source(original, [])
+    except Exception as exc:  # Immich unreachable and the like: unknown is not "present"
+        await log_warning("reprocess", f"{job.debug_key} Original {key} nicht prüfbar",
+                          f"{type(exc).__name__}: {exc}")
+        return None
+    if source is None or not source.checked:
+        return None
+    return DuplicateOriginal(key, original.id, str(ia02.get("match_type") or "exact"), source.kind)
+
+
+def _duplicate_hint(original: DuplicateOriginal) -> str:
+    where = "in Immich" if original.where == "immich" else "lokal"
+    if original.match_type == "exact":
+        return (f"Kein eigenes Exemplar. Derselbe Inhalt liegt als {original.debug_key} vor "
+                f"(exaktes Duplikat, {where}) — nichts verloren, der Job kann gelöscht werden.")
+    if original.match_type == "raw_jpg_pair":
+        return (f"Kein eigenes Exemplar. Das zugehörige RAW/JPG liegt als {original.debug_key} vor "
+                f"(RAW+JPG-Paar, {where}) — die Datei dieses Jobs selbst fehlt.")
+    return (f"Kein eigenes Exemplar. Ein ähnliches Bild liegt als {original.debug_key} vor "
+            f"(ähnliches Duplikat, {where}) — die Datei dieses Jobs selbst fehlt; "
+            "vor dem Löschen vergleichen.")
+
+
+def missing_source_message(notes: list[str], original: DuplicateOriginal | None = None) -> str:
+    """Error of a retry that found no verified copy of the job's own content.
+    `original`: the duplicate's original that holds the matched content now
+    (duplicate_original), named so nobody searches for a lost file."""
+    message = "Datei nicht auffindbar — Retry abgebrochen. "
+    if original is not None:
+        message += _duplicate_hint(original)
+    else:
+        message += "Kein geprüftes Exemplar dieses Jobs gefunden (weder lokal noch in Immich)."
     if notes:
         message += " " + "; ".join(notes)
     return message[:2000]

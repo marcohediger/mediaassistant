@@ -15,6 +15,10 @@ kept copy now, donors' own copies to the trash, final state in one commit):
   D12: Old donor without a known hash (live 2026-10-24): its file in
        error/duplicates is verified through the checksum of its own Immich
        asset and goes to the trash; D12b: a foreign file at that place stays
+  D13: Kept original with a stale IA-02 (live MA-2026-6066 / -69653): the
+       group counts as exact (its kind follows the duplicates' IA-02 only),
+       "Automatisch bereinigen" resolves it; a really similar group next to
+       it is left to the user and counted as skipped
 
 The poller's own-upload filter (formerly IM-11/IM-12, deviceId) is covered by
 test_e2e_user_stories.py US-4: inputs.immich.new_assets against real Immich —
@@ -28,7 +32,7 @@ while the test runs (the worker must not take them) and restored afterwards.
 Cleanup in finally: jobs with their register rows (delete_test_jobs), the
 set, the sandbox, the uploaded assets.
 
-Run via:  docker exec mediaassistant-dev python /app/test_immich_dedup.py
+Run via:  docker exec mediaassistant-dev python /app/test_immich_dedup.py [D6 D7 D9 D11 D12 D13]
 """
 import asyncio, sys, os, time, shutil
 sys.path.insert(0, "/app")
@@ -356,6 +360,99 @@ async def test_d12_legacy_donor_without_hash():
 
 
 # ──────────────────────────────────────────────────────────────
+# D13: kept original with a stale IA-02 (live 2026-10-24)
+# ──────────────────────────────────────────────────────────────
+async def test_d13_stale_ia02_of_kept_original():
+    """Live MA-2026-6066 / -69653: "Automatisch bereinigen → Nur diese Seite"
+    processed the other groups of the page and left this one out without a
+    word ("0 skipped"); the page showed it as "Ähnlich". The keeper (done,
+    Immich asset, promoted earlier) still carried its own IA-02 from before
+    — 'similar' to a job that is deleted now — and the group flags read the
+    IA-02 of every member. The donor is an exact duplicate in
+    error/duplicates.
+
+    Batch clean runs its real loop on page 1 of an index limited to the two
+    groups of this test (the dev database has other groups, which a test
+    must not resolve)."""
+    import routers.duplicates as dup
+    from immich_client import ASSET_PRESENT
+
+    print("\n── D13: Behaltenes Original mit veraltetem IA-02 (live 2026-10-24) ──")
+    src = make_jpeg(f"{SANDBOX}/src/d13.jpg")
+    asset_id = await upload(src)
+    gone_key = f"{TAG}-D13-GONE"
+    await add_job("D13-GONE", {"IA-01": {"file_type": "JPEG", "file_size": 100}, "IA-02": {"status": "ok"}},
+                  original_path=f"{SANDBOX}/reprocess/__d13_gone_{TS}.jpg", source_label="Inbox",
+                  status="deleted", error_message="Duplicate deleted (batch-clean). Kept: x")
+    big = {"file_type": "JPEG", "file_size": 100, "width": 4032, "height": 3024}
+    small = {"file_type": "JPEG", "file_size": 100, "width": 64, "height": 48}
+    await add_job("D13-KEEP", {
+        "IA-01": big,
+        "IA-02": {"status": "duplicate", "match_type": "similar", "phash_distance": 4,
+                  "original_debug_key": gone_key},
+        "IA-08": {"immich_asset_id": asset_id},
+    }, original_path=f"{SANDBOX}/reprocess/__d13_keep_{TS}.jpg", source_label="Inbox", status="done",
+        error_message="Promoted (best quality, full re-processing)", target_path=f"immich:{asset_id}",
+        immich_asset_id=asset_id, use_immich=True, file_hash=sha256(src), phash="d13phash00000001")
+    dup_path = copy_file(src, f"{DUP_DIR}/__d13_{TS}.jpg")
+    donor_id = await add_job("D13-DONOR", {
+        "IA-01": small,
+        "IA-02": {"status": "duplicate", "match_type": "exact", "original_debug_key": f"{TAG}-D13-KEEP"},
+    }, original_path=dup_path, source_label="Inbox", status="duplicate", target_path=dup_path,
+        file_hash=sha256(dup_path), phash="d13phash00000001")
+
+    # Next to it a group of really similar pictures: the user's decision.
+    sim_src = make_jpeg(f"{SANDBOX}/src/d13_sim.jpg")
+    sim_asset = await upload(sim_src)
+    await add_job("D13-SIMKEEP", {"IA-01": big, "IA-02": {"status": "ok"}, "IA-08": {"immich_asset_id": sim_asset}},
+                  original_path=f"{SANDBOX}/reprocess/__d13_simkeep_{TS}.jpg", source_label="Inbox",
+                  status="done", target_path=f"immich:{sim_asset}", immich_asset_id=sim_asset, use_immich=True,
+                  file_hash=sha256(sim_src), phash="d13phash00000002")
+    sim_path = make_jpeg(f"{DUP_DIR}/__d13_sim_{TS}.jpg")
+    sim_donor_id = await add_job("D13-SIMDONOR", {
+        "IA-01": small,
+        "IA-02": {"status": "duplicate", "match_type": "similar", "phash_distance": 5,
+                  "original_debug_key": f"{TAG}-D13-SIMKEEP"},
+    }, original_path=sim_path, source_label="Inbox", status="duplicate", target_path=sim_path,
+        file_hash=sha256(sim_path), phash="d13phash00000003")
+
+    real_index = dup._build_group_index
+
+    async def test_groups_only():
+        index, by_key = await real_index()
+        return [g for g in index if any(k.startswith(f"{TAG}-D13") for k in g["member_keys"])], by_key
+
+    groups, _ = await test_groups_only()
+    group = next((g for g in groups if f"{TAG}-D13-DONOR" in g["member_keys"]), None)
+    check("D13-01 Gruppe aus Behaltenem und Spender gebildet",
+          group is not None and set(group["member_keys"]) == {f"{TAG}-D13-KEEP", f"{TAG}-D13-DONOR"},
+          str(group and group["member_keys"]))
+    check("D13-02 Gruppe gilt als identisch (Badge «Identisch»), veraltetes IA-02 des Behaltenen zählt nicht",
+          bool(group and group["all_exact"]), str(group and {k: group[k] for k in ("all_exact", "safe_for_batch")}))
+    check("D13-03 Gruppe wird von «Automatisch bereinigen» erfasst", bool(group and group["safe_for_batch"]))
+
+    dup._build_group_index = test_groups_only
+    dup._batch_progress = {"running": True, "kept": 0, "deleted": 0, "errors": 0, "skipped": 0,
+                           "total": 0, "current": 0, "done": False, "page": 1}
+    try:
+        await dup._run_batch_clean(1)
+    finally:
+        dup._build_group_index = real_index
+    progress = dict(dup._batch_progress)
+
+    donor = await get_job(donor_id)
+    check("D13-04 Spender aufgelöst", donor.status == "deleted", f"status={donor.status} progress={progress}")
+    check("D13-05 Datei des Spenders nicht mehr in error/duplicates (Papierkorb)", not os.path.exists(dup_path))
+    check("D13-06 Asset des Behaltenen bleibt", await asset_state(asset_id) == ASSET_PRESENT)
+    sim_donor = await get_job(sim_donor_id)
+    check("D13-07 Ähnliche Gruppe nicht angefasst", sim_donor.status == "duplicate" and os.path.exists(sim_path)
+          and await asset_state(sim_asset) == ASSET_PRESENT, f"status={sim_donor.status}")
+    check("D13-08 Ergebnis: 1 Gruppe bereinigt, die ähnliche als übersprungen gezählt",
+          progress.get("kept") == 1 and progress.get("skipped") == 1 and progress.get("deleted") == 1,
+          str({k: progress.get(k) for k in ("kept", "deleted", "skipped", "errors", "total")}))
+
+
+# ──────────────────────────────────────────────────────────────
 # Cleanup
 # ──────────────────────────────────────────────────────────────
 async def cleanup():
@@ -391,7 +488,7 @@ async def main():
     from immich_client import get_immich_config
 
     print("=" * 60)
-    print("  E2E: Immich Duplicate Safety — D6/D7/D9/D10/D11/D12")
+    print("  E2E: Immich Duplicate Safety — D6/D7/D9/D10/D11/D12/D13")
     print("=" * 60)
 
     was_paused = await config_manager.get("pipeline.paused", False)
@@ -405,7 +502,11 @@ async def main():
         else:
             print(f"\nImmich: {immich_url}")
             tests = [test_d6_shared_asset_keep, test_d7_shared_asset_batch_clean,
-                     test_d9_asset_id_transfer, test_d12_legacy_donor_without_hash] + tests
+                     test_d9_asset_id_transfer, test_d12_legacy_donor_without_hash,
+                     test_d13_stale_ia02_of_kept_original] + tests
+        wanted = [a.lower() for a in sys.argv[1:]]
+        if wanted:
+            tests = [t for t in tests if any(t.__name__.startswith(f"test_{w}_") for w in wanted)]
         for test in tests:
             try:
                 await test()

@@ -118,7 +118,7 @@
     <svg class="ui-i" width="18" height="18" aria-hidden="true" focusable="false"><use data-field="message_icon" href="#ui-i-{{ 'alert-circle' if failed else 'info' }}"/></svg>
     <div class="ui-alert-body">
         <h2 class="ui-alert-title" data-field="message_title" data-label-error="{{ t.job_detail.error }}" data-label-note="{{ t.job_detail.note }}">{{ t.job_detail.error if failed else t.job_detail.note }}</h2>
-        <div class="ui-alert-text job-message" data-field="error_message">{{ job.error_message or '' }}</div>
+        <div class="ui-alert-text job-message" data-field="error_message" data-raw="{{ job.error_message or '' }}">{{ job.error_message | link_job_keys(job.debug_key) }}</div>
     </div>
 </div>
 
