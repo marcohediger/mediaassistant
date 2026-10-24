@@ -12,6 +12,9 @@ kept copy now, donors' own copies to the trash, final state in one commit):
        of its own takes the donor's asset over (IA-08 replaces it) and is queued
   D11: Analysis copy: a kept duplicate takes IA-03 … IA-06 over from the
        original, IA-02 becomes 'skipped'
+  D12: Old donor without a known hash (live 2026-10-24): its file in
+       error/duplicates is verified through the checksum of its own Immich
+       asset and goes to the trash; D12b: a foreign file at that place stays
 
 The poller's own-upload filter (formerly IM-11/IM-12, deviceId) is covered by
 test_e2e_user_stories.py US-4: inputs.immich.new_assets against real Immich —
@@ -288,6 +291,71 @@ async def test_d11_analysis_copy():
 
 
 # ──────────────────────────────────────────────────────────────
+# D12: old donor without a known hash (live 2026-10-24)
+# ──────────────────────────────────────────────────────────────
+async def test_d12_legacy_donor_without_hash():
+    """Live MA-2026-1643/-3535/-5763/-6561: uploaded in April (own asset),
+    later 'Datei nicht auffindbar' without file_hash; a 2.x retry downloaded
+    the original from that asset and IA-02 parked it in error/duplicates.
+    "Behalten" on the original refused the donor: content not verifiable,
+    no hash known. The file is a copy of the donor's own asset, so Immich's
+    checksum verifies it. D12b: a foreign file at the same place stays."""
+    from immich_client import ASSET_PRESENT, ASSET_TRASHED
+    from routers.duplicates import _resolve_duplicate_group
+
+    print("\n── D12: Altbestand-Spender ohne Hash (live 2026-10-24) ──")
+    for variant in ("a", "b"):
+        keep_src = make_jpeg(f"{SANDBOX}/src/d12{variant}_keep.jpg")
+        donor_src = make_jpeg(f"{SANDBOX}/src/d12{variant}_donor.jpg")
+        keep_asset = await upload(keep_src)
+        donor_asset = await upload(donor_src)
+        name = f"__d12{variant}_{TS}"
+        dup_path = f"{DUP_DIR}/{name}_{TAG}-D12{variant.upper()}-DONOR.jpg"
+        if variant == "a":
+            copy_file(donor_src, dup_path)            # what the 2.x retry downloaded
+        else:
+            make_jpeg(dup_path)                       # someone else's file at that place
+        before = sha256(dup_path)
+        keep_id = await add_job(f"D12{variant.upper()}-KEEP", {
+            "IA-01": {"file_type": "JPEG", "file_size": 100},
+            "IA-02": {"status": "ok"},
+            "IA-08": {"immich_asset_id": keep_asset},
+        }, original_path=f"{SANDBOX}/reprocess/{name}_keep.jpg", source_label="Inbox", status="done",
+            target_path=f"immich:{keep_asset}", immich_asset_id=keep_asset, use_immich=True,
+            file_hash=sha256(keep_src), phash=f"d12{variant}phash000001")
+        donor_id = await add_job(f"D12{variant.upper()}-DONOR", {
+            "IA-01": {"file_type": "JPEG", "file_size": 100},
+            "IA-02": {"status": "duplicate", "match_type": "similar", "phash_distance": 0,
+                      "original_debug_key": f"{TAG}-D12{variant.upper()}-KEEP"},
+        }, original_path=f"{SANDBOX}/reprocess/{name}.jpg", source_label="Inbox", status="duplicate",
+            target_path=dup_path, immich_asset_id=donor_asset, use_immich=True,
+            file_hash=None, phash=f"d12{variant}phash000001")
+
+        res = await _resolve_duplicate_group(keep_id, [keep_id, donor_id], source=f"test-d12{variant}",
+                                             user_kept=True)
+        donor = await get_job(donor_id)
+        if variant == "a":
+            check("D12a-01 Spender aufgelöst (Inhalt über die Prüfsumme seines Assets geprüft)",
+                  res.deleted == 1 and not res.problems and donor.status == "deleted",
+                  f"deleted={res.deleted} problems={res.problems} status={donor.status}")
+            check("D12a-02 Datei in den Papierkorb des Sets, nicht mehr in error/duplicates",
+                  not os.path.exists(dup_path) and any(
+                      n.startswith(name) for _, _, files in os.walk(f"{BASE}/.papierkorb") for n in files),
+                  f"dup_exists={os.path.exists(dup_path)}")
+            check("D12a-03 Asset des Spenders im Immich-Papierkorb",
+                  await asset_state(donor_asset) == ASSET_TRASHED, f"state={await asset_state(donor_asset)}")
+        else:
+            check("D12b-01 Fremde Datei am Pfad: Spender bleibt, nichts gelöscht",
+                  res.deleted == 0 and donor.status == "duplicate",
+                  f"deleted={res.deleted} status={donor.status}")
+            check("D12b-02 Fremde Datei unverändert an ihrem Ort",
+                  os.path.exists(dup_path) and sha256(dup_path) == before)
+            check("D12b-03 Asset des Spenders bleibt in Immich",
+                  await asset_state(donor_asset) == ASSET_PRESENT, f"state={await asset_state(donor_asset)}")
+        check(f"D12{variant}-04 Behaltenes Asset bleibt", await asset_state(keep_asset) == ASSET_PRESENT)
+
+
+# ──────────────────────────────────────────────────────────────
 # Cleanup
 # ──────────────────────────────────────────────────────────────
 async def cleanup():
@@ -323,7 +391,7 @@ async def main():
     from immich_client import get_immich_config
 
     print("=" * 60)
-    print("  E2E: Immich Duplicate Safety — D6/D7/D9/D10/D11")
+    print("  E2E: Immich Duplicate Safety — D6/D7/D9/D10/D11/D12")
     print("=" * 60)
 
     was_paused = await config_manager.get("pipeline.paused", False)
@@ -337,7 +405,7 @@ async def main():
         else:
             print(f"\nImmich: {immich_url}")
             tests = [test_d6_shared_asset_keep, test_d7_shared_asset_batch_clean,
-                     test_d9_asset_id_transfer] + tests
+                     test_d9_asset_id_transfer, test_d12_legacy_donor_without_hash] + tests
         for test in tests:
             try:
                 await test()

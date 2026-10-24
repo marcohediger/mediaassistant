@@ -250,10 +250,23 @@ async def job_copies(job, *, check: bool = True) -> tuple[list, list[str]]:
             notes.append(f"{target}: im Register einem anderen Job zugeordnet")
         else:
             hashes = _field_hashes(job)
-            digest = await asyncio.to_thread(sha256, target)
-            if not hashes:
+            digest, sha1, _size = await asyncio.to_thread(fileops._hash_for_upload, target)
+            # The checksums (SHA-1) of the job's own Immich assets verify the
+            # content too: a file downloaded from the job's asset is the job's
+            # content even when its hash fields are empty (live: old jobs a
+            # 2.x retry fetched from Immich without setting file_hash, which
+            # IA-02 then parked in error/duplicates).
+            checksums = set()
+            for asset_id in ([] if digest in hashes else job_asset_ids(job)):
+                try:
+                    asset = await fileops.immich_copy(job, asset_id, check=True)
+                except fileops.FileOpError:
+                    continue
+                if asset.job_id == job.id and asset.checksum:
+                    checksums.add(asset.checksum)
+            if not hashes and not checksums:
                 notes.append(f"{target}: Inhalt nicht prüfbar (kein Hash des Jobs bekannt)")
-            elif digest not in hashes:
+            elif digest not in hashes and sha1 not in checksums:
                 notes.append(f"{target}: anderer Inhalt als die Datei des Jobs")
             else:
                 rows.append(await fileops.register_existing(job, "local", target, sha256=digest,
