@@ -220,7 +220,7 @@ vollständige **Immich-Instanz** und alle Hilfsdienste verfügbar:
 | Container | Zugang | Zweck |
 |---|---|---|
 | `mediaassistant-dev` | `http://localhost:8000` | MA Dev (hot-reload) |
-| `immich_server` | `http://192.168.0.104:2283` | Immich API + Web-UI (**v3.1.0**, wie Produktion — [Issue #48](https://git.marcohediger.ch/MediaAssistant/ma-core/issues/48) gelöst, gemessenes Verhalten in [`docs/IMMICH_3_VERHALTEN.md`](docs/IMMICH_3_VERHALTEN.md)) |
+| `immich_server` | `http://192.168.0.104:2283` | Immich API + Web-UI (**v3.3.5**, wie Produktion; seit 2026-10-24, vorher 3.1.0 — beim Update der Produktion Dev nachziehen: `immich/.env` `IMMICH_VERSION`, Images mit der offiziellen `docker-compose.yml` des Releases abgleichen, vorher `pg_dumpall` sichern; gemessenes Verhalten in [`docs/IMMICH_3_VERHALTEN.md`](docs/IMMICH_3_VERHALTEN.md)) |
 | `immich_machine_learning` | intern | Immich ML |
 | `immich_redis` | intern | Redis für Immich |
 | `immich_postgres` | intern | PostgreSQL für Immich |
@@ -282,10 +282,11 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_no_direct_step_result.py` | Wächter: `jobs.step_result` schreibt nur `runs.py` — meldet jede direkte Zuweisung, `Job(step_result=…)`, `flag_modified`, `.values(step_result=…)` und SQL-Text, Tests eingeschlossen (Datei:Zeile, `ALLOWLIST`) | `docker exec mediaassistant-dev python /app/test_no_direct_step_result.py` |
 | `backend/test_data_safety_local.py` | Reproducer der lokalen Datenverlust-Risiken (z. B. R-05, R-10b, ohne Immich), je Risiko ein Abschnitt; Pipeline muss pausiert sein | `docker exec mediaassistant-dev python /app/test_data_safety_local.py [R-05 …]` |
 | `backend/test_data_safety_immich.py` | Reproducer der Datenverlust-Risiken mit Immich (z. B. R-10e Absturz im Ersetzen), je Risiko ein Abschnitt; Pipeline muss pausiert sein | `docker exec mediaassistant-dev python /app/test_data_safety_immich.py [R-10e …]` |
+| `backend/test_dup_page_errors.py` | Duplikat-Seite und Duplikat-Fehler gegen echtes Immich: Grossansicht HEIC als JPEG (L), Link mit `immich.public_url` (P), Retry-Meldung nennt das Original (M), Wartung „Erledigte Duplikat-Fehler aufräumen" (C); Teile wählbar | `docker exec mediaassistant-dev python /app/test_dup_page_errors.py [L P M C]` |
 | `backend/test_module_runs.py` | `module_runs`: Schreiben über `runs.py`, Sicht `step_result`, Trigger, Migration aus `step_result` (optional auf Live-Kopie: Indexe, WAL, Dauer) | `docker exec mediaassistant-dev python /app/test_module_runs.py [kopie.db]` |
 | `backend/test_module_rerun.py` | Neu ausführen: Vorschau, Kaskade nach gelesenen Feldern, veraltet, KI nur auf Wunsch, Immich-Modus, Abbruch, Absturz in der Vorbereitung | `docker exec mediaassistant-dev python /app/test_module_rerun.py` |
 | `backend/test_executor.py` | Ausführung nach Abhängigkeiten: Register als einzige Quelle, IA-03 als Seiten-Task, Betriebsmittel-Grenzen, Stopp-Regeln | `docker exec mediaassistant-dev python /app/test_executor.py` |
-| `backend/test_immich_dedup.py` | Duplikat-Auflösung mit echtem Immich: geteiltes Asset bei Keep, Übertragung, Review-Fälle | `docker exec mediaassistant-dev python /app/test_immich_dedup.py` |
+| `backend/test_immich_dedup.py` | Duplikat-Auflösung mit echtem Immich: geteiltes Asset bei Keep, Übertragung, Review-Fälle, Altbestand ohne Hash (D12), Gruppen-Art nur aus den Duplikat-Beziehungen + „Automatisch bereinigen" (D13); Teile wählbar | `docker exec mediaassistant-dev python /app/test_immich_dedup.py [D6 … D13]` |
 | `backend/test_ia04_convert.py` | IA-04 ohne ImageMagick: GIF (erstes Bild) und HEIC-Ausweichweg über Pillow, mit fehlschlagendem `heif-convert` im `PATH` | `docker exec mediaassistant-dev python /app/test_ia04_convert.py` |
 
 ### Pflicht-Vorstufe: startet die App überhaupt?

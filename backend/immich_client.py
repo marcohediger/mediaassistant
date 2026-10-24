@@ -754,6 +754,41 @@ async def get_asset_thumbnail(asset_id: str, size: str = "thumbnail", *, api_key
     return None
 
 
+async def get_asset_preview(asset_id: str, *, api_key: str | None = None) -> tuple[bytes, str] | None:
+    """Immich's preview of an asset (a JPEG by default) with its content type,
+    or None."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key or not asset_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{url}/api/assets/{asset_id}/thumbnail",
+                headers={"x-api-key": api_key},
+                params={"size": "preview"},
+            )
+    except Exception:
+        return None
+    if resp.status_code != 200:
+        return None
+    return resp.content, resp.headers.get("content-type", "image/jpeg")
+
+
+async def get_immich_web_url() -> str:
+    """Base address for links the browser opens ("In Immich öffnen").
+
+    immich.url is where MediaAssistant itself reaches Immich — in a Docker
+    setup often an internal name (http://immich_server:2283) the browser
+    does not know. immich.public_url overrides it for links; empty means
+    the same address as immich.url.
+    """
+    public = (await config_manager.get("immich.public_url", "") or "").strip()
+    if public:
+        return public.rstrip("/")
+    url, _ = await get_immich_config()
+    return url
+
+
 def _sanitize_filename(filename: str, fallback: str = "asset.jpg") -> str:
     """Sanitize filename from Immich API to prevent path traversal."""
     if not filename:

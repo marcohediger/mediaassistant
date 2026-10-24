@@ -196,8 +196,9 @@ async def _build_member(job, session, *, prefetched_info: dict | None = None) ->
     if target.startswith("immich:"):
         immich_asset_id = immich_asset_id or target[7:]
     if immich_asset_id:
-        from immich_client import get_immich_config
-        immich_url, _ = await get_immich_config()
+        # A link the browser opens: the public address, not the internal one.
+        from immich_client import get_immich_web_url
+        immich_url = await get_immich_web_url()
         if immich_url:
             immich_link = f"{immich_url}/photos/{immich_asset_id}"
 
@@ -366,18 +367,25 @@ async def _build_group_index() -> tuple[list[dict], dict[str, "Job"]]:
                 jobs_by_key[k].immich_asset_id or (jobs_by_key[k].target_path or "").startswith("immich:")
                 for k in valid_keys
             )
-            all_exact = all(
-                (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("match_type") in ("exact", "raw_jpg_pair", None)
-                for k in valid_keys
+            # The group's kind follows its duplicate relations only: the
+            # IA-02 results of the members that are duplicates now. A member
+            # in the library or Immich (done, review, …) is the original; its
+            # own IA-02 can be stale history from before it was kept or
+            # promoted (live MA-2026-6066: done, IA-02 'similar' to a deleted
+            # job), which made an exact group look similar and batch clean
+            # left it out.
+            relations = [(jobs_by_key[k].step_result or {}).get("IA-02") or {}
+                         for k in valid_keys if jobs_by_key[k].status == "duplicate"]
+            all_exact = bool(relations) and all(
+                r.get("match_type") in ("exact", "raw_jpg_pair", None) for r in relations
             )
             # Safe for batch-clean: exact SHA256, RAW+JPG pair, OR pHash
             # with a recorded distance of 0 (100% visually identical). A
             # missing distance does not count as 0 (D9).
-            safe_for_batch = all_exact or all(
-                (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("match_type") in ("exact", "raw_jpg_pair", None)
-                or (jobs_by_key[k].step_result or {}).get("IA-02", {}).get("phash_distance") == 0
-                for k in valid_keys
-            )
+            safe_for_batch = all_exact or (bool(relations) and all(
+                r.get("match_type") in ("exact", "raw_jpg_pair", None) or r.get("phash_distance") == 0
+                for r in relations
+            ))
 
             groups.append({
                 "original_key": group_key,
@@ -669,34 +677,51 @@ async def immich_thumbnail(asset_id: str, size: str = "thumbnail"):
     return Response(content=data, media_type="image/jpeg")
 
 
+# What an <img> shows in every current browser. Anything else (HEIC/HEIF,
+# TIFF, RAW/DNG, a video) is served as Immich's preview JPEG instead of the
+# original bytes, which the lightbox could not display.
+BROWSER_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+def _browser_shows(mime: str | None) -> bool:
+    return (mime or "").split(";")[0].strip().lower() in BROWSER_IMAGE_TYPES
+
+
+def _original_mime(info: dict) -> str | None:
+    """The original's media type from Immich's asset info."""
+    import mimetypes
+    return info.get("originalMimeType") or mimetypes.guess_type(info.get("originalFileName") or "")[0]
+
+
 @router.get("/api/original/immich/{asset_id}")
 async def immich_original(asset_id: str):
-    """Proxy the original image from Immich. For RAW formats, returns the preview JPEG."""
-    from immich_client import get_immich_config, get_asset_info, get_asset_thumbnail
+    """Full-size image of an Immich asset for the lightbox: the original
+    when the browser can show it (JPEG/PNG/WebP/GIF), else Immich's preview."""
+    from immich_client import get_immich_config, get_asset_info, get_asset_original, get_asset_preview
     url, api_key = await get_immich_config()
     if not url or not api_key:
         return Response(status_code=404)
 
-    # Check if the asset is a RAW format — use preview instead of original
-    info = await get_asset_info(asset_id)
-    if info:
-        filename = info.get("originalFileName", "")
-        ext = os.path.splitext(filename)[1].lower()
-        if ext in RAW_EXTENSIONS:
-            data = await get_asset_thumbnail(asset_id, size="preview")
-            if data:
-                return Response(content=data, media_type="image/jpeg")
+    async def preview() -> Response:
+        result = await get_asset_preview(asset_id)
+        if not result:
             return Response(status_code=404)
+        return Response(content=result[0], media_type=result[1])
 
+    info = await get_asset_info(asset_id)
+    if info and not _browser_shows(_original_mime(info)):
+        return await preview()
     try:
-        from immich_client import get_asset_original
         result = await get_asset_original(asset_id, api_key=api_key)
-        if result:
-            data, content_type = result
-            return Response(content=data, media_type=content_type)
-        return Response(status_code=404)
     except Exception:
+        result = None
+    if not result:
         return Response(status_code=404)
+    data, content_type = result
+    if not _browser_shows(content_type):
+        # Asset info was not readable; the original's type decides.
+        return await preview()
+    return Response(content=data, media_type=content_type)
 
 
 @router.get("/api/original/local/{job_id}")
@@ -1823,6 +1848,13 @@ async def _run_batch_clean(page: int):
             page_groups = group_index[start:start + per_page]
 
         safe_groups = [g for g in page_groups if g.get("safe_for_batch", g.get("all_exact"))]
+        # Groups of merely similar pictures are the user's decision. They are
+        # counted as skipped, with their reason, instead of vanishing from
+        # the summary ("0 skipped" while groups stayed on the page).
+        left_out = [g for g in page_groups if not g.get("safe_for_batch", g.get("all_exact"))]
+        _batch_progress["skipped"] += len(left_out)
+        left_out_reasons = [f"{g['original_key']}: ähnliche Bilder, nicht automatisch — bitte selbst vergleichen"
+                            for g in left_out[:20]]
         _batch_progress["total"] = len(safe_groups)
 
         for idx, g in enumerate(safe_groups, start=1):
@@ -1850,10 +1882,10 @@ async def _run_batch_clean(page: int):
         summary = (f"Batch-Clean Quality ({page_label}): "
                    f"{_batch_progress['kept']} groups, "
                    f"{_batch_progress['deleted']} deleted, "
-                   f"{_batch_progress['skipped']} skipped, "
+                   f"{_batch_progress['skipped']} skipped (davon {len(left_out)} ähnlich, nicht automatisch), "
                    f"{_batch_progress['errors']} errors")
         log = log_warning if _batch_progress["skipped"] or _batch_progress["errors"] else log_info
-        await log("duplicates", summary, "; ".join(skipped_reasons))
+        await log("duplicates", summary, "; ".join((skipped_reasons + left_out_reasons)[:40]))
 
     except Exception as exc:
         logger.error("Batch-clean crashed: %s\n%s", exc, traceback.format_exc())

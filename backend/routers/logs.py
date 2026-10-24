@@ -1,8 +1,9 @@
 import json
+import re
 from urllib.parse import urlencode
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
-from markupsafe import Markup
+from markupsafe import Markup, escape
 from sqlalchemy import select, func
 from config import config_manager
 from database import async_session
@@ -19,6 +20,28 @@ def _tojson_unicode(value, indent=None):
 
 
 templates.env.filters["tojson_unicode"] = _tojson_unicode
+
+# A debug key as the counter hands it out (inputs.common.next_debug_key).
+_JOB_KEY = re.compile(r"\bMA-\d{4}-\d+\b")
+
+
+def _link_job_keys(text, own: str | None = None):
+    """Escape a job message and link every other job's debug key in it to
+    that job's page (e.g. the original a duplicate's content lives on in).
+    Mirrored in static/js/app.js (setJobMessage) for the live refresh."""
+    text = str(text or "")
+    parts, pos = [], 0
+    for m in _JOB_KEY.finditer(text):
+        parts.append(escape(text[pos:m.start()]))
+        key = m.group(0)
+        parts.append(escape(key) if key == own
+                     else Markup('<a class="ui-link" href="/logs/job/{0}">{0}</a>').format(key))
+        pos = m.end()
+    parts.append(escape(text[pos:]))
+    return Markup("").join(parts)
+
+
+templates.env.filters["link_job_keys"] = _link_job_keys
 
 ITEMS_PER_PAGE = 50
 

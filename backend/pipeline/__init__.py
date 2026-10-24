@@ -172,8 +172,9 @@ async def _run_pipeline(job_id: int):
             # file was in place (crash, R-10b): finish that first.
             ok, notes = await reprocess.resume_prepare_source(session, job, actor="system:resume")
             if not ok:
+                original = await _duplicate_original(job)
                 job.status = "error"
-                job.error_message = reprocess.missing_source_message(notes)
+                job.error_message = reprocess.missing_source_message(notes, original)
                 await runs.set_values(session, job, clear_params=True)
                 job.completed_at = datetime.now()
                 await session.commit()
@@ -446,6 +447,16 @@ async def reset_job_for_retry(job_id: int, *, actor: str = "user:retry") -> bool
             return await _prepare_retry(session, job_id, actor)
 
 
+async def _duplicate_original(job):
+    """reprocess.duplicate_original for the error message of a refused
+    retry; a failure only costs the hint (the job must not stay claimed)."""
+    try:
+        return await reprocess.duplicate_original(job)
+    except Exception:
+        logger.exception("%s: original of the duplicate not checked", job.debug_key)
+        return None
+
+
 async def _prepare_retry(session, job_id: int, actor: str) -> bool:
     """reset_job_for_retry after a successful claim (job is 'processing')."""
     job = await session.get(Job, job_id)
@@ -464,14 +475,17 @@ async def _prepare_retry(session, job_id: int, actor: str) -> bool:
         # No source anywhere. Requeueing now would spin the job through
         # the pipeline forever (live MA-2026-15415, -23077); stop with a
         # clear error instead. The old step results stay for the record.
+        # A duplicate whose original holds the content says so (live
+        # MA-2026-56483: the photo was in Immich, as the original's asset).
+        original = await _duplicate_original(job)
         job.status = "error"
-        job.error_message = reprocess.missing_source_message(notes)
+        job.error_message = reprocess.missing_source_message(notes, original)
         job.retry_count = 0
         if not reprocess._is_immich_target(job.target_path):
             job.target_path = None
         await session.commit()
         await log_warning("pipeline", f"{key} Retry abgebrochen: Datei nicht auffindbar",
-                          "; ".join(notes) or "weder lokal noch in Immich")
+                          job.error_message)
         return False
 
     # **Nuclear retry**: drop EVERY step result, IA-01..IA-11, and the

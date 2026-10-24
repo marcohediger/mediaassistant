@@ -54,6 +54,26 @@
     .logs-tabbar .ui-tab > .ui-i { display: none; }
 }
 
+/* Preview of "Erledigte Duplikat-Fehler aufräumen" (dialog): one
+   collapsible group per outcome, each job on a line that wraps on a phone */
+.dup-errors-groups { display: flex; flex-direction: column; gap: var(--ui-space-3); }
+.dup-errors-group { border: 1px solid var(--ui-card-border); border-radius: var(--ui-radius); }
+.dup-errors-group > summary {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-3);
+    padding: var(--ui-space-2) var(--ui-space-3); cursor: pointer; font-weight: 600;
+    border-radius: var(--ui-radius);
+}
+.dup-errors-group > summary:hover { background: var(--ui-row-hover); }
+.dup-errors-group > summary:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.dup-errors-list {
+    margin: 0; padding: var(--ui-space-2) var(--ui-space-3) var(--ui-space-3);
+    list-style: none; border-top: 1px solid var(--ui-line);
+    display: flex; flex-direction: column; gap: var(--ui-space-1);
+    font-size: var(--ui-fs-sm);
+}
+.dup-errors-list > li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; min-width: 0; }
+.dup-errors-file { min-width: 0; overflow-wrap: anywhere; color: var(--text-muted); }
+
 /* Trailing chevron on "Weiter" */
 .logs-next > .ui-i { margin-left: 0; margin-right: -0.15rem; }
 
