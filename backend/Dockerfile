@@ -1,10 +1,12 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Debian security updates first; ImageMagick is gone since 3.0.1 (GIF and the
+# HEIC fallback go through Pillow, see pipeline/step_ia04_convert.py).
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     exiftool \
     libheif-examples \
     ffmpeg \
-    imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -285,6 +285,7 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_module_rerun.py` | Neu ausführen: Vorschau, Kaskade nach gelesenen Feldern, veraltet, KI nur auf Wunsch, Immich-Modus, Abbruch, Absturz in der Vorbereitung | `docker exec mediaassistant-dev python /app/test_module_rerun.py` |
 | `backend/test_executor.py` | Ausführung nach Abhängigkeiten: Register als einzige Quelle, IA-03 als Seiten-Task, Betriebsmittel-Grenzen, Stopp-Regeln | `docker exec mediaassistant-dev python /app/test_executor.py` |
 | `backend/test_immich_dedup.py` | Duplikat-Auflösung mit echtem Immich: geteiltes Asset bei Keep, Übertragung, Review-Fälle | `docker exec mediaassistant-dev python /app/test_immich_dedup.py` |
+| `backend/test_ia04_convert.py` | IA-04 ohne ImageMagick: GIF (erstes Bild) und HEIC-Ausweichweg über Pillow, mit fehlschlagendem `heif-convert` im `PATH` | `docker exec mediaassistant-dev python /app/test_ia04_convert.py` |
 
 ### Pflicht-Vorstufe: startet die App überhaupt?
 

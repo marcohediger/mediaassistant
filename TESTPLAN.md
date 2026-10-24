@@ -475,7 +475,7 @@ Dokumentierte Limitations — der Test prüft, dass die Pipeline
 genau dieses Verhalten zeigt (nicht crasht, dokumentierte
 Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 
-- **LIM-01:** GIF-Konvertierung — `convert` (ImageMagick) nicht im Container → GIF wird direkt an KI gesendet
+- **LIM-01:** ~~GIF-Konvertierung — `convert` (ImageMagick) nicht im Container~~ — seit 3.0.1 behoben: IA-04 wandelt GIF (erstes Bild) und den HEIC-Ausweichweg über Pillow um (`test_ia04_convert.py`)
 - **LIM-02:** Video < 1s — Thumbnail-Extraktion scheitert (Seek-Position > Videolänge)
 - **LIM-03:** Leere Ordner — Werden nur aufgeräumt wenn `folder_tags` aktiv ist
 - **LIM-04:** SMTP leerer Wert — JSON-encoded leerer String `""` wird nicht als "nicht konfiguriert" erkannt

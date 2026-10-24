@@ -11,7 +11,7 @@ annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.14.2
 Authlib==1.8.0
-certifi==2026.7.22
+certifi==2026.10.19
 cffi==2.1.1
 click==8.5.0
 cryptography==50.0.1
@@ -28,7 +28,7 @@ Jinja2==3.1.6
 joserfc==1.7.5
 MarkupSafe==3.0.3
 numpy==2.5.2
-pillow==12.3.0
+pillow==13.0.0
 pillow_heif==1.6.0
 pycparser==3.0
 pydantic==2.13.5
