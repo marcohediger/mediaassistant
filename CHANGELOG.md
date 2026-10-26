@@ -1,5 +1,37 @@
 # Changelog
 
+## v3.1.1 — 2026-10-26
+
+### Fix: Videos ohne Vorschau auf der Duplikat-Seite
+
+Bei zwei Live-Foto-Videos (MA-2026-70587/-70588, je 2–3 s, HEVC 1920×1440)
+zeigte die Duplikat-Seite für beide „Keine Vorschau".
+
+- **Lokales Video:** Das Vorschaubild kam aus Sekunde 1 (`ffmpeg -ss 1`).
+  Ein Clip von etwa einer Sekunde hat dort kein Bild, ffmpeg schreibt nichts.
+  Jetzt zuerst Sekunde 1, sonst das erste Bild; mehr Zeit für ffmpeg (30 s),
+  und ein Fehlschlag steht mit ffmpegs Meldung im Log.
+- **Video in Immich:** Für den versteckten Videoteil eines Live-Fotos liefert
+  Immich kein Vorschaubild. MediaAssistant holt dann das Video und erzeugt
+  das Bild selbst — für die Vorschau und beim Vergrössern.
+
+### Datensicherheit: Videos nur noch bitgleich automatisch bereinigen
+
+Die beiden Clips oben sind keine Duplikate: eine Sekunde nacheinander
+aufgenommen, verschieden lang und gross. Die Duplikat-Erkennung vergleicht
+bei Videos aber nur ein Standbild, und bei fast gleicher Szene ergibt das
+Bildabstand 0 („100 % ähnlich"). „Automatisch bereinigen" hätte einen der
+beiden in den Papierkorb gelegt.
+
+Jetzt nimmt „Automatisch bereinigen" eine Gruppe mit Videos nur, wenn die
+Dateien bitgleich sind. Andere Video-Gruppen tragen das Merkmal
+„Video · selbst prüfen" und werden im Ergebnis als übersprungen gezählt, mit
+Grund. Fotos mit Bildabstand 0 bleiben wie bisher automatisch.
+
+Getestet: neuer Teil V in `test_dup_page_errors.py` (kurzes Video lokal,
+Video in Immich ohne Immich-Vorschau, Vergrössern, drei Bereinigungs-Fälle);
+vor dem Fix 2/6, danach 6/6.
+
 ## v3.1.0 — 2026-10-24
 
 ### Update-Hinweise
