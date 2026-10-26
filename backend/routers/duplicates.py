@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import subprocess
+import tempfile
 import traceback
 import uuid
 from collections import defaultdict
@@ -29,8 +30,8 @@ from pipeline.reprocess import prepare_job_for_reprocess
 from system_logger import log_error, log_info, log_warning
 from template_engine import render
 from thumbnail_utils import (
-    generate_thumbnail, raw_to_jpeg, heic_to_jpeg,
-    THUMB_SIZE, PREVIEW_SIZE, HEIC_EXTENSIONS, RAW_EXTENSIONS,
+    generate_thumbnail, raw_to_jpeg, heic_to_jpeg, video_to_jpeg,
+    THUMB_SIZE, PREVIEW_SIZE, HEIC_EXTENSIONS, RAW_EXTENSIONS, VIDEO_EXTENSIONS,
 )
 
 logger = logging.getLogger("mediaassistant.routers.duplicates")
@@ -386,6 +387,15 @@ async def _build_group_index() -> tuple[list[dict], dict[str, "Job"]]:
                 r.get("match_type") in ("exact", "raw_jpg_pair", None) or r.get("phash_distance") == 0
                 for r in relations
             ))
+            # Videos only when bit-identical: their pHash comes from a single
+            # frame, so two different clips of one scene reach distance 0
+            # (live MA-2026-70587/-70588: two Live-Photo clips a second apart).
+            video_review = not all_exact and any(
+                os.path.splitext(jobs_by_key[k].filename or "")[1].lower() in VIDEO_EXTENSIONS
+                for k in valid_keys
+            )
+            if video_review:
+                safe_for_batch = False
 
             groups.append({
                 "original_key": group_key,
@@ -393,6 +403,7 @@ async def _build_group_index() -> tuple[list[dict], dict[str, "Job"]]:
                 "count": len(valid_keys),
                 "all_exact": all_exact,
                 "safe_for_batch": safe_for_batch,
+                "video_review": video_review,
                 "is_immich_duplicate": has_immich,
             })
 
@@ -488,6 +499,7 @@ async def _build_duplicate_groups() -> list[dict]:
             "members": members,
             "count": g["count"],
             "all_exact": g["all_exact"],
+            "video_review": g.get("video_review", False),
             "is_immich_duplicate": g["is_immich_duplicate"],
         })
 
@@ -523,6 +535,7 @@ async def api_duplicate_groups(request: Request):
             "members": members,
             "count": g["count"],
             "all_exact": g["all_exact"],
+            "video_review": g.get("video_review", False),
             "is_immich_duplicate": g["is_immich_duplicate"],
         })
 
@@ -620,6 +633,7 @@ async def duplicates_page(request: Request):
             "members": members,
             "count": g["count"],
             "all_exact": g["all_exact"],
+            "video_review": g.get("video_review", False),
             "is_immich_duplicate": g["is_immich_duplicate"],
         })
     page_exact_groups = sum(1 for g in page_groups if g.get("safe_for_batch", g.get("all_exact")))
@@ -673,8 +687,34 @@ async def immich_thumbnail(asset_id: str, size: str = "thumbnail"):
     from immich_client import get_asset_thumbnail
     data = await get_asset_thumbnail(asset_id, size=size)
     if not data:
+        data = await _immich_video_frame(asset_id, PREVIEW_SIZE if size == "preview" else THUMB_SIZE)
+    if not data:
         return Response(status_code=404)
     return Response(content=data, media_type="image/jpeg")
+
+
+async def _immich_video_frame(asset_id: str, max_size, info: dict | None = None) -> bytes | None:
+    """A frame of a video in Immich, rendered here from its original, for a
+    video Immich has no thumbnail or preview of — the hidden video part of a
+    Live Photo (live MA-2026-70587, "Keine Vorschau"). None for anything else."""
+    from immich_client import get_asset_info, get_asset_original
+    info = info or await get_asset_info(asset_id)
+    if not info or str(info.get("type") or "").upper() != "VIDEO":
+        return None
+    try:
+        result = await get_asset_original(asset_id)
+    except Exception:
+        result = None
+    if not result:
+        return None
+    suffix = os.path.splitext(info.get("originalFileName") or "")[1] or ".mov"
+
+    def render() -> bytes | None:
+        with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+            tmp.write(result[0])
+            tmp.flush()
+            return video_to_jpeg(tmp.name, max_size)
+    return await asyncio.to_thread(render)
 
 
 # What an <img> shows in every current browser. Anything else (HEIC/HEIF,
@@ -702,15 +742,18 @@ async def immich_original(asset_id: str):
     if not url or not api_key:
         return Response(status_code=404)
 
-    async def preview() -> Response:
+    async def preview(info: dict | None = None) -> Response:
         result = await get_asset_preview(asset_id)
-        if not result:
-            return Response(status_code=404)
-        return Response(content=result[0], media_type=result[1])
+        if result:
+            return Response(content=result[0], media_type=result[1])
+        frame = await _immich_video_frame(asset_id, PREVIEW_SIZE, info)
+        if frame:
+            return Response(content=frame, media_type="image/jpeg")
+        return Response(status_code=404)
 
     info = await get_asset_info(asset_id)
     if info and not _browser_shows(_original_mime(info)):
-        return await preview()
+        return await preview(info)
     try:
         result = await get_asset_original(asset_id, api_key=api_key)
     except Exception:
@@ -1853,7 +1896,9 @@ async def _run_batch_clean(page: int):
         # the summary ("0 skipped" while groups stayed on the page).
         left_out = [g for g in page_groups if not g.get("safe_for_batch", g.get("all_exact"))]
         _batch_progress["skipped"] += len(left_out)
-        left_out_reasons = [f"{g['original_key']}: ähnliche Bilder, nicht automatisch — bitte selbst vergleichen"
+        left_out_reasons = [f"{g['original_key']}: "
+                            + ("Videos, nur ein Standbild verglichen" if g.get("video_review") else "ähnliche Bilder")
+                            + ", nicht automatisch — bitte selbst vergleichen"
                             for g in left_out[:20]]
         _batch_progress["total"] = len(safe_groups)
 

@@ -327,7 +327,9 @@
     "msg_keep_partial": "{name} wurde behalten, aber nicht alles liess sich aufräumen: {detail}",
     "msg_not_dup_status": "{name} ist kein offenes Duplikat mehr (Status: {detail}). Es wurde nichts geändert.",
     "msg_not_dup_missing": "{name} wurde nicht neu eingereiht: Die Datei ist nirgends auffindbar (weder lokal noch in Immich). Sie bleibt als Duplikat sichtbar.",
-    "msg_delete_failed": "{name} wurde nicht gelöscht: {detail}"
+    "msg_delete_failed": "{name} wurde nicht gelöscht: {detail}",
+    "kind_video": "Video · selbst prüfen",
+    "kind_video_title": "Bei Videos vergleicht die Erkennung nur ein Standbild — zwei verschiedene Clips derselben Szene sehen gleich aus. «Automatisch bereinigen» lässt diese Gruppe aus."
   },
   "settings": {
     "title": "Einstellungen",

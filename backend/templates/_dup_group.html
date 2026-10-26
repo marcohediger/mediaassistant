@@ -29,6 +29,9 @@
             {% else %}
             <span class="ui-badge is-warning" title="{{ d.kind_similar_title }}">{{ icon('image', 12) }}{{ d.kind_similar }}</span>
             {% endif %}
+            {% if group.video_review %}
+            <span class="ui-badge is-warning" title="{{ d.kind_video_title }}">{{ icon('alert-triangle', 12) }}{{ d.kind_video }}</span>
+            {% endif %}
             {% if group.is_immich_duplicate %}
             <span class="ui-badge is-violet" title="{{ d.kind_immich_title }}">{{ icon('cloud', 12) }}{{ d.kind_immich }}</span>
             {% endif %}

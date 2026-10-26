@@ -5,11 +5,14 @@ router belongs here.  Do NOT reimplement these elsewhere.
 """
 
 import io
+import logging
 import os
 import subprocess
 import tempfile
 
 from PIL import Image
+
+logger = logging.getLogger("mediaassistant.thumbnails")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -62,19 +65,27 @@ def heic_to_jpeg(filepath: str) -> bytes | None:
 
 
 def video_to_jpeg(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
-    """Extract a frame from a video file via ffmpeg and return as JPEG bytes."""
-    try:
-        w, h = max_size
-        result = subprocess.run(
-            ["ffmpeg", "-ss", "1", "-i", filepath,
-             "-frames:v", "1", "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease",
-             "-f", "image2", "-c:v", "mjpeg", "-q:v", "5", "pipe:1"],
-            capture_output=True, timeout=15,
-        )
+    """A frame of a video as JPEG bytes: at 1 s (past a black first frame),
+    else the first frame — a clip of about a second, like the video part of
+    a Live Photo, has no frame at 1 s and ffmpeg writes nothing."""
+    w, h = max_size
+    error = ""
+    for seek in ("1", "0"):
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-ss", seek, "-i", filepath,
+                 "-frames:v", "1", "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease",
+                 "-f", "image2", "-c:v", "mjpeg", "-q:v", "5", "pipe:1"],
+                capture_output=True, timeout=30,
+            )
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            continue
         if result.stdout and len(result.stdout) > 500:
             return result.stdout
-    except Exception:
-        pass
+        error = (result.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-1:] or [""]
+        error = error[0]
+    logger.warning("no video thumbnail for %s: %s", filepath, error[:300])
     return None
 
 

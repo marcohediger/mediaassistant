@@ -422,6 +422,91 @@ async def test_cleanup(ctx):
 # ──────────────────────────────────────────────────────────────
 # Cleanup
 # ──────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+# V: video previews; videos only exact in batch clean
+# ──────────────────────────────────────────────────────────────
+def make_video(path, seconds, size="640x480"):
+    """A short H.264 clip; the random comment makes its bytes unique for Immich."""
+    import subprocess
+    import uuid
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                    "-i", f"testsrc=duration={seconds}:size={size}:rate=30",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-metadata", f"comment={uuid.uuid4()}", path],
+                   check=True, timeout=60)
+    return path
+
+
+async def test_video_previews(ctx):
+    print("\n── V: Vorschau von Videos, Videos nur exakt automatisch bereinigen ──")
+    import immich_client
+    from routers import duplicates as dup
+
+    # V-01: a clip of 1 s has no frame at second 1 (live: Live-Photo video
+    # parts are 1.5 … 3 s; IMG_6309.MOV showed "Keine Vorschau").
+    short = make_video(f"{SANDBOX}/src/v_short_{TS}.mov", 1)
+    key = next_key()
+    job_id = await add_job(key, {"IA-01": {"file_type": "MOV"}, "IA-02": {"status": "ok"}},
+                           original_path=short, source_label="Inbox", status="duplicate", target_path=short)
+    r = await http("GET", f"/api/thumbnail/{job_id}")
+    check("V-01 kurzes lokales Video (1 s): Vorschaubild", r.status_code == 200 and r.content[:2] == b"\xff\xd8",
+          f"{r.status_code} {len(r.content)} B")
+
+    # V-02/03: a video in Immich without a thumbnail from Immich (the hidden
+    # video part of a Live Photo, live MA-2026-70587): MA renders one itself.
+    clip = make_video(f"{SANDBOX}/src/v_immich_{TS}.mov", 2)
+    asset_id = await upload(clip)
+    real_thumb, real_preview = immich_client.get_asset_thumbnail, immich_client.get_asset_preview
+
+    async def nothing(*_a, **_k):
+        return None
+    immich_client.get_asset_thumbnail = immich_client.get_asset_preview = nothing
+    try:
+        thumb = await dup.immich_thumbnail(asset_id)
+        full = await dup.immich_original(asset_id)
+    finally:
+        immich_client.get_asset_thumbnail, immich_client.get_asset_preview = real_thumb, real_preview
+    check("V-02 Video in Immich ohne Immich-Vorschau: Vorschaubild aus dem Video",
+          thumb.status_code == 200 and thumb.body[:2] == b"\xff\xd8", f"{thumb.status_code}")
+    check("V-03 dasselbe beim Vergrössern", full.status_code == 200 and full.body[:2] == b"\xff\xd8",
+          f"{full.status_code}")
+
+    # V-04 … V-06: batch clean takes videos only when they are bit-identical.
+    async def pair(name, match, distance=None):
+        orig_key, dup_key = next_key(), next_key()
+        await add_job(orig_key, {"IA-01": {"file_type": "MOV"}, "IA-02": {"status": "ok"}},
+                      filename=f"{name}_a.MOV", original_path=f"{SANDBOX}/lib/{name}_a.MOV", source_label="Immich",
+                      status="done")
+        ia02 = {"status": "duplicate", "match_type": match, "original_debug_key": orig_key}
+        if distance is not None:
+            ia02["phash_distance"] = distance
+        await add_job(dup_key, {"IA-01": {"file_type": "MOV"}, "IA-02": ia02},
+                      filename=f"{name}_b.MOV", original_path=f"{SANDBOX}/lib/{name}_b.MOV", source_label="Immich",
+                      status="duplicate")
+        return dup_key
+
+    similar_key = await pair("v_similar", "similar", 0)
+    exact_key = await pair("v_exact", "exact")
+    photo_orig, photo_dup = next_key(), next_key()
+    await add_job(photo_orig, {"IA-01": IA01, "IA-02": {"status": "ok"}}, filename="v_photo_a.jpg",
+                  original_path=f"{SANDBOX}/lib/v_photo_a.jpg", source_label="Inbox", status="done")
+    await add_job(photo_dup, {"IA-01": IA01, "IA-02": {"status": "duplicate", "match_type": "similar",
+                                                       "phash_distance": 0, "original_debug_key": photo_orig}},
+                  filename="v_photo_b.jpg", original_path=f"{SANDBOX}/lib/v_photo_b.jpg", source_label="Inbox",
+                  status="duplicate")
+    index, _ = await dup._build_group_index()
+    by_member = {k: g for g in index for k in g["member_keys"]}
+    sim, ex, photo = by_member.get(similar_key), by_member.get(exact_key), by_member.get(photo_dup)
+    check("V-04 zwei Videos mit Bildabstand 0: nicht automatisch, von Hand prüfen",
+          bool(sim) and not sim["safe_for_batch"] and sim.get("video_review") is True,
+          str(sim and {k: sim.get(k) for k in ("all_exact", "safe_for_batch", "video_review")}))
+    check("V-05 bitgleiche Videos: weiterhin automatisch",
+          bool(ex) and ex["safe_for_batch"] and not ex.get("video_review"),
+          str(ex and {k: ex.get(k) for k in ("all_exact", "safe_for_batch", "video_review")}))
+    check("V-06 Fotos mit Bildabstand 0: weiterhin automatisch", bool(photo) and photo["safe_for_batch"],
+          str(photo and {k: photo.get(k) for k in ("all_exact", "safe_for_batch")}))
+
+
 async def cleanup():
     from immich_client import ASSET_MISSING, delete_asset
     from test_support.invariants import delete_test_jobs
@@ -438,7 +523,8 @@ async def cleanup():
     shutil.rmtree(SANDBOX, ignore_errors=True)
 
 
-SECTIONS = {"L": test_lightbox, "P": test_public_link, "M": test_retry_message, "C": test_cleanup}
+SECTIONS = {"L": test_lightbox, "P": test_public_link, "M": test_retry_message, "C": test_cleanup,
+            "V": test_video_previews}
 
 
 async def main():

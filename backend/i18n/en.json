@@ -327,7 +327,9 @@
     "msg_keep_partial": "{name} was kept, but not everything could be cleaned up: {detail}",
     "msg_not_dup_status": "{name} is no longer an open duplicate (status: {detail}). Nothing was changed.",
     "msg_not_dup_missing": "{name} was not queued: the file cannot be found anywhere (neither locally nor in Immich). It stays visible as a duplicate.",
-    "msg_delete_failed": "{name} was not deleted: {detail}"
+    "msg_delete_failed": "{name} was not deleted: {detail}",
+    "kind_video": "Video · check yourself",
+    "kind_video_title": "For videos the detection compares a single frame only — two different clips of one scene look the same. «Clean up automatically» leaves this group out."
   },
   "settings": {
     "title": "Settings",
