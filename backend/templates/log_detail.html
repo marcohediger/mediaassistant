@@ -6,6 +6,7 @@
 {% from "_status.html" import status_badge with context %}
 {% from "_modules.html" import module_bar, history_strings with context %}
 {% from "_rerun.html" import rerun_dialog with context %}
+{% from "_copy.html" import copy_btn with context %}
 {% macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
@@ -28,7 +29,7 @@
     <div class="ui-page-head-text">
         <a class="ui-page-back" href="{{ back.url }}" title="{{ t.job_detail.back_to | replace('{page}', back.label) }}">{{ icon('chevron-left') }}{{ back.label }}</a>
         <h1 class="ui-page-title"><span class="job-key">{{ job.debug_key }}</span></h1>
-        <p class="ui-page-sub job-file">{{ job.filename }}</p>
+        <p class="ui-page-sub job-file">{{ job.filename }}{{ copy_btn(job.filename, 'name') }}</p>
     </div>
     {# Retry/Delete actions are available for any terminal job state.
        The user is the source of truth for "this needs redoing" — even
@@ -194,14 +195,14 @@
             <dl class="ui-kv is-inset job-kv-stack">
                 <div class="ui-kv-row">
                     <dt>{{ t.job_detail.original }}{% if '/inbox' in (job.original_path or '') %} <span class="job-kv-note">({{ t.job_detail.inbox_temp }})</span>{% endif %}</dt>
-                    <dd><code class="ui-path job-path{{ ' is-empty' if not job.original_path else '' }}">{{ job.original_path or '—' }}</code></dd>
+                    <dd><code class="ui-path job-path{{ ' is-empty' if not job.original_path else '' }}">{{ job.original_path or '—' }}</code>{{ copy_btn(job.original_path) }}</dd>
                 </div>
                 {# A dry run keeps its would-be target in the IA-08 step result only #}
                 {% set ia08 = job.step_result.get('IA-08') if job.dry_run and job.step_result is mapping else none %}
                 {% set planned = ia08.get('target_path') if ia08 is mapping and not job.target_path else none %}
                 <div class="ui-kv-row">
                     <dt>{{ t.job_detail.target }}{% if planned %} <span class="job-kv-note">({{ t.sets.dry_run_short }})</span>{% endif %}</dt>
-                    <dd><code class="ui-path job-path{{ ' is-empty' if not (job.target_path or planned) else '' }}" data-field="target_path"{% if planned %} data-planned="1"{% endif %}>{{ job.target_path or planned or '—' }}</code></dd>
+                    <dd><code class="ui-path job-path{{ ' is-empty' if not (job.target_path or planned) else '' }}" data-field="target_path"{% if planned %} data-planned="1"{% endif %}>{{ job.target_path or planned or '—' }}</code>{{ copy_btn(job.target_path or planned, keep=True) }}</dd>
                 </div>
             </dl>
         </section>

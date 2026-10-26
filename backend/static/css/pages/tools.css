@@ -49,7 +49,7 @@
 }
 .tools-sample { display: flex; flex-direction: column; align-items: flex-start; gap: 0.35rem; min-width: 0; }
 .tools-sample-title { margin: 0; max-width: 80ch; font-size: var(--ui-fs-xs); font-weight: 500; line-height: 1.5; color: var(--text-muted); }
-.tools-sample > .ui-path { max-width: 100%; }
+.tools-sample > :is(.ui-path, .ui-copyable) { max-width: 100%; }
 
 @media (max-width: 600px) {
     .tools-result { padding: 1rem; }

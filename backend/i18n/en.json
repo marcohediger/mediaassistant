@@ -329,7 +329,8 @@
     "msg_not_dup_missing": "{name} was not queued: the file cannot be found anywhere (neither locally nor in Immich). It stays visible as a duplicate.",
     "msg_delete_failed": "{name} was not deleted: {detail}",
     "kind_video": "Video · check yourself",
-    "kind_video_title": "For videos the detection compares a single frame only — two different clips of one scene look the same. «Clean up automatically» leaves this group out."
+    "kind_video_title": "For videos the detection compares a single frame only — two different clips of one scene look the same. «Clean up automatically» leaves this group out.",
+    "msg_keep_kept_trashed": "{name} is in the Immich trash, so it was not kept. Restore the picture in Immich or keep another picture of the group. Nothing was deleted."
   },
   "settings": {
     "title": "Settings",
@@ -686,7 +687,11 @@
     "cancel": "Cancel",
     "close": "Close",
     "ok": "OK",
-    "optional": "optional"
+    "optional": "optional",
+    "copy_name": "Copy file name",
+    "copy_path": "Copy path",
+    "copied": "Copied",
+    "copy_failed": "Could not copy"
   },
   "tools": {
     "title": "Tools",

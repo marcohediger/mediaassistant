@@ -25,7 +25,7 @@ from database import async_session
 from file_operations import (
     job_asset_ids, job_copies, present_owners, resolve_filepath,
 )
-from models import AssetRef, Job
+from models import AssetRef, FileCopy, Job
 from pipeline.reprocess import prepare_job_for_reprocess
 from system_logger import log_error, log_info, log_warning
 from template_engine import render
@@ -1440,9 +1440,22 @@ async def _carry_out(members: dict, plan: dict, *, source: str, user_kept: bool)
     kept_rows, kept_notes = await job_copies(kept)
     if not kept_rows:
         detail = "; ".join(kept_notes) or "kein Exemplar im Register, an target_path oder in Immich"
-        await log_warning("duplicates", f"{kept.debug_key} Duplikat-Auflösung abgebrochen: behaltene Datei fehlt",
-                          f"{detail} — nichts gelöscht")
+        # The user deleted the kept picture in Immich (live MA-2026-71338): the
+        # message says where it is and what to do instead of "nicht auffindbar".
+        # job_copies() has just asked Immich, so the register state is current.
+        async with async_session() as session:
+            refs = (await session.execute(select(AssetRef.location).where(
+                AssetRef.job_id == kept.id))).scalars().all()
+            trashed = sorted(set((await session.execute(select(FileCopy.location).where(
+                FileCopy.kind == "immich", FileCopy.state == "trashed",
+                FileCopy.location.in_([*job_asset_ids(kept), *refs])))).scalars().all()))
+        await log_warning("duplicates", f"{kept.debug_key} Duplikat-Auflösung abgebrochen: behaltene Datei "
+                          + ("im Immich-Papierkorb" if trashed else "fehlt"), f"{detail} — nichts gelöscht")
         await _release(plan, members)
+        if trashed:
+            return Resolution([], 0, 0, [_problem(
+                "kept_trashed", f"Die behaltene Datei liegt im Immich-Papierkorb (Asset {', '.join(trashed)})",
+                fatal=True, name=kept.filename, detail=", ".join(trashed))])
         return Resolution([], 0, 0, [_problem(
             "kept_missing", f"Die behaltene Datei ist nicht auffindbar oder lässt sich nicht prüfen: {detail}",
             fatal=True, name=kept.filename, detail=detail)])

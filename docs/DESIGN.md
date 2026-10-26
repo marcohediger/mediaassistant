@@ -430,9 +430,31 @@ Seitennavigation (lange Bereichslisten, wird auf dem Handy zur waagrechten Leist
 <code class="ui-code">/library</code>
 <code class="ui-path">/inbox/Handy/2026/IMG_3140.HEIC</code>        <!-- bricht überall um -->
 <span class="ui-mono ui-clip" style="--ui-clip:22rem" title="vollständiger Wert">9f2c4e…</span>
-<span class="ui-copyable"><code class="ui-path">…</code><button type="button" class="ui-icon-btn" aria-label="Kopieren">{I:copy 14}</button></span>
 <pre class="ui-pre">{ "json": true }</pre>    <!-- .ui-pre-wrap: umbrechen statt scrollen -->
 ```
+
+### Kopieren (Dateiname, Pfad)
+**Jeder angezeigte Dateiname und jeder Pfad / Ort** (auch `immich:<id>` und
+Asset-IDs als Ort) bekommt direkt dahinter einen Kopieren-Knopf — nicht
+aber ein Debug-Key allein. Macro in `templates/_copy.html`:
+```html
+{% from "_copy.html" import copy_btn with context %}
+<!-- eine Zeile mit Ellipse: Wert + Knopf in .ui-copyable, der Wert behält seine Ellipse -->
+<span class="ui-copyable"><a class="logs-name" href="…" title="IMG_3140.HEIC">IMG_3140.HEIC</a>{{ copy_btn(job.filename, 'name') }}</span>
+<!-- umbrechender Pfad: Knopf folgt im Text; in einem Flex-Container beides in .ui-copyable.is-wrap -->
+<code class="ui-path">/library/2026/IMG_3140.HEIC</code>{{ copy_btn(job.target_path) }}
+```
+`kind`: `'name'` („Dateiname kopieren") oder `'path'` („Pfad kopieren");
+ohne Wert kein Knopf, `keep=True` rendert ihn versteckt (Wert kommt später,
+`setCopyValue` in `app.js`). Gerendert wird
+`<button class="ui-copy" data-copy="…" aria-label="Pfad kopieren: …">{I:copy 14}</button>`:
+gedämpft, Hover/Fokus in `--primary`, 24 px Ziel ohne höhere Zeile.
+Ein Klick-Handler für alle in `app.js` (Capture-Phase, `preventDefault` +
+`stopPropagation`: öffnet keine Zeile, folgt keinem Link), kopiert über
+`navigator.clipboard`, ohne HTTPS über ein verstecktes Textfeld und
+`execCommand("copy")`; danach 1.5 s Haken und „Kopiert" (Tooltip und
+Live-Region). In Skripten: `MA.copyable(node, value, kind, wrap)`,
+`MA.copyButton(value, kind)`, für HTML-Strings `MA.copyButtonHTML(value, kind)`.
 
 ### Schlüssel-Wert-Liste (Job-Details)
 ```html

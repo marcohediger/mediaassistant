@@ -635,7 +635,10 @@ function renderSidecar(res) {
                 });
                 h += '</tbody></table></div>';
                 h += '<div class="tools-sample"><p class="tools-sample-title">' + esc(L.sample) + '</p>' +
-                     res.sample.map(function (f) { return '<code class="ui-path">' + esc(f) + '</code>'; }).join('') + '</div>';
+                     res.sample.map(function (f) {
+                         return '<span class="ui-copyable is-wrap"><code class="ui-path">' + esc(f) + '</code>' +
+                                MA.copyButtonHTML(f, 'path') + '</span>';
+                     }).join('') + '</div>';
             }
             h += note(esc(L.preview_note), 'info');
             document.getElementById('btn_remove').disabled = false;

@@ -101,7 +101,7 @@ document.addEventListener("DOMContentLoaded", function () {
             const name = f.filename || (f.location || "").split("/").pop();
             const strong = H.el("strong", "", name);
             strong.title = name;
-            fileBox.appendChild(strong);
+            fileBox.appendChild(MA.copyable(strong, name, "name"));
             if (f.debug_key) {
                 const a = H.el("a", "trash-key ui-link", f.debug_key);
                 a.href = "/logs/job/" + encodeURIComponent(f.debug_key);
@@ -113,7 +113,7 @@ document.addEventListener("DOMContentLoaded", function () {
             const where = H.el("td", "inv-c-where inv-where");
             if (f.kind) where.appendChild(H.badge(T("kind_" + f.kind) || f.kind));
             where.appendChild(document.createTextNode(" "));
-            where.appendChild(H.el("code", "ui-path", f.location || ""));
+            where.appendChild(MA.copyable(H.el("code", "ui-path", f.location || ""), f.location, "path", true));
             const detail = H.el("td", "inv-c-detail inv-detail", T("inv_desc_" + f.type));
             if (f.detail) detail.appendChild(H.el("span", "trash-actor", f.detail));
             tr.append(type, file, where, detail);

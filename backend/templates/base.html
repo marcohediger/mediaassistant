@@ -120,7 +120,9 @@
     </div>
     {% from "_status.html" import status_badge, STATUSES with context %}
     <template id="status-badges">{% for s in STATUSES %}{{ status_badge(s) }}{{ status_badge(s, icon_only=True) }}{% endfor %}</template>
-    <script type="application/json" id="ui-strings">{{ {"cancel": t.common.cancel, "close": t.common.close, "ok": t.common.ok} | tojson }}</script>
+    <script type="application/json" id="ui-strings">{{ {"cancel": t.common.cancel, "close": t.common.close, "ok": t.common.ok,
+        "copy_name": t.common.copy_name, "copy_path": t.common.copy_path, "copied": t.common.copied,
+        "copy_failed": t.common.copy_failed} | tojson }}</script>
     <script src="/static/js/app.js?v={{ asset_v }}"></script>
     <script src="/static/js/rerun.js?v={{ asset_v }}"></script>
 </body>

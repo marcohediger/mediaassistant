@@ -5,6 +5,7 @@
 {% block content %}
 {% from "_status.html" import status_badge with context %}
 {% from "_modules.html" import module_strip, history_toggle, history_strings with context %}
+{% from "_copy.html" import copy_btn with context %}
 {% set d = t.dashboard %}
 {# Sprite icon; app.js (dashIcon) writes the same markup on live refresh. #}
 {% macro icon(name, size=16) -%}
@@ -31,7 +32,7 @@
 {% set msg = job.error_message or '' %}
 <tr class="hist-row" data-key="{{ job.debug_key }}" data-sig="{{ job_signature(job) }}">
 <td class="ui-col-icon">{{ status_badge(job.status, icon_only=True) }}</td>
-<th scope="row"><div class="dash-job"><a class="dash-job-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename or '' }}">{{ job.filename or '—' }}</a><span class="dash-job-key">{{ job.debug_key or '—' }}</span></div></th>
+<th scope="row"><div class="dash-job"><span class="ui-copyable"><a class="dash-job-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename or '' }}">{{ job.filename or '—' }}</a>{{ copy_btn(job.filename, 'name') }}</span><span class="dash-job-key">{{ job.debug_key or '—' }}</span></div></th>
 <td class="hist-col-mods dash-col-mods">{{ module_strip(job) }}</td>
 <td class="cell-msg{{ ' is-error' if job.status == 'error' else '' }}" title="{{ msg }}">{{ msg }}</td>
 <td class="ui-num dash-col-time">{{ job.updated_at.strftime('%d.%m. %H:%M:%S') if job.updated_at else '—' }}</td>

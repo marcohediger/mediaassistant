@@ -1,0 +1,18 @@
+{#- Copy button for a file name or a file path / location (an Immich
+    reference "immich:<id>" counts as a location). docs/DESIGN.md › Kopieren.
+
+    {% from "_copy.html" import copy_btn with context %}
+    <span class="ui-copyable"><a class="…">IMG_3140.HEIC</a>{{ copy_btn(job.filename, 'name') }}</span>
+
+    kind: 'name' (Dateiname kopieren) or 'path' (Pfad kopieren). Without a
+    value nothing is rendered; keep=True renders it hidden instead, for a
+    value the page fills in later (the job page's target path).
+    The click handler, the fallback without clipboard API and the feedback
+    live in static/js/app.js; copyButton()/copyButtonHTML() there build the
+    same markup for rows the scripts render — change both together. -#}
+{%- macro copy_btn(value, kind='path', keep=False) -%}
+{%- if value or keep -%}
+{%- set label = t.common.copy_name if kind == 'name' else t.common.copy_path -%}
+<button type="button" class="ui-copy" data-copy="{{ value or '' }}" data-copy-kind="{{ kind }}" title="{{ label }}" aria-label="{{ label }}{% if value %}: {{ value }}{% endif %}"{% if not value %} hidden{% endif %}><svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-copy"/></svg></button>
+{%- endif -%}
+{%- endmacro %}

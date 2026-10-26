@@ -3,6 +3,7 @@
 {% block head %}<link rel="stylesheet" href="/static/css/pages/review.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
 {% set r = t.review %}
+{% from "_copy.html" import copy_btn with context %}
 {% macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
@@ -56,7 +57,7 @@
 
     <div class="ui-media-body rv-body">
         <div class="rv-head">
-            <h2 class="rv-title" id="rv-t-{{ item.job_id }}" title="{{ item.filename }}">{{ item.filename }}</h2>
+            <div class="ui-copyable rv-name"><h2 class="rv-title" id="rv-t-{{ item.job_id }}" title="{{ item.filename }}">{{ item.filename }}</h2>{{ copy_btn(item.filename, 'name') }}</div>
             <a class="ui-link ui-mono rv-key" href="/logs/job/{{ item.debug_key }}" title="{{ r.job_details }}">{{ item.debug_key }}</a>
         </div>
 

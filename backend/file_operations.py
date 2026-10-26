@@ -281,7 +281,10 @@ async def job_copies(job, *, check: bool = True) -> tuple[list, list[str]]:
         except fileops.FileOpError as exc:
             notes.append(f"Asset {asset_id}: {exc}")
             continue
-        if row.state in _HELD_STATES:
+        # A trashed or missing asset is asked about again below: the user may
+        # have restored it in Immich since (live MA-2026-71338: "Behalten"
+        # stayed refused after the restore the message advises)
+        if row.state in _HELD_STATES or (check and row.state in ("trashed", "missing")):
             rows.append(row)
             seen.add(asset_id)
         else:

@@ -329,7 +329,8 @@
     "msg_not_dup_missing": "{name} wurde nicht neu eingereiht: Die Datei ist nirgends auffindbar (weder lokal noch in Immich). Sie bleibt als Duplikat sichtbar.",
     "msg_delete_failed": "{name} wurde nicht gelöscht: {detail}",
     "kind_video": "Video · selbst prüfen",
-    "kind_video_title": "Bei Videos vergleicht die Erkennung nur ein Standbild — zwei verschiedene Clips derselben Szene sehen gleich aus. «Automatisch bereinigen» lässt diese Gruppe aus."
+    "kind_video_title": "Bei Videos vergleicht die Erkennung nur ein Standbild — zwei verschiedene Clips derselben Szene sehen gleich aus. «Automatisch bereinigen» lässt diese Gruppe aus.",
+    "msg_keep_kept_trashed": "{name} liegt im Immich-Papierkorb und wurde deshalb nicht behalten. Stelle das Bild in Immich wieder her oder behalte ein anderes Bild der Gruppe. Es wurde nichts gelöscht."
   },
   "settings": {
     "title": "Einstellungen",
@@ -686,7 +687,11 @@
     "cancel": "Abbrechen",
     "close": "Schliessen",
     "ok": "OK",
-    "optional": "optional"
+    "optional": "optional",
+    "copy_name": "Dateiname kopieren",
+    "copy_path": "Pfad kopieren",
+    "copied": "Kopiert",
+    "copy_failed": "Kopieren nicht möglich"
   },
   "tools": {
     "title": "Werkzeuge",

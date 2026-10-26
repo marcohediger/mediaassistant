@@ -6,6 +6,7 @@
 {% from "_status.html" import status_badge with context %}
 {% from "_modules.html" import module_strip, history_toggle, history_strings with context %}
 {% from "_rerun.html" import rerun_dialog, rerun_progress with context %}
+{% from "_copy.html" import copy_btn with context %}
 {% macro icon(name, size=16, cls='') -%}
 <svg class="ui-i{{ ' ' ~ cls if cls else '' }}" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
@@ -388,7 +389,7 @@ function _dupErrorsGroup(label, items, open) {
         const name = document.createElement('span');
         name.className = 'dup-errors-file';
         name.textContent = item.filename || '';
-        li.append(name);
+        li.append(MA.copyable(name, item.filename, 'name', true));
         if (item.original) {
             const arrow = document.createElement('span');
             arrow.className = 'ui-muted';
@@ -590,7 +591,7 @@ async function cleanupOrphans(ev) {
                 <td class="cell-status lc-status">{{ status_badge(job.status, icon_only=True) }}{% if job.dry_run %}{{ dry_mark() }}{% endif %}</td>
                 <th scope="row" class="lc-file">
                     <div class="ui-cell-stack">
-                        <a class="logs-name" href="/logs/job/{{ job.debug_key }}{% if filter_query %}?{{ filter_query }}{% endif %}" title="{{ job.filename }}">{{ job.filename }}</a>
+                        <span class="ui-copyable"><a class="logs-name" href="/logs/job/{{ job.debug_key }}{% if filter_query %}?{{ filter_query }}{% endif %}" title="{{ job.filename }}">{{ job.filename }}</a>{{ copy_btn(job.filename, 'name') }}</span>
                         <span class="logs-key">{{ job.debug_key or '—' }}</span>
                     </div>
                 </th>
@@ -611,7 +612,7 @@ async function cleanupOrphans(ev) {
                 {# A dry run keeps its would-be target in the IA-08 step result only #}
                 {% set ia08 = job.step_result.get('IA-08') if job.dry_run and job.step_result is mapping else none %}
                 {% set target = job.target_path or (ia08.get('target_path') if ia08 is mapping else none) or '' %}
-                <td class="lc-target"><span class="logs-path" title="{{ target }}">{{ target or '—' }}</span></td>
+                <td class="lc-target"><span class="ui-copyable"><span class="logs-path" title="{{ target }}">{{ target or '—' }}</span>{{ copy_btn(target) }}</span></td>
                 <td class="ui-col-actions hist-col-toggle lc-toggle">{{ history_toggle(job) }}</td>
             </tr>
             {% endfor %}

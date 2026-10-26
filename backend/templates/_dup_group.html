@@ -4,6 +4,7 @@
 {% macro icon(name, size=16) -%}
 <svg class="ui-i" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false"><use href="#ui-i-{{ name }}"/></svg>
 {%- endmacro %}
+{% from "_copy.html" import copy_btn with context %}
 {% set d = t.duplicates %}
 {% set orig = (group.members | selectattr('is_original') | first) or group.members[0] %}
 {% set others_n = group.members | length - 1 %}
@@ -13,9 +14,10 @@
 <section class="ui-card dp-group" aria-labelledby="dp-g-{{ group.original_key }}">
     <div class="ui-card-head dp-group-head">
         <div class="ui-card-head-text">
-            <h2 class="ui-card-title dp-group-title" id="dp-g-{{ group.original_key }}">
+            {# The section is named by the file name alone, not by the copy button #}
+            <h2 class="ui-card-title dp-group-title">
                 <span class="ui-icon-tile ui-icon-tile-sm" aria-hidden="true">{{ icon('copy', 15) }}</span>
-                <span class="ui-truncate" title="{{ orig.filename }}">{{ orig.filename }}</span>
+                <span class="ui-copyable"><span class="ui-truncate" id="dp-g-{{ group.original_key }}" title="{{ orig.filename }}">{{ orig.filename }}</span>{{ copy_btn(orig.filename, 'name') }}</span>
             </h2>
             <p class="ui-card-desc dp-group-sub">
                 <a class="ui-link ui-mono" href="/logs/job/{{ group.original_key }}" title="{{ d.job_details }}">{{ group.original_key }}</a>
@@ -87,7 +89,7 @@
             {% endif %}
 
             <div class="ui-thumb-body">
-                <p class="ui-thumb-title" title="{{ member.filename }}">{{ member.filename }}</p>
+                <div class="ui-copyable"><p class="ui-thumb-title" title="{{ member.filename }}">{{ member.filename }}</p>{{ copy_btn(member.filename, 'name') }}</div>
 
                 <dl class="dp-facts">
                     <div class="dp-fact">
@@ -141,7 +143,7 @@
                 {% endif %}
 
                 <div class="dp-where">
-                    <span class="dp-path" title="{{ member.filepath }}">{{ member.filepath }}</span>
+                    <span class="ui-copyable"><span class="dp-path" title="{{ member.filepath }}">{{ member.filepath }}</span>{{ copy_btn(member.filepath) }}</span>
                     <a class="ui-link ui-mono dp-key" href="/logs/job/{{ member.debug_key }}" title="{{ d.job_details }}">{{ member.debug_key }}</a>
                 </div>
             </div>

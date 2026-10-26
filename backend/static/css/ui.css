@@ -942,9 +942,30 @@ a.ui-stat:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
     scrollbar-width: thin;
 }
 .ui-pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
-/* Value with a copy button next to it */
-.ui-copyable { display: inline-flex; align-items: center; gap: 0.2rem; max-width: 100%; min-width: 0; }
-.ui-copyable > .ui-icon-btn { width: 1.75rem; height: 1.75rem; }
+/* Copy button right after a file name or path (macro copy_btn in
+   templates/_copy.html, MA.copyButton in app.js). Muted, 14 px icon, a
+   24 px target whose negative margin keeps the line as high as before.
+   One line cut with an ellipsis: wrap value + button in .ui-copyable, the
+   value keeps its own ellipsis. A value that wraps (code.ui-path): the
+   button follows it inline; in a flex row or column put both in
+   .ui-copyable.is-wrap, so the button stays after the last line. */
+.ui-copy {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 1.5rem; height: 1.5rem; margin: -0.25rem -0.15rem -0.25rem 0.05rem; padding: 0;
+    vertical-align: middle; color: var(--text-muted);
+    background: transparent; border: 0; border-radius: var(--ui-radius-xs);
+    cursor: pointer; transition: color 0.15s, background 0.15s;
+}
+.ui-copy .ui-i { stroke-width: 2; }
+.ui-copy:hover { color: var(--primary); background: var(--ui-accent-soft); }
+.ui-copy:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; color: var(--primary); }
+.ui-copy.is-copied { color: var(--ui-ok-text); background: transparent; }
+.ui-copy.is-failed { color: var(--ui-err-text); background: transparent; }
+.ui-copyable { display: inline-flex; align-items: center; max-width: 100%; min-width: 0; vertical-align: middle; }
+.ui-copyable > :not(.ui-copy) { min-width: 0; }
+/* Inline in running text; a flex item turns it into a block of its own */
+.ui-copyable.is-wrap { display: inline; }
+.ui-copyable.is-wrap > .ui-copy { margin-left: 0.2rem; }
 
 /* Key-value list: <dl class="ui-kv"><div class="ui-kv-row"><dt>…</dt><dd>…</dd></div></dl> */
 .ui-kv { margin: 0; font-size: var(--ui-fs-base); }

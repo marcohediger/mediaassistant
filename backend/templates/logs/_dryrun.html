@@ -1,6 +1,6 @@
 {# Third tab of the logs page: summary of every job from a set in dry-run
    mode. Before, this was a page of its own behind a button.
-   Uses the icon, long_text and dry-run macros of logs.html. #}
+   Uses the icon, long_text, dry-run and copy_btn macros of logs.html. #}
 <p class="logs-dry-sub">{{ t.dryrun.subtitle }} · {{ t.dryrun.generated }}: <span class="ui-tabular">{{ report.generated_at }}</span></p>
 
 {% set s = report.stats %}
@@ -87,7 +87,7 @@
                 <tr class="log-row log-error">
                     <th scope="row" class="lc-file">
                         <div class="ui-cell-stack">
-                            <a class="logs-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename }}">{{ job.filename }}</a>
+                            <span class="ui-copyable"><a class="logs-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename }}">{{ job.filename }}</a>{{ copy_btn(job.filename, 'name') }}</span>
                             <span class="logs-key">{{ job.debug_key }}</span>
                         </div>
                     </th>
@@ -120,7 +120,7 @@
                     <td class="cell-status lc-status">{{ status_badge(job.status, icon_only=True) }}</td>
                     <th scope="row" class="lc-file">
                         <div class="ui-cell-stack">
-                            <a class="logs-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename }}">{{ job.filename }}</a>
+                            <span class="ui-copyable"><a class="logs-name" href="/logs/job/{{ job.debug_key }}" title="{{ job.filename }}">{{ job.filename }}</a>{{ copy_btn(job.filename, 'name') }}</span>
                             <span class="logs-key">{{ job.debug_key }}</span>
                         </div>
                     </th>
@@ -130,7 +130,7 @@
                     {% set ia08 = ia08 if ia08 is mapping else {} %}
                     {% set planned = ia08.get('target_path') or job.target_path or '' %}
                     <td class="ui-nowrap lc-cat">{{ ia08.get('category', '—') }}</td>
-                    <td class="lc-target"><span class="logs-path" title="{{ planned }}">{{ planned or '—' }}</span></td>
+                    <td class="lc-target"><span class="ui-copyable"><span class="logs-path" title="{{ planned }}">{{ planned or '—' }}</span>{{ copy_btn(planned) }}</span></td>
                 </tr>
                 {% endfor %}
             </tbody>

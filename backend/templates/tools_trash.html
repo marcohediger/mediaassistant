@@ -76,7 +76,7 @@ document.addEventListener("DOMContentLoaded", function () {
         const nameBox = H.el("div", "trash-name");
         const strong = H.el("strong", "", e.filename || e.name);
         strong.title = e.filename || e.name;
-        nameBox.appendChild(strong);
+        nameBox.appendChild(MA.copyable(strong, e.filename || e.name, "name"));
         if (e.debug_key) {
             const a = H.el("a", "trash-key ui-link", e.debug_key);
             a.href = "/logs/job/" + encodeURIComponent(e.debug_key);
@@ -90,7 +90,7 @@ document.addEventListener("DOMContentLoaded", function () {
         const whereBox = H.el("div", "trash-where");
         const path = H.el("code", "ui-path", e.location);
         if (e.trash_location) path.title = T("in_trash", {path: e.trash_location});
-        whereBox.append(H.badge(e.kind_label), path);
+        whereBox.append(H.badge(e.kind_label), MA.copyable(path, e.location, "path", true));
         where.appendChild(whereBox);
 
         const when = H.el("td", "trash-c-when trash-when", e.trashed_at || "—");

@@ -20,13 +20,17 @@ Four reports from the live system (3.0.1):
      marked deleted (row stays, note names the original, no file or asset
      touched). Kept: original without a copy (asset in Immich's trash),
      similar duplicates, jobs with an own copy.
+  T  "Behalten" on a picture in Immich's trash (live MA-2026-71338): refused
+     with its own message (keep_kept_trashed: restore it in Immich or keep
+     another picture), nothing deleted; after a restore in Immich the same
+     click resolves the group.
 
 Jobs carry debug keys MA-2099-… (never the counter's year), their files lie
 in a sandbox under /app/data (not scanned by the filewatcher); the pipeline
 is paused while the test runs. Cleanup in finally: jobs with their register
 rows (delete_test_jobs), the config keys, the sandbox, the uploaded assets.
 
-Run via:  docker exec mediaassistant-dev python /app/test_dup_page_errors.py [L P M C]
+Run via:  docker exec mediaassistant-dev python /app/test_dup_page_errors.py [L P M C V T]
 """
 import asyncio
 import os
@@ -420,8 +424,74 @@ async def test_cleanup(ctx):
 
 
 # ──────────────────────────────────────────────────────────────
-# Cleanup
+# T: "Behalten" on a picture that lies in Immich's trash
 # ──────────────────────────────────────────────────────────────
+async def test_kept_in_trash(ctx):
+    """Live MA-2026-71338 (3.1.1): the user deleted a photo in Immich, then
+    clicked "Behalten" on it. Refused correctly, but the message read "nicht
+    auffindbar … <asset>: trashed". It has to say where the picture is and
+    what to do; after a restore in Immich the same click has to work."""
+    import html
+    import json
+    import re
+    from urllib.parse import parse_qs, urlparse
+    import fileops
+    from immich_client import ASSET_PRESENT, ASSET_TRASHED, restore_asset, trash_asset
+
+    print("\n── T: «Behalten» auf ein Bild im Immich-Papierkorb ──")
+    asset_id = await upload(make_jpeg(f"{SANDBOX}/src/t_{TS}.jpg"))
+    kept_id, kept_key = await original_job(asset_id)
+    donor_file = make_jpeg(f"{SANDBOX}/dup/t_dup_{TS}.jpg")
+    donor_hash = sha256(donor_file)
+    donor_key = next_key()
+    donor_id = await add_job(donor_key, {"IA-01": IA01, "IA-02": {
+        "status": "duplicate", "match_type": "similar", "phash_distance": 2, "original_debug_key": kept_key}},
+        original_path=donor_file, target_path=donor_file, file_hash=donor_hash, source_label="Inbox",
+        status="duplicate")
+    await trash_asset(asset_id)
+    if await asset_state(asset_id) != ASSET_TRASHED:
+        raise Precondition(f"Asset {asset_id} nicht im Papierkorb")
+
+    async def keep():
+        r = await http("POST", "/api/duplicates/keep", data={"keep_key": kept_key, "group_key": kept_key})
+        loc = r.headers.get("location", "")
+        return r, {k: v[0] for k, v in parse_qs(urlparse(loc).query).items()}, loc
+
+    r, q, loc = await keep()
+    check("T-01 Behalten abgelehnt mit eigenem Hinweis «im Immich-Papierkorb» (keep_kept_trashed)",
+          r.status_code == 303 and q.get("msg") == "keep_kept_trashed", f"HTTP {r.status_code} → {loc[:200]}")
+    texts = [json.load(open(f"/app/i18n/{lang}.json", encoding="utf-8"))["duplicates"].get("msg_keep_kept_trashed", "")
+             for lang in ("de", "en")]
+    page = (await http("GET", loc)).text if loc else ""
+    shown = re.search(r'<p class="ui-alert-text">(.*?)</p>', page, re.S)
+    shown = html.unescape(shown.group(1)).strip() if shown else ""
+    check("T-02 Die Seite zeigt den Hinweis: Papierkorb, wiederherstellen oder anderes Bild behalten",
+          all(texts) and shown in [t.replace("{name}", q.get("name", "")) for t in texts]
+          and "Immich-Papierkorb" in texts[0] and "wieder her" in texts[0], shown[:160] or "kein Hinweis")
+    check("T-03 Kein «nicht auffindbar» und keine rohe Asset-Meldung «: trashed» im Hinweis",
+          bool(shown) and "nicht auffindbar" not in shown and "trashed" not in shown, shown[:160])
+    kept, donor = await get_job(kept_id), await get_job(donor_id)
+    check("T-04 Nichts gelöscht: Jobs unverändert, Datei des Spenders da, Asset im Papierkorb",
+          kept.status == "done" and donor.status == "duplicate" and os.path.isfile(donor_file)
+          and sha256(donor_file) == donor_hash and await asset_state(asset_id) == ASSET_TRASHED,
+          f"kept={kept.status} donor={donor.status} file={os.path.isfile(donor_file)}")
+
+    # The advice works: restored in Immich, the same click resolves the group.
+    await restore_asset(asset_id)
+    if await asset_state(asset_id) != ASSET_PRESENT:
+        raise Precondition(f"Asset {asset_id} nicht wiederhergestellt")
+    r, q, loc = await keep()
+    kept, donor = await get_job(kept_id), await get_job(donor_id)
+    check("T-05 Nach Wiederherstellen in Immich: Behalten klappt", r.status_code == 303 and "msg" not in q
+          and kept.status == "done" and donor.status == "deleted",
+          f"→ {loc[:200]} kept={kept.status} donor={donor.status}")
+    check("T-06 Asset bleibt, Spender-Datei im Papierkorb statt gelöscht",
+          await asset_state(asset_id) == ASSET_PRESENT and not os.path.exists(donor_file)
+          and any(c.state == "trashed" and c.trash_location and os.path.isfile(c.trash_location)
+                  for c in await fileops.copies(donor_id, states=("trashed",))),
+          f"asset={await asset_state(asset_id)}")
+
+
 # ──────────────────────────────────────────────────────────────
 # V: video previews; videos only exact in batch clean
 # ──────────────────────────────────────────────────────────────
@@ -524,7 +594,7 @@ async def cleanup():
 
 
 SECTIONS = {"L": test_lightbox, "P": test_public_link, "M": test_retry_message, "C": test_cleanup,
-            "V": test_video_previews}
+            "V": test_video_previews, "T": test_kept_in_trash}
 
 
 async def main():

@@ -125,8 +125,8 @@
       const sig = blocks ? blocks.signature : (old ? old.closest("tr").dataset.sig : "");
       return `<tr class="hist-row" data-key="${dashEscAttr(j.debug_key)}" data-sig="${dashEscAttr(sig)}">`
         + `<td class="ui-col-icon">${statusBadge(j.status, true)}</td>`
-        + `<th scope="row"><div class="dash-job"><a class="dash-job-name" href="/logs/job/${dashEscAttr(j.debug_key)}" title="${dashEscAttr(j.filename)}">${esc(j.filename || "—")}</a>`
-        + `<span class="dash-job-key">${esc(j.debug_key || "—")}</span></div></th>`
+        + `<th scope="row"><div class="dash-job"><span class="ui-copyable"><a class="dash-job-name" href="/logs/job/${dashEscAttr(j.debug_key)}" title="${dashEscAttr(j.filename)}">${esc(j.filename || "—")}</a>`
+        + `${copyButtonHTML(j.filename, "name")}</span><span class="dash-job-key">${esc(j.debug_key || "—")}</span></div></th>`
         + `<td class="hist-col-mods dash-col-mods">${strip}</td>`
         + `<td class="cell-msg${j.status === "error" ? " is-error" : ""}" title="${dashEscAttr(msg)}">${esc(msg)}</td>`
         + `<td class="ui-num dash-col-time">${esc(j.updated_at)}</td>`
@@ -357,7 +357,7 @@
     if (it.location) {
       const path = histEl("div", "hist-op-path");
       if (it.location_kind_label) path.appendChild(histBadge(it.location_kind_label));
-      path.appendChild(histEl("code", "ui-path", it.location));
+      path.appendChild(copyable(histEl("code", "ui-path", it.location), it.location, "path", true));
       body.appendChild(path);
     }
     const meta = histEl("div", "hist-op-meta");
@@ -429,13 +429,13 @@
       const path = histEl("div", "hist-op-path");
       if (op.src) {
         if (op.src_kind_label) path.appendChild(histBadge(op.src_kind_label));
-        path.appendChild(histEl("code", "ui-path", op.src));
+        path.appendChild(copyable(histEl("code", "ui-path", op.src), op.src, "path", true));
       }
       const toOther = op.dst && op.dst !== op.src;
       if (toOther || (op.dst_kind && op.dst_kind !== op.src_kind)) {
         path.appendChild(histEl("span", "hist-op-arrow", "→"));
         if (op.dst_kind_label) path.appendChild(histBadge(op.dst_kind_label));
-        if (toOther) path.appendChild(histEl("code", "ui-path", op.dst));
+        if (toOther) path.appendChild(copyable(histEl("code", "ui-path", op.dst), op.dst, "path", true));
       }
       body.appendChild(path);
     }
@@ -512,10 +512,13 @@
       if (c.shared && c.owner_key) head.appendChild(histEl("span", "hist-copy-meta", histText("shared_from", {key: c.owner_key})));
       head.appendChild(histEl("span", "hist-copy-meta",
         c.verified_at ? histText("verified_at", {when: c.verified_at}) : histText("never_verified")));
-      li.append(head, histEl("code", "ui-path", c.location));
+      li.append(head, copyable(histEl("code", "ui-path", c.location), c.location, "path", true));
       if (c.state === "trashed") {
         const trash = histEl("div", "hist-copy-trash");
-        if (c.trash_location) trash.append(histBadge(histText("kind_trash")), histEl("code", "ui-path", c.trash_location));
+        if (c.trash_location) {
+          trash.append(histBadge(histText("kind_trash")),
+            copyable(histEl("code", "ui-path", c.trash_location), c.trash_location, "path", true));
+        }
         if (c.remaining_label) trash.appendChild(histBadge(c.remaining_label, c.remaining_days != null && c.remaining_days <= 3 ? "is-warning" : ""));
         if (opts && opts.restore && c.can_restore) {
           const btn = histIconEl("button", "ui-btn ui-btn-secondary ui-btn-xs", "retry", histText("restore"), 14);
@@ -941,6 +944,8 @@
     if (targetEl && !(targetEl.dataset.planned && !job.target_path)) {
       targetEl.textContent = job.target_path || "—";
       targetEl.classList.toggle("is-empty", !job.target_path);
+      const copy = targetEl.parentNode.querySelector(".ui-copy");
+      if (copy && copy.dataset.copy !== (job.target_path || "")) setCopyValue(copy, job.target_path || "");
     }
 
     // Timestamps (use data-field attributes)
@@ -1069,6 +1074,120 @@
     const div = document.createElement("div");
     div.textContent = String(str);
     return div.innerHTML;
+  }
+
+  // ── Copy buttons after file names and paths ──
+  // Markup: copy_btn() in templates/_copy.html; copyButton() /
+  // copyButtonHTML() build the same for rows the scripts render. One handler
+  // for every .ui-copy, in the capture phase: the button may sit in a row
+  // that opens on click or next to a link, so the click goes no further and
+  // never navigates. navigator.clipboard needs a secure context (live runs
+  // on HTTPS); on plain http (dev on a LAN address) a hidden textarea and
+  // execCommand("copy") stand in.
+  const COPY_FEEDBACK_MS = 1500;
+
+  function copyLabel(kind) {
+    return uiText(kind === "name" ? "copy_name" : "copy_path");
+  }
+
+  function copyButton(value, kind) {
+    const btn = histEl("button", "ui-copy");
+    btn.type = "button";
+    btn.innerHTML = dashIcon("copy", 14); // fixed markup only
+    btn.dataset.copyKind = kind === "name" ? "name" : "path";
+    setCopyValue(btn, value);
+    return btn;
+  }
+
+  function copyButtonHTML(value, kind) {
+    if (!value) return "";
+    const label = copyLabel(kind);
+    return `<button type="button" class="ui-copy" data-copy="${dashEscAttr(value)}" data-copy-kind="${kind === "name" ? "name" : "path"}"`
+      + ` title="${dashEscAttr(label)}" aria-label="${dashEscAttr(label + ": " + value)}">${dashIcon("copy", 14)}</button>`;
+  }
+
+  // A value that changes in place (job page: target path); hidden without one
+  function setCopyValue(btn, value) {
+    const label = copyLabel(btn.dataset.copyKind);
+    btn.dataset.copy = value || "";
+    btn.title = label;
+    btn.setAttribute("aria-label", value ? label + ": " + value : label);
+    btn.hidden = !value;
+  }
+
+  // The visible value `node` and its copy button in one .ui-copyable; `wrap`
+  // for a value that wraps (code.ui-path), else it keeps its one line
+  function copyable(node, value, kind, wrap) {
+    const box = histEl("span", "ui-copyable" + (wrap ? " is-wrap" : ""));
+    box.appendChild(node);
+    if (value) box.appendChild(copyButton(value, kind));
+    return box;
+  }
+
+  async function copyText(text, btn) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (_) { /* e.g. no permission: fall back below */ }
+    }
+    // In a modal dialog only the dialog can hold the selection
+    const host = btn.closest("dialog[open]") || document.body;
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.readOnly = true;
+    area.tabIndex = -1;
+    area.setAttribute("aria-hidden", "true");
+    area.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none";
+    host.appendChild(area);
+    area.select();
+    area.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+    area.remove();
+    btn.focus({preventScroll: true});
+    return ok;
+  }
+
+  // Check icon and "Kopiert" (title and a live region) for a moment
+  function copyFeedback(btn, ok) {
+    const use = btn.querySelector("use");
+    const text = uiText(ok ? "copied" : "copy_failed");
+    btn.classList.toggle("is-copied", ok);
+    btn.classList.toggle("is-failed", !ok);
+    if (use) use.setAttribute("href", "#ui-i-" + (ok ? "check" : "x"));
+    btn.title = text;
+    const host = btn.closest("dialog[open]") || document.body;
+    let live = host.querySelector(":scope > .ui-copy-live");
+    if (!live) {
+      live = histEl("span", "ui-sr-only ui-copy-live");
+      live.setAttribute("role", "status");
+      host.appendChild(live);
+    }
+    live.textContent = "";
+    setTimeout(() => { live.textContent = text; }, 50); // the same text twice is read twice
+    clearTimeout(btn._copyReset);
+    btn._copyReset = setTimeout(() => {
+      btn.classList.remove("is-copied", "is-failed");
+      if (use) use.setAttribute("href", "#ui-i-copy");
+      btn.title = copyLabel(btn.dataset.copyKind);
+      live.textContent = "";
+    }, COPY_FEEDBACK_MS);
+  }
+
+  function initCopyButtons() {
+    // The region exists before the first announcement, so it is read out
+    const live = histEl("span", "ui-sr-only ui-copy-live");
+    live.setAttribute("role", "status");
+    document.body.appendChild(live);
+    document.addEventListener("click", async (e) => {
+      const btn = e.target.closest && e.target.closest(".ui-copy");
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenus();
+      copyFeedback(btn, await copyText(btn.dataset.copy || "", btn));
+    }, true);
   }
 
   // ── Lightbox ──
@@ -1371,10 +1490,12 @@
   initMenus();
   initQuickMenu();
   initStatusMenu();
+  initCopyButtons();
 
   // For the pages' own scripts
   window.MA = {
     confirm: confirmAsk, confirmOptions,
+    copyButton, copyButtonHTML, copyable,
     history: { text: histText, el: histEl, iconEl: histIconEl, badge: histBadge, state: histState,
                restore: histRestore, alert: histAlert },
   };
