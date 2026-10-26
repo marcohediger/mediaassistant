@@ -1,5 +1,54 @@
 # Changelog
 
+## v3.1.2 — 2026-10-26
+
+### UI: Dateinamen und Pfade kopieren
+
+Lange Dateinamen und Pfade sind auf vielen Seiten mit „…" gekürzt und liessen
+sich nur mühsam markieren. Jetzt steht direkt hinter jedem Dateinamen und
+jedem Pfad ein kleiner Kopieren-Knopf — auch hinter Immich-Verweisen
+(`immich:<id>`, Asset-IDs als Ort): Duplikat-Seite (Gruppentitel, Dateiname
+und Pfad jeder Kachel), Review, Job-Seite (Dateiname, Original, Ziel,
+Verlauf, Exemplare samt Papierkorb-Ort), Verarbeitungs-Log und Probelauf
+(Dateiname, Ziel), Dashboard „Letzte Verarbeitungen", die aufgeklappten
+Zeilen (Verlauf, Exemplare), Papierkorb, Bestandsprüfung, Stichproben beim
+Tag-Aufräumen und die Liste der Duplikat-Fehler.
+
+Ein Baustein für alle Stellen: Macro `copy_btn` (`templates/_copy.html`),
+Klasse `ui-copy`, ein Klick-Handler in `app.js` (`MA.copyButton`,
+`MA.copyable` für Zeilen aus Skripten). Der gekürzte Text behält seine
+Ellipse, der Knopf macht die Zeile nicht höher. Ein Klick klappt keine Zeile
+auf und folgt keinem Link; danach zeigt der Knopf kurz einen Haken und
+„Kopiert" (auch für Screenreader). Über HTTPS kopiert die Zwischenablage des
+Browsers, über eine einfache http-Adresse im LAN ein Ersatzweg.
+
+Geprüft im Browser: Kopieren über localhost und über die LAN-Adresse (ohne
+Zwischenablage-Schnittstelle), Tastatur, aufgeklappte Zeilen, kein seitlicher
+Scroll bei 390 px, keine Skriptfehler; hell und dunkel.
+
+### Fix: „Behalten" auf ein Bild im Immich-Papierkorb
+
+Live (MA-2026-71338): Ein Bild wurde in Immich gelöscht und danach auf der
+Duplikat-Seite „Behalten" gewählt. Die Ablehnung war richtig — ein Asset im
+Papierkorb ist kein geprüftes Exemplar —, die Meldung aber nicht: „Die
+behaltene Datei ist nicht auffindbar oder lässt sich nicht prüfen:
+92273784-…: trashed".
+
+- Liegt das behaltene Bild im Immich-Papierkorb, sagt die Meldung jetzt das
+  und was zu tun ist: „… liegt im Immich-Papierkorb und wurde deshalb nicht
+  behalten. Stelle das Bild in Immich wieder her oder behalte ein anderes
+  Bild der Gruppe. Es wurde nichts gelöscht." (Code `keep_kept_trashed`).
+  Andere Fälle behalten die bisherige Meldung.
+- Der Rat funktionierte nicht: Nach dem Wiederherstellen in Immich blieb
+  „Behalten" abgelehnt („im Register 'trashed'"), weil ein Asset, das das
+  Register schon als gelöscht oder fehlend kannte, nicht erneut in Immich
+  nachgesehen wurde. `job_copies` fragt solche Assets jetzt bei jeder
+  Prüfung neu ab.
+
+Test: `test_dup_page_errors.py` Abschnitt T (echtes Immich: hochladen, in den
+Papierkorb, Behalten → eigener Hinweis, nichts gelöscht; wiederherstellen,
+Behalten → Gruppe aufgelöst, Spender im Papierkorb). Vor dem Fix 5 von 6 rot.
+
 ## v3.1.1 — 2026-10-26
 
 ### Fix: Videos ohne Vorschau auf der Duplikat-Seite
