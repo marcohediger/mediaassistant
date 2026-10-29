@@ -256,7 +256,8 @@ async def cleanup():
     async with async_session() as session:
         ids = set(CLEANUP_JOBS) | set((await session.execute(select(Job.id).where(or_(
             Job.debug_key.like(f"E2E-%{TS}%"), Job.original_path.like(f"{E2E_ROOT}/%"))))).scalars().all())
-    paths = await delete_test_jobs(ids, locations=list(dict.fromkeys(CLEANUP_ASSETS)), prefixes=[E2E_ROOT])
+    paths = await delete_test_jobs(ids, locations=list(dict.fromkeys(CLEANUP_ASSETS)),
+                                   prefixes=[E2E_ROOT, STORAGE_ROOT])
     for f in list(dict.fromkeys(CLEANUP_FILES + paths)):
         for p in (f, f + ".xmp", f + ".log"):
             try:
@@ -269,6 +270,11 @@ async def cleanup():
             trash_root = os.sep.join(parts[:parts.index(fileops.TRASH_DIRNAME) + 1])
             fileops.prune_empty_dirs_blocking(os.path.dirname(f), trash_root)
     shutil.rmtree(E2E_ROOT, ignore_errors=True)
+    shutil.rmtree(STORAGE_ROOT, ignore_errors=True)
+    import storage
+    from config import config_manager
+    await config_manager.set(storage.MARKED_KEY, [r for r in await config_manager.get(storage.MARKED_KEY, []) or []
+                                                  if not r.startswith(STORAGE_ROOT)])
 
 
 async def phone_upload(path, tag):
@@ -1167,8 +1173,8 @@ E2E_TAGS: list[str] = []
 E2E_ALBUMS: list[str] = []
 
 
-async def e2e_set(name, *, target_mode, write_mode, template=None):
-    """A processing set of the stories' own (base path in the sandbox).
+async def e2e_set(name, *, target_mode, write_mode, template=None, base=None):
+    """A processing set of the stories' own (base path in the sandbox, or `base`).
     `template` ("{key}" = category key) replaces every category's path."""
     from database import async_session
     from models import LibraryCategory, ProcessingSet
@@ -1178,7 +1184,7 @@ async def e2e_set(name, *, target_mode, write_mode, template=None):
         ps = ProcessingSet(name=f"E2E {name} {TS}", description="test_e2e_user_stories", active=False,
                            position=9700 + len(E2E_SETS), schedule_mode="manual", folder_tags=False,
                            dry_run=False, ocr_enabled=False, metadata_write_mode=write_mode, google_json=False,
-                           target_mode=target_mode, library_base_path=f"{E2E_ROOT}/lib_{name}",
+                           target_mode=target_mode, library_base_path=base or f"{E2E_ROOT}/lib_{name}",
                            immich_input=False, immich_poll=False)
         s.add(ps)
         await s.flush()
@@ -2349,6 +2355,128 @@ async def test_us25_geocoding_unusable():
                         "geo_unreachable", module="IA-03", gps=(46.3127, 7.9883))
 
 
+# ══════════════════════════════════════════════════════════════
+# US-26 / US-27: a drive the pipeline works on is not mounted
+# Inside a container a missing drive shows as its empty mount point. The
+# stories' roots lie outside /app/data (the database's own volume is
+# never checked); "unmounting" moves the content aside and leaves the
+# empty folder, "mounting" puts it back.
+# ══════════════════════════════════════════════════════════════
+STORAGE_ROOT = f"/var/tmp/__e2e_storage_{TS}"
+
+
+def unmount(path):
+    os.rename(path, path + ".nas")
+    os.mkdir(path)
+
+
+def mount(path):
+    shutil.rmtree(path)  # the mount point, empty unless something wrote onto the wrong disk
+    os.rename(path + ".nas", path)
+
+
+async def wait_settled(job_id, timeout=120):
+    """The job's run is over (whoever claimed it: the story or the app's worker)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = await get_job(job_id)
+        if job.status != "processing":
+            return job
+        await asyncio.sleep(0.5)
+    return await get_job(job_id)
+
+
+async def storage_story(tag, root, job_id, *, path, nothing_written_to=None):
+    """Job `job_id` (queued, file at `path`) runs while `root` is unmounted, then the drive is back."""
+    from pipeline import run_pipeline
+    unmount(root)
+    await restore_pause({k: (False if k == "paused" else "") for k in _PAUSE_KEYS})
+    await run_pipeline(job_id)
+    job = await wait_settled(job_id)
+    state = await pause_state()
+    check(f"{tag}-02 Pipeline auto-pausiert (storage_unreachable)",
+          bool(state["paused"]) and state["auto_paused_reason"] == "storage_unreachable", str(state))
+    check(f"{tag}-03 Grund nennt den Ordner", root in (state["auto_paused_detail"] or ""),
+          state["auto_paused_detail"])
+    check(f"{tag}-04 Job wartet in der Warteschlange (kein Fehler)",
+          job.status == "queued" and not job.error_message, f"status={job.status} msg={job.error_message}")
+    check(f"{tag}-05 Datei liegt noch am Ort (nicht in error/)",
+          os.path.exists(path if nothing_written_to else root + ".nas" + path[len(root):])
+          and "/error/" not in (job.original_path or ""), job.original_path)
+    if nothing_written_to:
+        check(f"{tag}-06 nichts auf die falsche Platte geschrieben", os.listdir(nothing_written_to) == [],
+              str(os.listdir(nothing_written_to)))
+    current = {r.module: r for r in await runs_of(job_id) if r.status != "superseded"}
+    check(f"{tag}-07 kein Modul mit Fehler", not any(r.status == "error" for r in current.values()),
+          str({m: r.status for m, r in current.items()}))
+    mount(root)
+    check(f"{tag}-08 Pipeline läuft wieder (Health-Watcher)", await wait_resumed(), str(await pause_state()))
+    done = await wait_done([job_id], timeout=300)
+    job = await get_job(job_id)
+    if job.target_path and not job.target_path.startswith("immich:"):
+        CLEANUP_FILES.append(job.target_path)
+    check(f"{tag}-09 Job danach fertig", done and job.status == "done", f"status={job.status} msg={job.error_message}")
+    return job
+
+
+async def test_us26_library_drive_missing():
+    print("\n-- US-26: Laufwerk der Ablage nicht eingebunden --")
+    base = f"{STORAGE_ROOT}/us26/lib"
+    set_id = await e2e_set("us26", target_mode="library", write_mode="direct", base=base)
+    found = await saved_pause()
+    try:
+        first = f"{INBOX}/__e2e_us26a_{TS}.jpg"
+        make_unique_jpg(first)
+        CLEANUP_FILES.append(first)
+        a = await get_job(await create_and_run_job(os.path.basename(first), first, use_immich=False,
+                                                   set_id=set_id))
+        if a.target_path:
+            CLEANUP_FILES.append(a.target_path)
+        check("US26-01 erste Datei in der Ablage", a.status == "done" and (a.target_path or "").startswith(base + "/"),
+              f"status={a.status} target={a.target_path}")
+        second = f"{INBOX}/__e2e_us26b_{TS}.jpg"
+        make_unique_jpg(second)
+        CLEANUP_FILES.append(second)
+        b = await queued_job(set_id, second, f"E2E-{TS}-{next(_JOB_NO):04d}")
+        job = await storage_story("US26", base, b, path=second, nothing_written_to=base)
+        check("US26-10 Datei auf dem Laufwerk abgelegt",
+              (job.target_path or "").startswith(base + "/") and os.path.isfile(job.target_path), job.target_path)
+        check("US26-11 Markierung liegt auf dem Laufwerk", os.path.isfile(f"{base}/.mediaassistant"))
+    finally:
+        await restore_pause(found)
+
+
+async def test_us27_inbox_drive_missing():
+    print("\n-- US-27: Laufwerk des Eingangs nicht eingebunden --")
+    from database import async_session
+    from models import InboxDirectory
+    inbox = f"{STORAGE_ROOT}/us27/inbox"
+    os.makedirs(inbox, exist_ok=True)
+    set_id = await e2e_set("us27", target_mode="library", write_mode="direct")
+    async with async_session() as s:
+        s.add(InboxDirectory(set_id=set_id, path=inbox, label=f"E2E-US27-{TS}", active=False))
+        await s.commit()
+    found = await saved_pause()
+    try:
+        first = f"{inbox}/__e2e_us27a_{TS}.jpg"
+        make_unique_jpg(first)
+        a = await get_job(await create_and_run_job(os.path.basename(first), first, use_immich=False,
+                                                   source_inbox_path=inbox, set_id=set_id))
+        if a.target_path:
+            CLEANUP_FILES.append(a.target_path)
+        check("US27-01 erste Datei verarbeitet, Eingang markiert",
+              a.status == "done" and os.path.isfile(f"{inbox}/.mediaassistant"), f"status={a.status}")
+        second = f"{inbox}/__e2e_us27b_{TS}.jpg"
+        make_unique_jpg(second)
+        b = await insert_job(os.path.basename(second), second, f"E2E-{TS}-{next(_JOB_NO):04d}", status="queued",
+                             use_immich=False, set_id=set_id, source_inbox_path=inbox, file_hash=sha256(second))
+        job = await storage_story("US27", inbox, b, path=second)
+        check("US27-10 Datei aus dem Eingang abgelegt", not os.path.exists(second)
+              and (job.target_path or "").startswith(f"{E2E_ROOT}/lib_us27/"), job.target_path)
+    finally:
+        await restore_pause(found)
+
+
 async def main():
     from config import config_manager
     from immich_client import get_immich_config
@@ -2395,6 +2523,8 @@ async def main():
         test_us23_ai_model_missing,
         test_us24_immich_down,
         test_us25_geocoding_unusable,
+        test_us26_library_drive_missing,
+        test_us27_inbox_drive_missing,
     ]
     wanted = [a.lower() for a in sys.argv[1:]]
     if wanted:

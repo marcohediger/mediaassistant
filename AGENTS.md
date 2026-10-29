@@ -54,6 +54,7 @@ MediaAssistant/
 │   ├── reruns.py               # Aufträge „Neu ausführen": anlegen, Feeder, verfolgen, abbrechen
 │   ├── resources.py            # Betriebsmittel-Grenzen (ai, geo, immich, io, cpu), max_jobs
 │   ├── services.py             # Dienste der Pipeline (KI, Geocoding, Immich): Prüfung, Auto-Pause
+│   ├── storage.py              # Laufwerke der Sets (Eingänge, Basis-Pfade): Markierung .mediaassistant, Prüfung
 │   ├── folder_path.py          # Ordnerstruktur → Tags/Alben je nach Set-Optionen
 │   ├── safe_file.py            # safe_move(): copy → verify hash → delete (nur noch Baustein von fileops)
 │   ├── ai_backends.py          # Loadbalancer für mehrere OpenAI-kompat. Endpunkte
@@ -297,6 +298,7 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_executor.py` | Ausführung nach Abhängigkeiten: Register als einzige Quelle, IA-03 als Seiten-Task, Betriebsmittel-Grenzen, Stopp-Regeln | `docker exec mediaassistant-dev python /app/test_executor.py` |
 | `backend/test_immich_dedup.py` | Duplikat-Auflösung mit echtem Immich: geteiltes Asset bei Keep, Übertragung, Review-Fälle, Altbestand ohne Hash (D12), Gruppen-Art nur aus den Duplikat-Beziehungen + „Automatisch bereinigen" (D13); Teile wählbar | `docker exec mediaassistant-dev python /app/test_immich_dedup.py [D6 … D13]` |
 | `backend/test_ia04_convert.py` | IA-04 ohne ImageMagick: GIF (erstes Bild) und HEIC-Ausweichweg über Pillow, mit fehlschlagendem `heif-convert` im `PATH` | `docker exec mediaassistant-dev python /app/test_ia04_convert.py` |
+| `backend/test_storage.py` | Fehlendes Laufwerk (`storage.py`): Regeln der Markierung, `fileops` verweigert vor dem Intent, Prüfen markiert nichts als fehlend, Abgleich lässt offen, Watchdog, Parken aus „Review", Retry, Scanner, Pause von Hand, Knopf „neu markieren"; Teile wählbar | `docker exec mediaassistant-dev python /app/test_storage.py [S1 … S10]` |
 
 ### Pflicht-Vorstufe: startet die App überhaupt?
 
@@ -370,6 +372,7 @@ echte DB) und verifiziert das Endergebnis:
 | **US-21: Tag-Gruppen** | Datei in Unterordner mit GPS, Set mit Tag-Gruppen → fünf Wurzeln als Baum in Immich, Inhalts-Tags flach, TagsList in der Datei, keine anderen flachen MA-Tags |
 | **US-22: Tag-Gruppen nachträglich** | Job ohne Gruppen verarbeitet → eingeschaltet → IA-07+IA-08 neu (API) → flache MA-Tags weg ausser Inhalts-Tags (auch nach Neueinlesen der Sidecar), Gruppen da, Benutzer-Tag bleibt |
 | **US-23 … US-25: Dienst fehlt** | KI-Modell fehlt, Immich nicht erreichbar, Geocoding unbrauchbar → Pipeline pausiert mit Grund, Job wartet (kein Fehler, kein Review, Datei bleibt) → Dienst zurück → Health-Watcher setzt fort → Job fertig |
+| **US-26 / US-27: Laufwerk fehlt** | Basis-Pfad bzw. Eingang nicht eingebunden (leerer Einhängepunkt) → Pipeline pausiert mit Ordner, Job wartet, nichts auf die falsche Platte → Laufwerk zurück → Health-Watcher setzt fort → Job fertig, Ordner markiert |
 | **US-11 … US-14: pHash, Keep, Batch-Clean** | pHash-Duplikat (andere Kompression), Keep mit Ordner-/Stichwort-Merge, Batch-Clean alle bzw. diese Seite |
 | **US-15: Geocoding neu (Immich)** | Modul einzeln neu → IA-07/IA-08 laufen nach → Tags in Immich per API aktualisiert; gleicher Ort → nichts kaskadiert |
 | **US-16: Immich-Job ohne lokale Kopie** | Handy-Upload neu ausführen über eine Arbeitskopie; Variante „Datei ersetzen"; Datum bleibt (Datei-Zeit aus Immich) |
@@ -576,11 +579,27 @@ Moduls wird unvollendet geschlossen, der Job geht zurück in die
 Warteschlange — kein Fehler, keine Warnung, nichts nach `error/`. Ist der
 Dienst in Ordnung, ist es ein Fehler des Jobs wie bisher. Der
 Health-Watcher pollt alle 30 s und setzt fort; Fortsetzen von Hand löscht
-den Grund mit. Das Dashboard nennt Dienst und Grund.
+den Grund mit. Das Dashboard nennt Dienst und Grund. Eine Pause von Hand
+bleibt eine Pause von Hand: `services.pause` setzt dann keinen Grund, der
+Watcher hebt sie nie auf.
+
+**Laufwerke (`storage.py`, ab 3.3.0).** Ein nicht eingebundenes Laufwerk ist
+im Container ein leerer Einhängepunkt — wer dort schreibt, schreibt auf die
+falsche Platte. Jeder Eingang und Basis-Pfad bekommt beim ersten Prüfen die
+Datei `.mediaassistant` (Config `storage.marked`); fehlt sie später, ist der
+Ordner leer gegen das Register oder nicht lesbar, ist das Grund
+`storage_unreachable` (hält jedes Modul an, nicht nur eines Betriebsmittels).
+Geprüft wird beim Start jedes Jobs (`run_pipeline`), in `fileops._begin` vor
+jedem Intent (`StorageUnavailable`), beim Prüfen eines Exemplars, im
+Abgleich, im Stale-Watchdog, beim Retry und im Inbox-Scanner. Ordner unter
+`/app/data` werden nie geprüft — dort liegen auch alle Test-Sandboxen; ein
+Test, der Laufwerke prüft, legt seine Ordner ausserhalb an (`/var/tmp/…`).
+Einen fehlenden Laufwerk-Zustand nie mit „Datei fehlt" verwechseln: kein
+Exemplar als `missing`, kein Job als Fehler.
 
 Ein Test, der einen Dienst absichtlich ausfallen lässt, pausiert die ganze
 Pipeline — den vorgefundenen Pause-Zustand merken und im finally
-wiederherstellen (US-23 … US-25).
+wiederherstellen (US-23 … US-27).
 
 ### Dev-Container und gleichzeitige Testläufe
 

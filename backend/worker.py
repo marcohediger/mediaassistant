@@ -20,6 +20,7 @@ import immich_client
 import resources
 import runs
 import services
+import storage
 from config import config_manager
 from database import async_session
 from inputs.common import needs_immich_download
@@ -230,6 +231,8 @@ async def _requeue_or_fail(row, cutoff: datetime | None) -> None:
         (sr["_rerun"].get("source") or {}).get("kind") == "immich"
     source_gone = (not resumable and not rerun_without_file and not os.path.exists(row.original_path or "")
                    and not (row.source_label == "Immich" and row.immich_asset_id))
+    if source_gone and await storage.unavailable([row.original_path]) is not None:
+        source_gone = False  # the drive is missing, not the file: the next start parks the job
     if retry > STALE_MAX_RETRIES:
         values = dict(status="error", error_message=(
             f"Job hängt wiederholt bei {row.current_step} ({STALE_MAX_RETRIES}x Timeout) — aufgegeben"))

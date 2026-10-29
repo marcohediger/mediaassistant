@@ -1,5 +1,98 @@
 # Changelog
 
+## v3.3.0 — 2026-10-29
+
+### Pipeline: Fehlt ein Laufwerk, hält sie an — auch dafür ist der Job nicht schuld
+
+Derselbe Grundsatz wie in 3.2.0, jetzt für den Speicher: Ist ein Eingang oder
+der Basis-Pfad eines Sets nicht verfügbar, hält die Pipeline an, und der Job
+wartet in der Warteschlange.
+
+Im Container zeigt sich ein nicht eingebundenes Laufwerk selten als Fehler.
+Der Einhängepunkt bleibt als leerer Ordner stehen. Zwei neue E2E-Stories
+haben den Schaden vorher rot gezeigt:
+
+- **Ablage fehlt (US-26):** Die Datei wurde ohne jede Meldung in den leeren
+  Einhängepunkt geschrieben, also auf die lokale Platte. Sobald das Laufwerk
+  wieder da war, lag sie darunter versteckt, und der Job stand trotzdem auf
+  „fertig".
+- **Eingang fehlt (US-27):** Der Job wurde zum Fehler: IA-01 meldete „File
+  not found", und von Hand musste ein Retry her.
+
+Deshalb legt MediaAssistant jetzt in jeden Eingang und jeden Basis-Pfad, in
+dem es arbeitet, eine Datei `.mediaassistant`, wie Immich es mit `.immich`
+tut. Welche Ordner es markiert hat, merkt es sich. Unbrauchbar ist ein
+Ordner (`storage.py`), wenn
+
+- seine Markierung fehlt oder er ganz fehlt, obwohl er markiert war;
+- er leer ist oder fehlt, obwohl das Register dort Dateien kennt. Das fängt
+  den Fall ab, dass das Laufwerk schon beim ersten Prüfen nach dem Update
+  fehlte; dann wird auch nichts markiert;
+- er nicht lesbar ist (E/A-Fehler, keine Antwort innert 15 s) oder
+  schreibgeschützt.
+
+Ein Basis-Pfad, den es noch nicht gibt (ein neues Set), ist in Ordnung und
+wird markiert, sobald er existiert. Ordner unter `/app/data` werden nie
+geprüft: Ohne dieses Laufwerk gibt es auch keine Datenbank.
+
+Geprüft wird an den Stellen, an denen sonst Schaden entstand:
+
+- **beim Start jedes Jobs** (Basis-Pfad und der Ordner, in dem seine Datei
+  liegt). Ist einer nicht verfügbar, geht der Job ohne jeden Schritt zurück
+  in die Warteschlange.
+- **vor jeder Dateioperation in `fileops`**, noch vor dem Eintrag im
+  Protokoll. Verschwindet ein Laufwerk mitten im Lauf, wird nichts angefasst
+  und der Job parkt.
+- **wenn ein Modul scheitert**, etwa an „File not found" in IA-01: Der
+  Executor prüft zuerst die Ordner des Jobs, bevor er den Fehler dem Job
+  zuschreibt.
+- **beim Prüfen eines Exemplars**: Ein fehlendes Laufwerk sagt nichts über
+  die Datei, das Exemplar wird nie als „fehlt" markiert.
+- **beim Abgleich nach einem Absturz**: Eine offene Operation auf einem
+  fehlenden Laufwerk bleibt offen, bis es zurück ist. Vorher wurde sie als
+  gescheitert abgeschlossen, und das Exemplar galt als verloren.
+- **im Stale-Watchdog**: Statt „Quelldatei nicht mehr vorhanden" kommt der
+  Job zurück in die Warteschlange.
+- **beim Retry**: Der Job bleibt, wie er ist. Bisher wurde er zum Fehler
+  „Datei nicht auffindbar".
+- **im Inbox-Scanner**: Ein fehlender Eingang sah aus wie ein leerer
+  Eingang. Jetzt hält die Pipeline an, und das Dashboard nennt den Ordner.
+
+Das Dashboard zeigt „Pipeline automatisch angehalten: Speicher nicht bereit"
+und den Ordner samt Grund. Der Health-Watcher setzt fort, sobald der Ordner
+wieder in Ordnung ist. Fehlt die Markierung absichtlich, etwa nach dem
+Umzug auf ein neues Laufwerk, markiert der Knopf „Laufwerk ist richtig, neu
+markieren" im Banner die Ordner nach einer Rückfrage neu. Für einen Ordner,
+der nicht lesbar ist, tut er das nicht.
+
+### Fix: Eine von Hand gesetzte Pause bleibt bestehen
+
+Lief während einer Pause, die der Nutzer selbst gesetzt hatte, ein Job in
+einen Ausfall, wurde daraus eine automatische Pause. Der Health-Watcher hob
+sie auf, sobald der Dienst zurück war, mitten in der Wartung des Nutzers.
+Jetzt bleibt eine solche Pause eine Pause von Hand. Der Job parkt trotzdem.
+Läuft eine Prüfung über viele Dateien auf einem fehlenden Laufwerk, steht
+der Hinweis höchstens alle zehn Minuten einmal im Log statt einmal pro Datei.
+
+### Fix: Ein geparkter Job bleibt nicht in „Review" hängen
+
+Setzte IA-08 einen Job auf „Review" (unbekannte Kategorie) und scheiterte
+danach an einem fehlenden Dienst, blieb der Job in „Review" stehen, ohne
+Ablage. Beim Parken wurde der Status mitgespeichert, und das Zurückstellen
+in die Warteschlange griff nicht mehr. Betroffen war auch 3.2.0 bei einem
+Immich-Ausfall. Jetzt geht der Job zurück auf `queued`.
+
+### Diagnose
+
+`/api/diagnostics` meldet die markierten Ordner (`storage_marked`), je
+Eingang und Basis-Pfad, ob die Markierung da ist, und bei einer Pause
+Grund und Ordner.
+
+Getestet mit US-26 und US-27 (vorher 14 von 20 Prüfungen rot, jetzt 20 von
+20 grün) und dem neuen `test_storage.py` (31 Prüfungen: Regeln, `fileops`,
+Prüfen, Abgleich, Watchdog, Parken aus „Review", Retry, Scanner, Pause von
+Hand, Knopf „neu markieren").
+
 ## v3.2.0 — 2026-10-29
 
 ### Pipeline: Fehlt ein Dienst, hält sie an — der Job ist nie schuld

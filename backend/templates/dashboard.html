@@ -79,6 +79,10 @@
             {%- endif -%}
         </p>
     </div>
+    {#- A drive whose marker is gone on purpose (a new disk): the user marks it anew. -#}
+    <div class="ui-alert-actions" id="storage-adopt-actions"{% if auto_pause.reason != 'storage_unreachable' %} hidden{% endif %}>
+        <button type="button" id="storage-adopt-btn" class="ui-btn ui-btn-secondary ui-btn-sm">{{ d.storage_adopt_button }}</button>
+    </div>
 </div>
 
 <div class="ui-stats dash-stats" id="stats-grid">
@@ -189,7 +193,10 @@
         "title": d.pipeline_paused_title, "auto_title": d.pipeline_auto_paused_title,
         "auto_text": d.pipeline_auto_paused_text,
         "services": {"ai_unreachable": d.service_ai_unreachable, "geo_unreachable": d.service_geo_unreachable,
-                     "immich_unreachable": d.service_immich_unreachable},
+                     "immich_unreachable": d.service_immich_unreachable,
+                     "storage_unreachable": d.service_storage_unreachable},
+        "adopt_confirm": d.storage_adopt_confirm, "adopt_done": d.storage_adopt_done,
+        "adopt_none": d.storage_adopt_none,
         "scan_started": d.scan_started, "scan_failed": d.scan_failed,
         "toggle_failed": d.pipeline_toggle_failed,
     } | tojson }};
@@ -199,6 +206,8 @@
     const detail = document.getElementById("pipeline-paused-detail");
     const title = document.getElementById("pipeline-paused-title");
     const reasonText = document.getElementById("pipeline-paused-reason");
+    const adoptActions = document.getElementById("storage-adopt-actions");
+    const adoptBtn = document.getElementById("storage-adopt-btn");
 
     function toast(text, tone) {
         const icons = {success: "check-circle", error: "alert-circle"};
@@ -232,6 +241,7 @@
         title.textContent = reason ? T.auto_title.replace("{service}", T.services[reason] || reason) : T.title;
         reasonText.hidden = !reason;
         reasonText.textContent = (data.auto_paused_detail ? data.auto_paused_detail + ". " : "") + T.auto_text;
+        adoptActions.hidden = reason !== "storage_unreachable";
         const queued = String(data.queued);
         detail.textContent = data.in_flight > 0
             ? T.drain + " (" + T.counts_drain.replace("{active}", data.in_flight).replace("{queued}", queued) + ")"
@@ -244,6 +254,23 @@
             if (r.ok) renderPipeline(await r.json());
         } catch (e) { /* next poll retries */ }
     }
+
+    adoptBtn.addEventListener("click", async function () {
+        if (!confirm(T.adopt_confirm)) return;
+        setBusy(adoptBtn, true);
+        try {
+            const r = await fetch("/api/storage/adopt", {method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}});
+            const data = r.ok ? await r.json() : null;
+            if (!data) toast(T.toggle_failed + " (HTTP " + r.status + ")", "error");
+            else if (data.adopted.length) toast(T.adopt_done.replace("{count}", data.adopted.length), "success");
+            else toast(T.adopt_none.replace("{detail}", data.detail || ""), "error");
+            await refreshPipelineStatus();
+        } catch (e) {
+            toast(T.toggle_failed + ": " + e.message, "error");
+        } finally {
+            setBusy(adoptBtn, false);
+        }
+    });
 
     toggleBtn.addEventListener("click", async function () {
         const action = toggleBtn.dataset.state === "paused" ? "resume" : "pause";

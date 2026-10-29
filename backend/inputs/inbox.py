@@ -5,6 +5,9 @@ import os
 
 from sqlalchemy import select
 
+import services
+import storage
+from config import config_manager
 from database import async_session
 from file_operations import sha256 as _sha256
 from models import InboxDirectory, Job
@@ -90,6 +93,13 @@ async def scan_set(processing_set) -> int:
     queued_total = 0
 
     for inbox in inboxes:
+        # An inbox drive that is not mounted looks like an empty inbox.
+        found = await storage.unavailable([inbox.path])
+        if found is not None:
+            if await config_manager.get("pipeline.auto_paused_reason", "") != services.STORAGE:
+                await storage.pause(found, where=f"Eingang {inbox.label} (Set {ps.name})",
+                                    error="Eingang nicht verfügbar — nicht eingelesen")
+            continue
         if not os.path.isdir(inbox.path):
             continue
 

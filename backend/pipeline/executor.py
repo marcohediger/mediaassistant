@@ -28,11 +28,12 @@ it (IA-05 and everything after); on a stop of the main path (duplicate,
 critical failure, park) it is cancelled and awaited, never left behind.
 
 A service the next module needs is down (auto-pause ``ai_unreachable`` /
-``geo_unreachable`` / ``immich_unreachable``): the job parks — back to
-``queued``, finished runs stay, it goes on after the pause. A module that
-fails while its service is missing is no fault of the job (services.py):
-the pipeline pauses, the module's run is closed unfinished and the job
-parks like the others — no error, no warning, nothing moved to error/.
+``geo_unreachable`` / ``immich_unreachable``; ``storage_unreachable`` stops
+every module): the job parks — back to ``queued``, finished runs stay, it
+goes on after the pause. A module that fails while its service is missing
+or a drive of the job is not usable is no fault of the job (services.py,
+storage.py): the pipeline pauses, the module's run is closed unfinished and
+the job parks like the others — no error, no warning, nothing moved to error/.
 """
 import asyncio
 import contextlib
@@ -49,6 +50,7 @@ import fileops
 import resources
 import runs
 import services
+import storage
 from config import config_manager
 from models import RerunItem
 from pipeline import registry
@@ -182,21 +184,33 @@ def _failed(result) -> bool:
 
 
 async def _service_down(ctx: Ctx, code: str, error: str, exc: BaseException | None = None) -> str | None:
-    """A failure of `code` that comes from a missing service: pause the
-    pipeline and return the reason; None when the service is fine (the
-    failure is the job's own) or the module needs none."""
+    """A failure of `code` that comes from a missing service or from a
+    drive of the job that is not usable: pause the pipeline and return the
+    reason; None when all of it is fine (the failure is the job's own)."""
+    if isinstance(exc, fileops.StorageUnavailable):
+        return services.STORAGE  # fileops refused before touching anything and paused
+    where = f"{ctx.job.debug_key} bei {code}"
+    tb = traceback.format_exc() if exc is not None else ""
     resource = registry.SPECS[code].resource_for(ctx.job, ctx.snap)
     down = await services.down(resource, exc)
-    if down is None:
+    if down is not None:
+        reason, detail = down
+        await services.pause(reason, detail, where=where, error=error, tb=tb)
+        return reason
+    # E.g. ExifTool "file not found": the inbox drive is not mounted.
+    found = await storage.down_for_job(ctx.job)
+    if found is None:
         return None
-    reason, detail = down
-    await services.pause(reason, detail, where=f"{ctx.job.debug_key} bei {code}", error=error,
-                         tb=traceback.format_exc() if exc is not None else "")
-    return reason
+    await storage.pause(found, where=where, error=error, tb=tb)
+    return services.STORAGE
 
 
 async def _park_for_service(ctx: Ctx, code: str, reason: str) -> None:
-    """The module's open run ends unfinished; the job waits (raises Park)."""
+    """The module's open run ends unfinished; the job waits (raises Park).
+    A status the step set on its way (IA-08: 'review') is not kept — the
+    run is not over."""
+    if not ctx.side:
+        ctx.job.status = "processing"
     await runs.supersede(ctx.session, ctx.job, [code], reason=f"Dienst fehlt ({reason}) — Job wartet")
     await ctx.session.commit()
     raise Park(registry.SPECS[code].resource_for(ctx.job, ctx.snap), reason)

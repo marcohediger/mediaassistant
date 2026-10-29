@@ -25,6 +25,7 @@ from database import async_session
 from models import (
     Config, ImmichUser, InboxDirectory, Job, LibraryCategory, ProcessingSet, SortingRule, SystemLog,
 )
+from storage import MARKED_KEY, MARKER
 from version import VERSION, VERSION_DATE
 
 router = APIRouter(prefix="/api/diagnostics")
@@ -245,7 +246,7 @@ async def diagnostics(request: Request):
                 },
                 "directories": [
                     {"path": d.path, "label": d.label, "active": bool(d.active),
-                     "exists": os.path.isdir(d.path)}
+                     "exists": os.path.isdir(d.path), "marker": os.path.isfile(os.path.join(d.path, MARKER))}
                     for d in directories if d.set_id == ps.id
                 ],
                 "immich_input": bool(ps.immich_input),
@@ -256,6 +257,7 @@ async def diagnostics(request: Request):
                 "immich_user_id": ps.immich_user_id,
                 "library_base_path": base,
                 "library_base_path_exists": os.path.isdir(base) if base else False,
+                "library_base_path_marker": os.path.isfile(os.path.join(base, MARKER)) if base else False,
                 "folder_tag_mode": ps.folder_tag_mode or "none",
                 "folder_albums": bool(ps.folder_albums),
                 "tag_groups": bool(ps.tag_groups),
@@ -323,7 +325,12 @@ async def diagnostics(request: Request):
             "paused": await config_manager.get("pipeline.paused", False),
             "auto_paused_reason": await config_manager.get("pipeline.auto_paused_reason", ""),
             "auto_paused_at": await config_manager.get("pipeline.auto_paused_at", ""),
+            "auto_paused_detail": await config_manager.get("pipeline.auto_paused_detail", ""),
+            "auto_paused_paths": await config_manager.get("pipeline.auto_paused_paths", []),
         },
+        # Storage roots MediaAssistant marked (storage.py); whether each root
+        # still holds its marker is in sets[].directories / library_base_path_marker.
+        "storage_marked": await config_manager.get(MARKED_KEY, []),
         "modules": modules,
         "settings": settings,
         "settings_superseded": superseded,

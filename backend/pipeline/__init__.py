@@ -10,6 +10,8 @@ from sqlalchemy import and_, case, func, or_, update
 import fileops
 import resources
 import runs
+import services
+import storage
 from config import config_manager
 from database import async_session
 from file_operations import sha256 as _sha256
@@ -167,6 +169,15 @@ async def _run_pipeline(job_id: int):
         if not job:
             return
 
+        # A drive of the job is not usable (not mounted, read-only, …): it
+        # waits in the queue before anything is touched (storage.py).
+        found = await storage.down_for_job(job)
+        if found is not None:
+            await storage.pause(found, where=f"{job.debug_key} vor dem Start",
+                                error=storage.describe(found, await services.ui_texts()))
+            await _park(session, job, services.STORAGE, runs.params_of(job).get("_rerun"))
+            return
+
         if reprocess.PREPARE_SOURCE in runs.params_of(job):
             # A retry dropped the old results and was cut short before its
             # file was in place (crash, R-10b): finish that first.
@@ -208,7 +219,7 @@ async def _run_pipeline(job_id: int):
         await executor.run_main(ctx)
         pipeline_failed, duplicate_detected = ctx.pipeline_failed, ctx.duplicate
         if ctx.parked:
-            await _park(session, job, ctx)
+            await _park(session, job, ctx.parked, ctx.rerun)
             return
 
         # Move failed file to error/ immediately (before finalizers) — never
@@ -279,20 +290,19 @@ async def _run_pipeline(job_id: int):
         gc.collect()
 
 
-async def _park(session, job, ctx) -> None:
+async def _park(session, job, reason: str, rerun: dict | None) -> None:
     """A service the next module needs is down (auto-pause): the job goes
     back to the queue — atomically, finished runs and run parameters stay —
     and goes on from there after the pause (3.5). No finalizers yet."""
     from models import RerunItem
     res = await session.execute(update(Job).where(Job.id == job.id, Job.status == "processing")
                                 .values(status="queued"))
-    rerun = ctx.rerun
     if rerun is not None:
         await session.execute(update(RerunItem).where(RerunItem.id == rerun.get("item"),
                                                       RerunItem.state == "running").values(state="queued"))
     await session.commit()
     if res.rowcount:
-        await log_info("pipeline", f"{job.debug_key} wartet: {ctx.parked} — weiter nach dem Fortsetzen",
+        await log_info("pipeline", f"{job.debug_key} wartet: {reason} — weiter nach dem Fortsetzen",
                        f"{job.filename}: beendete Module bleiben, der Job steht wieder in der Warteschlange")
 
 
@@ -426,6 +436,9 @@ async def reset_job_for_retry(job_id: int, *, actor: str = "user:retry") -> bool
                 f"{job.error_message} — dieser Job hat kein eigenes Exemplar mehr; der Inhalt ist "
                 "beim behaltenen Job. Nichts geändert.")
             return False
+        if await _storage_holds_back(job, "Retry"):
+            return False
+        before = job.status
 
     async with async_session() as session:
         # Atomic claim: only one caller moves a terminal job to 'processing',
@@ -444,7 +457,20 @@ async def reset_job_for_retry(job_id: int, *, actor: str = "user:retry") -> bool
         # Heartbeat and in-process registration while the file is prepared (a
         # download or the copy of a large video can outlast the stale timeout).
         async with _running(job_id, "retry"):
-            return await _prepare_retry(session, job_id, actor)
+            return await _prepare_retry(session, job_id, actor, before)
+
+
+async def _storage_holds_back(job, what: str) -> bool:
+    """A drive of the job is not usable: its file is not missing, so nothing
+    is changed and the pipeline pauses (storage.py)."""
+    found = await storage.down_for_job(job)
+    if found is None:
+        return False
+    text = storage.describe(found, await services.ui_texts())
+    await storage.pause(found, where=f"{job.debug_key} {what}", error=text)
+    await log_warning("pipeline", f"{job.debug_key} {what} zurückgestellt: Speicher nicht verfügbar",
+                      f"{text} — der Job bleibt, wie er ist")
+    return True
 
 
 async def _duplicate_original(job):
@@ -457,8 +483,9 @@ async def _duplicate_original(job):
         return None
 
 
-async def _prepare_retry(session, job_id: int, actor: str) -> bool:
-    """reset_job_for_retry after a successful claim (job is 'processing')."""
+async def _prepare_retry(session, job_id: int, actor: str, before: str) -> bool:
+    """reset_job_for_retry after a successful claim (job is 'processing',
+    `before` its status until then)."""
     job = await session.get(Job, job_id)
     if not job:
         return False
@@ -471,6 +498,10 @@ async def _prepare_retry(session, job_id: int, actor: str) -> bool:
     except Exception as exc:
         logger.exception("%s: retry source lookup failed", key)
         source, notes = None, [f"{type(exc).__name__}: {exc}"]
+    if source is None and await _storage_holds_back(job, "Retry"):
+        job.status = before
+        await session.commit()
+        return False
     if source is None:
         # No source anywhere. Requeueing now would spin the job through
         # the pipeline forever (live MA-2026-15415, -23077); stop with a
@@ -520,6 +551,12 @@ async def _prepare_retry(session, job_id: int, actor: str) -> bool:
         # old results (copies of the superseded runs), with the reason.
         await runs.restore(session, job, superseded)
         await runs.set_values(session, job, clear_params=True)
+        if isinstance(exc, fileops.StorageUnavailable):
+            job.status = before  # the drive is missing, not the file (fileops paused)
+            await session.commit()
+            await log_warning("pipeline", f"{key} Retry zurückgestellt: Speicher nicht verfügbar",
+                              f"{exc} — der Job bleibt, wie er ist")
+            return False
         job.status = "error"
         job.error_message = f"Retry abgebrochen — Datei nicht bereitgestellt: {exc}"[:2000]
         await session.commit()

@@ -468,7 +468,7 @@ und produziert Phantom-Fehler.
 - ~~**A-6** `filewatcher.py` ist 830-Zeilen-Gott-File (Scan + Poll + Worker + Recovery + Scheduler).~~ ✅ v3.0.0: zerlegt in `inputs/`, `worker.py`, `recovery.py`; `filewatcher.py` ist nur noch der Taktgeber.
 - **A-7** 🔶 `_resolve_duplicate_group` ist seit v3.0.0 in feste Schritte zerlegt (beanspruchen, prüfen, Papierkorb, behaltener Job, Endzustand), die Business-Logik liegt aber weiterhin im Router (`routers/duplicates.py`, rund 1950 Zeilen).
 - **A-8** SQLite Query-Plan für Duplicate-View ungetestet.
-- **A-9** Kein globaler Filesystem-Healthcheck auf Inbox/Library-Mount. Die Set-Liste zeigt nur an, ob der Basis-Pfad existiert.
+- ~~**A-9** Kein globaler Filesystem-Healthcheck auf Inbox/Library-Mount. Die Set-Liste zeigt nur an, ob der Basis-Pfad existiert.~~ ✅ v3.3.0: `storage.py` markiert jeden Eingang und Basis-Pfad mit `.mediaassistant`. Fehlt die Markierung, ist der Ordner leer, obwohl das Register dort Dateien kennt, oder ist er nicht lesbar, hält die Pipeline an; der Job wartet. Geprüft wird beim Start jedes Jobs, vor jeder Dateioperation, beim Abgleich nach einem Absturz, im Stale-Watchdog, beim Retry und im Inbox-Scanner (US-26, US-27, `test_storage.py`).
 - **A-10** 🔶 Die Reproducer in `test_data_safety_local.py` / `test_data_safety_immich.py` und US-18 simulieren Abstürze an festen Stellen (z. B. mitten im Ersetzen in Immich, R-10e) samt Wiederaufnahme. Ein echtes Abschiessen des Prozesses während eines Laufs fehlt weiterhin.
 
 ---

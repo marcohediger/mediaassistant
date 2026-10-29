@@ -370,6 +370,16 @@ as the default base path for new sets.
 
 Every file move uses copy → verify hash → delete. No data loss even on interrupted operations.
 
+A missing service or drive is never blamed on a file. If the AI backend,
+geocoding or Immich is not usable, or an inbox or library drive is not
+mounted, the pipeline pauses itself, the dashboard says why, and the
+affected files wait in the queue until it is back. To tell a drive that is
+not mounted from an empty folder (inside a container both look the same),
+MediaAssistant puts a small `.mediaassistant` file into every inbox and
+library folder it works in, as Immich does with `.immich`. Please leave it
+there. If you move a library to a new disk on purpose, the dashboard offers
+to mark the folder again.
+
 ## Encrypted Configuration
 
 API keys and passwords are encrypted with Fernet (AES-128-CBC) in the database.

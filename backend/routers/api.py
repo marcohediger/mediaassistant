@@ -1070,6 +1070,24 @@ async def resume_pipeline_endpoint(request: Request):
     return RedirectResponse(url="/", status_code=303)
 
 
+@router.post("/storage/adopt")
+async def storage_adopt_endpoint():
+    """Mark the storage roots anew whose marker is gone on purpose — the
+    user confirmed the drive is the right one (a new disk, storage.py).
+    Ends the storage pause once every root checks out."""
+    import services
+    import storage
+    adopted = await storage.adopt()
+    if adopted:
+        await log_info("api", f"Speicher neu markiert: {len(adopted)} Ordner (vom Benutzer bestätigt)",
+                       "\n".join(adopted))
+    ok, detail = await storage.check(await services.ui_texts())
+    if ok and await config_manager.get("pipeline.auto_paused_reason", "") == services.STORAGE:
+        await services.clear()
+        await log_info("pipeline", "Speicher wieder bereit — Pipeline fortgesetzt", detail)
+    return JSONResponse({"adopted": adopted, "ok": ok, "detail": detail})
+
+
 @router.get("/pipeline/status")
 async def pipeline_status_endpoint():
     """Return current pipeline pause-state and in-flight counters."""

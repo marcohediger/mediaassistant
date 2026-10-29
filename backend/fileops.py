@@ -54,6 +54,8 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 
+import services
+import storage
 from database import async_session
 from file_operations import sanitize_path_component
 from file_operations import sha256 as _sha256
@@ -119,6 +121,15 @@ class FileOpRefused(FileOpError):
 
 class FileOpBusy(FileOpRefused):
     """Another operation on the same source is still open."""
+
+
+class StorageUnavailable(FileOpRefused):
+    """The drive the operation needs is not usable (storage.py): nothing was
+    touched, and the pipeline is paused."""
+
+    def __init__(self, problem, message: str):
+        super().__init__(message)
+        self.problem = problem
 
 
 class FileOpFailed(FileOpError):
@@ -511,11 +522,26 @@ async def _claim(session, job_id, kind, location, sha, size, notes: list, *,
     return row
 
 
+async def _ensure_storage(key: str, what: str, paths) -> None:
+    """Refuse to act on a drive that is not usable: an empty mount point
+    would take the file onto the wrong disk, a missing one would read as a
+    lost file. The pipeline pauses (services.py); nothing is touched."""
+    found = await storage.unavailable(paths)
+    if found is None:
+        return
+    text = storage.describe(found, await services.ui_texts())
+    await storage.pause(found, where=f"{key} {what}", error=text)
+    raise StorageUnavailable(found, text)
+
+
 async def _begin(jref: _JobRef, *, op, actor, src_kind, src, dst_kind=None, dst_dir=None,
                  filename=None, copy_id=None, sha256_before=None, size=None, reason=None,
                  run_id=None, register_src=None, part_suffix=None, tmp_dir=False,
                  detail: dict | None = None) -> tuple[int, dict]:
-    """Write the intent row; returns (op id, detail). Raises FileOpBusy."""
+    """Write the intent row; returns (op id, detail). Raises FileOpBusy, and
+    StorageUnavailable before any row is written."""
+    await _ensure_storage(jref.debug_key, op, [src if src_kind != "immich" else None,
+                                               dst_dir if dst_kind != "immich" else None])
     if run_id is None:
         run_id = CURRENT_RUN_ID.get()
     async with async_session() as session:
@@ -860,9 +886,11 @@ async def verify(copy, *, actor: str = "system:verify") -> FileCopy:
     if row.state not in ("present", "trashed", "missing"):
         return row
     path = row.trash_location if row.state == "trashed" else row.location
+    key = (await _job_ref(row.job_id)).debug_key if row.job_id else "system"
+    # A drive that is not there says nothing about the copy: never "missing".
+    await _ensure_storage(key, "Prüfung", [path])
     actual = await asyncio.to_thread(_hash_regular, path) if path else None
     ok = actual is not None and (row.sha256 is None or actual == row.sha256)
-    key = (await _job_ref(row.job_id)).debug_key if row.job_id else "system"
     async with async_session() as session:
         row = await session.get(FileCopy, copy_id)
         if ok:
@@ -2662,6 +2690,17 @@ async def reconcile_open_intents(*, older_than_s: float = 0.0,
     entries = sorted(entries, key=lambda e: (e.op == "replace", e.id))
     results = []
     for entry in entries:
+        # On a drive that is not there the operation can be judged neither
+        # way: it stays open until the drive is back.
+        found = await storage.unavailable([
+            entry.src if entry.src_kind != "immich" else None,
+            entry.dst if entry.dst_kind != "immich" else None,
+            (entry.detail or {}).get("dst_dir") if entry.dst_kind != "immich" else None])
+        if found is not None:
+            note = storage.describe(found, await services.ui_texts())
+            await storage.pause(found, where=f"Abgleich #{entry.id} {entry.op}", error=note)
+            results.append({"op_id": entry.id, "op": entry.op, "state": "intent", "note": note})
+            continue
         try:
             if entry.src_kind == "immich" and entry.op in _ASSET_OP_EFFECT:
                 state, note = await _reconcile_asset_op(entry)
