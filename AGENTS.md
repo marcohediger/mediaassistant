@@ -692,14 +692,12 @@ Mantra:
    das `Latest`-Badge auf der alten Version stehen). Ein Tag-Push allein
    reicht nicht; Releases sind eine separate API-Resource.
 
-   GitHub via API (Token aus `git remote get-url github` parsen):
+   GitHub über `gh` (auf dem Entwicklungsrechner angemeldet, `gh auth
+   status`; der `github`-Remote ist ein SSH-Deploy-Key und darf keine
+   Releases anlegen). Nie einen Token in die Befehlszeile oder den Chat:
    ```bash
-   TOKEN=$(git remote get-url github | sed -n 's|.*://[^:]*:\([^@]*\)@.*|\1|p')
-   curl -X POST https://api.github.com/repos/marcohediger/mediaassistant/releases \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Accept: application/vnd.github+json" \
-     -d '{"tag_name":"v2.X.Y","name":"v2.X.Y","body":"<changelog-text>",
-          "draft":false,"prerelease":false,"make_latest":"true"}'
+   gh release create v2.X.Y -R marcohediger/mediaassistant \
+     --title v2.X.Y --notes-file <changelog-auszug.md> --latest
    ```
 
    Gitea via API (Credentials aus `git remote get-url origin`):

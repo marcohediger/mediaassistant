@@ -5,8 +5,6 @@
 
 Drop your photos and videos into a folder. MediaAssistant takes care of the rest: metadata extraction, AI-powered tagging, duplicate detection, geocoding, and automatic sorting into your library or Immich.
 
-![Dashboard](docs/screenshots/Screenshot%202026-04-15%20133554.png)
-
 ## What it does
 
 - **Processing sets** — Any number of independent setups, each with its own inputs, schedule, rules, folder tags, OCR, metadata mode and target storage
@@ -40,44 +38,32 @@ Inbox  →  EXIF  →  Duplicates  →  Geocoding  →  Convert  →  AI  →  O
 | IA-10 | Cleanup | Remove temporary files |
 | IA-11 | Log | Processing summary to database |
 
-## Screenshots
+## Highlights
 
 ### Review — Manual Classification
-![Review](docs/screenshots/Screenshot%202026-04-15%20133653.png)
-
 Files the AI is uncertain about land in the review queue. Classify them manually with one click.
 
 ### Settings — Inbox Directories
-![Inbox Settings](docs/screenshots/Screenshot%202026-04-15%20133709.png)
-
 Multiple inbox directories with individual settings: Immich upload, folder tags, dry-run mode.
 
 ### Settings — Sorting Rules
-![Sorting Rules](docs/screenshots/Screenshot%202026-04-15%20133728.png)
-
 Flexible rules based on filename, regex, EXIF expressions, or file extension. First match wins. AI verifies all files.
 
 ### Settings — Target Storage
-![Target Storage](docs/screenshots/Screenshot%202026-04-15%20133741.png)
-
 Configurable library structure with placeholders ({YYYY}, {COUNTRY}, {CAMERA}, ...). Per-category paths.
 
 ### Duplicate Review — Side-by-Side Comparison
-![Duplicate Review](docs/screenshots/Screenshot%202026-04-15%20150132.png)
-
 Compare duplicates with thumbnails, metadata, and quality scores at a glance. Keep the best file, batch-clean entire groups, or mark false positives — with live progress tracking.
 
 ### Authentication — SSO Login
-![SSO Login](docs/screenshots/Screenshot%202026-04-15%20135538.png)
-
 Secure access via OIDC/OAuth2. Works with Authentik, Keycloak, Authelia, or any compatible provider — one click to sign in.
 
 ## Quick Start
 
 ```bash
 mkdir mediaassistant && cd mediaassistant
-curl -O https://raw.githubusercontent.com/marcohediger/mediaassistant/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/marcohediger/mediaassistant/main/.env.example
+curl -O https://raw.githubusercontent.com/marcohediger/mediaassistant/master/docker-compose.yml
+curl -O https://raw.githubusercontent.com/marcohediger/mediaassistant/master/.env.example
 cp .env.example .env
 ```
 
