@@ -22,6 +22,11 @@ Regeln:
 - Behalte die originale Formatierung bei wo sinnvoll"""
 
 
+# Reason of a skip in smart mode (no text expected): the module did what the
+# set asked for. job_view shows it as OK; jobs before 3.1.3 carry the same text.
+SMART_NOT_NEEDED = "OCR nicht nötig (Modus: smart)"
+
+
 async def execute(job, session) -> dict:
     """IA-06: OCR — Texterkennung via KI."""
     from sets import get_set
@@ -37,7 +42,7 @@ async def execute(job, session) -> dict:
         ai_source = ai_result.get("source", "").lower()
         is_ocr_relevant = ai_type.lower() == "screenshot" or "dokument" in ai_source or "document" in ai_source or "quittung" in ai_source
         if ai_type and not is_ocr_relevant and not ai_result.get("parse_error"):
-            return {"status": "skipped", "reason": f"type={ai_type}, OCR nicht nötig (Modus: smart)"}
+            return {"status": "skipped", "reason": f"type={ai_type}, {SMART_NOT_NEEDED}"}
 
     # Use pre-converted temp file from IA-04 if available
     filepath = job.original_path

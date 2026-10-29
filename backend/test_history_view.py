@@ -134,10 +134,42 @@ def test_module_blocks():
     report("Probelauf mit geplantem Ziel", by2["IA-08"]["status"] == "dry_run" and "/x/y.jpg" in by2["IA-08"]["detail"])
     summary = job_view.strip_summary(job_view.module_blocks(job2, T), T)
     report("Zusammenfassung für Screenreader", summary.startswith("Module:") and "Fehler" in summary, summary)
+    smart = {"status": "skipped", "reason": "type=Persönliches Foto, OCR nicht nötig (Modus: smart)"}
+    off = {"status": "skipped", "reason": "OCR im Set ausgeschaltet"}
+    job4 = SimpleNamespace(status="done", current_step=None, step_result={"IA-06": smart}, updated_at=None)
+    b4 = {b["module"]: b for b in job_view.module_blocks(job4, T)}["IA-06"]
+    report("OCR im Modus Smart übersprungen: grün, mit Hinweis",
+           b4["status"] == "ok" and b4["tone"] == "is-success"
+           and b4["detail"] == T["history"]["detail_ocr_not_needed"], str(b4))
+    job5 = SimpleNamespace(status="done", current_step=None, step_result={"IA-06": off}, updated_at=None)
+    report("OCR im Set ausgeschaltet: bleibt übersprungen",
+           {b["module"]: b for b in job_view.module_blocks(job5, T)}["IA-06"]["status"] == "skipped")
+    now = datetime.now()
+
+    def run(i, status, result):
+        return SimpleNamespace(id=i, job_id=1, module="IA-06", status=status, result=result, attempt=i,
+                               trigger="pipeline", started_at=now, finished_at=now, error=None,
+                               copied_from_run_id=None)
+    runs_ = [run(1, "superseded", smart), run(2, "skipped", smart)]
+    b6 = {b["module"]: b for b in job_view.module_blocks(job4, T, runs=runs_)}["IA-06"]
+    report("…auch aus den Läufen, frühere Versuche ebenso",
+           b6["status"] == "ok" and b6["earlier"] and b6["earlier"][0]["status"] == "ok", str(b6))
+    failed = {"status": "error", "reason": "RuntimeError: OCR API Timeout nach 3 Versuchen"}
+    job7 = SimpleNamespace(status="done", current_step=None, step_result={"IA-06": failed}, updated_at=None)
+    b7 = {b["module"]: b for b in job_view.module_blocks(job7, T)}["IA-06"]
+    report("OCR-Fehler bleibt sichtbar (Warnung, mit Grund)",
+           b7["status"] == "warning" and "Timeout" in b7["detail"]
+           and job_view.step_status("IA-06", failed) == "error", str(b7))
+    b8 = {b["module"]: b for b in job_view.module_blocks(
+        job4, T, runs=[run(1, "superseded", failed), run(2, "skipped", smart)])}["IA-06"]
+    report("…auch ein früherer fehlgeschlagener Versuch",
+           b8["status"] == "ok" and b8["earlier"][0]["status"] == "warning", str(b8["earlier"]))
+    report("Schritt-Details: Smart-Überspringen OK, ausgeschaltet bleibt übersprungen",
+           job_view.step_status("IA-06", smart) == "ok" and job_view.step_status("IA-06", off) == "skipped"
+           and job_view.step_status("IA-05", {"status": "skipped", "reason": smart["reason"]}) == "skipped")
     job3 = SimpleNamespace(status="queued", current_step=None, step_result=None, updated_at=None)
     report("Ohne step_result: alles nicht gelaufen",
            all(b["status"] == "not_run" for b in job_view.module_blocks(job3, T)))
-    now = datetime.now()
     report("Restzeit: 30 Tage frisch, 0 nach Ablauf",
            job_view.remaining_days(now, now=now) == 30
            and job_view.remaining_days(now - timedelta(days=31), now=now) == 0

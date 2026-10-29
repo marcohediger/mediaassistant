@@ -1012,7 +1012,8 @@
     }
     for (const [step, result] of entries) {
       const isMap = result !== null && typeof result === "object" && !Array.isArray(result);
-      const st = isMap ? result.status : undefined;
+      // Status from job_view.step_status (a skip the set chose counts as OK)
+      const st = isMap ? (job.step_status || {})[step] : undefined;
       const tone = !isMap ? ["is-neutral", "info"] : TONES[st] || ["is-success", "check-circle"];
       const toneLabel = !isMap ? "" : TONES[st] ? L[st] : L.ok;
 

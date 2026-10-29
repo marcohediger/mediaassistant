@@ -229,6 +229,7 @@ async def dryrun_report():
 @router.get("/job/{debug_key}/json")
 async def log_detail_json(debug_key: str):
     """JSON endpoint for live-updating the job detail page."""
+    import job_view
     async with async_session() as session:
         result = await session.execute(select(Job).where(Job.debug_key == debug_key))
         job = result.scalar()
@@ -251,6 +252,7 @@ async def log_detail_json(debug_key: str):
         "target_path": job.target_path,
         "error_message": job.error_message,
         "step_result": job.step_result,
+        "step_status": {code: job_view.step_status(code, r) for code, r in (job.step_result or {}).items()},
         "step_labels": steps,
         "file_hash": job.file_hash,
         "phash": job.phash,

@@ -636,7 +636,7 @@ Fehlermeldung produziert, oder Datei wie spezifiziert ignoriert).
 > Zählungen und Blätterlogik lassen sich mit Attrappen nicht prüfen.
 >
 > **Noch kein automatisiertes Skript** — bisher Handarbeit,
-> siehe [Issue #44](https://<gitea-host>/MediaAssistant/ma-core/issues/44).
+> siehe Issue #44 (Gitea).
 
 **Löschen nach Muster**
 

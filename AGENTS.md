@@ -215,7 +215,14 @@ laufend, der nächste Test/Lauf erwartet ihn als ready.
 ### Dev-Umgebung — verfügbare Services
 
 In der Dev-Umgebung sind neben dem MediaAssistant-Container auch eine
-vollständige **Immich-Instanz** und alle Hilfsdienste verfügbar:
+vollständige **Immich-Instanz** und alle Hilfsdienste verfügbar.
+
+> **Hostnamen und Adressen stehen nicht in diesem Repo** (es ist auf GitHub
+> öffentlich). Hier stehen Platzhalter — `<dev-host>` (Rechner der
+> Dev-Umgebung), `<gitea-host>` (Gitea-Instanz), `<Benutzer>` (Ordner des
+> Immich-Benutzers) —, die echten Werte in **`AGENTS.local.md`** im
+> Repo-Ordner (gitignoriert, nur lokal). Neue Adressen kommen dorthin, nie
+> hierher.
 
 | Container | Zugang | Zweck |
 |---|---|---|
@@ -247,7 +254,7 @@ Sidecar-Pfade:   <asset_path>.xmp (falls vorhanden)
 Dateien im Immich-Storage gehören `root:root` (Docker). Schreiben
 in den Storage geht über `docker cp` oder `docker exec`:
 ```bash
-docker cp /tmp/test.xmp "immich_server:/data/library/Marco Hediger/2026/..."
+docker cp /tmp/test.xmp "immich_server:/data/library/<Benutzer>/2026/..."
 ```
 
 **Immich Jobs API** (getestet April 2026, Immich v2.6.3):
@@ -834,8 +841,8 @@ Was übernommen wurde, steht in `step_result['dup_merge']` (R-20).
 ### Externe Tools
 | Tool | Repo | Zweck |
 |---|---|---|
-| `ma-sidecar-repair` | [GitHub](https://github.com/marcohediger/ma-sidecar-repair) / [Gitea](https://<gitea-host>/MediaAssistant/ma-tools-sidecar-repair) | Defekte XMP-Sidecars reparieren (v2.28.13-Bug) |
-| `ma-ghost-tag-detect` | [GitHub](https://github.com/marcohediger/ma-ghost-tag-detect) / [Gitea](https://<gitea-host>/MediaAssistant/ma-tools-ghost-tag-detect) | Ghost-Tags erkennen → CSV für csv-retry |
+| `ma-sidecar-repair` | [GitHub](https://github.com/marcohediger/ma-sidecar-repair) / Gitea `MediaAssistant/ma-tools-sidecar-repair` | Defekte XMP-Sidecars reparieren (v2.28.13-Bug) |
+| `ma-ghost-tag-detect` | [GitHub](https://github.com/marcohediger/ma-ghost-tag-detect) / Gitea `MediaAssistant/ma-tools-ghost-tag-detect` | Ghost-Tags erkennen → CSV für csv-retry |
 
 ### Immich Sidecar-Sync (getestet April 2026, Immich v2.6.3)
 | Richtung | Verhalten |

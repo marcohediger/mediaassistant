@@ -52,6 +52,7 @@ from models import AssetRef, FileCopy, FileOp, Job, ModuleRun, ProcessingSet, RU
 # The module register is the one source of the module order and of which
 # modules are critical (a failure there fails the job; elsewhere it only warns).
 from pipeline.registry import CRITICAL, ORDER as MODULES
+from pipeline.step_ia06_ocr import SMART_NOT_NEEDED
 
 STATUS_TONES = {
     "ok": ("is-success", "check-circle"),
@@ -129,6 +130,13 @@ def short_location(kind: str | None, location: str | None) -> str:
 # Module blocks
 # ---------------------------------------------------------------------------
 
+def _not_needed(code: str, result) -> bool:
+    """A skip the set chose on purpose: OCR in smart mode for a picture where
+    no text is expected. The module did its job, so it shows as OK."""
+    return (code == "IA-06" and isinstance(result, dict) and result.get("status") == "skipped"
+            and SMART_NOT_NEEDED in str(result.get("reason") or ""))
+
+
 def _status_of(job, code: str, results: dict) -> str:
     if job.status == "processing" and job.current_step == code:
         return "running"
@@ -140,6 +148,8 @@ def _status_of(job, code: str, results: dict) -> str:
     st = result.get("status")
     if st == "error":
         return "error" if code in CRITICAL else "warning"
+    if _not_needed(code, result):
+        return "ok"
     if st in ("warning", "skipped", "duplicate", "dry_run"):
         return st
     if result.get("_skipped"):
@@ -171,6 +181,8 @@ def _ok_detail(code: str, r: dict, h: dict) -> str:
             parts.append(_fmt(h.get("detail_tags", "{n}"), n=len(tags)))
         return " · ".join(p for p in parts if p)
     if code == "IA-06":
+        if _not_needed(code, r):
+            return h.get("detail_ocr_not_needed", "")
         if "has_text" in r or "text" in r:
             return h.get("detail_text_found" if (r.get("has_text") or r.get("text")) else "detail_no_text", "")
         return ""
@@ -218,6 +230,14 @@ def _detail_of(code: str, status: str, result, h: dict) -> str:
     return _ok_detail(code, result, h)
 
 
+def step_status(code: str, result) -> str | None:
+    """Status of a raw module result for the step details of the job page:
+    its own status, except that a skip the set chose counts as OK."""
+    if not isinstance(result, dict):
+        return None
+    return "ok" if _not_needed(code, result) else result.get("status")
+
+
 def step_visible(code: str, result) -> bool:
     """Whether a module belongs in the workflow view of a job.
 
@@ -230,11 +250,13 @@ def step_visible(code: str, result) -> bool:
     return isinstance(result, dict) and (bool(result.get("sent")) or result.get("status") == "error")
 
 
-def _result_tone(code: str, run_status: str) -> str:
+def _result_tone(code: str, run_status: str, result=None) -> str:
     """Block status of a finished run: a failure outside the critical
-    modules only warns, like in the pipeline."""
+    modules only warns, like in the pipeline; a skip the set chose is OK."""
     if run_status == "error":
         return "error" if code in CRITICAL else "warning"
+    if _not_needed(code, result):
+        return "ok"
     return run_status if run_status in STATUS_TONES else "ok"
 
 
@@ -248,13 +270,13 @@ def _outcome(code: str, run) -> str:
     """What an attempt came to: the status its result stands for, also once
     superseded; 'interrupted' for one superseded while it ran."""
     if run.status in RUN_RESULT_STATUSES:
-        return _result_tone(code, run.status)
+        return _result_tone(code, run.status, run.result)
     if run.status != "superseded":
         return run.status  # queued, running
     if run.result is None:
         return "interrupted" if run.started_at is not None else "not_run"
     import runs as _runs  # runs.py writes; only its status rule is used here
-    return _result_tone(code, _runs.result_status(run.result))
+    return _result_tone(code, _runs.result_status(run.result), run.result)
 
 
 def _attempt_entry(code: str, run, h: dict) -> dict:
@@ -325,7 +347,7 @@ def module_blocks(job, t: dict | None = None, runs=None, stale=None) -> list[dic
         if current is None:
             status = "running" if job.status == "processing" and job.current_step == code else "not_run"
         elif finished:
-            status = _result_tone(code, current.status)
+            status = _result_tone(code, current.status, result)
         else:
             status = current.status  # running or queued
         block = _block(code, status, result, h, steps)
