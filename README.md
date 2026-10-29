@@ -5,6 +5,10 @@
 
 Drop your photos and videos into a folder. MediaAssistant takes care of the rest: metadata extraction, AI-powered tagging, duplicate detection, geocoding, and automatic sorting into your library or Immich.
 
+![Dashboard](docs/screenshots/dashboard.png)
+
+<sub>All screenshots come from a demo instance with synthetic pictures.</sub>
+
 ## What it does
 
 - **Processing sets** — Any number of independent setups, each with its own inputs, schedule, rules, folder tags, OCR, metadata mode and target storage
@@ -40,20 +44,40 @@ Inbox  →  EXIF  →  Duplicates  →  Geocoding  →  Convert  →  AI  →  O
 
 ## Highlights
 
+### Job Detail — Every Module at a Glance
+![Job detail](docs/screenshots/job.png)
+
+One block per module, green when it did its job. Open a step to see its result, rerun single modules, and follow every file operation in the timeline.
+
 ### Review — Manual Classification
+![Review](docs/screenshots/review.png)
+
 Files the AI is uncertain about land in the review queue. Classify them manually with one click.
 
-### Settings — Inbox Directories
-Multiple inbox directories with individual settings: Immich upload, folder tags, dry-run mode.
+### Settings — Processing Sets
+![Processing sets](docs/screenshots/processing-sets.png)
+
+Any number of sets, each with its own inputs, schedule, sorting rules, folder tags, OCR mode, metadata mode and target storage.
 
 ### Settings — Sorting Rules
+![Sorting rules](docs/screenshots/sorting-rules.png)
+
 Flexible rules based on filename, regex, EXIF expressions, or file extension. First match wins. AI verifies all files.
 
 ### Settings — Target Storage
-Configurable library structure with placeholders ({YYYY}, {COUNTRY}, {CAMERA}, ...). Per-category paths.
+![Target storage](docs/screenshots/target-storage.png)
+
+Library folder or Immich upload. Configurable structure with placeholders ({YYYY}, {COUNTRY}, {CAMERA}, ...), one path per category.
 
 ### Duplicate Review — Side-by-Side Comparison
-Compare duplicates with thumbnails, metadata, and quality scores at a glance. Keep the best file, batch-clean entire groups, or mark false positives — with live progress tracking.
+![Duplicate review](docs/screenshots/duplicates.png)
+
+Compare duplicates with thumbnails, metadata, and quality scores at a glance. Keep the best file, clean up groups automatically, or mark false positives. Removed files go to the trash, never straight to deletion.
+
+### Tools — Trash, Inventory Check, Tag Cleanup
+![Tools](docs/screenshots/tools.png)
+
+Restore files from the trash, check that every copy is still there and unchanged, and remove or merge keywords across sidecars and Immich.
 
 ### Authentication — SSO Login
 Secure access via OIDC/OAuth2. Works with Authentik, Keycloak, Authelia, or any compatible provider — one click to sign in.
