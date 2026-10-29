@@ -1,5 +1,66 @@
 # Changelog
 
+## v3.2.0 — 2026-10-29
+
+### Pipeline: Fehlt ein Dienst, hält sie an — der Job ist nie schuld
+
+Grundsatz: Ein Problem der Infrastruktur wird keinem Job angelastet. Fehlt
+ein Dienst, den die Pipeline braucht, hält die ganze Pipeline an. Der Job,
+der es bemerkt hat, wartet wie alle anderen in der Warteschlange und läuft
+weiter, sobald der Dienst wieder bereit ist.
+
+Bisher pausierte die Pipeline nur, wenn das KI-Backend oder der Geocoder gar
+nicht antworteten — und auch dann landete der Job, der den Ausfall
+bemerkte, als Fehler mit seiner Datei in `error/`. Andere Ausfälle liefen
+still durch:
+
+- **KI-Modell fehlt auf dem KI-Server** (umbenannt oder entladen): HTTP 400
+  „model not found" galt als Warnung des einzelnen Jobs. Jedes Bild lief
+  durch und landete als „Unbekannt / Review" (KNOWN_RISKS S-9, heute in der
+  E2E-Suite aufgefallen).
+- **Immich nicht erreichbar:** keine Pause; jeder Job mit Ziel Immich wurde
+  zum Fehler, seine Datei kam nach `error/`.
+- **Geocoder antwortet, aber unbrauchbar** (z. B. HTTP 403 oder 404): jeder
+  Job lief mit einer Warnung in IA-03 ohne Orte weiter.
+- **OCR bei KI-Ausfall:** IA-06 überging den Ausfall als Warnung.
+
+Jetzt gilt für jedes Modul, das KI, Geocoding oder Immich braucht, und für
+den Download aus Immich beim Start eines Jobs: Scheitert es, prüft der
+Executor den Dienst (`services.py`) — mit derselben Prüfung, die das
+Dashboard für seine Modul-Karten zeigt. Ist der Dienst nicht bereit, hält
+die Pipeline mit Grund an; der Lauf des Moduls wird unvollendet geschlossen,
+der Job geht zurück in die Warteschlange — kein Fehler, keine Warnung,
+nichts nach `error/`. Ist der Dienst in Ordnung, ist es ein Fehler des Jobs
+wie bisher. Ein Auftrag „Neu ausführen" wird ebenso zurückgestellt.
+
+Die KI-Prüfung verlangt jetzt auch, dass das eingestellte Modell in
+`/models` des Servers steht (für beide KI-Backends); die Modul-Karte zeigt
+„Modell … fehlt auf dem Server". Der Health-Watcher setzt die Pipeline fort,
+sobald der Dienst wieder bereit ist — neu auch nach einem Immich-Ausfall.
+
+Das Dashboard nennt bei einer automatischen Pause den Dienst und darunter
+den Grund, z. B. „Pipeline automatisch angehalten: KI-Backend nicht bereit"
+und „Modell … fehlt auf dem Server". Wer eine automatische Pause von Hand fortsetzt,
+löscht den Grund mit; vorher parkten die Jobs danach weiter in einer
+Schleife, solange der Grund gespeichert blieb.
+
+Getestet mit drei neuen E2E-Stories gegen die echten Dienste (vorher rot,
+jetzt grün): US-23 KI-Modell fehlt, US-24 Immich nicht erreichbar, US-25
+Geocoder antwortet mit 404 — jeweils Pause mit Grund, Job wartet, Datei
+bleibt liegen, nach der Rückkehr des Dienstes setzt der Health-Watcher fort
+und der Job wird fertig.
+
+### Refactor: Toter Lösch-Code entfernt
+
+`safe_upload_asset` und `safe_replace_asset` in `immich_client.py` waren die
+letzten Stellen, die Assets in Immich endgültig löschten (`force=True`).
+Produktiv rief sie seit 3.0 niemand mehr auf — `fileops` lädt über
+`upload_asset` hoch und räumt nur in den Papierkorb von Immich. Beide sind
+entfernt, samt ihrer Tests. `delete_asset` hat keine Vorgabe mehr für
+`force`: wer endgültig löschen will (nur Tests, für die eigenen Test-Assets),
+muss es ausschreiben. Der Reproducer R-12c/R-12d beobachtet jetzt den echten
+Ersetz-Weg (`fileops.replace`) statt der entfernten Funktion.
+
 ## v3.1.3 — 2026-10-29
 
 ### UI: OCR im Modus „Smart“ übersprungen ist grün
