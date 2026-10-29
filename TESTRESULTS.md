@@ -36,7 +36,7 @@ zusammengefasst. Die ID-Liste ist 1:1 synchron mit `TESTPLAN.md`.
 | Test-Skript | vor 2026-04-02 | 2026-04-02 | 2026-04-07 | 2026-04-08 | 2026-04-09 | 2026-04-13 | v2.29.1 | v2.31.0 | v2.31.1 | v2.31.2 | v3.0.0 | v3.0.1 | v3.0.2 | v3.1.0 | v3.1.1 | v3.1.2 | v3.1.3 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---| --- |
 | **Release** | < v2.17.1 | v2.17.1 | v2.28.3 | v2.28.29 | v2.28.66 | v2.28.73 | v2.29.1 | v2.31.0 | v2.31.1 | v2.31.2 | v3.0.0 | v3.0.1 | v3.0.2 | v3.1.0 (Immich 3.3.5) | v3.1.1 (gezielt) | v3.1.2 (gezielt) | v3.1.3 (gezielt, KI-Modell qwen3.5-4b) |
-| **Commit** | – | – | – | – | `8ffc4c5` | `16f4b8c` | `6358dfe` | `e0356df` | `f0a3d63` | (this) | `47efaed` | (this) | `b89a642` | (this) | (this) | (this) | `b89a642` |
+| **Commit** | – | – | – | – | `f9a6025` | `9c831ca` | `0138aaa` | `b972a87` | `1f245b3` | (this) | `7642933` | (this) | (this) | (this) | (this) | (this) | `e77c86b` |
 | `test_duplicate_fix.py` | – | – | 26/26 ✅ | 26/26 ✅ | 34/34 ✅ | 34/34 ✅ | 34/34 ✅ | – | – | – | 28/28 ✅ | 28/28 ✅ | 28/28 ✅ | 28/28 ✅ | 28/28 ✅ | 28/28 ✅ | – |
 | `test_retry_file_lifecycle.py` | – | – | – | 46/46 ✅ | 110/110 ✅ | 110/110 ✅ | 110/110 ✅ | – | – | – | 110/110 ✅ | 110/110 ✅ | 110/110 ✅ (Immich 3.3.5) | 110/110 ✅ | – | 110/110 ✅ | – |
 | `test_testplan_final.py` | – | 296/305 | 66/66 ✅ | 59/60 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | 63/64 ⚠️ (1 BLOCK) | – | – | – | 51/51 ✅ | 51/51 ✅ | 51/51 ✅ (2 BLOCK: Fixtures) | 51/51 ✅ (2 BLOCK: Fixtures) | 51/51 ✅ (2 BLOCK: Fixtures) | 51/51 ✅ (2 BLOCK: Fixtures) | 51/51 ✅ |
@@ -720,7 +720,7 @@ Handarbeit. → Issue #44 (Gitea)
 
 ### 2026-04-13 (v2.28.73)
 
-- Vollständiger Testlauf aller 4 Suites auf v2.28.73 (`16f4b8c`).
+- Vollständiger Testlauf aller 4 Suites auf v2.28.73 (`9c831ca`).
 - `test_ai_backends.py` erstmals dokumentiert: 13/13 grün.
 - 220/221 bestanden, 1 BLOCK (HEIC-Testdatei fehlt — preexisting).
 - **Neue FTAG-Sektion** (27 Tests): folder_tags & Album-Propagation

@@ -1,5 +1,5 @@
 > **Grundlage für den Umbau „Module & Datensicherheit" (Branch `umbau/module-und-datensicherheit`).**
-> Bestandsaufnahme vom 2026-10-22, Code-Stand 6457f77; Zahlen aus einer Kopie der Live-DB (Stand 2026-09-01, nur Zählungen).
+> Bestandsaufnahme vom 2026-10-22, Code-Stand 0e77699; Zahlen aus einer Kopie der Live-DB (Stand 2026-09-01, nur Zählungen).
 > Entscheid 2026-10-22: Die Risiken R-01 bis R-23 werden **im Umbau** gelöst, nicht per Hotfix in 2.32.x.
 > Die Szenarien stammen aus dem Lesen des Codes; vor jedem Fix braucht es einen roten Reproducer auf Dev (AGENTS.md).
 
@@ -7,7 +7,7 @@
 
 Input for the planned rebuild (append-only ledger of file operations, register of all copies, trash instead of permanent delete, single module runs).
 
-- Code state: branch `umbau/dateieingabe-verarbeitung`, HEAD `6457f77`, `VERSION = 2.32.25`, working tree as found on 2026-10-22 (some UI files were modified by someone else; none of the files below were changed by this research). All `file:line` references are relative to `backend/`.
+- Code state: branch `umbau/dateieingabe-verarbeitung`, HEAD `0e77699`, `VERSION = 2.32.25`, working tree as found on 2026-10-22 (some UI files were modified by someone else; none of the files below were changed by this research). All `file:line` references are relative to `backend/`.
 - Method: every file under `backend/` that is not a test was read (`pipeline/*`, `routers/*`, `inputs/*`, `worker.py`, `recovery.py`, `safe_file.py`, `file_operations.py`, `immich_client.py`, `sets.py`, `system_logger.py`, `scripts/*`, the one-shot helpers). Tests (`test_*.py`) and the `_*.py` dev helpers are listed only where they delete real data.
 - Live numbers come from a **copy** of `dataLiveSystem/db/mediaassistant.db` (+WAL) taken into the scratchpad and queried there (snapshot of 2026-09-01, 65,982 jobs). Only aggregate counts are given.
 - Scenarios in Deliverable 4 were derived from the code. **None was reproduced on dev.** AGENTS.md requires a red reproducer before each fix, so the plan should schedule one per scenario.

@@ -2552,7 +2552,7 @@ Inspektion: nein — die Datei war 250 KB groß und begann mit
 `\xff\xd8\xff\xe0` (JPEG SOI). Eine echte XMP-Sidecar ist Text-XML
 (`<?xpacket … <x:xmpmeta …`) und ~2 KB groß.
 
-**Root cause:** v2.28.13 (`dca6437`) führte das atomic-write-Pattern
+**Root cause:** v2.28.13 (`19a5f8d`) führte das atomic-write-Pattern
 für Sidecars ein:
 
 ```python

@@ -1,6 +1,6 @@
 # Umbau „Module & Datensicherheit": Module einzeln ausführen und Ausführung nach Abhängigkeiten (Schritte 5 und 6)
 
-Branch `umbau/module-und-datensicherheit`. Grundlage: [`UMBAU_MODULE.md`](UMBAU_MODULE.md) (Ausführung, Reihenfolge, R-11, R-12), [`UMBAU_MODULE_INVENTUR.md`](UMBAU_MODULE_INVENTUR.md) Deliverable 3. Code-Stand: Arbeitsbaum vom 2026-10-23 mit Schritt 3 (`runs.py`, `module_runs`, Commit cbd6613). Zeilen relativ zu `backend/`; sie verschieben sich mit späteren Commits.
+Branch `umbau/module-und-datensicherheit`. Grundlage: [`UMBAU_MODULE.md`](UMBAU_MODULE.md) (Ausführung, Reihenfolge, R-11, R-12), [`UMBAU_MODULE_INVENTUR.md`](UMBAU_MODULE_INVENTUR.md) Deliverable 3. Code-Stand: Arbeitsbaum vom 2026-10-23 mit Schritt 3 (`runs.py`, `module_runs`, Commit 439191e). Zeilen relativ zu `backend/`; sie verschieben sich mit späteren Commits.
 
 ## 0. Entscheide auf einen Blick
 
