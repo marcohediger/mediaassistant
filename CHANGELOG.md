@@ -1,5 +1,43 @@
 # Changelog
 
+## v3.1.3 — 2026-10-29
+
+### UI: OCR im Modus „Smart“ übersprungen ist grün
+
+Mit OCR-Modus „Smart“ liest IA-06 nur Screenshots und Dokumente; bei allen
+anderen Bildern lässt es die Texterkennung absichtlich aus. Das Modul hat dann
+getan, was das Set verlangt, wurde aber grau als „Übersprungen“ angezeigt.
+Die Modul-Leiste hatte deshalb bei fast jedem Foto ein graues Kästchen
+zwischen lauter grünen. Auf Live betrifft das rund 53 000 Jobs.
+
+Jetzt zeigt die Ansicht diesen Fall grün als „OK“ mit dem Hinweis „nicht
+nötig (Modus Smart)“: in der Modul-Leiste, in den aufgeklappten Zeilen, bei
+den früheren Versuchen und in den Schritt-Ergebnissen der Job-Seite, auch
+nach dem Live-Update. Erkannt wird der Fall am Grund, den IA-06 schon immer
+schreibt; dadurch werden auch alle bestehenden Jobs grün, ohne dass Daten
+umgeschrieben werden. Die Pipeline selbst ist unverändert, das Ergebnis
+bleibt `skipped`.
+
+Andere Fälle bleiben wie bisher: Ist OCR im Set ausgeschaltet, bleibt das
+Modul grau. Ein Fehler der Texterkennung (z. B. Zeitüberschreitung der KI)
+bleibt als Warnung mit Grund sichtbar, und ein früherer fehlgeschlagener
+Versuch behält seine Farbe in der Liste der Versuche.
+
+Die Schritt-Ergebnisse der Job-Seite berechneten ihre Farbe bisher selbst,
+in der Vorlage und im Live-Update. Beide nehmen jetzt dieselbe Regel aus
+`job_view.step_status`.
+
+### Doku: Keine Hostnamen und LAN-Adressen mehr im Repo (#47)
+
+`AGENTS.md`, `README.md`, `.env.example`, `KNOWN_RISKS.md`, `TESTPLAN.md` und
+`TESTRESULTS.md` nannten den Hostnamen der Gitea-Instanz, LAN-Adressen der
+Dev-Umgebung und im Beispielpfad den Namen des Immich-Benutzers. Das
+GitHub-Repo ist öffentlich. An ihrer Stelle stehen jetzt Platzhalter
+(`<dev-host>`, `<gitea-host>`, `<Benutzer>`, `<ai-host>`); die echten Werte
+liegen lokal in `AGENTS.local.md`, das nicht ins Repo kommt (`.gitignore`).
+Die Beispiel-Adresse für das KI-Backend in den Einstellungen und im
+Einrichtungs-Assistenten heisst jetzt einheitlich `http://ai-server:1234/v1`.
+
 ## v3.1.2 — 2026-10-26
 
 ### UI: Dateinamen und Pfade kopieren
