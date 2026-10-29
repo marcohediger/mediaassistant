@@ -1,10 +1,16 @@
 # Known Risks
 
-Ergebnis eines Logik- und Architektur-Reviews (Stand: 2026-04-20, durchgesehen 2026-09-02). Dokumentiert bekannte theoretische Risiken — **keine akuten Bugs**. Die meisten triggern nur in seltenen Crash-/Race-Szenarien. Kontext: Single-Admin-LAN-Setup, Server mit USV, kein Internet-Exposure.
+Ergebnis eines Logik- und Architektur-Reviews (Stand: 2026-04-20, durchgesehen 2026-09-02 und 2026-10-29 gegen v3.1.3). Dokumentiert bekannte theoretische Risiken — **keine akuten Bugs**. Die meisten triggern nur in seltenen Crash-/Race-Szenarien. Kontext: Single-Admin-LAN-Setup, Server mit USV, kein Internet-Exposure.
 
 Einträge, die inzwischen erledigt sind, bleiben mit ✅ und Fix-Version
 stehen — die Begründung, warum es ein Risiko war, ist beim nächsten
 ähnlichen Fall mehr wert als eine gelöschte Zeile.
+
+Die Datenverlust-Risiken des Umbaus „Module & Datensicherheit" (3.0) —
+R-01 … R-26, je mit Reproducer in `test_data_safety_local.py` bzw.
+`test_data_safety_immich.py` — stehen in
+[`docs/UMBAU_MODULE.md`](docs/UMBAU_MODULE.md). Dieser Umbau hat die
+Kritisch-Einträge unten geschlossen.
 
 **Grundsatz:** Nicht anfassen solange das System stabil läuft. Diese Liste dient als Orientierung, falls später gezielt refactorisiert wird.
 
@@ -12,89 +18,121 @@ stehen — die Begründung, warum es ein Risiko war, ist beim nächsten
 
 ## Kritisch (Datenverlust-Pfade)
 
-### K-1 / K-2 — `safe_move` ohne fsync
-**Datei:** `backend/safe_file.py:39-69`
+### K-1 / K-2 — `safe_move` ohne fsync — ✅ behoben (v3.0.0)
+**Datei:** `backend/fileops.py`
 
-Der Copy-Loop ruft vor `os.remove(src)` kein `f_out.flush()` + `os.fsync()` und kein Parent-Directory-fsync auf. Die Hash-Verifikation liest aus dem Page-Cache, nicht von Disk.
+Der Copy-Loop rief vor `os.remove(src)` kein `fsync` auf, weder für die
+Datei noch für den Ordner. Bei einem Kernel-Panic, OOM-Kill oder
+Container-Absturz zwischen Kopie und Writeback konnte die Quelle weg und
+das Ziel leer sein.
 
-**Szenario:** Kernel-Panic / OOM-Kill / Container-Hard-Crash zwischen Copy und Writeback → Quelle gelöscht, Ziel leer/partiell.
-
-**Entschärfung:** USV eliminiert Stromausfall. Realistisches Restrisiko: OOM-Kill / Docker-Crash.
-
-**Fix (nicht priorisiert):** `f_out.flush(); os.fsync(f_out.fileno())` vor close, dann `os.fsync(dir_fd)` auf Parent-Dir, erst dann `os.remove(src)`.
-
----
-
-### K-3 — `_handle_duplicate` ohne Rollback
-**Datei:** `backend/pipeline/step_ia02_duplicates.py:485-509`
-
-`safe_move` → `/duplicates/` passiert **vor** Commit. Crash dazwischen → Datei ist im Duplicates-Ordner, Job bleibt `processing`. Resume beim Startup setzt `status=queued` → IA-01 crasht mit FileNotFoundError.
-
-**Fix (nicht priorisiert):** DB-Status zuerst auf `duplicate` setzen + committen, dann `safe_move`, dann `.log` schreiben. Oder Resume-Logik prüft Existenz von `original_path`.
+**Jetzt:** Jede Verschiebung läuft über `fileops.move`: kopieren, Datei
+und Zielordner per `fsync` festschreiben, SHA-256 am Ziel prüfen, erst
+dann die Quelle entfernen (und deren Ordner festschreiben).
 
 ---
 
-### K-4 — Donor-Delete vor Commit in Duplicate-Resolution
-**Datei:** `backend/routers/duplicates.py:861-908`
+### K-3 — `_handle_duplicate` ohne Rollback — ✅ behoben (v3.0.0)
+**Datei:** `backend/pipeline/step_ia02_duplicates.py`
 
-Donor-Files werden physisch via `safe_remove_with_log` + `delete_asset(force=True)` gelöscht **bevor** der Keep-Job-State persistiert wird. Commit-Fehler → Donor weg, Keep nicht korrekt verlinkt.
+Die Verschiebung in den Duplikat-Ordner lief **vor** dem Commit. Ein
+Absturz dazwischen liess die Datei im Duplikat-Ordner und den Job auf
+`processing`; die Wiederaufnahme scheiterte dann in IA-01 mit
+FileNotFoundError.
 
-**Fix (nicht priorisiert):** Status-Änderungen committen, dann physische Löschung.
-
----
-
-### K-5 — XMP-Sidecar-Überschreibung ohne Merge
-**Datei:** `backend/pipeline/step_ia07_exif_write.py:264-269`
-
-ExifTool `-o` überschreibt existierende `.xmp`-Sidecar ohne User-eingetragene Tags zu mergen. Widerspricht `keep-local-xmp`-Prinzip.
-
-**Szenario:** User kuratiert Tags via `ma-sidecar-repair`, nächster MediaAssistant-Retry verwirft sie.
-
-**Fix (nicht priorisiert):** `-tagsfromfile existing.xmp` vor Regenerierung oder Merge-Modus.
+**Jetzt:** IA-02 verschiebt über `fileops.move`, das die Absicht vor der
+Operation ins Protokoll `file_ops` schreibt. Beim Start gleicht
+`recovery.reconcile_file_operations()` offene Absichten gegen Platte und
+Immich ab, bevor unterbrochene Jobs wieder eingereiht werden.
 
 ---
 
-### K-7 — Size-Only-Overwrite in IA-08
-**Datei:** `backend/pipeline/step_ia08_sort.py:470-487`
+### K-4 — Donor-Delete vor Commit in Duplicate-Resolution — ✅ behoben (v3.0.0)
+**Datei:** `backend/routers/duplicates.py`
 
-`overwrite_existing=True` wenn nur Dateigröße gleich — kein Hash-Vergleich. Zwei verschiedene Files mit zufällig identischer Byte-Größe am selben Zielpfad → eine wird silent gelöscht.
+Spender-Dateien wurden physisch gelöscht (`safe_remove_with_log`,
+`delete_asset(force=True)`), **bevor** der Zustand des behaltenen Jobs
+gespeichert war. Scheiterte der Commit, war der Spender weg und der
+behaltene Job nicht richtig verknüpft.
 
-**Fix (nicht priorisiert):** Immer Hash vergleichen wenn target existiert. Die Optimierung "skip hash bei gleicher Grösse" spart wenige ms und riskiert Datenverlust.
+**Jetzt (R-04, R-09, R-10a):** `_resolve_duplicate_group` beansprucht
+zuerst alle Mitglieder atomar (`resolving`, Plan im Job), prüft das
+behaltene Exemplar, schickt Spender nur in den Papierkorb und schreibt den
+Endzustand in einem Commit. Nach einem Absturz führt
+`resume_interrupted_resolutions()` den Plan erneut aus; jeder Schritt darf
+zweimal laufen.
 
 ---
 
-### K-8 — `delete_asset(force=True)` hardcoded — ✅ schärfster Pfad entschärft (v2.32.5)
-**Datei:** `backend/immich_client.py`
+### K-5 — XMP-Sidecar-Überschreibung ohne Merge — ✅ behoben (v3.0.0)
+**Datei:** `backend/pipeline/step_ia07_exif_write.py`
 
-Umgeht Immich-Trash. Keine Recovery möglich. Insbesondere relevant in Kombination mit K-4.
+ExifTool `-o` überschrieb eine vorhandene `.xmp` und verwarf dabei vom
+Nutzer eingetragene Tags.
 
-**Was tatsächlich passiert ist:** `safe_upload_asset` behandelte einen
-Upload, den Immich als Duplikat abwies, wie einen eigenen Fehlschlag und
-rief `delete_asset(force=True)` auf die zurückgegebene ID — das ist aber
-die ID des **bestehenden** Assets. Ein zweiter Upload eines Bildes, das
-schon in Immich lag, konnte so das Original permanent löschen.
+**Jetzt (R-17a):** In eine vorhandene, lesbare Sidecar werden die
+Stichwörter von MediaAssistant nur ergänzt; Bewertung, Label, eigene
+Stichwörter und eine eigene Beschreibung bleiben. Nur eine Datei, die gar
+kein XMP ist (die binären Bild-Kopien des v2.28.13-Bugs), kommt in den
+Papierkorb und wird neu erzeugt.
 
-`AssetMediaResponseDto` hat ein Pflichtfeld `status` mit `created` oder
-`duplicate`. Das wird jetzt gelesen; `orphan_id` wird nur bei
-`status != "duplicate"` gesetzt.
+---
 
-**Rest-Risiko (nicht priorisiert):** `force=False` als Default, explizite
-Opt-in-Pfade.
+### K-7 — Size-Only-Overwrite in IA-08 — ✅ behoben (v3.0.0)
+**Datei:** `backend/pipeline/step_ia08_sort.py`, `backend/fileops.py`
+
+Bei gleicher Dateigrösse am Zielpfad wurde ohne Hash-Vergleich
+überschrieben. Zwei verschiedene Dateien mit zufällig gleicher Grösse —
+eine ging still verloren.
+
+**Jetzt (R-05, R-06):** `fileops` überschreibt nie; ein belegter Name
+bekommt einen Zähler. Wo IA-08 den Inhalt eines Ziels nicht sehen kann,
+wird nicht blind überschrieben.
+
+---
+
+### K-8 — `delete_asset(force=True)` hardcoded — ✅ behoben (v2.32.5, v3.0.0)
+**Datei:** `backend/immich_client.py`, `backend/fileops.py`
+
+`force=True` umgeht den Immich-Papierkorb, nichts ist wiederherstellbar.
+
+**Was tatsächlich passiert ist (v2.32.5):** `safe_upload_asset` behandelte
+einen Upload, den Immich als Duplikat abwies, wie einen eigenen
+Fehlschlag und rief `delete_asset(force=True)` auf die zurückgegebene
+ID — das ist aber die ID des **bestehenden** Assets. Seither wird das
+Pflichtfeld `status` (`created` / `duplicate`) gelesen; `orphan_id` wird
+nur bei `status != "duplicate"` gesetzt.
+
+**Seit v3.0.0:** Weggeräumt wird nur über `fileops`, und das schickt
+Immich-Assets ausschliesslich in den Papierkorb von Immich
+(`force=false`). `test_no_direct_file_ops.py` meldet jeden direkten
+Aufruf ausserhalb von `fileops`.
+
+**Rest (gering, aufräumen):** `immich_client.delete_asset` hat weiterhin
+`force=True` als Vorgabe, und `safe_upload_asset` / `safe_replace_asset`
+benutzen es noch. Produktiv ruft beide niemand mehr auf — `fileops` lädt
+über `upload_asset` hoch und räumt über `trash_asset` (`force=false`) weg;
+nur Tests verwenden sie. Vorgabe auf `False` setzen und die beiden
+Funktionen samt ihren Tests entfernen.
 
 ---
 
 ## Hoch (Inkonsistenter State)
 
-### H-1 — Pipeline-Worker-Selektion ohne Lock
-**Datei:** `backend/filewatcher.py:800-813`
+### H-1 — Pipeline-Worker-Selektion ohne Lock — ✅ erledigt (v3.0.0)
+**Datei:** `backend/worker.py`
 
-`SELECT queued LIMIT N` ohne `FOR UPDATE SKIP LOCKED`. Der atomic claim in `pipeline/__init__.py:52` fängt Doppelvergabe ab, aber Worker startet leere asyncio-Tasks.
+`SELECT queued LIMIT N` ohne Sperre; mehrere Aufrufer konnten dieselben
+Jobs wählen, der atomic claim fing die Doppelvergabe ab.
 
-**Impact:** Nur Performance-Noise, kein Datenproblem.
+**Jetzt:** `worker.py` ist der einzige Ort, der `run_pipeline` startet.
+Er wählt nur Jobs, die nicht schon laufen (`notin_(busy)`), bis zu den
+freien Plätzen; der atomic claim (`UPDATE … WHERE status='queued'`) bleibt
+die Absicherung.
 
 ---
 
-### H-2 — `_poll_immich` blockt Filewatcher-Loop — ✅ behoben (v2.33.0)
+### H-2 — `_poll_immich` blockt Filewatcher-Loop — ✅ behoben (v3.0.0)
 
 Der Poller lud jedes neue Asset herunter und liess die Pipeline darauf
 laufen, eines nach dem anderen, innerhalb der Scan-Schleife — solange
@@ -106,54 +144,69 @@ reihen nur ein, verarbeitet wird ausschliesslich im Worker.
 
 ---
 
-### H-3 — Immich-Poll ohne Overlap-Buffer — ⚠️ ist eingetreten (v2.32.4)
-**Datei:** `backend/filewatcher.py`
+### H-3 — Immich-Poll ohne Overlap-Buffer — ✅ behoben (v2.32.4, v3.0.0)
+**Datei:** `backend/inputs/immich.py`
 
-`last_poll = now` ohne Overlap. Clock-Skew zwischen MediaAssistant-Host und Immich-Server droppt Assets im Grenzbereich.
+`last_poll = now` ohne Overlap. Clock-Skew zwischen MediaAssistant-Host
+und Immich-Server konnte Assets im Grenzbereich auslassen.
 
-**Der teure Teil war ein anderer:** Der Cursor wurde **auch nach einem
-gescheiterten Abruf** weitergestellt. Damit übersprang der Poller genau
-die Assets, deren Abruf fehlgeschlagen war — in Produktion vier Wochen
-Handy-Uploads, die nie in die Pipeline kamen. Ein `poll_failed`-Guard
-verhindert das jetzt; die Lücke wurde per Cursor-Rückdrehung über die
-ganze Historie aufgeholt.
+**Der teure Teil war ein anderer (v2.32.4):** Der Cursor wurde **auch
+nach einem gescheiterten Abruf** weitergestellt. Damit übersprang der
+Poller genau die Assets, deren Abruf fehlgeschlagen war — in Produktion
+vier Wochen Handy-Uploads, die nie in die Pipeline kamen. Ein
+`poll_failed`-Guard verhindert das; die Lücke wurde per
+Cursor-Rückdrehung über die ganze Historie aufgeholt.
 
-**Rest-Risiko (gering):** Der Clock-Skew-Overlap fehlt weiterhin. Dedup
-via `already_by_id` existiert.
-
----
-
-### H-6 — LIKE-Query auf `step_result` JSON
-**Datei:** `backend/routers/duplicates.py:1165-1168, 1186`
-
-`Job.step_result.like(f'%"original_debug_key": "{debug_key}"%')`. Full-Table-Scan ohne Index, LIKE-Metazeichen nicht escaped.
-
-**Fix (nicht priorisiert):** Separate normalisierte Tabelle `job_duplicate_links` oder SQLAlchemy JSON-Operatoren.
+**Seit v3.0.0:** Der Cursor wird um `OVERLAP` (5 Minuten) zurückgesetzt;
+schon bekannte Assets erkennt der Eingang über das Register.
 
 ---
 
-### H-7 — Folder-Tags splitten Whitespace
-**Datei:** `backend/pipeline/step_ia02_duplicates.py:442-450`
+### H-6 — LIKE-Query auf `step_result` JSON — ✅ erledigt (v3.0.0)
+**Datei:** `backend/routers/duplicates.py`
 
-Ordner `Ferien Spanien 2024` erzeugt Tags `["Ferien", "Spanien", "2024", "Ferien Spanien 2024"]`. Pure Zahlen als Tag sind rauschend.
-
-**Fix (nicht priorisiert):** Explizit entscheiden (combined ODER split, nicht beides), Zahlen-only filtern.
+`Job.step_result.like(f'%"original_debug_key": "{debug_key}"%')` —
+Full-Table-Scan, LIKE-Metazeichen nicht escaped. Die Abfrage gibt es
+nicht mehr; die Gruppen der Duplikat-Seite entstehen aus den
+Duplikat-Beziehungen der Mitglieder.
 
 ---
 
-### H-8 / H-9 — `retry_count` wird nie zurückgesetzt
-**Datei:** `backend/pipeline/__init__.py:327-438`
+### H-7 — Folder-Tags splitten Whitespace — ✅ erledigt (v3.0.0)
+**Datei:** `backend/folder_path.py`
 
-Weder manueller Retry noch erfolgreicher Lauf setzen `retry_count` zurück. Ein einmal-staler Job wird beim zweiten Fehler früher abgebrochen als erwartet.
+Ordner `Ferien Spanien 2024` erzeugte Tags `["Ferien", "Spanien", "2024",
+"Ferien Spanien 2024"]`.
 
-**Fix (nicht priorisiert):** Reset bei `done` / manual retry.
+**Jetzt:** Die Ordner-Optionen sind pro Set wählbar (`none`, `flat`,
+`nested`, `legacy`); siehe
+[`docs/IMMICH_ORDNERSTRUKTUR.md`](docs/IMMICH_ORDNERSTRUKTUR.md). Nur
+`legacy` teilt weiterhin in Wörter auf — bewusst, damit migrierte Sets
+dieselben Tags schreiben wie vorher.
+
+---
+
+### H-8 / H-9 — `retry_count` wird nie zurückgesetzt — ✅ behoben (v2.31.3, v3.0.0)
+**Datei:** `backend/pipeline/__init__.py`
+
+Ein einmal hängengebliebener Job wurde beim nächsten Hänger früher
+aufgegeben als erwartet. Jetzt setzt ein Lauf, der mit `done` oder
+`review` endet, den Zähler zurück (v2.31.3), ebenso ein vom Nutzer
+ausgelöster Retry (v3.0.0).
 
 ---
 
 ### H-11 — Geocoding ohne Provider-Fallback-Chain
-**Datei:** `backend/pipeline/step_ia03_geocoding.py:222-236`
+**Datei:** `backend/pipeline/step_ia03_geocoding.py`
 
-Nur ein konfigurierter Provider pro Job. README suggeriert Nominatim → Photon → Google Chain, Code hat das nicht.
+Pro Job wird genau der eine konfigurierte Anbieter gefragt (Nominatim,
+Photon oder Google); eine Kette mit Ausweichanbieter gibt es nicht. Das
+README verspricht inzwischen auch keine mehr.
+
+**Entschärfung:** Fällt der Anbieter aus, pausiert
+`GeocodingConnectionError` die Pipeline, und der Health-Watcher setzt sie
+fort, sobald er wieder antwortet. Es gehen keine Jobs verloren, sie
+warten.
 
 **Fix (nicht priorisiert):** Provider-Chain in Config.
 
@@ -177,78 +230,120 @@ fehlen weiterhin. Ein sinnvolles, aber falsches Wort erkennt kein Filter
 — dafür bleibt `ma-ghost-tag-detect`.
 
 Die KI-Stufe für Synonyme und Englisch → Deutsch ist
-Issue #45 (Gitea).
+Issue #45 (Gitea), auf GitHub #55.
 
 ---
 
 ## Mittel / Niedrig (Auswahl)
 
-### N-6 — `_run_job` Exception-Fallback fehlt
-**Datei:** `backend/filewatcher.py:257-264`
+### N-6 — `_run_job` Exception-Fallback fehlt — ✅ behoben (v2.31.3)
+**Datei:** `backend/worker.py`
 
-Exception in `_run_job` wird gelogt, aber Job-Status bleibt `processing` bis Stale-Recovery (15 min).
-
-**Fix (gering):** Bei Exception `job.status="error"` setzen.
-
-**Issue:** siehe Tracker.
+Eine Exception ausserhalb der eigenen Fehlerbehandlung von `run_pipeline`
+liess den Job bis zur Stale-Recovery auf `processing`. Jetzt setzt
+`_run_job` ihn auf `error` und loggt den Absturz; ein „Neu ausführen"
+kehrt stattdessen zu seinem vorherigen Status zurück.
 
 ---
 
-### N-7 — `_scan_directory` folgt Symlinks
-**Datei:** `backend/filewatcher.py:99-119`
+### N-7 — `_scan_directory` folgt Symlinks — ✅ behoben (v2.31.3)
+**Datei:** `backend/inputs/common.py`
 
-`os.walk` default folgt Symlinks. Symlink-Loop in Inbox → Stack-Overflow möglich.
-
-**Fix (gering):** `followlinks=False`.
-
-**Issue:** siehe Tracker.
+`os.walk` folgte Symlinks; eine Symlink-Schleife in der Inbox hätte den
+Scan endlos laufen lassen. Der Scan geht jetzt mit `os.scandir` und
+überspringt Symlinks.
 
 ---
 
 ### M-3 — Zeitzone-Handling inkonsistent
-**Datei:** `backend/file_operations.py:187-210`
+**Datei:** `backend/file_operations.py` (`parse_date`)
 
-`parse_date` stripped TZ-Info → nachgelagerte Pfad-Resolution verwendet lokale Container-TZ. Wenn Container-TZ von User-TZ abweicht, landen Grenzfälle in falschem Monat/Jahr.
+`parse_date` entfernt die Zeitzone → die Pfad-Auflösung verwendet die
+lokale Container-TZ. Weicht die Container-TZ von der des Nutzers ab,
+landen Grenzfälle im falschen Monat/Jahr.
 
 **Fix (nicht priorisiert):** Container-TZ-Config `TZ=Europe/Zurich` sicherstellen (ist im README dokumentiert).
 
 ---
 
-### M-5 — `done_hashes` als `(path, hash)`-Tupel
-**Datei:** `backend/filewatcher.py:166-189`
+### M-5 — Bekannte Dateien als `(Pfad, Hash)`-Paar
+**Datei:** `backend/inputs/inbox.py`
 
-Datei umbenannt und wieder in Inbox → Check greift nicht → unnötige AI-Kosten. Duplicate-Detection in IA-02 fängt's ab.
+Der Scan überspringt eine Datei nur, wenn Pfad **und** Hash schon einem
+erledigten Job gehören. Eine umbenannte Datei, die wieder in die Inbox
+kommt, wird neu eingereiht → unnötiger KI-Lauf. IA-02 erkennt sie als
+exaktes Duplikat.
 
-**Fix (nicht priorisiert):** Als `set[hash]` (Pfad egal für Entscheidung).
+**Fix (nicht priorisiert):** Entscheidung nur nach Hash.
 
 ---
 
 ### M-7 — Sorting-Rules `&`/`|` ohne Klammern-Support
-**Datei:** `backend/pipeline/step_ia08_sort.py:278-323`
+**Datei:** `backend/pipeline/step_ia08_sort.py` (`_eval_exif_expression`)
 
-Regel-Ausdrücke wie `a & b | c` werden implizit gruppiert. Admin-Config-Stolperfalle.
+`|` bindet schwächer als `&` (`a & b | c` = `(a & b) | c`); Klammern gibt
+es nicht. Admin-Config-Stolperfalle.
 
 **Fix (nicht priorisiert):** Parser + Klammern oder klare Doku.
 
 ---
 
-### N-5 — `STALE_TIMEOUT_S = 15*60` ohne Heartbeat
-**Datei:** `backend/filewatcher.py:668`
+### N-5 — `STALE_TIMEOUT_S = 15*60` ohne Heartbeat — ✅ behoben (v3.0.0)
+**Datei:** `backend/worker.py`, `backend/pipeline/__init__.py`
 
-Lange Video-Konvertierungen in IA-04 können als stale markiert werden obwohl sie laufen.
+Lange Video-Konvertierungen konnten als hängend gelten, obwohl sie
+liefen.
 
-**Fix (nicht priorisiert):** Steps committen periodisch Heartbeat-Ticks.
+**Jetzt (R-11):** Jeder Lauf berührt seinen Job alle `HEARTBEAT_S`. Als
+hängend gilt ein Job erst, wenn eines seiner laufenden Module länger als
+15 Minuten läuft und keine Dateioperation von ihm offen ist; Warten auf
+ein Betriebsmittel zählt nicht.
+
+---
+
+### N-9 — Toter `orphan`-Status — ✅ trifft nicht zu
+**Datei:** `backend/routers/api.py`
+
+Der Status wird seit v2.28.11 gesetzt: Die Wartung
+`/api/jobs/cleanup-orphans` (`_scan_orphans_in_background`) markiert
+erledigte Jobs (`done`, `duplicate`, `review`), deren Inhalt
+weder lokal noch in Immich mehr existiert, und merkt sich den vorherigen
+Status für die Rücknahme.
 
 ---
 
-### N-9 — Toter `orphan`-Status
-**Datei:** `backend/models.py:18`
+## Neu erkannt (2026-10-29)
 
-Status-Wert `orphan` in Enum, aber nirgends gesetzt. Nur in Filtern.
+### S-9 — Fehlt das KI-Modell, landet alles in Review, ohne Pause
+**Datei:** `backend/pipeline/step_ia05_ai.py`, `backend/health_watcher.py`
 
-**Fix (gering, aufräumen):** Entfernen oder dokumentieren wann er gesetzt werden soll.
+Auf dem KI-Server wurde das Modell gewechselt; die Dev-Konfiguration
+verlangte weiter das alte. Der Server antwortet dann mit HTTP 400
+„model not found". Das ist ein `AIResponseError`, also eine weiche
+Warnung in IA-05 — kein `AIConnectionError`, der die Pipeline pausieren
+würde. Jedes Bild lief durch und landete als „Unbekannt / Review".
+Aufgefallen ist es nur, weil die E2E-Suite rot wurde (13 von 147
+Prüfungen).
 
----
+In Produktion hiesse das: Nach einem Modellwechsel auf dem KI-Server
+füllt sich still die Review-Liste, bis jemand die Einstellung anpasst.
+Die Erreichbarkeitsprüfung sieht nur, ob der Server antwortet.
+
+**Fix (nicht priorisiert):** Eine Antwort „Modell unbekannt" wie einen
+Verbindungsausfall behandeln (Auto-Pause mit Grund), oder der
+Health-Watcher prüft, ob das eingestellte Modell in `/models` steht.
+
+### S-10 — Immich 3.x stellt alte Tags wieder her — ✅ entschärft (v3.1.0)
+**Betrifft:** IA-08 und „Tags in Gruppen umstellen" gegen Immich
+
+Nach vielen Tag-Änderungen schreibt Immich 3.1/3.3 unter Last teils einen
+veralteten Stand zurück — Tags, die MediaAssistant gerade entfernt hat,
+hängen danach wieder am Asset. Gemessen an der Dev-Instanz, siehe
+[`docs/IMMICH_ORDNERSTRUKTUR.md`](docs/IMMICH_ORDNERSTRUKTUR.md).
+
+**Entschärfung:** IA-08 kontrolliert nach dem Schreiben, was am Asset
+hängt, korrigiert und prüft erneut (höchstens 3 Runden). Das kostet
+rund 1,8 s pro Job.
 
 ## Neu erkannt (2026-10-22)
 
@@ -338,7 +433,8 @@ Dasselbe Muster wie bei S-2. `test_startup_imports.py` schliesst das:
 **Datei:** `backend/routers/tools.py`
 
 Löschen und Zusammenführen fassen tausende XMP-Dateien und Immich-Tags in
-einem Lauf an. Es gibt kein Undo.
+einem Lauf an. Seit v3.1.0 gehört „Tags in Gruppen umstellen" dazu, das
+über alle Jobs eines Sets läuft. Es gibt kein Undo.
 
 Abgesichert ist das durch: Pflicht-Vorschau, serverseitige Prüfung, dass
 Muster und Schalter beim Ausführen exakt der Vorschau entsprechen (sonst
@@ -360,22 +456,20 @@ und produziert Phantom-Fehler.
 
 ## Architektur-Schulden (strukturell, kein Bug)
 
-- **A-1** Keine formale State-Machine für Job-Status — Transitions ad-hoc über Codebase verteilt.
-- **A-2** `step_result` JSON-Spalte ohne Schema. Sentinel-Keys mit `_`-Präfix als Workaround.
-- **A-3** Keine Pipeline-Parallelisierung. IA-02 / IA-03 / IA-04 hängen alle nur von IA-01 ab, könnten parallel laufen.
-- **A-4** Kein exponentieller Backoff für Retries.
-- ~~**A-6** `filewatcher.py` ist 830-Zeilen-Gott-File (Scan + Poll + Worker + Recovery + Scheduler).~~ ✅ v2.33.0: zerlegt in `inputs/`, `worker.py`, `recovery.py`; `filewatcher.py` ist nur noch der Taktgeber.
-- **A-7** `_resolve_duplicate_group` ist 370+ Zeilen Business-Logic im Router.
+- **A-1** Keine formale State-Machine für Job-Status — Transitions ad-hoc über Codebase verteilt. Die kritischen Übergänge sind atomic claims (`UPDATE … WHERE status = …`).
+- **A-2** 🔶 v3.0.0: Jeder Modul-Lauf ist eine Zeile in `module_runs`; `jobs.step_result` ist nur noch die abgeleitete Sicht, die allein `runs.py` schreibt (Wächter `test_no_direct_step_result.py`). Die Ergebnisse selbst sind weiterhin JSON ohne Schema, Sentinel-Keys mit `_`-Präfix bleiben.
+- **A-3** 🔶 v3.0.0: Reihenfolge und Abhängigkeiten stehen nur in `pipeline/registry.py`; IA-03 läuft als Seiten-Task neben IA-04, jedes Modul hält nur sein Betriebsmittel (`resources.py`). Weitere Module laufen noch nacheinander.
+- **A-4** Kein exponentieller Backoff für Pipeline-Retries (hängende Jobs werden bis zu dreimal neu eingereiht). Uploads nach Immich haben einen eigenen Backoff.
+- ~~**A-6** `filewatcher.py` ist 830-Zeilen-Gott-File (Scan + Poll + Worker + Recovery + Scheduler).~~ ✅ v3.0.0: zerlegt in `inputs/`, `worker.py`, `recovery.py`; `filewatcher.py` ist nur noch der Taktgeber.
+- **A-7** 🔶 `_resolve_duplicate_group` ist seit v3.0.0 in feste Schritte zerlegt (beanspruchen, prüfen, Papierkorb, behaltener Job, Endzustand), die Business-Logik liegt aber weiterhin im Router (`routers/duplicates.py`, rund 1950 Zeilen).
 - **A-8** SQLite Query-Plan für Duplicate-View ungetestet.
-- **A-9** Kein globaler Filesystem-Healthcheck auf Inbox/Library-Mount.
-- **A-10** E2E-Tests decken keine Failure-Injection (Kill während Pipeline-Run).
+- **A-9** Kein globaler Filesystem-Healthcheck auf Inbox/Library-Mount. Die Set-Liste zeigt nur an, ob der Basis-Pfad existiert.
+- **A-10** 🔶 Die Reproducer in `test_data_safety_local.py` / `test_data_safety_immich.py` und US-18 simulieren Abstürze an festen Stellen (z. B. mitten im Ersetzen in Immich, R-10e) samt Wiederaufnahme. Ein echtes Abschiessen des Prozesses während eines Laufs fehlt weiterhin.
 
 ---
 
-## Empfohlene Low-Risk-Fixes (Issues erstellt)
+## Empfohlene Low-Risk-Fixes
 
-1. **N-6** — `_run_job` Exception-Fallback setzt `status="error"`
-2. **N-7** — `_scan_directory` mit `followlinks=False`
-3. **H-3** — Immich-Poll `last_poll` mit 5-min-Overlap-Buffer
-
-Alle drei sind ~1-3 Zeilen, rein defensiv, isoliert testbar.
+Die drei Kandidaten von 2026-04-20 sind erledigt: N-6 und N-7 in v2.31.3,
+der Overlap-Puffer von H-3 in v3.0.0. Offen und klein wäre als Nächstes
+**S-9** (fehlendes KI-Modell als Pause statt Review-Flut).
