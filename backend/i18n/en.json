@@ -15,6 +15,11 @@
     "status_off": "All disabled"
   },
   "dashboard": {
+    "pipeline_auto_paused_title": "Pipeline stopped automatically: {service} not ready",
+    "pipeline_auto_paused_text": "The pipeline resumes by itself once the service is ready again. Affected jobs wait in the queue and are not marked as failed.",
+    "service_ai_unreachable": "AI backend",
+    "service_geo_unreachable": "Geocoding",
+    "service_immich_unreachable": "Immich",
     "title": "Dashboard",
     "total": "Total",
     "done": "Done",
@@ -591,6 +596,7 @@
     "immich_public_url_invalid": "Invalid address for links in the browser (expected http:// or https:// with a host name). Nothing was saved."
   },
   "modules": {
+    "status_model_missing": "Model {model} is not available on the server",
     "ki_analyse": "AI Analysis",
     "geocoding": "Geocoding",
     "duplikat_erkennung": "Duplicate Detection",

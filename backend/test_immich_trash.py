@@ -74,7 +74,7 @@ async def main() -> int:
         # Round trip: upload, read back, state
         path_a = make_jpeg("a")
         files.append(path_a)
-        res = await ic.safe_upload_asset(path_a)
+        res = await ic.upload_asset(path_a)
         a = res["id"]
         created.append(a)
         report("Upload neu → status created", res.get("status") == "created", str(res.get("status")))
@@ -126,9 +126,9 @@ async def main() -> int:
         path_t = make_jpeg("timeline")
         path_r = make_jpeg("archived")
         files += [path_t, path_r]
-        t = (await ic.safe_upload_asset(path_t))["id"]
+        t = (await ic.upload_asset(path_t))["id"]
         created.append(t)
-        r_ = (await ic.safe_upload_asset(path_r))["id"]
+        r_ = (await ic.upload_asset(path_r))["id"]
         created.append(r_)
         await ic.archive_asset(r_)
         recent = {x["id"] for x in await ic.get_recent_assets(since=since)}

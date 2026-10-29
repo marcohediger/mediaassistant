@@ -28,8 +28,11 @@ it (IA-05 and everything after); on a stop of the main path (duplicate,
 critical failure, park) it is cancelled and awaited, never left behind.
 
 A service the next module needs is down (auto-pause ``ai_unreachable`` /
-``geo_unreachable``): the job parks — back to ``queued``, finished runs
-stay, it goes on after the pause.
+``geo_unreachable`` / ``immich_unreachable``): the job parks — back to
+``queued``, finished runs stay, it goes on after the pause. A module that
+fails while its service is missing is no fault of the job (services.py):
+the pipeline pauses, the module's run is closed unfinished and the job
+parks like the others — no error, no warning, nothing moved to error/.
 """
 import asyncio
 import contextlib
@@ -45,6 +48,7 @@ from sqlalchemy import select, update
 import fileops
 import resources
 import runs
+import services
 from config import config_manager
 from models import RerunItem
 from pipeline import registry
@@ -95,16 +99,9 @@ class Park(Exception):
         self.resource, self.reason = resource, reason
 
 
-_PARK_REASONS = {"ai": "ai_unreachable", "geo": "geo_unreachable"}
-
-
 async def park_reason(resource: str) -> str | None:
     """The auto-pause reason that stops modules of this limit, if any."""
-    want = _PARK_REASONS.get(resource)
-    if want is None:
-        return None
-    reason = await config_manager.get("pipeline.auto_paused_reason", "") or ""
-    return reason if reason == want else None
+    return await services.paused_for(resource)
 
 
 async def parallel_enabled() -> bool:
@@ -180,24 +177,29 @@ async def _call(ctx: Ctx, run, fn):
         pipeline._unmark_step(ctx.job.id, run.module)
 
 
-async def _auto_pause(ctx: Ctx, code: str, exc: Exception, tb: str) -> str:
-    """Service down: pause the whole pipeline (the health watcher resumes)."""
-    from pipeline.step_ia05_ai import AIConnectionError
-    reason = "ai_unreachable" if isinstance(exc, AIConnectionError) else "geo_unreachable"
-    await config_manager.set("pipeline.paused", True)
-    await config_manager.set("pipeline.auto_paused_reason", reason)
-    await config_manager.set("pipeline.auto_paused_at", datetime.now().isoformat(timespec="seconds"))
-    await log_error(
-        "pipeline",
-        f"Service down — Pipeline AUTO-PAUSIERT ({reason})",
-        (
-            f"Job {ctx.job.debug_key} bei {code}: {type(exc).__name__}: {exc}\n\n"
-            f"Die Pipeline wurde automatisch pausiert. Der health_watcher "
-            f"prüft alle 30 Sekunden ob das Backend wieder erreichbar ist und "
-            f"setzt die Pipeline dann automatisch fort.\n\n{tb}"
-        ),
-    )
+def _failed(result) -> bool:
+    return isinstance(result, dict) and result.get("status") == "error"
+
+
+async def _service_down(ctx: Ctx, code: str, error: str, exc: BaseException | None = None) -> str | None:
+    """A failure of `code` that comes from a missing service: pause the
+    pipeline and return the reason; None when the service is fine (the
+    failure is the job's own) or the module needs none."""
+    resource = registry.SPECS[code].resource_for(ctx.job, ctx.snap)
+    down = await services.down(resource, exc)
+    if down is None:
+        return None
+    reason, detail = down
+    await services.pause(reason, detail, where=f"{ctx.job.debug_key} bei {code}", error=error,
+                         tb=traceback.format_exc() if exc is not None else "")
     return reason
+
+
+async def _park_for_service(ctx: Ctx, code: str, reason: str) -> None:
+    """The module's open run ends unfinished; the job waits (raises Park)."""
+    await runs.supersede(ctx.session, ctx.job, [code], reason=f"Dienst fehlt ({reason}) — Job wartet")
+    await ctx.session.commit()
+    raise Park(registry.SPECS[code].resource_for(ctx.job, ctx.snap), reason)
 
 
 # ---------------------------------------------------------------------------
@@ -380,8 +382,6 @@ async def _early_skip(ctx: Ctx) -> bool:
 
 async def _pipeline_module(ctx: Ctx, code: str, fn) -> str:
     """One module of a pipeline run; 'next' or 'stop'."""
-    from pipeline.step_ia03_geocoding import GeocodingConnectionError
-    from pipeline.step_ia05_ai import AIConnectionError
     job, session = ctx.job, ctx.session
     async with _limit(ctx, code):
         run = await _start(ctx, code)
@@ -399,6 +399,10 @@ async def _pipeline_module(ctx: Ctx, code: str, fn) -> str:
 
         try:
             result = await _call(ctx, run, fn)
+            if _failed(result):
+                reason = await _service_down(ctx, code, str(result.get("reason") or "error"))
+                if reason:
+                    await _park_for_service(ctx, code, reason)
             await close(result)
             await session.commit()
 
@@ -423,32 +427,16 @@ async def _pipeline_module(ctx: Ctx, code: str, fn) -> str:
                     return "stop"
             return "next"
 
-        except runs.RunSuperseded:
+        except (runs.RunSuperseded, Park):
             raise
         except Exception as e:
-            # Service-outage exceptions: auto-pause the entire pipeline
-            # so we don't bulldoze through hundreds of files producing
-            # garbage results while a backend is down. The health_watcher
-            # will auto-resume once the backend is reachable again.
-            if isinstance(e, (AIConnectionError, GeocodingConnectionError)):
-                tb = traceback.format_exc()
-                reason = await _auto_pause(ctx, code, e, tb)
-                _set_job(ctx, status="error",
-                         error_message=f"[{code}] {reason} — Pipeline auto-pausiert: {type(e).__name__}: {e}")
-                error_result = {
-                    "status": "error",
-                    "reason": f"{type(e).__name__}: {e}",
-                    "ai_unreachable": isinstance(e, AIConnectionError),
-                    "geo_unreachable": isinstance(e, GeocodingConnectionError),
-                    "traceback": tb,
-                }
-                if code == "IA-05":
-                    error_result.update(_ia05_fallback())
-                await close(error_result)
-                await session.commit()
-                logger.error(f"{job.debug_key} Service down at {code}: pipeline auto-paused ({reason})")
-                ctx.pipeline_failed = True
-                return "stop"
+            # A missing service is no fault of the job: the pipeline pauses
+            # instead of producing garbage for hundreds of files, and the
+            # job waits in the queue until the health watcher resumes.
+            reason = await _service_down(ctx, code, f"{type(e).__name__}: {e}", e)
+            if reason:
+                logger.error(f"{job.debug_key} service missing at {code}: pipeline auto-paused ({reason})")
+                await _park_for_service(ctx, code, reason)
 
             if code in NON_CRITICAL:
                 tb = traceback.format_exc()
@@ -674,8 +662,6 @@ async def _give_back_open(ctx: Ctx) -> None:
 
 async def _rerun_module(ctx: Ctx, code: str, fn) -> str:
     """One module of a rerun; 'next' or 'stop' (2.6)."""
-    from pipeline.step_ia03_geocoding import GeocodingConnectionError
-    from pipeline.step_ia05_ai import AIConnectionError
     job, session = ctx.job, ctx.session
     key = job.debug_key
     async with _limit(ctx, code):
@@ -684,20 +670,10 @@ async def _rerun_module(ctx: Ctx, code: str, fn) -> str:
             result = await _call(ctx, run, fn)
         except runs.RunSuperseded:
             raise
-        except (AIConnectionError, GeocodingConnectionError) as e:
-            tb = traceback.format_exc()
-            reason = await _auto_pause(ctx, code, e, tb)
-            error_result = {"status": "error", "reason": f"{type(e).__name__}: {e}",
-                            "ai_unreachable": reason == "ai_unreachable",
-                            "geo_unreachable": reason == "geo_unreachable"}
-            if code == "IA-05":
-                error_result.update(_ia05_fallback())
-            await runs.finish(session, job, run, error_result, error=f"{type(e).__name__}: {e}\n\n{tb}")
-            await session.commit()
-            await _give_back(ctx, code, "Dienst nicht erreichbar (neu ausführen zurückgestellt)")
-            ctx.deferred = True
-            return "stop"
         except Exception as e:
+            reason = await _service_down(ctx, code, f"{type(e).__name__}: {e}", e)
+            if reason:
+                return await _defer_for_service(ctx, code, run, reason, f"{type(e).__name__}: {e}")
             tb = traceback.format_exc()
             error_result = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
             if code == "IA-05":
@@ -711,6 +687,10 @@ async def _rerun_module(ctx: Ctx, code: str, fn) -> str:
                 # The old result counts again; nothing cascades from here.
                 await _give_back(ctx, code, "fehlgeschlagen (neu ausführen)")
             return "stop" if code in CRITICAL else "next"
+        if _failed(result):
+            reason = await _service_down(ctx, code, str(result.get("reason") or "error"))
+            if reason:
+                return await _defer_for_service(ctx, code, run, reason, str(result.get("reason")))
         await runs.finish(session, job, run, result)
         await session.commit()
         status = runs.result_status(result)
@@ -724,6 +704,16 @@ async def _rerun_module(ctx: Ctx, code: str, fn) -> str:
             reason = result.get("reason") if isinstance(result, dict) else None
             ctx.failure = ctx.failure or (code, "module_error", str(reason or "error"))
         return "next"
+
+
+async def _defer_for_service(ctx: Ctx, code: str, run, reason: str, error: str) -> str:
+    """A rerun module ran into a missing service: its run ends unfinished,
+    the old result counts again and the order waits for the pause to end."""
+    await runs.supersede(ctx.session, ctx.job, [code], reason=f"Dienst fehlt ({reason}): {error}")
+    await ctx.session.commit()
+    await _give_back(ctx, code, "Dienst fehlt (neu ausführen zurückgestellt)")
+    ctx.deferred = True
+    return "stop"
 
 
 async def finish_rerun(ctx: Ctx) -> dict:

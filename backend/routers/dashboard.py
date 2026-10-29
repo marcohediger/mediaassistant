@@ -55,6 +55,10 @@ async def _probe_ai_backend(config_key: str, i18n: dict) -> tuple[bool, str]:
     the module to error whenever someone else's job occupied the GPU — the
     error/restored flapping seen on a shared LM Studio. A backend that accepts
     the connection is up: slow is not down.
+
+    A backend that answers but does not list the configured model cannot
+    serve the pipeline (the model was renamed or unloaded on the server);
+    that counts as down. An empty or unreadable list says nothing either way.
     """
     url = await config_manager.get(config_key)
     if not url:
@@ -81,6 +85,13 @@ async def _probe_ai_backend(config_key: str, i18n: dict) -> tuple[bool, str]:
 
     if resp.status_code != 200:
         return False, f"HTTP {resp.status_code}"
+    model = await config_manager.get(config_key.replace("backend_url", "model"))
+    try:
+        listed = {m.get("id") for m in resp.json().get("data", []) if isinstance(m, dict)}
+    except (ValueError, AttributeError):
+        listed = set()
+    if model and listed and model not in listed:
+        return False, _t("status_model_missing", i18n).replace("{model}", model)
     elapsed = time.monotonic() - started
     if elapsed >= 2:
         return True, _t("status_slow", i18n).replace("{n}", f"{elapsed:.0f}")
@@ -93,6 +104,22 @@ async def _check_ai_backend(i18n: dict) -> tuple[bool, str]:
 
 async def _check_ai_backend_2(i18n: dict) -> tuple[bool, str]:
     return await _probe_ai_backend("ai2.backend_url", i18n)
+
+
+async def _check_ai_backends(i18n: dict) -> tuple[bool, str]:
+    """Every AI backend the pipeline may use (ai_backends picks either)."""
+    checks = []
+    if await config_manager.is_module_enabled("ki_analyse"):
+        checks.append(("ai.backend_url", _check_ai_backend))
+    if await config_manager.is_module_enabled("ki_analyse_2") and await config_manager.get("ai2.backend_url"):
+        checks.append(("ai2.backend_url", _check_ai_backend_2))
+    details = []
+    for key, fn in checks:
+        ok, detail = await fn(i18n)
+        if not ok:
+            return False, detail if len(checks) == 1 else f"{await config_manager.get(key)}: {detail}"
+        details.append(detail)
+    return True, "; ".join(details) or _t("status_connected", i18n)
 
 
 async def _check_geocoding(i18n: dict) -> tuple[bool, str]:
@@ -465,6 +492,8 @@ async def dashboard(request: Request):
     data = await _overview()
     # Rendered in the right state at once; the page polls it afterwards.
     data["pipeline_paused"] = bool(await config_manager.get("pipeline.paused", False))
+    data["auto_pause"] = {"reason": await config_manager.get("pipeline.auto_paused_reason", "") or "",
+                          "detail": await config_manager.get("pipeline.auto_paused_detail", "") or ""}
     return await render(request, "dashboard.html", data)
 
 

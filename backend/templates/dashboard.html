@@ -60,7 +60,17 @@
 <div class="ui-alert is-warning dash-paused" id="pipeline-paused-banner" role="status"{% if not pipeline_paused %} hidden{% endif %}>
     {{ icon('pause-circle', 18) }}
     <div class="ui-alert-body">
-        <p class="ui-alert-title">{{ d.pipeline_paused_title }}</p>
+        {#- An auto-pause (services.py) names the missing service and why. -#}
+        <p class="ui-alert-title" id="pipeline-paused-title">
+            {%- if auto_pause.reason -%}
+            {{ d.pipeline_auto_paused_title | replace('{service}', d['service_' ~ auto_pause.reason] | default(auto_pause.reason)) }}
+            {%- else -%}
+            {{ d.pipeline_paused_title }}
+            {%- endif -%}
+        </p>
+        <p class="ui-alert-text" id="pipeline-paused-reason"{% if not auto_pause.reason %} hidden{% endif %}>
+            {%- if auto_pause.detail %}{{ auto_pause.detail }}. {% endif %}{{ d.pipeline_auto_paused_text -}}
+        </p>
         <p class="ui-alert-text" id="pipeline-paused-detail">
             {%- if stats.processing -%}
             {{ d.pipeline_paused_drain }} ({{ d.paused_counts_drain | replace('{active}', stats.processing | string) | replace('{queued}', stats.queued | string) }})
@@ -176,6 +186,10 @@
         "pause_confirm": d.pause_pipeline_confirm, "resume_confirm": d.resume_pipeline_confirm,
         "drain": d.pipeline_paused_drain, "idle": d.pipeline_paused_idle,
         "counts_drain": d.paused_counts_drain, "counts_idle": d.paused_counts_idle,
+        "title": d.pipeline_paused_title, "auto_title": d.pipeline_auto_paused_title,
+        "auto_text": d.pipeline_auto_paused_text,
+        "services": {"ai_unreachable": d.service_ai_unreachable, "geo_unreachable": d.service_geo_unreachable,
+                     "immich_unreachable": d.service_immich_unreachable},
         "scan_started": d.scan_started, "scan_failed": d.scan_failed,
         "toggle_failed": d.pipeline_toggle_failed,
     } | tojson }};
@@ -183,6 +197,8 @@
     const scanBtn = document.getElementById("scan-btn");
     const banner = document.getElementById("pipeline-paused-banner");
     const detail = document.getElementById("pipeline-paused-detail");
+    const title = document.getElementById("pipeline-paused-title");
+    const reasonText = document.getElementById("pipeline-paused-reason");
 
     function toast(text, tone) {
         const icons = {success: "check-circle", error: "alert-circle"};
@@ -212,6 +228,10 @@
         toggleBtn.querySelector(".dash-btn-label").textContent = paused ? T.resume : T.pause;
         banner.hidden = !paused;
         if (!paused) return;
+        const reason = data.auto_paused_reason || "";
+        title.textContent = reason ? T.auto_title.replace("{service}", T.services[reason] || reason) : T.title;
+        reasonText.hidden = !reason;
+        reasonText.textContent = (data.auto_paused_detail ? data.auto_paused_detail + ". " : "") + T.auto_text;
         const queued = String(data.queued);
         detail.textContent = data.in_flight > 0
             ? T.drain + " (" + T.counts_drain.replace("{active}", data.in_flight).replace("{queued}", queued) + ")"

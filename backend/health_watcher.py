@@ -1,14 +1,13 @@
 """Health watcher: auto-resumes the pipeline after an auto-pause once the
-unhealthy backend (AI or geocoding) is reachable again.
+missing service (AI backend, geocoding, Immich — services.py) is usable again.
 
 Started as a background task from main.py lifespan. Runs in a loop with
 a configurable interval (default 30s) and only acts when
 `pipeline.auto_paused_reason` is set — manual pauses (where the reason is
 empty) are NEVER auto-resumed.
 
-The actual reachability checks are reused from `routers.dashboard` so we
-have a single source of truth for "is this backend healthy" and the same
-check the user sees in the dashboard module list also drives auto-resume.
+The checks are those of `services.check` — the ones the dashboard shows for
+its module cards — so what the user sees also drives auto-resume.
 """
 import asyncio
 import logging
@@ -23,30 +22,15 @@ DEFAULT_INTERVAL_SEC = 30
 
 
 async def _check_service(reason: str) -> tuple[bool, str]:
-    """Reuse the dashboard health-check functions for a given pause reason.
-
-    Returns (healthy, detail). The detail string is best-effort English/German
-    info — we use {} as i18n stub since we only need the bool and rendering
-    happens in the system log.
-    """
-    # Local import to avoid circular: dashboard imports many things from
-    # the main app, while this module is started during lifespan setup.
-    from routers.dashboard import _check_ai_backend, _check_geocoding
-
-    if reason == "ai_unreachable":
-        return await _check_ai_backend({})
-    if reason == "geo_unreachable":
-        return await _check_geocoding({})
-    # Unknown reason — treat as healthy so we don't get stuck forever on a
-    # garbage value in the DB.
-    return True, "unknown reason — auto-clearing"
+    """Is the service behind the pause reason usable again? (healthy, detail)"""
+    import services
+    return await services.check(reason)
 
 
 async def _resume_pipeline(reason: str, detail: str):
     """Clear the auto-pause flags so the pipeline worker resumes."""
-    await config_manager.set("pipeline.paused", False)
-    await config_manager.set("pipeline.auto_paused_reason", "")
-    await config_manager.set("pipeline.auto_paused_at", "")
+    import services
+    await services.clear()
     await log_info(
         "pipeline",
         f"Service wieder erreichbar — Pipeline AUTO-RESUMED ({reason})",

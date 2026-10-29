@@ -651,19 +651,18 @@ async def test_restore(set_id):
 
 async def test_deferred(set_id):
     section("6. Dienst nicht erreichbar → zurückgestellt, alter Lauf zurück, wieder vorgemerkt")
-    from pipeline import executor
     from pipeline.step_ia03_geocoding import GeocodingConnectionError
     import reruns
+    import services
     j = await done_job(set_id)
     before = await cur(j)
     paused = []
 
-    async def no_pause(ctx, code, exc, tb):
+    async def no_pause(reason, detail, *, where, error, tb=""):
         # Recorded instead of pausing the dev pipeline (the app's health
         # watcher would resume it, and the worker would take dev jobs).
-        paused.append((code, type(exc).__name__))
-        return "geo_unreachable"
-    with patched(executor, "_auto_pause", no_pause), FakeGeo(fail=GeocodingConnectionError("weg")):
+        paused.append((where.rsplit(" bei ", 1)[-1], error.split(":", 1)[0]))
+    with patched(services, "pause", no_pause), FakeGeo(fail=GeocodingConnectionError("weg")):
         rid, prepared, item = await rerun(j, ["IA-03"])
     after, job = await cur(j), await get_job(j)
     report("GeocodingConnectionError: Auto-Pause ausgelöst, Auftrag deferred (service_down)",

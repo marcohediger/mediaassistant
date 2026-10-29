@@ -108,12 +108,11 @@ Immich-Assets ausschliesslich in den Papierkorb von Immich
 (`force=false`). `test_no_direct_file_ops.py` meldet jeden direkten
 Aufruf ausserhalb von `fileops`.
 
-**Rest (gering, aufräumen):** `immich_client.delete_asset` hat weiterhin
-`force=True` als Vorgabe, und `safe_upload_asset` / `safe_replace_asset`
-benutzen es noch. Produktiv ruft beide niemand mehr auf — `fileops` lädt
-über `upload_asset` hoch und räumt über `trash_asset` (`force=false`) weg;
-nur Tests verwenden sie. Vorgabe auf `False` setzen und die beiden
-Funktionen samt ihren Tests entfernen.
+**Aufgeräumt (v3.2.0):** `safe_upload_asset` und `safe_replace_asset`,
+die letzten Nutzer von `force=True`, sind entfernt — produktiv rief sie
+niemand mehr auf. `delete_asset` hat keine Vorgabe mehr für `force`; wer
+endgültig löschen will (nur Tests, für ihre eigenen Assets), muss es
+ausschreiben.
 
 ---
 
@@ -314,8 +313,8 @@ Status für die Rücknahme.
 
 ## Neu erkannt (2026-10-29)
 
-### S-9 — Fehlt das KI-Modell, landet alles in Review, ohne Pause
-**Datei:** `backend/pipeline/step_ia05_ai.py`, `backend/health_watcher.py`
+### S-9 — Fehlt das KI-Modell, landet alles in Review, ohne Pause — ✅ behoben (v3.2.0)
+**Datei:** `backend/services.py`, `backend/pipeline/executor.py`
 
 Auf dem KI-Server wurde das Modell gewechselt; die Dev-Konfiguration
 verlangte weiter das alte. Der Server antwortet dann mit HTTP 400
@@ -329,9 +328,15 @@ In Produktion hiesse das: Nach einem Modellwechsel auf dem KI-Server
 füllt sich still die Review-Liste, bis jemand die Einstellung anpasst.
 Die Erreichbarkeitsprüfung sieht nur, ob der Server antwortet.
 
-**Fix (nicht priorisiert):** Eine Antwort „Modell unbekannt" wie einen
-Verbindungsausfall behandeln (Auto-Pause mit Grund), oder der
-Health-Watcher prüft, ob das eingestellte Modell in `/models` steht.
+**Jetzt — allgemein für jeden Dienst der Pipeline:** Scheitert ein Modul,
+das KI, Geocoding oder Immich braucht, fragt der Executor die Prüfung des
+Dienstes. Die KI-Prüfung verlangt, dass das eingestellte Modell in `/models`
+steht. Ist der Dienst nicht bereit, hält die Pipeline mit Grund an; der Job,
+der es bemerkt hat, wartet wie alle anderen in der Warteschlange — ein
+Problem der Infrastruktur wird nie einem Job angelastet. Davor landete
+dieser Job als Fehler in `error/`, ein Immich-Ausfall pausierte gar nicht,
+OCR und ein unbrauchbarer Geocoder liefen still mit Warnungen weiter.
+E2E US-23 … US-25.
 
 ### S-10 — Immich 3.x stellt alte Tags wieder her — ✅ entschärft (v3.1.0)
 **Betrifft:** IA-08 und „Tags in Gruppen umstellen" gegen Immich
@@ -471,5 +476,4 @@ und produziert Phantom-Fehler.
 ## Empfohlene Low-Risk-Fixes
 
 Die drei Kandidaten von 2026-04-20 sind erledigt: N-6 und N-7 in v2.31.3,
-der Overlap-Puffer von H-3 in v3.0.0. Offen und klein wäre als Nächstes
-**S-9** (fehlendes KI-Modell als Pause statt Review-Flut).
+der Overlap-Puffer von H-3 in v3.0.0; S-9 in v3.2.0.

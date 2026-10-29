@@ -19,7 +19,7 @@ passes the function without calling it):
   (any ``.unlink``), shutil.move / shutil.rmtree;
 - safe_move, safe_remove, safe_remove_with_log (safe_file.py,
   file_operations.py);
-- Immich: delete_asset, safe_upload_asset, safe_replace_asset, download_asset
+- Immich: delete_asset, download_asset
   (writes with "wb" into whatever directory it is given — R-03), and
   upload_asset / trash_asset / restore_asset / lock_asset when they come from
   immich_client (fileops has functions of the same name that are the
@@ -56,7 +56,7 @@ FS_PRIMITIVES = {
 # Destructive wherever they come from: no fileops function has these names.
 UNIQUE_NAMES = {
     "safe_move", "safe_remove", "safe_remove_with_log",
-    "delete_asset", "safe_upload_asset", "safe_replace_asset", "download_asset",
+    "delete_asset", "download_asset",
 }
 # Names fileops reuses for its own, sanctioned functions: flagged only when
 # they resolve to immich_client.

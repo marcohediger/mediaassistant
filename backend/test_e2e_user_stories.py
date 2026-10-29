@@ -214,7 +214,7 @@ async def restore_set_folder_tags():
                 await session.commit()
     for aid in dict.fromkeys(_FOLDER_STORIES["assets"]):
         try:
-            await delete_asset(aid)
+            await delete_asset(aid, force=True)
         except Exception as exc:
             print(f"  cleanup: asset {aid}: {exc}")
     try:
@@ -250,7 +250,7 @@ async def cleanup():
 
     for aid in dict.fromkeys(CLEANUP_ASSETS):
         try:
-            await delete_asset(aid)
+            await delete_asset(aid, force=True)
         except Exception:
             pass
     async with async_session() as session:
@@ -1136,10 +1136,15 @@ async def test_us14_batch_clean_page():
     # Batch-clean the page (10 groups) holding this test's groups. Page 1
     # alone depended on whatever else the dev DB holds: with many older
     # groups, the new pairs were elsewhere and nothing got cleaned.
-    group_index, _ = await _build_group_index()
+    # The two pairs can straddle a page boundary: clean the page of whichever
+    # own group is left, until none is (the index shifts after each run).
     own_keys = {(await get_job(i)).debug_key for i in dup_ids}
-    pos = next((n for n, g in enumerate(group_index) if own_keys & set(g["member_keys"])), 0)
-    await _run_batch_clean(pos // 10 + 1)
+    for _ in range(len(dup_ids)):
+        group_index, _ = await _build_group_index()
+        pos = next((n for n, g in enumerate(group_index) if own_keys & set(g["member_keys"])), None)
+        if pos is None:
+            break
+        await _run_batch_clean(pos // 10 + 1)
 
     async with async_session() as s:
         r = await s.execute(select(func.count()).where(Job.status == "duplicate"))
@@ -2240,6 +2245,110 @@ async def cleanup_rerun_stories():
 # ══════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+# US-23 … US-25: a service the pipeline needs is missing
+# The pipeline pauses itself, the job that noticed waits in the queue
+# (nothing in error/, no review, no warning on the job) and goes on once
+# the app's health watcher sees the service back.
+# ══════════════════════════════════════════════════════════════
+async def pause_state():
+    from config import config_manager
+    return {k: await config_manager.get(f"pipeline.{k}", "")
+            for k in ("paused", "auto_paused_reason", "auto_paused_detail")}
+
+
+async def wait_resumed(timeout=120):
+    from config import config_manager
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not await config_manager.get("pipeline.paused", False):
+            return True
+        await asyncio.sleep(1)
+    return False
+
+
+_PAUSE_KEYS = ("paused", "auto_paused_reason", "auto_paused_at", "auto_paused_detail")
+
+
+async def saved_pause():
+    from config import config_manager
+    return {k: await config_manager.get(f"pipeline.{k}") for k in _PAUSE_KEYS}
+
+
+async def restore_pause(saved):
+    from config import config_manager
+    for key in _PAUSE_KEYS:
+        await config_manager.set(f"pipeline.{key}", saved[key] if saved[key] is not None
+                                 else (False if key == "paused" else ""))
+
+
+async def service_story(tag, label, stage, reason, *, module, use_immich=False, gps=False,
+                        detail_has=None):
+    """A job runs while `stage` makes a service unusable, then the service comes back."""
+    path = f"{INBOX}/__e2e_{tag.lower()}_{TS}.jpg"
+    make_unique_jpg(path)
+    if gps:
+        add_gps(path, *gps)  # coordinates of its own: IA-03 caches per process
+    CLEANUP_FILES.append(path)
+    # The story needs the app's worker; the state found is restored afterwards.
+    found = await saved_pause()
+    await restore_pause({k: (False if k == "paused" else "") for k in _PAUSE_KEYS})
+    try:
+        async with stage:
+            job_id = await create_and_run_job(os.path.basename(path), path, use_immich=use_immich)
+            job = await get_job(job_id)
+            state = await pause_state()
+            check(f"{tag}-01 Pipeline auto-pausiert ({reason})",
+                  bool(state["paused"]) and state["auto_paused_reason"] == reason, str(state))
+            if detail_has:
+                check(f"{tag}-02 Grund nennt {label}", detail_has in (state["auto_paused_detail"] or ""),
+                      state["auto_paused_detail"])
+            check(f"{tag}-03 Job wartet in der Warteschlange (kein Fehler, kein Review)",
+                  job.status == "queued" and not job.error_message, f"status={job.status} msg={job.error_message}")
+            check(f"{tag}-04 Datei liegt noch am Ort (nicht in error/)",
+                  os.path.exists(path) and "/error/" not in (job.original_path or ""), job.original_path)
+            current = {r.module: r for r in await runs_of(job_id) if r.status != "superseded"}
+            check(f"{tag}-05 {module} hat kein Ergebnis (läuft nach dem Fortsetzen)", module not in current,
+                  str({m: r.status for m, r in current.items()}))
+            if use_immich:
+                check(f"{tag}-06 kein Asset angelegt", not job.immich_asset_id, str(job.immich_asset_id))
+        # The service is back: the app's health watcher resumes, its worker runs the job.
+        check(f"{tag}-07 Pipeline läuft wieder (Health-Watcher)", await wait_resumed(), str(await pause_state()))
+        done = await wait_done([job_id], timeout=300)
+        job = await get_job(job_id)
+        if job.immich_asset_id:
+            CLEANUP_ASSETS.append(job.immich_asset_id)
+        if job.target_path and not job.target_path.startswith("immich:"):
+            CLEANUP_FILES.append(job.target_path)
+        check(f"{tag}-08 Job danach fertig", done and job.status == "done", f"status={job.status}")
+        current = {r.module: r for r in await runs_of(job_id) if r.status != "superseded"}
+        check(f"{tag}-09 {module} danach gelaufen, ohne Fehler",
+              module in current and current[module].status == "ok",
+              str(current.get(module) and current[module].status))
+    finally:
+        await restore_pause(found)
+
+
+async def test_us23_ai_model_missing():
+    print("\n-- US-23: KI-Modell fehlt auf dem KI-Server --")
+    await service_story("US23", "das Modell", ConfigStage(ai__model=f"ma-e2e-gibt-es-nicht-{TS}"),
+                        "ai_unreachable", module="IA-05", detail_has=f"ma-e2e-gibt-es-nicht-{TS}")
+
+
+async def test_us24_immich_down():
+    print("\n-- US-24: Immich nicht erreichbar --")
+    await service_story("US24", "Immich", ConfigStage(immich__url="http://127.0.0.1:9"),
+                        "immich_unreachable", module="IA-08", use_immich=True)
+
+
+async def test_us25_geocoding_unusable():
+    print("\n-- US-25: Geocoding antwortet, aber unbrauchbar --")
+    # The app itself answers 404 on every Nominatim path: reachable, unusable.
+    await service_story("US25", "Geocoding", ConfigStage(geo__provider="nominatim",
+                                                         geo__url="http://localhost:8000/__kein_geocoder"),
+                        "geo_unreachable", module="IA-03", gps=(46.3127, 7.9883))
+
+
 async def main():
     from config import config_manager
     from immich_client import get_immich_config
@@ -2283,6 +2392,9 @@ async def main():
         test_us20_no_double_run,
         test_us21_tag_groups,
         test_us22_tag_groups_rerun,
+        test_us23_ai_model_missing,
+        test_us24_immich_down,
+        test_us25_geocoding_unusable,
     ]
     wanted = [a.lower() for a in sys.argv[1:]]
     if wanted:

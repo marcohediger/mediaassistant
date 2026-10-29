@@ -1229,7 +1229,7 @@ async def _run_immich_tag_wait_skip_test(source_heic: str):
     finally:
         if asset_id:
             try:
-                await delete_asset(asset_id)
+                await delete_asset(asset_id, force=True)
             except Exception:
                 pass
 

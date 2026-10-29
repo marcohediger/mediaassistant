@@ -850,6 +850,7 @@ async def test_r10h():
 
 async def test_r12():
     risk = "R-12"
+    import fileops
     from pipeline import reprocess as reprocess_mod, reset_job_for_retry, step_ia08_sort
     box = Box("R12")
     set_id = await create_set("R-12", base=box.lib)
@@ -888,16 +889,19 @@ async def test_r12():
 
     section("R-12c", "Verschleppter _force_reupload löst beim Erstlauf im Sidecar-Modus ein Ersetzen aus",
             "Ein Immich-Job (immich_asset_id gesetzt, Sidecar-Modus, retry_count=0) trägt den "
-            "verschleppten Merker. IA-08 entscheidet needs_reupload = ... or force_reupload und ruft "
-            "safe_replace_asset(alt, ...) auf — das löscht das alte Asset mit force=True. Der Test "
-            "ersetzt safe_replace_asset und die Tag-Aufrufe durch Aufzeichner (kein Immich-Aufruf); "
+            "verschleppten Merker. IA-08 entscheidet needs_reupload = ... or force_reupload und "
+            "ersetzt das bestehende Asset (fileops.replace). Der Test ersetzt fileops.replace und die "
+            "Tag-Aufrufe durch Aufzeichner (kein Immich-Aufruf); "
             "Kontrolllauf ohne Merker zum Vergleich.",
             "Ohne echten Grund (kein Retry, Sidecar-Modus) wird kein bestehendes Asset ersetzt/gelöscht.")
     calls: list[str] = []
 
-    async def fake_replace(old_id, path, **kw):
-        calls.append(old_id)
-        return {"id": old_id}
+    class Recorded(Exception):
+        pass
+
+    async def fake_replace(job, old, new_src, **kw):
+        calls.append(old)
+        raise Recorded(old)
 
     async def fake_tag(*_a, **_k):
         return [], [], []
@@ -919,11 +923,14 @@ async def test_r12():
         before = len(calls)
         async with async_session() as s:
             job = await s.get(Job, jid)
-            await step_ia08_sort.execute(job, s)
+            try:
+                await step_ia08_sort.execute(job, s)
+            except Recorded:
+                pass
             await s.rollback()
         return len(calls) - before
 
-    with patched(step_ia08_sort, "safe_replace_asset", fake_replace), \
+    with patched(fileops, "replace", fake_replace), \
             patched(step_ia08_sort, "_tag_immich_asset", fake_tag), \
             patched(step_ia08_sort, "update_asset_description", fake_noop), \
             patched(step_ia08_sort, "lock_asset", fake_noop), \
@@ -932,10 +939,9 @@ async def test_r12():
         with_flag = await run_ia08(True)
     if control:
         raise Precondition(f"Kontrolllauf ohne Merker ersetzt bereits ({control}x)")
-    report(risk, "R-12c kein safe_replace_asset (= force-delete) nur wegen des Merkers", with_flag == 0,
-           f"safe_replace_asset-Aufrufe: ohne Merker {control}, mit Merker {with_flag}")
-    actual(f"ohne Merker: {control} Ersetzungen, mit Merker: {with_flag} (würde das alte Asset mit "
-           f"force=True löschen).")
+    report(risk, "R-12c kein Ersetzen des bestehenden Assets nur wegen des Merkers", with_flag == 0,
+           f"Ersetzungen: ohne Merker {control}, mit Merker {with_flag}")
+    actual(f"ohne Merker: {control} Ersetzungen, mit Merker: {with_flag}.")
 
     section("R-12d", "Auch der Immich-Zweig verliert das Entfernen, wenn IA-08 der erste Step des Laufs ist",
             "IA-08 entfernt die Merker per step_results.pop() aus job.step_result. Ist IA-08 der "
@@ -949,7 +955,7 @@ async def test_r12():
     srd["_force_reupload"] = True
     jd = await create_job(local, set_id=sidecar_set, step_result=srd, source_label="Immich",
                           immich_asset_id=f"{TAG}-asset-d")
-    with patched(step_ia08_sort, "safe_replace_asset", fake_replace), \
+    with patched(fileops, "replace", fake_replace), \
             patched(step_ia08_sort, "_tag_immich_asset", fake_tag), \
             patched(step_ia08_sort, "update_asset_description", fake_noop), \
             patched(step_ia08_sort, "lock_asset", fake_noop), \

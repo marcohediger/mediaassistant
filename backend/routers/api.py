@@ -1055,8 +1055,10 @@ async def pause_pipeline_endpoint(request: Request):
 
 @router.post("/pipeline/resume")
 async def resume_pipeline_endpoint(request: Request):
-    """Resume the pipeline worker after a pause."""
-    await config_manager.set("pipeline.paused", False)
+    """Resume the pipeline worker after a pause. Also ends an auto-pause:
+    the user decides — the reason must not keep parking jobs (services.py)."""
+    import services
+    await services.clear()
     try:
         await log_info("api", "Pipeline resumed")
     except Exception:
@@ -1085,6 +1087,8 @@ async def pipeline_status_endpoint():
         "paused": paused,
         "in_flight": in_flight,
         "queued": queued,
+        "auto_paused_reason": await config_manager.get("pipeline.auto_paused_reason", "") or "",
+        "auto_paused_detail": await config_manager.get("pipeline.auto_paused_detail", "") or "",
     })
 
 

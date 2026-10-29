@@ -19,6 +19,7 @@ import fileops
 import immich_client
 import resources
 import runs
+import services
 from config import config_manager
 from database import async_session
 from inputs.common import needs_immich_download
@@ -117,6 +118,11 @@ async def fetch_immich_source(job_id: int) -> bool:
                                          kind="work", api_key=api_key)
     except Exception as e:
         await asyncio.to_thread(_rmdir_quiet, tmp_dir)
+        # Immich itself missing is no fault of the job: pause, the job stays queued.
+        down = await services.down("immich", e)
+        if down:
+            await services.pause(*down, where=f"{debug_key} Download aus Immich", error=f"{type(e).__name__}: {e}")
+            return False
         return await fail(f"{type(e).__name__}: {e}")
     path, digest = res.location, res.sha256
 

@@ -632,7 +632,7 @@ async def story_us12(std_id):
     # from the phone): already processed for this access → skipped.
     if await asset_exists(asset_a):
         try:
-            await delete_asset(asset_a)
+            await delete_asset(asset_a, force=True)
         except Exception as exc:
             print(f"    note: delete of {asset_a} failed: {exc}")
     asset_b, status = "", None
@@ -756,7 +756,7 @@ async def cleanup():
     for aid in dict.fromkeys(CLEANUP_ASSETS):
         try:
             if await asset_exists(aid):
-                await delete_asset(aid)
+                await delete_asset(aid, force=True)
         except Exception as exc:
             print(f"  cleanup: asset {aid}: {exc}")
 

@@ -53,6 +53,7 @@ MediaAssistant/
 │   ├── runs.py                 # module_runs: einziger Schreiber, step_result als abgeleitete Sicht
 │   ├── reruns.py               # Aufträge „Neu ausführen": anlegen, Feeder, verfolgen, abbrechen
 │   ├── resources.py            # Betriebsmittel-Grenzen (ai, geo, immich, io, cpu), max_jobs
+│   ├── services.py             # Dienste der Pipeline (KI, Geocoding, Immich): Prüfung, Auto-Pause
 │   ├── folder_path.py          # Ordnerstruktur → Tags/Alben je nach Set-Optionen
 │   ├── safe_file.py            # safe_move(): copy → verify hash → delete (nur noch Baustein von fileops)
 │   ├── ai_backends.py          # Loadbalancer für mehrere OpenAI-kompat. Endpunkte
@@ -125,8 +126,9 @@ die aktiven Sets; deren Eingänge reihen nur Jobs ein), **Pipeline-Worker**
 `resources.max_jobs()` gleichzeitig — Standard 2 × KI-Slots + 2 —, lädt
 Immich-Originale erst beim Start eines Jobs), **Rerun-Feeder**
 (`reruns.feeder`: bereitet Aufträge „Neu ausführen" vor und reiht sie ein,
-höchstens die Hälfte der Plätze), **Health-Watcher** (überwacht AI-Backend
-+ Geocoding und auto-pausiert die Pipeline bei Ausfall) und die tägliche
+höchstens die Hälfte der Plätze), **Health-Watcher** (setzt eine Auto-Pause
+fort, sobald der fehlende Dienst — KI, Geocoding, Immich — wieder bereit ist)
+und die tägliche
 **Papierkorb-Leerung**. `run_pipeline(job_id)` übergibt die Module an
 `pipeline/executor.py`: Reihenfolge, Abhängigkeiten und kritische Module
 stehen nur in `pipeline/registry.py`; IA-03 läuft als Seiten-Task neben
@@ -367,6 +369,7 @@ echte DB) und verifiziert das Endergebnis:
 | **US-10: Folder-Tags → Album** | Datei in Subfolder → Album in Immich erstellt → Asset zugeordnet |
 | **US-21: Tag-Gruppen** | Datei in Unterordner mit GPS, Set mit Tag-Gruppen → fünf Wurzeln als Baum in Immich, Inhalts-Tags flach, TagsList in der Datei, keine anderen flachen MA-Tags |
 | **US-22: Tag-Gruppen nachträglich** | Job ohne Gruppen verarbeitet → eingeschaltet → IA-07+IA-08 neu (API) → flache MA-Tags weg ausser Inhalts-Tags (auch nach Neueinlesen der Sidecar), Gruppen da, Benutzer-Tag bleibt |
+| **US-23 … US-25: Dienst fehlt** | KI-Modell fehlt, Immich nicht erreichbar, Geocoding unbrauchbar → Pipeline pausiert mit Grund, Job wartet (kein Fehler, kein Review, Datei bleibt) → Dienst zurück → Health-Watcher setzt fort → Job fertig |
 | **US-11 … US-14: pHash, Keep, Batch-Clean** | pHash-Duplikat (andere Kompression), Keep mit Ordner-/Stichwort-Merge, Batch-Clean alle bzw. diese Seite |
 | **US-15: Geocoding neu (Immich)** | Modul einzeln neu → IA-07/IA-08 laufen nach → Tags in Immich per API aktualisiert; gleicher Ort → nichts kaskadiert |
 | **US-16: Immich-Job ohne lokale Kopie** | Handy-Upload neu ausführen über eine Arbeitskopie; Variante „Datei ersetzen"; Datum bleibt (Datei-Zeit aus Immich) |
@@ -562,12 +565,22 @@ nie eine vorhandene Datei. `safe_move` (copy → verify → delete) ist nur
 noch ein Baustein darunter. Niemals durch `shutil.move()`, `os.rename`
 oder einen direkten `safe_move` ersetzen.
 
-### Pipeline-Auto-Pause
-`AIConnectionError` und `GeocodingConnectionError` setzen
-`config.pipeline.paused=True` global. Health-Watcher pollt alle 30s
-und resumed automatisch. Wenn du einen Test schreibst, der absichtlich
-das AI-Backend ausfallen lässt, wirst du die ganze Pipeline pausieren —
-restaurieren im finally.
+### Pipeline-Auto-Pause: Infrastruktur ist nie Schuld eines Jobs
+Fehlt ein Dienst, den die Pipeline braucht (KI-Backend samt eingestelltem
+Modell, Geocoding, Immich), hält die ganze Pipeline an — `services.py`.
+Scheitert ein Modul mit Dienst-Betriebsmittel (`registry`: ai, geo, immich)
+oder der Immich-Download im Worker, fragt `services.down()` die Prüfung des
+Dienstes (dieselbe wie die Modul-Karten im Dashboard). Ist der Dienst nicht
+bereit: `pipeline.paused` + `auto_paused_reason` / `_detail`, der Lauf des
+Moduls wird unvollendet geschlossen, der Job geht zurück in die
+Warteschlange — kein Fehler, keine Warnung, nichts nach `error/`. Ist der
+Dienst in Ordnung, ist es ein Fehler des Jobs wie bisher. Der
+Health-Watcher pollt alle 30 s und setzt fort; Fortsetzen von Hand löscht
+den Grund mit. Das Dashboard nennt Dienst und Grund.
+
+Ein Test, der einen Dienst absichtlich ausfallen lässt, pausiert die ganze
+Pipeline — den vorgefundenen Pause-Zustand merken und im finally
+wiederherstellen (US-23 … US-25).
 
 ### Dev-Container und gleichzeitige Testläufe
 

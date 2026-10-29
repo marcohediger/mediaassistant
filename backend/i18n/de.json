@@ -15,6 +15,11 @@
     "status_off": "Alle deaktiviert"
   },
   "dashboard": {
+    "pipeline_auto_paused_title": "Pipeline automatisch angehalten: {service} nicht bereit",
+    "pipeline_auto_paused_text": "Die Pipeline läuft von selbst weiter, sobald der Dienst wieder bereit ist. Betroffene Jobs warten in der Warteschlange und werden nicht als Fehler markiert.",
+    "service_ai_unreachable": "KI-Backend",
+    "service_geo_unreachable": "Geocoding",
+    "service_immich_unreachable": "Immich",
     "title": "Dashboard",
     "total": "Total",
     "done": "Fertig",
@@ -591,6 +596,7 @@
     "immich_public_url_invalid": "Adresse für Links im Browser ungültig (http:// oder https:// mit Hostname erwartet). Es wurde nichts gespeichert."
   },
   "modules": {
+    "status_model_missing": "Modell {model} fehlt auf dem Server",
     "ki_analyse": "KI-Analyse",
     "geocoding": "Geocoding",
     "duplikat_erkennung": "Duplikat-Erkennung",
