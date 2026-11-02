@@ -1,5 +1,49 @@
 # Changelog
 
+## v3.5.1 — 2026-11-02
+
+### Fix: Authlib 1.9.2 (CVE-2026-96760 und weitere Hinweise)
+
+Authlib 1.8.0 meldete eine JWS-Nutzlast in JSON-Form als geprüft, ohne die
+Signatur anzusehen (CVE-2026-96760, kritisch). Mit derselben Version kamen
+weitere Hinweise. Einer betrifft den SSO-Client von MediaAssistant selbst:
+Ein ID-Token konnte seine eigene Nonce-Prüfung abschalten
+(GHSA-c5mf-xmp2-59rc). Das galt nur für Implicit- und Hybrid-Flow;
+MediaAssistant nutzt den Authorization-Code-Flow. 1.9.0 behebt diese
+Hinweise, 1.9.2 zusätzlich die ID-JAG-Lücke vom 1. November. Die betrifft
+nur Server, ein Scanner hätte 1.9.0 und 1.9.1 aber sofort wieder gemeldet.
+`constraints.txt` hält jetzt 1.9.2, `requirements.txt` verlangt mindestens
+1.9.2. Die übrigen Versionen bleiben (cryptography 50.0.1, joserfc 1.7.5
+erfüllen die Anforderungen).
+
+Getestet mit einem echten OIDC-Anbieter (Dex) und einem Browser, mit 1.8.0
+und mit 1.9.2 gleich:
+- vor dem Login leitet die API auf `/auth/login` um
+- Anmeldung beim Anbieter, Rückkehr über `/auth/callback`
+- danach ist die API offen
+- ein Callback mit falschem `state` wird abgelehnt
+
+### Fix: ffmpeg liest nur noch Video-Container (libxml2, CVE-2026-6653)
+
+Der Image-Scanner meldet libxml2 als kritisch. Den Fehler (Use-after-free
+beim Einlesen einer DTD) behebt Debian 13 nicht, und das Paket muss bleiben,
+weil ffmpeg daran hängt. Im Image liest nur ffmpeg XML mit libxml2, im
+DASH-Demuxer und zwei verwandten. ffmpeg wählt den Demuxer aber nach dem
+Inhalt: Eine präparierte XML-Datei mit dem Namen `urlaub.mp4` in einem
+Eingang ging durch libxml2. Das galt für IA-01 (ffprobe), IA-04 (Bilder für
+die KI) und die Video-Vorschau, und bekam die Datei ein echtes Video als
+Segment, kam sogar ein Bild heraus.
+
+Jetzt bekommen ffmpeg und ffprobe an allen drei Stellen die Liste der
+erlaubten Demuxer (`-format_whitelist`): mov (mp4, mov, m4v, 3gp), matroska
+(mkv, webm), avi, flv, mpegts (mts, m2ts), mpeg (mpg, vob), mpegvideo und
+asf (wmv). Andere Formate werden abgewiesen, bevor ihr Demuxer den Inhalt
+liest. Das neue `test_ffmpeg_input.py` erzeugt echte Videos aller dieser
+Container und schickt sie durch die drei Stellen, dazu ein DASH-Manifest mit
+DTD unter dem Namen `.mp4`; vor dem Fix war das rot. Der Scanner zeigt
+libxml2 weiter an, bis Debian einen Fix liefert; der nächste Build nimmt ihn
+dann mit (`KNOWN_RISKS.md` S-11).
+
 ## v3.5.0 — 2026-11-02
 
 ### Job-Liste: Ausgewählte Jobs löschen

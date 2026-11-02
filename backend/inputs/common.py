@@ -16,6 +16,12 @@ logger = logging.getLogger("mediaassistant.inputs")
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif", ".webp", ".gif", ".bmp", ".dng", ".cr2", ".nef", ".arw"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".mpg", ".mpeg", ".vob", ".asf"}
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+# The demuxers of the video containers the inputs and Immich bring (Immich
+# also takes webm, flv, wmv, m2ts), as input options for ffmpeg and ffprobe.
+# They pick the demuxer by the content, not the name; limited to these, a
+# file that only claims to be a video never reaches one that parses XML with
+# libxml2 (dash, imf, webm_dash_manifest: CVE-2026-6653, no fix in Debian 13).
+FFMPEG_VIDEO_INPUT = ["-format_whitelist", "mov,matroska,avi,flv,mpegts,mpeg,mpegvideo,asf"]
 
 _SKIP_DIRS = {"@eadir", ".synology", "#recycle"}
 

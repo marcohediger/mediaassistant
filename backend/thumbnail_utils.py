@@ -12,6 +12,8 @@ import tempfile
 
 from PIL import Image
 
+from inputs.common import FFMPEG_VIDEO_INPUT
+
 logger = logging.getLogger("mediaassistant.thumbnails")
 
 # ---------------------------------------------------------------------------
@@ -73,7 +75,7 @@ def video_to_jpeg(filepath: str, max_size=THUMB_SIZE) -> bytes | None:
     for seek in ("1", "0"):
         try:
             result = subprocess.run(
-                ["ffmpeg", "-ss", seek, "-i", filepath,
+                ["ffmpeg", *FFMPEG_VIDEO_INPUT, "-ss", seek, "-i", filepath,
                  "-frames:v", "1", "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease",
                  "-f", "image2", "-c:v", "mjpeg", "-q:v", "5", "pipe:1"],
                 capture_output=True, timeout=30,

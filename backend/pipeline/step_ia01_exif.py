@@ -5,6 +5,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
+from inputs.common import FFMPEG_VIDEO_INPUT
 
 logger = logging.getLogger("mediaassistant.pipeline.ia01")
 
@@ -113,7 +114,7 @@ async def _run_ffprobe(filepath: str) -> dict | None:
         result = await asyncio.to_thread(
             subprocess.run,
             [
-                "ffprobe", "-v", "quiet",
+                "ffprobe", "-v", "quiet", *FFMPEG_VIDEO_INPUT,
                 "-print_format", "json",
                 "-show_format", "-show_streams",
                 filepath,

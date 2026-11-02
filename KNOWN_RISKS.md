@@ -311,6 +311,33 @@ Status für die Rücknahme.
 
 ---
 
+## Neu erkannt (2026-11-02)
+
+### S-11 — libxml2 im Image mit CVE-2026-6653 (kritisch laut Scanner) — 🔶 entschärft (v3.5.1)
+**Betrifft:** Image (Debian 13), `ffmpeg`/`ffprobe` in IA-01, IA-04 und der Video-Vorschau
+
+libxml2 2.9.14 (Debian-Version `2.12.7+dfsg+really2.9.14-2.1+deb13u3`) hat
+einen Use-after-free beim Einlesen einer DTD (`xmlParseInternalSubset`).
+Debian stuft ihn für trixie als „minor issue, no-dsa“ ein und liefert keinen
+Fix; behoben ist er erst in forky/sid. Das Paket lässt sich nicht entfernen:
+ffmpeg hängt über `libavformat61` daran.
+
+Im Image liest nur ffmpeg XML mit libxml2, in seinen Demuxern dash, imf und
+webm_dash_manifest. ffmpeg wählt den Demuxer nach dem Inhalt, nicht nach dem
+Namen: Eine präparierte Datei `urlaub.mp4` in einem Eingang ging bis 3.5.0
+durch den DASH-Demuxer und damit durch libxml2 (IA-01, IA-04, Vorschau).
+Seit 3.5.1 bekommen ffmpeg und ffprobe `-format_whitelist` mit den
+Demuxern der Video-Container (`inputs/common.py` `FFMPEG_VIDEO_INPUT`); ein
+anderes Format wird abgewiesen, bevor sein Demuxer den Inhalt liest.
+`test_ffmpeg_input.py` zeigt beides: echte Videos aller Container laufen,
+das Manifest wird abgewiesen.
+
+**Offen:** Der Scanner meldet das Paket weiter, solange es im Image liegt.
+Das Dockerfile führt `apt-get upgrade` aus; sobald Debian einen Fix für
+trixie veröffentlicht, nimmt ihn der nächste Build mit.
+
+---
+
 ## Neu erkannt (2026-10-29)
 
 ### S-9 — Fehlt das KI-Modell, landet alles in Review, ohne Pause — ✅ behoben (v3.2.0)

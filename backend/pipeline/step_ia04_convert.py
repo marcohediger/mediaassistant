@@ -4,6 +4,7 @@ import os
 import subprocess
 
 from config import config_manager
+from inputs.common import FFMPEG_VIDEO_INPUT
 
 TEMP_DIR = os.path.join(os.path.dirname(os.environ.get("DATABASE_PATH", "/app/data/mediaassistant.db")), "tmp")
 
@@ -183,7 +184,7 @@ async def _ffmpeg_extract_frame(video_path: str, seek_time: float, output_path: 
     Funktioniert korrekt für jedes Seitenverhältnis (Landscape, Portrait, Quadrat etc.).
     """
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-y", *FFMPEG_VIDEO_INPUT,
         "-ss", str(seek_time),
         "-i", video_path,
         "-vframes", "1",
