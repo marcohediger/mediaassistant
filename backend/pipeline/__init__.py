@@ -148,12 +148,13 @@ async def _run_pipeline(job_id: int):
         # immich_poll, duplicates router) start the same job in parallel,
         # which previously caused IA-07 "already exists" and IA-08
         # "file disappeared" errors when two pipelines wrote/uploaded the
-        # same file concurrently. A rerun keeps the job's started_at.
+        # same file concurrently. A rerun keeps the job's started_at. An
+        # acknowledged error is over once the job runs again.
         now = datetime.now()
         claim = await session.execute(
             update(Job)
             .where(Job.id == job_id, Job.status == "queued")
-            .values(status="processing",
+            .values(status="processing", error_acknowledged_at=None,
                     started_at=case((func.json_extract(Job.job_data, "$._rerun").is_(None), now),
                                     else_=Job.started_at))
         )
@@ -445,11 +446,12 @@ async def reset_job_for_retry(job_id: int, *, actor: str = "user:retry") -> bool
         # the transient lock while the file is prepared — neither the worker
         # nor a parallel run_pipeline can claim it meanwhile. Committed on its
         # own: the file checks below write the register in sessions of their
-        # own (one SQLite write lock).
+        # own (one SQLite write lock). An acknowledged error is over: a retry
+        # that fails shows again.
         claim = await session.execute(
             update(Job)
             .where(Job.id == job_id, Job.status.in_(RETRYABLE_STATUSES))
-            .values(status="processing")
+            .values(status="processing", error_acknowledged_at=None)
         )
         await session.commit()
         if claim.rowcount == 0:

@@ -28,6 +28,11 @@
 {%- set m = meta.get(lv, ('is-neutral', 'info', level or '—')) -%}
 <span class="log-level {{ m[0] }}" title="{{ m[2] }}">{{ icon(m[1], 13) }}<span class="ui-sr-only">{{ m[2] }}</span></span>
 {%- endmacro %}
+{# An acknowledged error (job_view.status_filter): off the dashboard and the "Fehler" filter #}
+{% macro ack_mark(job) -%}
+{%- set label = t.logs.acknowledged_mark | replace('{date}', job.error_acknowledged_at.strftime('%d.%m.%Y %H:%M')) -%}
+<span class="ack-mark" title="{{ label }}">{{ icon('check', 13) }}<span class="sr-only">{{ label }}</span></span>
+{%- endmacro %}
 {% macro dry_mark() -%}
 <span class="dry-run-mark" title="{{ t.sets.dry_run_short }} — {{ t.sets.dry_run_hint }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="sr-only">{{ t.sets.dry_run_short }}</span></span>
 {%- endmacro %}
@@ -209,6 +214,7 @@ const TASK_TITLES = {
     tag_merge: LOGS_L.task_tag_merge,
     tag_groups: LOGS_L.task_tag_groups,
     tag_empty: LOGS_L.task_tag_empty,
+    delete_jobs: LOGS_L.task_delete_jobs,
 };
 let _cleanupPollInterval = null;
 
@@ -291,6 +297,16 @@ function _formatResult(task, result) {
         if (c > 0) msg += '\n  ' + _t('dup_errors_changed', {n: c});
         return msg;
     }
+    if (task === 'delete_jobs') {
+        let msg = _t('delete_result', {deleted: result.deleted || 0, total: result.total || 0});
+        for (const key of ['trashed', 'files_kept', 'already', 'busy', 'gone']) {
+            if (result[key]) msg += '\n  ' + _t('delete_result_' + key, {n: result[key]});
+        }
+        if (result.storage) {
+            msg += '\n  ' + _t('delete_result_storage', {n: result.storage, detail: result.storage_detail || ''});
+        }
+        return msg;
+    }
     return JSON.stringify(result);
 }
 
@@ -299,6 +315,7 @@ const TASK_REDIRECT = {
     stale_errors: '/logs?tab=jobs&status=error',
     stuck_duplicates: '/logs?tab=jobs&status=duplicate',
     dup_errors: '/logs?tab=jobs&status=deleted',
+    delete_jobs: null,  // the page it was started on, with its filter
 };
 
 async function _pollCleanup(task) {
@@ -323,7 +340,8 @@ async function _pollCleanup(task) {
             const hasWork = data.result && (data.result.total > 0 || data.result.deleted > 0 || data.result.orphaned > 0);
             alert(msg + (hasWork ? '\n\n' + _t('reloading') : ''));
             if (hasWork) {
-                window.location.href = TASK_REDIRECT[task] || '/logs';
+                if (TASK_REDIRECT[task]) window.location.href = TASK_REDIRECT[task];
+                else window.location.reload();
             }
         }
     } catch (e) {
@@ -343,7 +361,8 @@ async function _startCleanup(task, endpoint, body) {
         });
         if (resp.status === 409) {
             const data = await resp.json();
-            alert(_t('cleanup_busy', {task: TASK_TITLES[data.task] || data.task}));
+            alert(data.task ? _t('cleanup_busy', {task: TASK_TITLES[data.task] || data.task})
+                : (data.detail || _t('cleanup_failed_http', {status: resp.status})));
             return;
         }
         if (!resp.ok) {
@@ -486,6 +505,48 @@ async function cleanupOrphans(ev) {
     await _startCleanup('orphans', url);
 }
 
+// "Löschen …" in the selection bar of the job log (rerun.js sends the
+// selection): the same delete as on the job page, for every selected job.
+// "Alle … Treffer" sends the count the user saw; the server refuses when
+// the filter matches a different number by now.
+document.addEventListener('ma:selection-delete', async (e) => {
+    const {target, count} = e.detail;
+    const title = target.kind === 'query' ? _t('delete_confirm_title_all', {n: count})
+        : _t(count === 1 ? 'delete_confirm_title_one' : 'delete_confirm_title_many', {n: count});
+    if (!await MA.confirm({title, text: LOGS_L.delete_confirm_text, ok: LOGS_L.delete_confirm_ok,
+                           danger: true})) return;
+    await _startCleanup('delete_jobs', '/api/jobs/delete',
+                        target.kind === 'query' ? {target, expected: count} : {target});
+});
+
+// "Quittieren" / "Quittierung aufheben" in the selection bar: changes only
+// the acknowledgement, at once, then the page reloads with its filter.
+document.addEventListener('ma:selection-acknowledge', async (e) => {
+    const {target, count, undo, button} = e.detail;
+    button.disabled = true;
+    try {
+        const resp = await fetch('/api/jobs/acknowledge', {
+            method: 'POST',
+            headers: {'Accept': 'application/json', 'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+            body: JSON.stringify(target.kind === 'query' ? {target, expected: count, undo} : {target, undo}),
+            credentials: 'same-origin'
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            alert(data.detail || _t('cleanup_failed_http', {status: resp.status}));
+            button.disabled = false;
+            return;
+        }
+        let msg = _t(undo ? 'unacknowledge_done' : 'acknowledge_done', {n: data.changed || 0});
+        if (data.skipped) msg += '\n' + _t(undo ? 'unacknowledge_skipped' : 'acknowledge_skipped', {n: data.skipped});
+        alert(msg);
+        window.location.reload();
+    } catch (err) {
+        alert(_t('cleanup_start_failed', {error: err.message}));
+        button.disabled = false;
+    }
+});
+
 // On page load, check if a cleanup is already running and pick up the polling.
 (async function _resumeCleanup() {
     try {
@@ -570,6 +631,7 @@ async function cleanupOrphans(ev) {
         <option value="processing" {{ 'selected' if status_filter == 'processing' else '' }}>{{ t.logs.processing }}</option>
         <option value="done" {{ 'selected' if status_filter == 'done' else '' }}>{{ t.logs.done }}</option>
         <option value="error" {{ 'selected' if status_filter == 'error' else '' }}>{{ t.logs.error }}</option>
+        <option value="acknowledged" {{ 'selected' if status_filter == 'acknowledged' else '' }}>{{ t.logs.acknowledged }}</option>
         <option value="warning" {{ 'selected' if status_filter == 'warning' else '' }}>{{ t.logs.warning }}</option>
         <option value="duplicate" {{ 'selected' if status_filter == 'duplicate' else '' }}>{{ t.logs.duplicate }}</option>
         <option value="review" {{ 'selected' if status_filter == 'review' else '' }}>{{ t.logs.review }}</option>
@@ -602,7 +664,7 @@ async function cleanupOrphans(ev) {
             {% for job in jobs %}
             <tr class="log-row log-{{ job.status }} hist-row" data-key="{{ job.debug_key }}" data-sig="{{ job_signature(job) }}">
                 <td class="ui-col-check lc-check"><label class="ui-check rerun-check"><input type="checkbox" class="rerun-row-check" value="{{ job.debug_key }}" data-name="{{ job.filename or job.debug_key }}"><span class="ui-sr-only">{{ t.rerun.select_row | replace('{name}', job.filename or job.debug_key) }}</span></label></td>
-                <td class="cell-status lc-status">{{ status_badge(job.status, icon_only=True) }}{% if job.dry_run %}{{ dry_mark() }}{% endif %}</td>
+                <td class="cell-status lc-status">{{ status_badge(job.status, icon_only=True) }}{% if job.status == 'error' and job.error_acknowledged_at %}{{ ack_mark(job) }}{% endif %}{% if job.dry_run %}{{ dry_mark() }}{% endif %}</td>
                 <th scope="row" class="lc-file">
                     <div class="ui-cell-stack">
                         <span class="ui-copyable"><a class="logs-name" href="/logs/job/{{ job.debug_key }}{% if filter_query %}?{{ filter_query }}{% endif %}" title="{{ job.filename }}">{{ job.filename }}</a>{{ copy_btn(job.filename, 'name') }}</span>
@@ -634,7 +696,8 @@ async function cleanupOrphans(ev) {
     </table>
 </div>
 {# Selection bar: sticks to the bottom while rows are selected (rerun.js).
-   "Alle … Treffer" switches to the filter as target (kind "query"). #}
+   "Alle … Treffer" switches to the filter as target (kind "query").
+   "Löschen …" runs in the maintenance slot (ma:selection-delete above). #}
 <div class="ui-card rerun-bar" id="rerun-bar" role="region" aria-label="{{ t.rerun.selection_label }}"
      data-total="{{ total }}" data-status="{{ status_filter }}" data-q="{{ search }}" hidden>
     <div class="ui-toolbar">
@@ -642,6 +705,11 @@ async function cleanupOrphans(ev) {
         <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" data-f="page">{{ t.rerun.select_page }}</button>
         <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" data-f="matching" hidden></button>
         <button type="button" class="ui-btn ui-btn-primary ui-btn-sm" data-f="run">{{ icon('retry', 14) }}{{ t.rerun.select_run }}</button>
+        {% set undo = status_filter == 'acknowledged' %}
+        <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" data-f="acknowledge"{% if undo %} data-undo="1"{% endif %}
+                title="{{ t.logs.select_unacknowledge_tip if undo else t.logs.select_acknowledge_tip }}">{{ icon('x' if undo else 'check', 14) }}{{ t.logs.select_unacknowledge if undo else t.logs.select_acknowledge }}</button>
+        <button type="button" class="ui-btn ui-btn-danger ui-btn-sm cleanup-btn" data-f="delete"
+                data-tip="{{ t.logs.select_delete_tip }}" title="{{ t.logs.select_delete_tip }}">{{ icon('trash', 14) }}{{ t.logs.select_delete }}</button>
         <button type="button" class="ui-btn ui-btn-secondary ui-btn-sm" data-f="clear">{{ t.rerun.clear_selection }}</button>
     </div>
 </div>

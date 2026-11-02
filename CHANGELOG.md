@@ -1,5 +1,61 @@
 # Changelog
 
+## v3.5.0 — 2026-11-02
+
+### Job-Liste: Ausgewählte Jobs löschen
+
+Die Auswahlleiste der Job-Liste (Logs → Verarbeitungs-Log) hat neben „Module
+neu ausführen …“ den Knopf „Löschen …“. Er löscht die ausgewählten Jobs, oder
+mit „Alle … Treffer“ alle Treffer des Filters, so wie „Löschen“ auf der
+Job-Seite: Eigene Dateien kommen in den Papierkorb des Sets (30 Tage
+wiederherstellbar), Immich-Assets bleiben in Immich, nichts unter
+`original_path` wird angefasst, und die Zeile bleibt mit Status „Gelöscht“.
+Vorher fragt ein Dialog mit der Anzahl nach. Das Löschen läuft als
+Wartungsaufgabe mit Fortschrittsbalken (`POST /api/jobs/delete`, Aufgabe
+`delete_jobs`). Am Ende meldet es, was gelöscht und was übersprungen wurde.
+
+Übersprungen werden Jobs, die schon gelöscht sind, Jobs in der
+Warteschlange, in Verarbeitung oder mitten in einer Duplikat-Auflösung
+(`resolving`), und Jobs, deren Laufwerk fehlt. Bei „Alle Treffer“ schickt
+die Seite mit, wie viele Treffer sie gezeigt hat. Trifft der Filter
+inzwischen eine andere Zahl, wird nichts gelöscht und die Seite bittet ums
+Neuladen. So verschwindet kein Job, den niemand gesehen hat.
+
+### Fix: Löschen auf der Job-Seite bei fehlendem Laufwerk
+
+Fehlte das Laufwerk eines Jobs, setzte „Löschen“ den Job trotzdem auf
+„Gelöscht“. Die Datei blieb auf dem Laufwerk liegen und stand im Register
+weiter als vorhanden, gehörte aber einem gelöschten Job. Jetzt prüft das
+Löschen vorher die Laufwerke, auf denen es arbeitet: eigene Exemplare,
+Ablageziel, Papierkorb des Sets. Fehlt eines, wird nichts geändert, die
+Seite nennt den Ordner und die Pipeline hält an wie bei jedem fehlenden
+Laufwerk. Ausserdem lehnt das Löschen jetzt auch einen Job mitten in einer
+Duplikat-Auflösung (`resolving`) ab, nicht nur `queued` und `processing`.
+Die neue Story US-28 im E2E-Test zeigte den Fehler vorher rot.
+
+### Fehler quittieren
+
+Ein Fehler, um den sich niemand mehr kümmern muss, lässt sich quittieren:
+in der Auswahlleiste der Job-Liste (auch für „Alle Treffer“) und auf der
+Job-Seite eines Fehlers. Ein quittierter Fehler zählt nicht mehr in der
+Kachel „Fehler“ im Dashboard, erscheint nicht mehr unter den letzten Jobs
+dort und nicht mehr im Filter „Fehler“. Er steht unter dem neuen Filter
+„Quittiert“, in der Liste mit einem Häkchen neben dem Status-Symbol. Am Job
+ändert sich sonst nichts: Status, Meldung und Zeitpunkt bleiben, Dateien
+werden nicht angefasst. „Alle Fehler erneut verarbeiten“ lässt quittierte
+Fehler aus.
+
+Läuft der Job wieder (Retry, Warteschlange) und scheitert erneut, ist der
+Fehler wieder offen. Die Quittung wird beim Beanspruchen des Jobs gelöscht.
+Die Quittung lässt sich aufheben: im Filter „Quittiert“ heisst der Knopf
+„Quittierung aufheben“, und auf der Job-Seite steht derselbe Knopf.
+
+Technisch: neue Spalte `jobs.error_acknowledged_at` (wird beim Start
+angelegt). Die Statusfilter der Job-Liste stehen jetzt an einer Stelle,
+`job_view.status_filter`. Diese Stelle nutzen die Liste, „Alle Treffer“ der
+Auswahlleiste und „Alle Fehler erneut verarbeiten“. Getestet in der neuen
+Story US-29.
+
 ## v3.4.1 — 2026-11-02
 
 ### Fix: Wartung markiert keine Jobs auf einem fehlenden Laufwerk mehr

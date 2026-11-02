@@ -42,6 +42,18 @@
             <input type="hidden" name="back" value="{{ back.url }}">
             <button type="submit" class="ui-btn ui-btn-primary">{{ icon('retry') }}{{ t.job_detail.retry }}</button>
         </form>
+        {% if job.status == 'error' %}
+        {# Acknowledged: off the dashboard and the "Fehler" filter until the job runs again #}
+        <form method="post" action="/api/job/{{ job.debug_key }}/acknowledge">
+            <input type="hidden" name="back" value="{{ back.url }}">
+            {% if job.error_acknowledged_at %}
+            <input type="hidden" name="undo" value="1">
+            <button type="submit" class="ui-btn ui-btn-secondary">{{ icon('x') }}{{ t.job_detail.unacknowledge }}</button>
+            {% else %}
+            <button type="submit" class="ui-btn ui-btn-secondary" title="{{ t.job_detail.acknowledge_tip }}">{{ icon('check') }}{{ t.job_detail.acknowledge }}</button>
+            {% endif %}
+        </form>
+        {% endif %}
         <form method="post" action="/api/job/{{ job.debug_key }}/delete"
               data-confirm="{{ t.job_detail.delete_confirm | replace('{key}', job.debug_key) }}"
               onsubmit="return confirm(this.dataset.confirm)">
@@ -120,6 +132,9 @@
     <div class="ui-alert-body">
         <h2 class="ui-alert-title" data-field="message_title" data-label-error="{{ t.job_detail.error }}" data-label-note="{{ t.job_detail.note }}">{{ t.job_detail.error if failed else t.job_detail.note }}</h2>
         <div class="ui-alert-text job-message" data-field="error_message" data-raw="{{ job.error_message or '' }}">{{ job.error_message | link_job_keys(job.debug_key) }}</div>
+        {% if failed and job.error_acknowledged_at %}
+        <p class="ui-alert-text job-ack">{{ t.job_detail.acknowledged_at | replace('{date}', stamp(job.error_acknowledged_at)) }}</p>
+        {% endif %}
     </div>
 </div>
 

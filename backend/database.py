@@ -67,6 +67,7 @@ async def _migrate_columns(conn):
         ("jobs", "folder_tags", "ALTER TABLE jobs ADD COLUMN folder_tags BOOLEAN DEFAULT 0"),
         ("jobs", "started_at", "ALTER TABLE jobs ADD COLUMN started_at DATETIME"),
         ("jobs", "set_id", "ALTER TABLE jobs ADD COLUMN set_id INTEGER"),
+        ("jobs", "error_acknowledged_at", "ALTER TABLE jobs ADD COLUMN error_acknowledged_at DATETIME"),
         ("inbox_directories", "set_id", "ALTER TABLE inbox_directories ADD COLUMN set_id INTEGER"),
         ("sorting_rules", "set_id", "ALTER TABLE sorting_rules ADD COLUMN set_id INTEGER"),
         ("library_categories", "set_id", "ALTER TABLE library_categories ADD COLUMN set_id INTEGER"),

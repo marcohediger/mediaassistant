@@ -49,7 +49,7 @@ MediaAssistant/
 │   ├── worker.py               # DER Pipeline-Worker — einziger Ort, der run_pipeline startet
 │   ├── recovery.py             # Einmaliges beim Start: Wiederaufnahme, Einmal-Migrationen
 │   ├── fileops.py              # DER Weg für Dateioperationen: Protokoll, Register, Papierkorb
-│   ├── job_view.py             # Sicht auf einen Job (module_blocks, Verlauf) — nur lesend
+│   ├── job_view.py             # Sicht auf einen Job (module_blocks, Verlauf, status_filter der Job-Liste) — nur lesend
 │   ├── runs.py                 # module_runs: einziger Schreiber, step_result als abgeleitete Sicht
 │   ├── reruns.py               # Aufträge „Neu ausführen": anlegen, Feeder, verfolgen, abbrechen
 │   ├── resources.py            # Betriebsmittel-Grenzen (ai, geo, immich, io, cpu), max_jobs
@@ -375,6 +375,8 @@ echte DB) und verifiziert das Endergebnis:
 | **US-22: Tag-Gruppen nachträglich** | Job ohne Gruppen verarbeitet → eingeschaltet → IA-07+IA-08 neu (API) → flache MA-Tags weg ausser Inhalts-Tags (auch nach Neueinlesen der Sidecar), Gruppen da, Benutzer-Tag bleibt |
 | **US-23 … US-25: Dienst fehlt** | KI-Modell fehlt, Immich nicht erreichbar, Geocoding unbrauchbar → Pipeline pausiert mit Grund, Job wartet (kein Fehler, kein Review, Datei bleibt) → Dienst zurück → Health-Watcher setzt fort → Job fertig |
 | **US-26 / US-27: Laufwerk fehlt** | Basis-Pfad bzw. Eingang nicht eingebunden (leerer Einhängepunkt) → Pipeline pausiert mit Ordner, Job wartet, nichts auf die falsche Platte → Laufwerk zurück → Health-Watcher setzt fort → Job fertig, Ordner markiert |
+| **US-28: Auswahl löschen** | Job-Liste, Auswahl bzw. „Alle Treffer“ über die API der App → fertiger Job gelöscht, Datei im Papierkorb des Sets; Job in Verarbeitung, schon gelöschter und Job auf fehlendem Laufwerk unberührt (Pipeline pausiert); Job-Seite lehnt Löschen auf fehlendem Laufwerk ab; geänderte Trefferzahl → 409 |
+| **US-29: Fehler quittieren** | Auswahl bzw. „Alle Treffer“ quittiert → Dashboard zählt weniger, Filter „Fehler“ ohne, „Quittiert“ mit ihnen, Job sonst unverändert; aufheben (Leiste, Job-Seite); Retry scheitert erneut → wieder offen |
 | **US-11 … US-14: pHash, Keep, Batch-Clean** | pHash-Duplikat (andere Kompression), Keep mit Ordner-/Stichwort-Merge, Batch-Clean alle bzw. diese Seite |
 | **US-15: Geocoding neu (Immich)** | Modul einzeln neu → IA-07/IA-08 laufen nach → Tags in Immich per API aktualisiert; gleicher Ort → nichts kaskadiert |
 | **US-16: Immich-Job ohne lokale Kopie** | Handy-Upload neu ausführen über eine Arbeitskopie; Variante „Datei ersetzen"; Datum bleibt (Datei-Zeit aus Immich) |

@@ -133,12 +133,8 @@ async def resolve_target(target) -> tuple[list[int], dict]:
             status, q = target.get("status") or "", target.get("q") or ""
             if not isinstance(status, str) or not isinstance(q, str):
                 raise RerunError("bad_target")
-            query = select(Job.id)
-            if status == "warning":
-                # The processing log's pseudo status (routers/logs.py).
-                query = query.where(Job.status == "done", Job.error_message.like("Warnungen in:%"))
-            elif status:
-                query = query.where(Job.status == status)
+            import job_view
+            query = select(Job.id).where(*job_view.status_filter(status))  # as the job log filters
             if q:
                 query = query.where(Job.filename.contains(q) | Job.debug_key.contains(q))
             ids = list((await session.execute(query.order_by(Job.updated_at.desc()))).scalars().all())

@@ -342,9 +342,11 @@ async def retry_all_errors_endpoint(request: Request):
     handler shows a toast and reloads). Falls back to a 303 redirect when
     called via classic form-POST so non-JS clients still work.
     """
+    import job_view
     async with async_session() as session:
+        # The errors nobody acknowledged, as the "Fehler" filter lists them
         result = await session.execute(
-            select(Job.id, Job.debug_key).where(Job.status == "error")
+            select(Job.id, Job.debug_key).where(*job_view.status_filter("error"))
         )
         rows = result.all()
 
@@ -1281,18 +1283,80 @@ async def _delete_summary(out: dict) -> str:
     return "\n".join(lines)
 
 
-@router.post("/job/{debug_key}/delete")
-async def delete_job_endpoint(debug_key: str, request: Request = None):
-    """Delete a job on the user's request.
+# Jobs in these states belong to the worker or to a duplicate resolution.
+_DELETE_BUSY = ("queued", "processing", "resolving")
 
-    The job's own copies go to the trash (30 days), via fileops; nothing at
-    original_path is ever touched (R-02) and Immich assets stay in Immich.
-    The row stays, with status 'deleted' and a note of what happened, so
-    the ledger keeps its job. Queued and processing jobs belong to the
-    worker and are refused.
+
+async def _delete_job(job, drives, *, how: str) -> tuple[str, object]:
+    """Delete one job on the user's request: ("deleted", what happened),
+    ("busy", None) or ("storage", the storage.Problem).
+
+    The drives the delete works on are checked first (its local copies, its
+    library target, the trash of its set): on a missing drive nothing is
+    claimed — the job would be 'deleted' with its file left behind on the
+    drive, registered as present. Then the job is claimed; the worker and a
+    retry only take queued / terminal-but-not-deleted jobs, so after this
+    nobody else works on the row. Its own copies go to the trash (30 days),
+    via fileops; nothing at original_path is ever touched (R-02) and Immich
+    assets stay in Immich. The row stays, with status 'deleted' and a note
+    of what happened, so the ledger keeps its job.
     """
     from datetime import datetime
     from sqlalchemy import update
+    import fileops
+    from sets import get_set
+
+    paths = [c.location for c in await fileops.copies(job.id) if c.kind != "immich"]
+    if job.target_path and not job.target_path.startswith("immich:") and not job.dry_run:
+        paths.append(job.target_path)
+    if paths:
+        async with async_session() as session:
+            ps = await get_set(session, job.set_id)
+        paths.append((ps.library_base_path if ps else None) or "/library")
+    problem = await drives.problem(paths)
+    if problem is not None:
+        return "storage", problem
+
+    previous = job.status
+    async with async_session() as session:
+        claim = await session.execute(
+            update(Job).where(Job.id == job.id, Job.status.notin_(_DELETE_BUSY))
+            .values(status="deleted", completed_at=datetime.now()))
+        await session.commit()
+    if claim.rowcount != 1:
+        return "busy", None
+
+    await log_info("api", f"{job.debug_key} Job wird gelöscht ({how})",
+                   f"Status vorher: {previous}; Ziel: {job.target_path or '—'}; "
+                   f"original_path wird nicht angefasst")
+    try:
+        out = await _trash_job_copies(job.id, job.target_path, job.immich_asset_id, bool(job.dry_run))
+    except Exception as exc:
+        out = {"trashed": [], "removed": [], "gone": [], "refused": [], "immich_kept": [],
+               "failed": [("—", f"{type(exc).__name__}: {exc}")], "refs_dropped": 0}
+    out["summary"] = await _delete_summary(out)
+    async with async_session() as session:
+        await session.execute(update(Job).where(Job.id == job.id).values(error_message=out["summary"]))
+        await session.commit()
+
+    detail = (f"Papierkorb: {len(out['trashed'])}, entfernt (temporär): {len(out['removed'])}, "
+              f"nicht mehr vorhanden: {len(out['gone'])}, verweigert: {len(out['refused'])}, "
+              f"fehlgeschlagen: {len(out['failed'])}, in Immich belassen: {len(out['immich_kept'])}, "
+              f"Verweise entfernt: {out['refs_dropped']}")
+    if out["refused"] or out["failed"]:
+        await log_warning("api", f"{job.debug_key} Job gelöscht, nicht alle Dateien entfernt", detail)
+    else:
+        await log_info("api", f"{job.debug_key} Job gelöscht ({how})", detail)
+    return "deleted", out
+
+
+@router.post("/job/{debug_key}/delete")
+async def delete_job_endpoint(debug_key: str, request: Request = None):
+    """Delete a job on the user's request (_delete_job). Queued, processing
+    and resolving jobs are refused, and so is a job whose drive is missing."""
+    import job_view
+    import services
+    import storage
 
     async with async_session() as session:
         job = (await session.execute(select(Job).where(Job.debug_key == debug_key))).scalar()
@@ -1302,27 +1366,195 @@ async def delete_job_endpoint(debug_key: str, request: Request = None):
                                 status_code=404)
         return RedirectResponse(url="/logs?tab=jobs", status_code=303)
     # Back to the job page, keeping where it was opened from (form field "back")
-    import job_view
     try:
         detail_url = job_view.job_page_url(debug_key, (await request.form()).get("back") if request else None)
     except Exception:
         detail_url = job_view.job_page_url(debug_key)
-    previous = job.status
 
-    # Claim: the worker and a retry only take queued / terminal-but-not-
-    # deleted jobs, so after this nobody else works on the row.
-    async with async_session() as session:
-        claim = await session.execute(
-            update(Job).where(Job.id == job.id, Job.status.notin_(("queued", "processing")))
-            .values(status="deleted", completed_at=datetime.now()))
-        await session.commit()
-    if claim.rowcount != 1:
+    outcome, info = await _delete_job(job, storage.Checker(), how="Benutzer")
+    if outcome == "deleted":
+        if _wants_json(request):
+            return JSONResponse({"ok": not info["failed"], "status": "deleted", "detail": info["summary"],
+                                 "trashed": info["trashed"], "refused": [n for n, _ in info["refused"]],
+                                 "failed": [n for n, _ in info["failed"]]})
+        return RedirectResponse(url=detail_url, status_code=303)
+    if outcome == "storage":
+        why = storage.describe(info, await services.ui_texts())
+        message = await _text("job_detail", "delete_storage", reason=why)
+        await log_warning("api", f"{debug_key} Löschen verweigert: Laufwerk fehlt", why)
+        await storage.pause(info, where="Job löschen", error=why)
+    else:
         message = await _text("job_detail", "delete_busy")
         await log_warning("api", f"{debug_key} Löschen verweigert: Job wird gerade verarbeitet",
-                          f"Status: {previous}")
+                          f"Status: {job.status}")
+    if _wants_json(request):
+        return JSONResponse({"ok": False, "detail": message}, status_code=409)
+    return RedirectResponse(url=detail_url, status_code=303)
+
+
+async def _run_delete_jobs(ids: list[int], scope: dict):
+    """Background task: delete the jobs selected in the job log, one by one
+    as on the job page (_delete_job). Jobs already deleted, being processed
+    or on a missing drive are counted and left alone; a missing drive
+    pauses the pipeline."""
+    import services
+    import storage
+
+    counts = {"deleted": 0, "already": 0, "busy": 0, "storage": 0, "gone": 0,
+              "trashed": 0, "files_kept": 0}
+    drives = storage.Checker()
+    try:
+        _cleanup_progress["total"] = len(ids)
+        _cleanup_phase("deleting_jobs")
+        await log_info("api", f"Auswahl löschen: {len(ids)} Jobs werden gelöscht (Benutzer)", _scope_text(scope))
+        for idx, job_id in enumerate(ids, 1):
+            async with async_session() as session:
+                job = await session.get(Job, job_id)
+            if job is None:
+                counts["gone"] += 1
+            elif job.status == "deleted":
+                counts["already"] += 1
+            else:
+                outcome, info = await _delete_job(job, drives, how="Benutzer, Auswahl")
+                counts[outcome] += 1
+                if outcome == "deleted":
+                    counts["trashed"] += len(info["trashed"])
+                    counts["files_kept"] += len(info["refused"]) + len(info["failed"])
+            _cleanup_progress["current"] = idx
+            if idx % 25 == 0:
+                await asyncio.sleep(0)
+
+        texts = await services.ui_texts()
+        missing = "; ".join(storage.describe(p, texts) for p in drives.problems.values())
+        if drives.problems:
+            await storage.pause(next(iter(drives.problems.values())), where="Auswahl löschen", error=missing)
+        detail = (f"gelöscht: {counts['deleted']} (Dateien im Papierkorb: {counts['trashed']}, "
+                  f"nicht entfernt: {counts['files_kept']}), schon gelöscht: {counts['already']}, "
+                  f"in Verarbeitung (übersprungen): {counts['busy']}, Laufwerk fehlt (übersprungen): "
+                  f"{counts['storage']}, nicht mehr vorhanden: {counts['gone']}"
+                  + (f" — {missing}" if missing else ""))
+        log = log_warning if counts["storage"] or counts["files_kept"] else log_info
+        await log("api", f"Auswahl löschen beendet: {counts['deleted']} von {len(ids)} Jobs gelöscht", detail)
+        _cleanup_finish(result={**counts, "total": len(ids), "storage_detail": missing})
+    except Exception as exc:
+        import traceback
+        try:
+            await log_warning("api", "Auswahl löschen fehlgeschlagen",
+                              f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
+        except Exception:
+            pass
+        _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
+
+
+async def _selection(request: Request):
+    """(body, job ids, scope) of a request from the job log's selection bar,
+    or the JSONResponse refusing it.
+
+    Body: {"target": {"kind": "jobs", "keys": [...]}} or, for every match
+    of the log's filter, {"target": {"kind": "query", "status": ..., "q": ...},
+    "expected": <count the user saw>} — refused (409 "changed") when the
+    filter matches a different number of jobs by now, so nothing happens to
+    a job the user never saw.
+    """
+    from pipeline.rerun import RerunError, resolve_target
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "bad_target"}, status_code=400)
+    try:
+        ids, scope = await resolve_target(body.get("target"))
+    except RerunError as exc:
+        return JSONResponse({"ok": False, "error": exc.key, "detail": exc.detail}, status_code=exc.status)
+    if scope["kind"] not in ("jobs", "query"):
+        return JSONResponse({"ok": False, "error": "bad_target"}, status_code=400)
+    if scope["kind"] == "query" and body.get("expected") != len(ids):
+        return JSONResponse({"ok": False, "error": "changed", "count": len(ids),
+                             "detail": await _text("logs", "selection_changed", n=len(ids))}, status_code=409)
+    return body, ids, scope
+
+
+def _scope_text(scope: dict) -> str:
+    if scope.get("kind") == "query":
+        return f"Filter Status={scope.get('status') or 'alle'}, Suche={scope.get('q') or '—'}"
+    keys = scope.get("keys") or []
+    return f"Auswahl: {', '.join(keys)}" + (" …" if scope.get("count", 0) > len(keys) else "")
+
+
+@router.post("/jobs/delete")
+async def delete_jobs_endpoint(request: Request):
+    """Delete the jobs selected in the job log (_selection), as a background
+    task ("delete_jobs", progress via /api/jobs/cleanup-status)."""
+    found = await _selection(request)
+    if isinstance(found, JSONResponse):
+        return found
+    _, ids, scope = found
+    if _cleanup_progress["running"]:
+        return JSONResponse({"error": "another_cleanup_running", "task": _cleanup_progress["task"]},
+                            status_code=409)
+    _cleanup_reset("delete_jobs")
+    asyncio.create_task(_run_delete_jobs(ids, scope))
+    return JSONResponse({"status": "started", "task": "delete_jobs", "count": len(ids)})
+
+
+async def _acknowledge(ids: list[int], undo: bool) -> int:
+    """Acknowledge the errors among the jobs, or take it back: how many
+    changed. updated_at stays — the job itself did not change."""
+    from datetime import datetime
+    from sqlalchemy import update
+
+    changed = 0
+    async with async_session() as session:
+        for i in range(0, len(ids), 500):
+            res = await session.execute(update(Job).where(
+                Job.id.in_(ids[i:i + 500]), Job.status == "error",
+                Job.error_acknowledged_at.isnot(None) if undo else Job.error_acknowledged_at.is_(None),
+            ).values(error_acknowledged_at=None if undo else datetime.now(), updated_at=Job.updated_at))
+            changed += res.rowcount or 0
+        await session.commit()
+    return changed
+
+
+@router.post("/jobs/acknowledge")
+async def acknowledge_jobs_endpoint(request: Request):
+    """Acknowledge the errors among the jobs selected in the job log
+    (_selection), or take it back ("undo": true). An acknowledged error is
+    off the dashboard and the "Fehler" filter until the job runs again;
+    nothing else about the job changes. Jobs that are no error (or, for
+    undo, not acknowledged) are counted as skipped."""
+    found = await _selection(request)
+    if isinstance(found, JSONResponse):
+        return found
+    body, ids, scope = found
+    undo = body.get("undo") is True
+    changed = await _acknowledge(ids, undo)
+    await log_info("api", f"Fehler {'Quittung aufgehoben' if undo else 'quittiert'}: {changed} von {len(ids)} Jobs "
+                          f"(Benutzer)", _scope_text(scope))
+    return JSONResponse({"ok": True, "changed": changed, "skipped": len(ids) - changed, "undo": undo})
+
+
+@router.post("/job/{debug_key}/acknowledge")
+async def acknowledge_job_endpoint(debug_key: str, request: Request):
+    """The job page: acknowledge its error, or take it back (form field "undo")."""
+    import job_view
+    async with async_session() as session:
+        job = (await session.execute(select(Job).where(Job.debug_key == debug_key))).scalar()
+    if not job:
         if _wants_json(request):
-            return JSONResponse({"ok": False, "detail": message}, status_code=409)
-        return RedirectResponse(url=detail_url, status_code=303)
+            return JSONResponse({"ok": False, "detail": await _text("job_detail", "not_found")},
+                                status_code=404)
+        return RedirectResponse(url="/logs?tab=jobs", status_code=303)
+    form = await request.form()
+    undo = bool(form.get("undo"))
+    changed = await _acknowledge([job.id], undo)
+    if changed:
+        await log_info("api", f"{debug_key} Fehler {'Quittung aufgehoben' if undo else 'quittiert'} (Benutzer)",
+                       (job.error_message or "").split("\n")[0][:200])
+    if _wants_json(request):
+        return JSONResponse({"ok": True, "changed": changed, "undo": undo})
+    return RedirectResponse(url=job_view.job_page_url(debug_key, form.get("back")), status_code=303)
 
     await log_info("api", f"{debug_key} Job wird gelöscht (Benutzer)",
                    f"Status vorher: {previous}; Ziel: {job.target_path or '—'}; "

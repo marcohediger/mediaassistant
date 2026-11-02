@@ -43,6 +43,9 @@ class Job(Base):
     started_at = Column(DateTime)  # pipeline processing start
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
     completed_at = Column(DateTime)
+    # The user acknowledged the error: off the dashboard and the "Fehler"
+    # filter (listed under "Quittiert") until the job runs again.
+    error_acknowledged_at = Column(DateTime)
 
 
 class Config(Base):

@@ -6,13 +6,14 @@ from datetime import datetime, timedelta
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from config import config_manager
 from database import DEFAULT_MODULES, async_session
 from models import Job, Module, InboxDirectory, ProcessingSet
 from routers.processing_sets import summaries as set_summaries
 from system_logger import log_error, log_info, log_warning
 from i18n import load_lang, DEFAULT_LANGUAGE
+import job_view
 
 # Track last known status per module to avoid duplicate log entries
 _last_module_status: dict[str, str] = {}
@@ -461,9 +462,13 @@ async def _overview() -> dict:
             select(Job.status, func.count(Job.id)).group_by(Job.status)
         )
         counts = {row[0] or "unknown": row[1] for row in count_result.all()}
+        # An acknowledged error is off the dashboard (job_view.status_filter)
+        acknowledged = (await session.execute(
+            select(func.count(Job.id)).where(*job_view.status_filter("acknowledged")))).scalar() or 0
 
         recent_result = await session.execute(
-            select(Job).order_by(Job.updated_at.desc()).limit(20)
+            select(Job).where(or_(Job.status != "error", Job.error_acknowledged_at.is_(None)))
+            .order_by(Job.updated_at.desc()).limit(20)
         )
         recent_jobs = recent_result.scalars().all()
 
@@ -473,7 +478,7 @@ async def _overview() -> dict:
         "stats": {
             "total": sum(counts.values()),
             "done": counts.get("done", 0),
-            "errors": counts.get("error", 0),
+            "errors": counts.get("error", 0) - acknowledged,
             "queued": counts.get("queued", 0),
             "processing": counts.get("processing", 0),
             "duplicates": counts.get("duplicate", 0),

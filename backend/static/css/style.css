@@ -915,6 +915,13 @@ td.cell-status > * { vertical-align: middle; }
     border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
 }
 .dry-run-mark.with-text { width: auto; padding: 0 0.55rem 0 0.45rem; border-radius: 999px; font-size: var(--ui-fs-xs, 0.75rem); font-weight: 600; }
+/* An acknowledged error: the dry-run mark's shape, muted */
+.ack-mark {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.375rem; height: 1.375rem; vertical-align: middle; border-radius: 50%;
+    color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+    border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+}
 /* ── end log tables ── */
 
 /* ── Log tables: long text collapses ── */

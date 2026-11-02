@@ -27,6 +27,9 @@ Stories:
   US-18 … US-20: Ausführung nach Abhängigkeiten (parallel, Grenzen, kein doppelter Lauf)
   US-21: Tag-Gruppen: Datei aus einem Unterordner mit GPS → fünf Wurzeln als Baum in Immich
   US-22: Tag-Gruppen nachträglich eingeschaltet → Neu ausführen IA-07+IA-08 (API) ersetzt MAs flache Tags
+  US-23 … US-27: Dienst bzw. Laufwerk fehlt → Pipeline pausiert, Job wartet
+  US-28: Ausgewählte Jobs löschen (Job-Liste, auch „Alle Treffer“)
+  US-29: Fehler quittieren (Dashboard, Filter, Aufheben, erneut gescheitert)
 """
 import asyncio, contextlib, sys, os, time, shutil, random, hashlib, itertools
 sys.path.insert(0, "/app")
@@ -2273,7 +2276,7 @@ async def wait_resumed(timeout=120):
     return False
 
 
-_PAUSE_KEYS = ("paused", "auto_paused_reason", "auto_paused_at", "auto_paused_detail")
+_PAUSE_KEYS = ("paused", "auto_paused_reason", "auto_paused_at", "auto_paused_detail", "auto_paused_paths")
 
 
 async def saved_pause():
@@ -2477,6 +2480,260 @@ async def test_us27_inbox_drive_missing():
         await restore_pause(found)
 
 
+# ══════════════════════════════════════════════════════════════
+# US-28: delete the jobs selected in the job log
+# Through the app's own API, as the selection bar calls it: the same way as
+# "Löschen" on the job page (copies to the set's trash, row stays as
+# 'deleted'), jobs being processed and jobs on a missing drive are left
+# alone; "Alle Treffer" (the filter) only if the count is still the one
+# the user saw.
+# ══════════════════════════════════════════════════════════════
+MA_URL = "http://localhost:8000"
+
+
+async def ma_post(path, body=None):
+    import httpx
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post(f"{MA_URL}{path}", json=body,
+                         headers={"Accept": "application/json", "X-Requested-With": "fetch"})
+    try:
+        return r.status_code, r.json()
+    except ValueError:
+        return r.status_code, {}
+
+
+async def wait_task(task, timeout=120):
+    """The result of the app's maintenance task `task` once it is done."""
+    import httpx
+    deadline = time.monotonic() + timeout
+    async with httpx.AsyncClient(timeout=10) as c:
+        while time.monotonic() < deadline:
+            data = (await c.get(f"{MA_URL}/api/jobs/cleanup-status")).json()
+            if data.get("task") == task and data.get("done"):
+                return data
+            await asyncio.sleep(0.5)
+    return data
+
+
+async def copy_states(job_id):
+    import fileops
+    return [(c.kind, c.state, c.trash_location) for c in
+            await fileops.copies(job_id, states=("present", "trashed", "missing", "deleted"))]
+
+
+async def test_us28_delete_selection():
+    print("\n-- US-28: Ausgewählte Jobs löschen (Job-Liste) --")
+    from datetime import datetime
+    base = f"{STORAGE_ROOT}/us28/lib"
+    base_d = f"{STORAGE_ROOT}/us28d/lib"
+    set_id = await e2e_set("us28", target_mode="library", write_mode="direct", base=base)
+    set_d = await e2e_set("us28d", target_mode="library", write_mode="direct", base=base_d)
+    found = await saved_pause()
+    # Unpaused: the storage problem must show as the pipeline's own pause.
+    await restore_pause({k: (False if k == "paused" else "") for k in _PAUSE_KEYS})
+    unmounted = False
+    try:
+        files = {}
+        for name, sid in (("a", set_id), ("d", set_d)):
+            path = f"{INBOX}/__e2e_us28{name}_{TS}.jpg"
+            make_unique_jpg(path)
+            CLEANUP_FILES.append(path)
+            files[name] = await get_job(await create_and_run_job(os.path.basename(path), path,
+                                                                 use_immich=False, set_id=sid))
+        a, d = files["a"], files["d"]
+        check("US28-01 Vorbereitung: zwei Dateien in der Ablage",
+              a.status == "done" and os.path.isfile(a.target_path or "")
+              and d.status == "done" and os.path.isfile(d.target_path or ""),
+              f"{a.status} {a.target_path} / {d.status} {d.target_path}")
+        lost = f"{INBOX}/__e2e_us28b_{TS}.jpg"  # never created: "Datei nicht auffindbar"
+        b = await insert_job(os.path.basename(lost), lost, f"E2E-{TS}-{next(_JOB_NO):04d}", status="error",
+                             error_message="Datei nicht auffindbar — Retry abgebrochen", set_id=set_id)
+        c = await insert_job("__e2e_us28c.jpg", f"{INBOX}/__e2e_us28c_{TS}.jpg", f"E2E-{TS}-{next(_JOB_NO):04d}",
+                             status="processing", set_id=set_id, updated_at=datetime.now())
+        e = await insert_job("__e2e_us28e.jpg", f"{INBOX}/__e2e_us28e_{TS}.jpg", f"E2E-{TS}-{next(_JOB_NO):04d}",
+                             status="deleted", error_message="Vom Benutzer gelöscht.", set_id=set_id)
+        b, c, e = await get_job(b), await get_job(c), await get_job(e)
+
+        unmount(base_d)
+        unmounted = True
+        status, body = await ma_post(f"/api/job/{d.debug_key}/delete")
+        d_now = await get_job(d.id)
+        check("US28-02 Job-Seite: Löschen auf fehlendem Laufwerk abgelehnt (409), Job unverändert",
+              status == 409 and d_now.status == "done", f"{status} {body} status={d_now.status}")
+
+        keys = [a.debug_key, b.debug_key, c.debug_key, d.debug_key, e.debug_key]
+        status, body = await ma_post("/api/jobs/delete", {"target": {"kind": "jobs", "keys": keys}})
+        check("US28-03 Auswahl löschen gestartet", status == 200 and body.get("task") == "delete_jobs",
+              f"{status} {body}")
+        data = await wait_task("delete_jobs")
+        res = data.get("result") or {}
+        check("US28-04 Ergebnis: 2 gelöscht, 1 in Verarbeitung, 1 Laufwerk fehlt, 1 schon gelöscht",
+              data.get("done") and not data.get("error") and res.get("deleted") == 2 and res.get("busy") == 1
+              and res.get("storage") == 1 and res.get("already") == 1 and res.get("total") == 5,
+              f"{data.get('error')} {res}")
+        check("US28-05 Ergebnis nennt das fehlende Laufwerk", base_d in (res.get("storage_detail") or ""),
+              res.get("storage_detail"))
+
+        a_now = await get_job(a.id)
+        states = await copy_states(a.id)
+        trashed = [t for k, s, t in states if k == "local" and s == "trashed"]
+        check("US28-06 fertiger Job: gelöscht, Datei im Papierkorb des Sets",
+              a_now.status == "deleted" and not os.path.exists(a.target_path)
+              and len(trashed) == 1 and trashed[0].startswith(f"{base}/.papierkorb/") and os.path.isfile(trashed[0]),
+              f"status={a_now.status} copies={states}")
+        if trashed:
+            CLEANUP_FILES.append(trashed[0])
+        check("US28-07 fertiger Job: Zeile bleibt, Meldung sagt was geschah",
+              (a_now.error_message or "").startswith("Vom Benutzer gelöscht") and "Papierkorb" in a_now.error_message,
+              a_now.error_message)
+        b_now = await get_job(b.id)
+        check("US28-08 Fehler-Job ohne Datei: gelöscht", b_now.status == "deleted", f"status={b_now.status}")
+        c_now = await get_job(c.id)
+        check("US28-09 Job in Verarbeitung: nicht angefasst", c_now.status == "processing", f"status={c_now.status}")
+        d_now = await get_job(d.id)
+        check("US28-10 Job auf fehlendem Laufwerk: nicht angefasst, Exemplar noch registriert",
+              d_now.status == "done" and ("local", "present", None) in await copy_states(d.id),
+              f"status={d_now.status} copies={await copy_states(d.id)}")
+        e_now = await get_job(e.id)
+        check("US28-11 schon gelöschter Job: unverändert",
+              e_now.status == "deleted" and e_now.error_message == "Vom Benutzer gelöscht.", e_now.error_message)
+        state = await pause_state()
+        check("US28-12 Pipeline auto-pausiert (storage_unreachable), Grund nennt den Ordner",
+              bool(state["paused"]) and state["auto_paused_reason"] == "storage_unreachable"
+              and base_d in (state["auto_paused_detail"] or ""), str(state))
+        mount(base_d)
+        unmounted = False
+        check("US28-13 Datei auf dem Laufwerk unversehrt", os.path.isfile(d.target_path), d.target_path)
+
+        # "Alle Treffer": the filter, guarded by the count the user saw
+        q = f"__e2e_us28q_{TS}"
+        q_ids = [await insert_job(f"{q}_{n}.jpg", f"{INBOX}/{q}_{n}.jpg", f"E2E-{TS}-{next(_JOB_NO):04d}",
+                                  status="error", error_message="Datei nicht auffindbar — Retry abgebrochen",
+                                  set_id=set_id) for n in (1, 2)]
+        target = {"kind": "query", "status": "error", "q": q}
+        status, body = await ma_post("/api/jobs/delete", {"target": target, "expected": 1})
+        still = [(await get_job(j)).status for j in q_ids]
+        check("US28-14 Alle Treffer: geänderte Trefferzahl abgelehnt (409), nichts gelöscht",
+              status == 409 and still == ["error", "error"], f"{status} {body} {still}")
+        status, body = await ma_post("/api/jobs/delete", {"target": target, "expected": 2})
+        data = await wait_task("delete_jobs")
+        still = [(await get_job(j)).status for j in q_ids]
+        check("US28-15 Alle Treffer: beide gelöscht",
+              status == 200 and (data.get("result") or {}).get("deleted") == 2 and still == ["deleted", "deleted"],
+              f"{status} {data.get('result')} {still}")
+        async with __import__("database").async_session() as s:
+            from models import SystemLog
+            from sqlalchemy import select
+            msgs = (await s.execute(select(SystemLog.message).where(
+                SystemLog.message.like("Auswahl löschen%")).order_by(SystemLog.id.desc()).limit(4))).scalars().all()
+        check("US28-16 Systemlog: vor und nach dem Löschen", any("werden gelöscht" in m for m in msgs)
+              and any("beendet" in m for m in msgs), str(msgs))
+    finally:
+        if unmounted:
+            mount(base_d)
+        await restore_pause(found)
+
+
+# ══════════════════════════════════════════════════════════════
+# US-29: acknowledge errors
+# An acknowledged error leaves the dashboard and the "Fehler" filter (it is
+# listed under "Quittiert"), the job itself stays as it is; once the job
+# runs again and fails, the error is back.
+# ══════════════════════════════════════════════════════════════
+async def ma_get(path):
+    import httpx
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.get(f"{MA_URL}{path}", headers={"Accept": "application/json"})
+    return r.status_code, r.text
+
+
+async def dashboard_errors():
+    status, text = await ma_get("/api/dashboard")
+    import json
+    return json.loads(text)["stats"]["errors"] if status == 200 else None
+
+
+async def listed(status, q):
+    """Debug keys the job log lists for a status filter and search."""
+    import re
+    from urllib.parse import quote
+    _, html = await ma_get(f"/logs?tab=jobs&status={status}&q={quote(q)}")
+    return set(re.findall(r'data-key="([^"]+)"', html))
+
+
+async def test_us29_acknowledge_errors():
+    print("\n-- US-29: Fehler quittieren --")
+    q = f"__e2e_us29_{TS}"
+    message = "Datei nicht auffindbar — Retry abgebrochen"
+    errs = []
+    for n in (1, 2, 3):
+        errs.append(await get_job(await insert_job(f"{q}_{n}.jpg", f"{INBOX}/{q}_{n}.jpg",
+                                                   f"E2E-{TS}-{next(_JOB_NO):04d}", status="error",
+                                                   error_message=message)))
+    done = await get_job(await insert_job(f"{q}_done.jpg", f"{INBOX}/{q}_done.jpg",
+                                          f"E2E-{TS}-{next(_JOB_NO):04d}", status="done"))
+    e1, e2, e3 = errs
+    before = await dashboard_errors()
+    check("US29-01 Vorbereitung: drei Fehler im Filter „Fehler“",
+          await listed("error", q) == {e.debug_key for e in errs}, str(await listed("error", q)))
+
+    status, body = await ma_post("/api/jobs/acknowledge",
+                                 {"target": {"kind": "jobs", "keys": [e1.debug_key, e2.debug_key, done.debug_key]}})
+    check("US29-02 Auswahl quittiert: 2 Fehler, der fertige Job zählt nicht",
+          status == 200 and body.get("changed") == 2 and body.get("skipped") == 1, f"{status} {body}")
+    after = await dashboard_errors()
+    check("US29-03 Dashboard zählt 2 Fehler weniger", after == before - 2, f"{before} -> {after}")
+    check("US29-04 Filter „Fehler“ zeigt nur den offenen", await listed("error", q) == {e3.debug_key},
+          str(await listed("error", q)))
+    check("US29-05 Filter „Quittiert“ zeigt die quittierten",
+          await listed("acknowledged", q) == {e1.debug_key, e2.debug_key}, str(await listed("acknowledged", q)))
+    e1_now = await get_job(e1.id)
+    check("US29-06 Job selbst unverändert (Status, Meldung, Zeitpunkt), Quittung vermerkt",
+          e1_now.status == "error" and e1_now.error_message == message and e1_now.updated_at == e1.updated_at
+          and e1_now.error_acknowledged_at is not None,
+          f"{e1_now.status} {e1_now.updated_at} vs {e1.updated_at} ack={e1_now.error_acknowledged_at}")
+
+    target = {"kind": "query", "status": "error", "q": q}
+    status, body = await ma_post("/api/jobs/acknowledge", {"target": target, "expected": 3})
+    check("US29-07 Alle Treffer: geänderte Trefferzahl abgelehnt (409)",
+          status == 409 and body.get("error") == "changed", f"{status} {body}")
+    status, body = await ma_post("/api/jobs/acknowledge", {"target": target, "expected": 1})
+    check("US29-08 Alle Treffer quittiert", status == 200 and body.get("changed") == 1 and not await listed("error", q),
+          f"{status} {body}")
+
+    status, body = await ma_post("/api/jobs/acknowledge",
+                                 {"target": {"kind": "jobs", "keys": [e1.debug_key]}, "undo": True})
+    check("US29-09 Quittung aufgehoben: wieder unter „Fehler“",
+          status == 200 and body.get("changed") == 1 and await listed("error", q) == {e1.debug_key},
+          f"{status} {body} {await listed('error', q)}")
+
+    _, page = await ma_get(f"/logs/job/{e3.debug_key}")
+    check("US29-10 Job-Seite eines quittierten Fehlers: Quittung aufheben angeboten",
+          f'/api/job/{e3.debug_key}/acknowledge' in page and 'name="undo"' in page)
+    import httpx
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(f"{MA_URL}/api/job/{e3.debug_key}/acknowledge", data={"undo": "1"},
+                         headers={"Accept": "application/json"})
+    check("US29-11 Job-Seite: Quittung aufheben", r.status_code == 200 and (await get_job(e3.id)).error_acknowledged_at is None,
+          f"{r.status_code} {r.text[:200]}")
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(f"{MA_URL}/api/job/{e3.debug_key}/acknowledge", headers={"Accept": "application/json"})
+    check("US29-12 Job-Seite: quittieren", r.status_code == 200 and (await get_job(e3.id)).error_acknowledged_at is not None,
+          f"{r.status_code} {r.text[:200]}")
+
+    # Runs again and fails again (the file is still gone): the error is back
+    status, body = await ma_post(f"/api/job/{e2.debug_key}/retry")
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        e2_now = await get_job(e2.id)
+        if e2_now.status == "error" and e2_now.error_acknowledged_at is None:
+            break
+        await asyncio.sleep(0.5)
+    check("US29-13 erneut gescheitert: Fehler wieder offen",
+          e2_now.status == "error" and e2_now.error_acknowledged_at is None
+          and e2.debug_key in await listed("error", q), f"{status} {e2_now.status} ack={e2_now.error_acknowledged_at}")
+
+
 async def main():
     from config import config_manager
     from immich_client import get_immich_config
@@ -2525,6 +2782,8 @@ async def main():
         test_us25_geocoding_unusable,
         test_us26_library_drive_missing,
         test_us27_inbox_drive_missing,
+        test_us28_delete_selection,
+        test_us29_acknowledge_errors,
     ]
     wanted = [a.lower() for a in sys.argv[1:]]
     if wanted:

@@ -660,23 +660,36 @@
       const first = boxes()[0];
       if (first) first.focus();
     });
-    bar.querySelector("[data-f=run]").addEventListener("click", (e) => {
-      let target;
-      let label = null;
-      let count;
+    // What is selected: the chosen rows, or every match of the filter
+    function chosenTarget() {
       if (mode === "query") {
-        target = {kind: "query"};
+        const target = {kind: "query"};
         if (bar.dataset.status) target.status = bar.dataset.status;
         if (bar.dataset.q) target.q = bar.dataset.q;
-        count = total;
-      } else {
-        const chosen = selected();
-        target = {kind: "jobs", keys: chosen.map((b) => b.value)};
-        count = chosen.length;
-        if (count === 1) label = chosen[0].dataset.name;
+        return {target, count: total, label: null};
       }
+      const chosen = selected();
+      return {target: {kind: "jobs", keys: chosen.map((b) => b.value)}, count: chosen.length,
+              label: chosen.length === 1 ? chosen[0].dataset.name : null};
+    }
+    bar.querySelector("[data-f=run]").addEventListener("click", (e) => {
+      const {target, count, label} = chosenTarget();
       open({target, modules: [], label, count, returnFocus: e.currentTarget});
     });
+    // "Quittieren" and "Löschen …": the page (logs.html) runs them
+    const ack = bar.querySelector("[data-f=acknowledge]");
+    if (ack) {
+      ack.addEventListener("click", () => {
+        document.dispatchEvent(new CustomEvent("ma:selection-acknowledge",
+          {detail: {...chosenTarget(), undo: ack.dataset.undo === "1", button: ack}}));
+      });
+    }
+    const del = bar.querySelector("[data-f=delete]");
+    if (del) {
+      del.addEventListener("click", () => {
+        document.dispatchEvent(new CustomEvent("ma:selection-delete", {detail: chosenTarget()}));
+      });
+    }
     document.addEventListener("ma:rerun-started", (e) => { if (!(e.detail && e.detail.existing)) setAll(false); });
     sync();
   }

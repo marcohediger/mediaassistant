@@ -242,6 +242,7 @@
 .job-alert { margin: 0 0 1.5rem; }
 .job-alert .ui-alert-title { font-size: var(--ui-fs-base); line-height: 1.55; }
 .job-alert .job-message { margin-top: 0.3rem; max-height: 26rem; overflow: auto; scrollbar-width: thin; }
+.job-alert .job-ack { margin-top: 0.4rem; color: var(--text-muted); font-size: var(--ui-fs-sm); }
 
 /* Steps left, paths / times / hashes right; one column on small screens
    with the facts first */

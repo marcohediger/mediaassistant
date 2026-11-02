@@ -397,6 +397,22 @@ def job_signature(job) -> str:
     return f"{job.status}|{job.current_step}|{job.updated_at.isoformat() if job.updated_at else ''}"
 
 
+def status_filter(status: str) -> list:
+    """Conditions of the job log's status filter (routers/logs.py); "Alle
+    Treffer" in its selection bar takes the same (pipeline/rerun.py). Two
+    pseudo statuses: 'warning' and 'acknowledged'; 'error' is the errors
+    nobody acknowledged."""
+    if status == "warning":
+        # Jobs that completed with module warnings: status 'done' with an
+        # error_message starting with "Warnungen in:" (pipeline/__init__.py).
+        return [Job.status == "done", Job.error_message.like("Warnungen in:%")]
+    if status == "error":
+        return [Job.status == "error", Job.error_acknowledged_at.is_(None)]
+    if status == "acknowledged":
+        return [Job.status == "error", Job.error_acknowledged_at.isnot(None)]
+    return [Job.status == status] if status else []
+
+
 # ---------------------------------------------------------------------------
 # Ledger and register
 # ---------------------------------------------------------------------------

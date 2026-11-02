@@ -49,6 +49,8 @@ Inbox  →  EXIF  →  Duplicates  →  Geocoding  →  Convert  →  AI  →  O
 
 One block per module, green when it did its job. Open a step to see its result, rerun single modules, and follow every file operation in the timeline.
 
+In the processing log, tick jobs (or every match of the filter) to rerun modules, to delete them — their files go to the set's trash for 30 days, Immich assets stay — or to acknowledge errors: an acknowledged error leaves the dashboard and the "Error" filter and is listed under "Acknowledged" until the job fails again.
+
 ### Review — Manual Classification
 ![Review](docs/screenshots/review.png)
 
