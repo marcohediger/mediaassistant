@@ -178,7 +178,17 @@
     "stuck_skipped": "⚠️ {n} skipped — no \"done\" counterpart.",
     "stuck_raced": "ℹ️ {n} picked up by the pipeline in the meantime.",
     "task_sidecar_tags": "Tag cleanup",
-    "task_tag_merge": "Merge spelling variants"
+    "task_tag_merge": "Merge spelling variants",
+    "retry_all_errors_tip": "Puts every job in error back into the queue. Each job looks for its own file first; if it finds none, it stays an error with “file not found”.",
+    "retry_all_warnings_tip": "Runs every finished job with warnings through the whole pipeline again — for example when the AI or geocoding was briefly gone back then.",
+    "cleanup_orphans_tip": "Checks every finished job (done, duplicate, review) for its file. Jobs without a file become “orphaned”: duplicate detection no longer compares new files with them. Nothing is deleted. Jobs on a drive that is missing right now are skipped.",
+    "cleanup_stuck_duplicates_tip": "Duplicates released with “Keep this” that got stuck afterwards: with a file of their own they are queued again and stored, with an Immich asset of their own marked done. Without a verified copy of their own they stay as they are.",
+    "cleanup_dup_errors_tip": "Error jobs that are an exact duplicate and have no file of their own any more while the original is present. After a preview they are marked deleted; no file and no asset is touched.",
+    "cleanup_stale_errors_tip": "Deletes error jobs with “file not found” whose content (same hash) is verified present in a finished job. Jobs with entries in the ledger or the register stay.",
+    "menu_busy": "Locked while another maintenance task runs — they share one slot.",
+    "task_tag_groups": "Switch tags to groups",
+    "task_tag_empty": "Delete empty tags",
+    "orphans_storage": "{n} jobs skipped because their drive is missing: {detail}"
   },
   "job_detail": {
     "back": "Back",

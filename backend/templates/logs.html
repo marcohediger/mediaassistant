@@ -53,19 +53,24 @@
                 aria-haspopup="menu" aria-expanded="false" aria-controls="logs-menu"
                 aria-label="{{ t.logs.maintenance }}" title="{{ t.logs.maintenance }}">{{ icon('menu', 20) }}</button>
         <div class="ui-menu" id="logs-menu" role="menu" aria-label="{{ t.logs.maintenance }}" hidden>
-            <button type="button" class="ui-menu-item" role="menuitem"
+            {#- Each entry says what it does (title = tooltip); a locked one also why. -#}
+            <button type="button" class="ui-menu-item" role="menuitem" title="{{ t.logs.retry_all_errors_tip }}"
                     onclick="retryAllErrors(event)">{{ icon('retry') }}{{ t.logs.retry_all_errors }}</button>
-            <button type="button" class="ui-menu-item" role="menuitem"
+            <button type="button" class="ui-menu-item" role="menuitem" title="{{ t.logs.retry_all_warnings_tip }}"
                     onclick="retryAllWarnings(event)">{{ icon('retry') }}{{ t.logs.retry_all_warnings }}</button>
             <div class="ui-menu-sep" role="separator"></div>
             <button type="button" class="ui-menu-item cleanup-btn" role="menuitem" data-task="orphans"
+                    title="{{ t.logs.cleanup_orphans_tip }}" data-tip="{{ t.logs.cleanup_orphans_tip }}"
                     onclick="cleanupOrphans(event)">{{ icon('link') }}{{ t.logs.cleanup_orphans }}</button>
             <button type="button" class="ui-menu-item cleanup-btn" role="menuitem" data-task="stuck_duplicates"
+                    title="{{ t.logs.cleanup_stuck_duplicates_tip }}" data-tip="{{ t.logs.cleanup_stuck_duplicates_tip }}"
                     onclick="cleanupStuckDuplicates(event)">{{ icon('copy') }}{{ t.logs.cleanup_stuck_duplicates }}</button>
             <button type="button" class="ui-menu-item cleanup-btn" role="menuitem" data-task="dup_errors"
+                    title="{{ t.logs.cleanup_dup_errors_tip }}" data-tip="{{ t.logs.cleanup_dup_errors_tip }}"
                     onclick="cleanupDupErrors(event)">{{ icon('check-circle') }}{{ t.logs.cleanup_dup_errors }}</button>
             <div class="ui-menu-sep" role="separator"></div>
             <button type="button" class="ui-menu-item cleanup-btn is-danger" role="menuitem" data-task="stale_errors"
+                    title="{{ t.logs.cleanup_stale_errors_tip }}" data-tip="{{ t.logs.cleanup_stale_errors_tip }}"
                     onclick="cleanupStaleErrors(event)">{{ icon('trash') }}{{ t.logs.cleanup_stale_errors }}</button>
         </div>
     </div>
@@ -202,11 +207,16 @@ const TASK_TITLES = {
     dup_errors: LOGS_L.cleanup_dup_errors,
     sidecar_tags: LOGS_L.task_sidecar_tags,
     tag_merge: LOGS_L.task_tag_merge,
+    tag_groups: LOGS_L.task_tag_groups,
+    tag_empty: LOGS_L.task_tag_empty,
 };
 let _cleanupPollInterval = null;
 
 function _setButtonsDisabled(disabled) {
-    document.querySelectorAll('.cleanup-btn').forEach(btn => { btn.disabled = disabled; });
+    document.querySelectorAll('.cleanup-btn').forEach(btn => {
+        btn.disabled = disabled;
+        btn.title = btn.dataset.tip + (disabled ? '\n\n' + LOGS_L.menu_busy : '');
+    });
     _setMenuBusy(disabled);
 }
 
@@ -245,11 +255,15 @@ function _updateProgress(data) {
 function _formatResult(task, result) {
     if (!result) return _t('cleanup_done');
     if (task === 'orphans') {
-        return _t('orphans_result', {
+        let msg = _t('orphans_result', {
             orphaned: result.orphaned || 0,
             checked: result.checked || 0,
             skipped: result.immich_skipped || 0,
         });
+        if (result.storage_skipped) {
+            msg += '\n  ' + _t('orphans_storage', {n: result.storage_skipped, detail: result.storage || ''});
+        }
+        return msg;
     }
     if (task === 'stale_errors') {
         const d = result.deleted || 0, s = result.skipped || 0;

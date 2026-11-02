@@ -28,6 +28,8 @@ volume there is no database either.
     check(i18n)             (ok, detail) of the roots in use — the health watcher
     down_for_job(job)       Problem of the first unusable root of a job, or None
     unavailable(paths)      Problem of the first unusable root among paths, or None
+    Checker                 the same for a scan over many jobs (each root checked
+                            at most every CHECKER_EVERY_S)
     pause(problem, ...)     pause the pipeline for it (services.pause)
     adopt()                 mark roots anew whose marker the user says is gone on purpose
 """
@@ -36,6 +38,7 @@ import errno
 import logging
 import os
 import stat
+import time
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -293,6 +296,41 @@ async def unavailable(paths) -> Problem | None:
         if root:
             roots.setdefault(root, known[root])
     return await _first_problem(roots)
+
+
+CHECKER_EVERY_S = 30
+
+
+class Checker:
+    """For a maintenance scan over many jobs ("Verwaiste aufräumen" & Co.):
+    is a drive the job's files lie on unusable? A missing file there says
+    nothing about the job. Each root is checked at most every `every_s`
+    seconds; `problems` holds what was found, by root."""
+
+    def __init__(self, every_s: float = CHECKER_EVERY_S):
+        self.every_s = every_s
+        self.problems: dict[str, Problem] = {}
+        self._roots: dict[str, str] | None = None
+        self._seen: dict[str, tuple[float, Problem | None]] = {}
+
+    async def problem(self, paths) -> Problem | None:
+        if self._roots is None:
+            self._roots = await _roots(active_only=False)
+        for path in paths:
+            if not path or not str(path).startswith(os.sep):
+                continue
+            root = _root_of(path, self._roots)
+            if root is None:
+                continue
+            seen = self._seen.get(root)
+            if seen is None or time.monotonic() - seen[0] >= self.every_s:
+                seen = (time.monotonic(), await problem(root, self._roots[root]))
+                self._seen[root] = seen
+                if seen[1] is not None:
+                    self.problems[root] = seen[1]
+            if seen[1] is not None:
+                return seen[1]
+        return None
 
 
 async def pause(p: Problem, *, where: str, error: str, tb: str = "") -> None:

@@ -26,6 +26,9 @@ S7  Retry while the drive is missing: the job stays as it was.
 S8  The inbox scanner pauses for an inbox drive that is not there.
 S9  A pipeline paused by hand stays a manual pause.
 S10 "Laufwerk ist richtig, neu markieren": marks anew and resumes.
+S11 "Verwaiste aufräumen" never marks a job whose drive is missing.
+S12 "Erledigte Duplikat-Fehler aufräumen" never deletes a job whose own
+    file lies on a missing drive.
 
 The pause state found is restored at the end; jobs, sets and the roots go.
 """
@@ -428,9 +431,68 @@ async def s10_adopt():
     os.remove(f"{odd}/{storage.MARKER}")
 
 
+async def s11_orphans():
+    section("S11 Verwaiste aufräumen bei fehlendem Laufwerk")
+    from routers import api
+    base = f"{ROOT}/s11/lib"
+    set_id = await new_set("s11", base)
+    path = new_file(f"{base}/photos/o.jpg")
+    jid = await new_job(set_id, path, status="done", target_path=path)
+    await fileops.register_existing(await get_job(jid), "local", path)
+    await storage.problem(base, "library")
+    unmount(base)
+    await set_pause(False)
+    api._cleanup_reset("orphans")
+    await api._scan_orphans_in_background(False, only=[jid])
+    res = api._cleanup_progress.get("result") or {}
+    state = await pause_state()
+    await set_pause(True)
+    job = await get_job(jid)
+    report("Job bleibt done, nicht verwaist", job.status == "done", f"status={job.status} msg={job.error_message}")
+    report("Ergebnis nennt das Laufwerk", res.get("storage_skipped") == 1 and base in (res.get("storage") or ""),
+           str(res))
+    report("Pipeline auto-pausiert (Speicher)", state["auto_paused_reason"] == services.STORAGE, str(state))
+    mount(base)
+    api._cleanup_reset("orphans")
+    await api._scan_orphans_in_background(False, only=[jid])
+    job = await get_job(jid)
+    report("eingebunden: Job bleibt done (Datei da)", job.status == "done", f"status={job.status}")
+
+
+async def s12_dup_errors():
+    section("S12 Erledigte Duplikat-Fehler bei fehlendem Laufwerk")
+    from routers import api
+    from test_support.seed import seed_results
+    base = f"{ROOT}/s12/lib"
+    set_id = await new_set("s12", base)
+    orig_path = new_file(f"{SANDBOX}/s12/orig.jpg")
+    orig = await new_job(set_id, orig_path, status="done", target_path=orig_path)
+    await fileops.register_existing(await get_job(orig), "local", orig_path)
+    dup = new_file(f"{base}/error/d.jpg")
+    jid = await new_job(set_id, dup, status="error", target_path=dup, error_message="Datei nicht auffindbar")
+    async with async_session() as s:
+        job = await s.get(Job, jid)
+        await seed_results(s, job, {"IA-02": {"status": "duplicate", "match_type": "exact",
+                                              "original_debug_key": (await s.get(Job, orig)).debug_key}})
+        await s.commit()
+    await storage.problem(base, "library")
+    unmount(base)
+    await set_pause(False)
+    api._cleanup_reset("dup_errors")
+    await api._run_cleanup_dup_errors("apply", [jid])
+    res = api._cleanup_progress.get("result") or {}
+    await set_pause(True)
+    job = await get_job(jid)
+    unchecked = (res.get("unchecked") or [{}])[0]
+    report("Job bleibt error, nicht als gelöscht markiert", job.status == "error", f"status={job.status}")
+    report("als nicht prüfbar, mit dem Laufwerk", (res.get("counts") or {}).get("unchecked") == 1
+           and base in (unchecked.get("reason") or ""), f"{res.get('counts')} {unchecked}")
+    mount(base)
+
+
 SECTIONS = [("S1", s1_rules), ("S2", s2_fileops_refuses), ("S3", s3_verify), ("S4", s4_reconcile),
             ("S5", s5_stale_watchdog), ("S6", s6_park_from_review), ("S7", s7_retry), ("S8", s8_scanner),
-            ("S9", s9_manual_pause), ("S10", s10_adopt)]
+            ("S9", s9_manual_pause), ("S10", s10_adopt), ("S11", s11_orphans), ("S12", s12_dup_errors)]
 
 
 async def cleanup():

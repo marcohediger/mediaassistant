@@ -1,5 +1,41 @@
 # Changelog
 
+## v3.4.1 — 2026-11-02
+
+### Fix: Wartung markiert keine Jobs auf einem fehlenden Laufwerk mehr
+
+Zwei Funktionen im Wartungsmenü der Logs-Seite schlossen aus einer fehlenden
+Datei, dass ein Job erledigt ist. Ein Laufwerk, das nicht eingebunden ist,
+lässt aber jede Datei darauf fehlen. Beide Fälle haben neue Abschnitte in
+`test_storage.py` vorher rot gezeigt:
+
+- **Verwaiste aufräumen** markierte einen fertigen Job als „verwaist“,
+  obwohl `fileops` das fehlende Laufwerk schon erkannt und die Pipeline
+  angehalten hatte. Danach galt nur noch „Datei am Ziel fehlt“ (S11).
+- **Erledigte Duplikat-Fehler aufräumen** markierte einen Fehler-Job als
+  gelöscht, dessen eigene Datei im `error/`-Ordner des fehlenden Laufwerks
+  lag (S12).
+
+Beide prüfen jetzt vorher die Laufwerke der Datei eines Jobs
+(`storage.Checker`; jeder Ordner höchstens alle 30 Sekunden). Ein Job auf
+einem fehlenden Laufwerk wird übersprungen beziehungsweise als „nicht
+prüfbar“ geführt, mit dem Ordner als Grund. Die Pipeline hält an wie bei
+jedem anderen fehlenden Laufwerk. Das Ergebnis von „Verwaiste aufräumen“
+nennt, wie viele Jobs übersprungen wurden und welcher Ordner fehlt.
+„Veraltete Fehler löschen“ und „Hängende Duplikate bereinigen“ waren sicher:
+Dort zählt nur ein geprüft vorhandenes Exemplar, ein fehlendes Laufwerk
+führt also zum Überspringen.
+
+### UI: Jeder Eintrag im Wartungsmenü erklärt sich
+
+Die Einträge im Menü der Logs-Seite (Alle Fehler retry, Alle Warnungen retry,
+Verwaiste aufräumen, Hängende Duplikate bereinigen, Erledigte Duplikat-Fehler
+aufräumen, Veraltete Fehler löschen) haben einen Tooltip mit Beschreibung.
+Ein grauer Eintrag sagt dazu, warum: Alle Wartungsaufgaben teilen sich einen
+Platz, und gerade läuft eine andere. Läuft „Tags in Gruppen umstellen“ oder
+„Leere Tags löschen“, nennt die Fortschrittsanzeige der Logs-Seite die
+Aufgabe jetzt mit Namen statt mit ihrem internen Schlüssel.
+
 ## v3.4.0 — 2026-11-02
 
 ### Werkzeuge: Schreibweisen zusammenführen mit Häkchen, KI und Reparatur

@@ -3,7 +3,7 @@ import os
 import subprocess
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, true
 from config import config_manager
 from database import async_session
 from models import Job
@@ -206,15 +206,19 @@ async def _orphan_reason(row, copies: list, check_immich: bool) -> str | None:
     return "no path"
 
 
-async def _scan_orphans_in_background(check_immich: bool):
+async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None = None):
     """Scan all settled jobs (done/duplicate/review) and mark those whose
     content is gone as 'orphan'. Stores the previous status in
     error_message for possible un-orphan recovery. Changes nothing on disk
     or in Immich; the register is brought in line where a copy is missing.
+    `only` limits the scan to some jobs (a test's own).
     """
     from datetime import datetime
     from models import AssetRef, FileCopy
     from sqlalchemy import update as sql_update
+
+    import services
+    import storage
 
     SETTLED_STATES = ("done", "duplicate", "review")
     BATCH_SIZE = 200
@@ -222,6 +226,10 @@ async def _scan_orphans_in_background(check_immich: bool):
     total_checked = 0
     total_orphaned = 0
     total_immich_skipped = 0
+    total_storage = 0
+    # A drive that is not mounted makes every file on it look gone: those
+    # jobs are skipped, never orphaned (the infrastructure is no job's fault).
+    drives = storage.Checker()
 
     # Seed the progress total
     try:
@@ -241,7 +249,8 @@ async def _scan_orphans_in_background(check_immich: bool):
             result = await session.execute(
                 select(Job.id, Job.debug_key, Job.status, Job.target_path, Job.original_path,
                        Job.file_hash)
-                .where(Job.status.in_(SETTLED_STATES), Job.id > last_id)
+                .where(Job.status.in_(SETTLED_STATES), Job.id > last_id,
+                       Job.id.in_(only) if only is not None else true())
                 .order_by(Job.id)
                 .limit(BATCH_SIZE)
             )
@@ -266,6 +275,10 @@ async def _scan_orphans_in_background(check_immich: bool):
         orphan_ids = []
         for row in rows:
             total_checked += 1
+            paths = [c.location for c in copies.get(row.id, []) if c.kind != "immich"]
+            if await drives.problem([*paths, row.target_path, row.original_path]):
+                total_storage += 1
+                continue
             reason = await _orphan_reason(row, copies.get(row.id, []), check_immich)
             if reason == _ORPHAN_SKIP:
                 total_immich_skipped += 1
@@ -291,11 +304,17 @@ async def _scan_orphans_in_background(check_immich: bool):
         # Tiny pause to avoid blocking the event loop / DB pool
         await asyncio.sleep(0.05)
 
+    texts = await services.ui_texts()
+    missing = "; ".join(storage.describe(p, texts) for p in drives.problems.values())
+    if drives.problems:
+        first = next(iter(drives.problems.values()))
+        await storage.pause(first, where="Verwaiste aufräumen", error=missing)
     try:
         await log_info(
             "api",
             f"Orphan-Cleanup done: {total_orphaned} jobs marked orphan",
-            f"Checked {total_checked}, immich skipped {total_immich_skipped}",
+            f"Checked {total_checked}, immich skipped {total_immich_skipped}, "
+            f"Laufwerk fehlt (übersprungen) {total_storage}" + (f": {missing}" if missing else ""),
         )
     except Exception:
         pass
@@ -304,6 +323,8 @@ async def _scan_orphans_in_background(check_immich: bool):
         "checked": total_checked,
         "orphaned": total_orphaned,
         "immich_skipped": total_immich_skipped,
+        "storage_skipped": total_storage,
+        "storage": missing,
     })
 
 
@@ -845,7 +866,7 @@ async def _dup_error_jobs(job_ids: list[int] | None = None) -> list:
         return list((await session.execute(query.order_by(Job.id))).scalars().all())
 
 
-async def _classify_dup_error(job) -> tuple[str, dict]:
+async def _classify_dup_error(job, drives=None) -> tuple[str, dict]:
     """Bucket of one candidate and what the preview shows about it.
 
     cleanable: exact duplicate, no own copy, the original has a verified copy
@@ -863,6 +884,18 @@ async def _classify_dup_error(job) -> tuple[str, dict]:
             "original": ia02.get("original_debug_key"), "match_type": match_type}
     if match_type != "exact":
         return "similar", item
+    if drives is not None:
+        # The job's own file on a drive that is not mounted looks gone: it
+        # cannot be judged now (unchecked), never cleanable.
+        import fileops
+        own_paths = [c.location for c in await fileops.copies(job, states=("present", "missing"))
+                     if c.kind != "immich"]
+        found = await drives.problem([*own_paths, job.target_path, job.original_path])
+        if found is not None:
+            import services
+            import storage
+            item["reason"] = storage.describe(found, await services.ui_texts())
+            return "unchecked", item
     try:
         own, _ = await reprocess.find_source(job)
         if own is not None:
@@ -924,8 +957,10 @@ async def _run_cleanup_dup_errors(mode: str, job_ids: list[int] | None):
         jobs = await _dup_error_jobs(job_ids)
         _cleanup_progress["total"] = len(jobs)
         _cleanup_phase("checking_dup_errors")
+        import storage
+        drives = storage.Checker()
         for idx, job in enumerate(jobs, 1):
-            bucket, item = await _classify_dup_error(job)
+            bucket, item = await _classify_dup_error(job, drives)
             buckets[bucket].append(item)
             _cleanup_progress["current"] = idx
             await asyncio.sleep(0)
@@ -954,6 +989,11 @@ async def _run_cleanup_dup_errors(mode: str, job_ids: list[int] | None):
                       f"nicht prüfbar: {len(buckets['unchecked'])}, inzwischen geändert: {changed}")
             await log_info("api", f"Duplikat-Fehler-Aufräumen: {len(deleted)} Jobs als gelöscht markiert", detail)
 
+        if drives.problems:
+            import services
+            first = next(iter(drives.problems.values()))
+            await storage.pause(first, where="Erledigte Duplikat-Fehler aufräumen",
+                                error=storage.describe(first, await services.ui_texts()))
         result = {"mode": mode,
                   "counts": {b: len(items) for b, items in buckets.items()},
                   **{b: items[:DUP_ERRORS_LIST_MAX] for b, items in buckets.items()}}

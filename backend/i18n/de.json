@@ -178,7 +178,17 @@
     "stuck_skipped": "⚠️ {n} übersprungen — kein \"done\"-Gegenstück.",
     "stuck_raced": "ℹ️ {n} inzwischen von Pipeline aufgegriffen.",
     "task_sidecar_tags": "Tag-Aufräumen",
-    "task_tag_merge": "Schreibweisen zusammenführen"
+    "task_tag_merge": "Schreibweisen zusammenführen",
+    "retry_all_errors_tip": "Stellt alle Jobs mit Status Fehler erneut in die Warteschlange. Jeder Job sucht dafür seine eigene Datei; findet er keine, bleibt er ein Fehler mit „Datei nicht auffindbar“.",
+    "retry_all_warnings_tip": "Lässt alle fertigen Jobs mit Warnungen noch einmal ganz durch die Pipeline laufen — etwa wenn die KI oder das Geocoding damals kurz weg war.",
+    "cleanup_orphans_tip": "Prüft alle fertigen Jobs (fertig, Duplikat, Review), ob ihre Datei noch da ist. Jobs ohne Datei werden „verwaist“: Die Duplikat-Erkennung vergleicht neue Dateien nicht mehr mit ihnen. Gelöscht wird nichts. Jobs auf einem Laufwerk, das gerade fehlt, werden übersprungen.",
+    "cleanup_stuck_duplicates_tip": "Duplikate, die mit „Dieses behalten“ freigegeben wurden und danach hängen geblieben sind: Mit eigener Datei werden sie neu eingereiht und abgelegt, mit eigenem Immich-Asset als fertig markiert. Ohne geprüftes eigenes Exemplar bleiben sie, wie sie sind.",
+    "cleanup_dup_errors_tip": "Fehler-Jobs, die ein exaktes Duplikat sind und keine eigene Datei mehr haben, während das Original vorhanden ist. Nach einer Vorschau werden sie als gelöscht markiert; keine Datei und kein Asset wird angefasst.",
+    "cleanup_stale_errors_tip": "Löscht Fehler-Jobs mit „Datei nicht auffindbar“, deren Inhalt (gleicher Hash) bei einem fertigen Job geprüft vorhanden ist. Jobs mit Einträgen im Protokoll oder im Register bleiben.",
+    "menu_busy": "Gesperrt, solange eine andere Wartungsaufgabe läuft — sie teilen sich einen Platz.",
+    "task_tag_groups": "Tags in Gruppen umstellen",
+    "task_tag_empty": "Leere Tags löschen",
+    "orphans_storage": "{n} Jobs übersprungen, weil ihr Laufwerk fehlt: {detail}"
   },
   "job_detail": {
     "back": "Zurück",
