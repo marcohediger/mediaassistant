@@ -414,6 +414,21 @@ class RerunItem(Base):
     finished_at = Column(DateTime)
 
 
+
+class MaintenanceResult(Base):
+    """The last result of each maintenance task and tool (#57), kept across
+    a restart and read by the diagnostics API. One row per task and mode:
+    "tag_merge:merge_scan" and "tag_merge:merge_apply" are two rows."""
+    __tablename__ = "maintenance_results"
+
+    key = Column(Text, primary_key=True)
+    task = Column(Text, nullable=False)
+    started_at = Column(DateTime)
+    finished_at = Column(DateTime)
+    error = Column(Text)
+    result = Column(JSON)  # lists cut to routers.api.RESULT_ENTRIES, "<name>_total" beside
+
+
 # Executed at startup (database._migrate_module_runs), like FILE_OPS_GUARDS.
 MODULE_RUNS_GUARDS = [
     "CREATE TRIGGER IF NOT EXISTS trg_module_runs_no_delete BEFORE DELETE ON module_runs "

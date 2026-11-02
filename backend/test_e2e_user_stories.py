@@ -1858,8 +1858,11 @@ async def _limit_run(set_id, n, label, *, ai_delay=0.5):
 
 async def test_us19_limits():
     print("\n-- US-19: Grenzen (KI 1, Nominatim 1/s, 6 Jobs) und Durchsatz --")
-    async with RerunStage(), ConfigStage(ai__slots=1, pipeline__max_jobs=6, pipeline__parallel_modules=True,
-                                         pipeline__geo_slots=0, geo__provider="nominatim"):
+    # One AI slot in all: the slots of every backend in use count (backend 1
+    # runs the model of the live system, backend 2 an external one, AGENTS.md).
+    async with RerunStage(), ConfigStage(ai__slots=1, ai2__slots=1, pipeline__max_jobs=6,
+                                         pipeline__parallel_modules=True, pipeline__geo_slots=0,
+                                         geo__provider="nominatim"):
         set_id = await e2e_set("us19", target_mode="library", write_mode="direct")
         seconds, st, ids = await _limit_run(set_id, 8, "lim")
         statuses = [(await get_job(j)).status for j in ids]
@@ -2343,8 +2346,190 @@ async def service_story(tag, label, stage, reason, *, module, use_immich=False, 
 
 async def test_us23_ai_model_missing():
     print("\n-- US-23: KI-Modell fehlt auf dem KI-Server --")
-    await service_story("US23", "das Modell", ConfigStage(ai__model=f"ma-e2e-gibt-es-nicht-{TS}"),
-                        "ai_unreachable", module="IA-05", detail_has=f"ma-e2e-gibt-es-nicht-{TS}")
+    from config import config_manager
+    missing = f"ma-e2e-gibt-es-nicht-{TS}"
+    # The model of every backend in use: dev runs the model of the live
+    # system (backend 1) or a fast external one (backend 2), see AGENTS.md.
+    stage = {f"{prefix}__model": missing for prefix, module in (("ai", "ki_analyse"), ("ai2", "ki_analyse_2"))
+             if await config_manager.is_module_enabled(module)}
+    await service_story("US23", "das Modell", ConfigStage(**stage),
+                        "ai_unreachable", module="IA-05", detail_has=missing)
+
+
+async def test_us31_ai_failover():
+    """US-31: one AI backend does not answer, the other takes over — the job
+    runs through, the pipeline never pauses (ai_backends failover)."""
+    print("\n-- US-31: ein KI-Backend fällt aus, das andere übernimmt --")
+    import sqlalchemy
+    from config import config_manager
+    from database import async_session
+    from models import Config, SystemLog
+    from routers.dashboard import _check_ai_backends
+    from i18n import load_lang
+    rows = [f"{p}.{k}" for p in ("ai", "ai2") for k in ("backend_url", "model", "api_key", "slots")]
+    async with async_session() as s:
+        saved = {r.key: (r.value, r.encrypted) for r in (await s.execute(
+            sqlalchemy.select(Config).where(Config.key.in_(rows)))).scalars().all()}
+    modules = {m: await config_manager.is_module_enabled(m) for m in ("ki_analyse", "ki_analyse_2")}
+    # The backend in use goes to slot 2; slot 1 gets one that does not answer.
+    # A request goes to slot 1 first while it has a free slot.
+    prefix = "ai2" if modules["ki_analyse_2"] else "ai"
+    working = {k: await config_manager.get(f"{prefix}.{k}", "") for k in ("backend_url", "model", "api_key")}
+    dead_model = f"ma-e2e-tot-{TS}"  # a new backend per run: the failover remembers by URL and model
+    path = f"{INBOX}/__e2e_us31_{TS}.jpg"
+    make_unique_jpg(path)
+    CLEANUP_FILES.append(path)
+    found = await saved_pause()
+    await restore_pause({k: (False if k == "paused" else "") for k in _PAUSE_KEYS})
+    async with async_session() as s:
+        last_log = (await s.execute(sqlalchemy.select(sqlalchemy.func.max(SystemLog.id)))).scalar() or 0
+    try:
+        await config_manager.set("ai2.backend_url", working["backend_url"])
+        await config_manager.set("ai2.model", working["model"])
+        await config_manager.set("ai2.api_key", working["api_key"] or "", encrypted=True)
+        await config_manager.set("ai.backend_url", "http://127.0.0.1:9/v1")
+        await config_manager.set("ai.model", dead_model)
+        await config_manager.set_module_enabled("ki_analyse", True)
+        await config_manager.set_module_enabled("ki_analyse_2", True)
+        job_id = await create_and_run_job(os.path.basename(path), path, use_immich=False)
+        done = await wait_done([job_id], timeout=300)
+        job = await get_job(job_id)
+        if job.target_path and not job.target_path.startswith("immich:"):
+            CLEANUP_FILES.append(job.target_path)
+        state = await pause_state()
+        ia05 = (job.step_result or {}).get("IA-05") or {}
+        check("US31-01 Job fertig, IA-05 mit Ergebnis", done and job.status == "done" and bool(ia05.get("tags")),
+              f"status={job.status} IA-05={str(ia05)[:160]}")
+        check("US31-02 IA-05 lief auf dem Backend, das antwortet", ia05.get("_model") == working["model"],
+              f"{ia05.get('_model')}")
+        check("US31-03 Pipeline nie pausiert", not state["paused"] and not state["auto_paused_reason"], str(state))
+        async with async_session() as s:
+            logged = (await s.execute(sqlalchemy.select(SystemLog.message, SystemLog.detail).where(
+                SystemLog.id > last_log, SystemLog.message.like("KI-Backend 1 nicht bereit%")))).all()
+        check("US31-04 Log: Backend 1 beiseitegestellt, mit Adresse und Grund",
+              any("127.0.0.1:9" in (d or "") for _, d in logged), f"{logged}")
+        ready, detail = await _check_ai_backends(load_lang("de"))
+        check("US31-05 Dienst-Prüfung: KI bereit, solange ein Backend bereit ist, nennt das ausgefallene",
+              ready and "127.0.0.1:9" in detail, detail)
+    finally:
+        async with async_session() as s:
+            for key in rows:
+                row = await s.get(Config, key)
+                if key in saved:
+                    value, encrypted = saved[key]
+                    if row is None:
+                        s.add(Config(key=key, value=value, encrypted=encrypted))
+                    else:
+                        row.value, row.encrypted = value, encrypted
+                elif row is not None:
+                    await s.delete(row)
+            await s.commit()
+        for module, enabled in modules.items():
+            await config_manager.set_module_enabled(module, enabled)
+        await restore_pause(found)
+
+
+async def test_us32_model_that_thinks():
+    """US-32: a backend saved with a model that thinks before it answers.
+    Saving checks the model (ai_backends.model_caps) and switches thinking
+    off; a photo runs through IA-05 with reasoning_effort "none". The model
+    is a stub on a port of this container — no backend with such a model is
+    always there on dev; it thinks unless told not to, and answers IA-05
+    with valid JSON."""
+    print("\n-- US-32: ein Modell, das vor der Antwort denkt --")
+    import json
+    import socket
+    import httpx
+    import sqlalchemy
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    import ai_backends
+    from config import config_manager
+    from database import async_session
+    from models import Config
+    model = f"e2e/denker-{TS}"
+    asked: list[dict] = []
+
+    async def models(request):
+        return JSONResponse({"data": [{"id": model, "object": "model"}]})
+
+    async def completions(request):
+        body = await request.json()
+        asked.append(body)
+        if body.get("reasoning_effort") != "none":
+            return JSONResponse({"choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+                                 "usage": {"completion_tokens_details": {"reasoning_tokens": 64}}})
+        pictures = [p["image_url"]["url"] for m in body["messages"] if isinstance(m.get("content"), list)
+                    for p in m["content"] if p.get("type") == "image_url"]
+        number = next((str(n) for n in ai_backends.TEST_NUMBERS
+                       if pictures and ai_backends.number_picture(str(n)) == pictures[0]), None)
+        content = number or json.dumps({
+            "type": "Persönliches Foto", "source": "Kamerafoto", "tags": [f"Denker{TS}"],
+            "description": "Ein Testbild.", "mood": "outdoor", "people_count": 0, "quality": "good",
+            "confidence": 0.9, "nsfw": False})
+        return JSONResponse({"choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+                             "usage": {"completion_tokens_details": {"reasoning_tokens": 0}}})
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    url = f"http://127.0.0.1:{port}/v1"
+    server = uvicorn.Server(uvicorn.Config(Starlette(routes=[
+        Route("/v1/models", models), Route("/v1/chat/completions", completions, methods=["POST"])]),
+        host="127.0.0.1", port=port, log_level="warning"))
+    serving = asyncio.create_task(server.serve())
+    rows = [f"{p}.{k}" for p in ("ai", "ai2") for k in ("backend_url", "model", "api_key", "slots")] + [ai_backends.CAPS_KEY]
+    async with async_session() as s:
+        saved = {r.key: (r.value, r.encrypted) for r in (await s.execute(
+            sqlalchemy.select(Config).where(Config.key.in_(rows)))).scalars().all()}
+    modules = {m: await config_manager.is_module_enabled(m) for m in ("ki_analyse", "ki_analyse_2")}
+    path = f"{INBOX}/__e2e_us32_{TS}.jpg"
+    make_unique_jpg(path)
+    CLEANUP_FILES.append(path)
+    found = await saved_pause()
+    await restore_pause({k: (False if k == "paused" else "") for k in _PAUSE_KEYS})
+    try:
+        while not server.started:
+            await asyncio.sleep(0.05)
+        await config_manager.set_module_enabled("ki_analyse_2", False)
+        async with httpx.AsyncClient(base_url="http://localhost:8000", timeout=60) as c:
+            r = (await c.put("/settings/ai-backends/1", json={"enabled": True, "url": url, "model": model,
+                                                              "slots": 1, "api_key": ""})).json()
+        caps = (await ai_backends.known_caps(url, [model]))[model]
+        check("US32-01 Speichern prüft das Modell: denkt, Denken abschaltbar, versteht Bilder",
+              r.get("ok") and caps.get("thinks") and caps.get("no_think") and caps.get("usable"), f"{caps}")
+        asked.clear()
+        job_id = await create_and_run_job(os.path.basename(path), path, use_immich=False)
+        done = await wait_done([job_id], timeout=300)
+        job = await get_job(job_id)
+        if job.target_path and not job.target_path.startswith("immich:"):
+            CLEANUP_FILES.append(job.target_path)
+        ia05 = (job.step_result or {}).get("IA-05") or {}
+        check("US32-02 Job fertig, IA-05 mit der Antwort des Modells",
+              done and job.status == "done" and f"Denker{TS}" in (ia05.get("tags") or []),
+              f"status={job.status} IA-05={str(ia05)[:160]}")
+        sent = [b.get("reasoning_effort") for b in asked]
+        check("US32-03 jede Anfrage mit reasoning_effort none, keine ohne", sent and set(sent) == {"none"}, f"{sent}")
+    finally:
+        server.should_exit = True
+        await serving
+        async with async_session() as s:
+            for key in rows:
+                row = await s.get(Config, key)
+                if key in saved:
+                    value, encrypted = saved[key]
+                    if row is None:
+                        s.add(Config(key=key, value=value, encrypted=encrypted))
+                    else:
+                        row.value, row.encrypted = value, encrypted
+                elif row is not None:
+                    await s.delete(row)
+            await s.commit()
+        for module, enabled in modules.items():
+            await config_manager.set_module_enabled(module, enabled)
+        await restore_pause(found)
 
 
 async def test_us24_immich_down():
@@ -2869,6 +3054,8 @@ async def main():
         test_us21_tag_groups,
         test_us22_tag_groups_rerun,
         test_us23_ai_model_missing,
+        test_us31_ai_failover,
+        test_us32_model_that_thinks,
         test_us24_immich_down,
         test_us25_geocoding_unusable,
         test_us26_library_drive_missing,

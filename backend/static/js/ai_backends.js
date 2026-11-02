@@ -103,6 +103,10 @@
       return renderStatus(cell, "warn", T.ai_status_no_model || "Kein Modell",
         T.ai_status_no_model_hint || "Ohne Modell bekommt dieses Backend keine Bilder.");
     }
+    if (st.model_unsuitable) {
+      return renderStatus(cell, "warn", T.ai_status_model_unsuitable || "Modell ungeeignet",
+        b.model + ": " + reasonLabel(st.model_unsuitable), reach);
+    }
     if (st.model_available === false) {
       return renderStatus(cell, "warn", T.ai_status_model_missing || "Modell fehlt",
         fmt(T.ai_status_model_missing_hint || "Das Backend bietet „{model}\" nicht an.", {model: b.model}), reach);
@@ -144,11 +148,13 @@
   const f = {
     title: $("dlg-ai-title"), enabled: $("ai-enabled"), url: $("ai-url"), model: $("ai-model"),
     list: $("ai-model-list"), chips: $("ai-model-chips"), status: $("ai-model-status"), warn: $("ai-model-warn"),
+    hidden: $("ai-model-hidden"), check: $("ai-check"),
     slots: $("ai-slots"), key: $("ai-key"), keyHint: $("ai-key-hint"), test: $("ai-test"), result: $("ai-test-result"),
     del: $("ai-delete"), save: $("ai-save"), error: dlg.querySelector(".modal-error"),
   };
   let editing = null;
   let models = [];
+  let unchecked = [];
   let modelsUrl = null;
   let modelsReq = 0;
   let urlTimer = null;
@@ -182,15 +188,58 @@
       chip.type = "button";
       chip.className = "ai-chip";
       chip.dataset.model = m;
-      chip.textContent = m;
+      chip.title = m;
+      // "provider/model": the provider quieter, the model's own name in front.
+      const cut = m.lastIndexOf("/") + 1;
+      if (cut) {
+        const org = document.createElement("span");
+        org.className = "ai-chip-org";
+        org.textContent = m.slice(0, cut);
+        chip.appendChild(org);
+      }
+      const name = document.createElement("span");
+      name.className = "ai-chip-name";
+      name.textContent = m.slice(cut);
+      chip.appendChild(name);
+      if (unchecked.indexOf(m) !== -1) {
+        // Offered until "Modelle prüfen" says otherwise.
+        const note = document.createElement("span");
+        note.className = "ai-chip-note";
+        note.textContent = " · " + (T.ai_model_unchecked || "nicht geprüft");
+        chip.appendChild(note);
+      }
       f.chips.appendChild(chip);
     });
     f.chips.hidden = !models.length;
     checkModel();
   }
 
-  // Model ids offered by the typed URL; also the connection test.
-  async function fetchModels(force) {
+  // Why a model is not offered (ai_backends.model_caps reason keys).
+  function reasonLabel(reason) {
+    return T["ai_model_reason_" + reason] || reason || "";
+  }
+  function renderHidden(unsuitable) {
+    f.hidden.hidden = !unsuitable.length;
+    f.hidden.querySelector("summary").textContent =
+      fmt(T.ai_models_hidden || "{n} ausgeblendet", {n: unsuitable.length});
+    const list = f.hidden.querySelector("ul");
+    list.replaceChildren();
+    unsuitable.forEach(function (u) {
+      const li = document.createElement("li");
+      const id = document.createElement("span");
+      id.className = "ai-hidden-id";
+      id.textContent = u.id;
+      const why = document.createElement("span");
+      why.textContent = reasonLabel(u.reason);
+      if (u.detail) why.title = u.detail;
+      li.append(id, why);
+      list.appendChild(li);
+    });
+  }
+
+  // Model ids offered by the typed URL, with the kept checks for pictures
+  // and thinking applied; `check` checks every model now ("Modelle prüfen").
+  async function fetchModels(force, check) {
     const url = f.url.value.trim();
     if (!force && url === modelsUrl) return null;
     modelsUrl = url;
@@ -198,18 +247,27 @@
     f.url.removeAttribute("aria-invalid");
     if (!URL_OK.test(url)) {
       models = [];
+      unchecked = [];
       renderModels();
+      renderHidden([]);
       setText(f.status, null, "");
       return {ok: false, detail: url ? (T.ai_url_invalid || "Die URL muss mit http:// oder https:// beginnen.") : ""};
     }
-    setText(f.status, null, T.ai_models_loading || "Lade Modelle …", true);
-    const d = await api("GET", "/settings/ai-models?url=" + encodeURIComponent(url));
+    setText(f.status, null, check ? (T.ai_models_checking || "Prüfe Modelle …")
+                                  : (T.ai_models_loading || "Lade Modelle …"), true);
+    // The key typed in the field, else the stored one of this backend (server side).
+    const d = await api("POST", "/settings/ai-models",
+                        {url: url, api_key: f.key.value.trim(), backend: editing.id, check: !!check});
     if (req !== modelsReq) return null;  // a newer URL is already being asked
     models = d.models || [];
+    unchecked = d.unchecked || [];
     renderModels();
+    renderHidden(d.unsuitable || []);
     if (d.ok) {
-      setText(f.status, null, fmt(d.filtered ? (T.ai_models_found || "{n} bildfähige Modelle")
-        : (T.ai_models_found_any || "{n} Modelle (Bildfähigkeit nicht abfragbar)"), {n: models.length}));
+      const usable = models.length - unchecked.length;
+      let text = fmt(T.ai_models_found || "{n} bildfähige Modelle", {n: usable});
+      if (unchecked.length) text += " · " + fmt(T.ai_models_unchecked || "{n} nicht geprüft", {n: unchecked.length});
+      setText(f.status, null, text);
     } else {
       setText(f.status, false, d.detail || errorLabel());
     }
@@ -236,8 +294,10 @@
     showError("");
     setText(f.result, null, "");
     models = [];
+    unchecked = [];
     modelsUrl = null;
     renderModels();
+    renderHidden([]);
     setText(f.status, null, "");
     fetchModels(true);
     dlg.showModal();
@@ -249,6 +309,8 @@
     urlTimer = setTimeout(function () { fetchModels(false); }, 600);
   });
   f.url.addEventListener("change", function () { clearTimeout(urlTimer); fetchModels(false); });
+  // A key typed in changes what a backend that wants one lists.
+  f.key.addEventListener("change", function () { fetchModels(true); });
   f.model.addEventListener("input", checkModel);
   f.chips.addEventListener("click", function (e) {
     const chip = e.target.closest(".ai-chip");
@@ -270,6 +332,13 @@
       if (!URL_OK.test(f.url.value.trim())) f.url.setAttribute("aria-invalid", "true");
       setText(f.result, false, d.detail || errorLabel());
     }
+  });
+
+  f.check.addEventListener("click", async function () {
+    clearTimeout(urlTimer);
+    f.check.disabled = true;
+    await fetchModels(true, true);
+    f.check.disabled = false;
   });
 
   f.save.addEventListener("click", async function () {

@@ -1105,33 +1105,6 @@
   // ════════════════════════════════════════════════════════════════════
   // Global settings form (unchanged behaviour)
   // ════════════════════════════════════════════════════════════════════
-  function loadAiModels(modelId, urlId) {
-    const urlEl = document.getElementById(urlId);
-    const list = document.getElementById(modelId + "_options");
-    const hint = document.getElementById(modelId + "_hint");
-    if (!list || !hint) return;
-    if (!urlEl || !urlEl.value) { list.innerHTML = ""; hint.textContent = ""; return; }
-    fetch("/settings/ai-models?url=" + encodeURIComponent(urlEl.value))
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        list.innerHTML = "";
-        (d.models || []).forEach(function (m) { list.appendChild(el("option", {value: m})); });
-        if (d.ok) {
-          const tpl = d.filtered ? hint.dataset.found : hint.dataset.any;
-          hint.textContent = tpl.replace("{n}", (d.models || []).length);
-          hint.style.color = "";
-        } else {
-          hint.textContent = d.detail;
-          hint.style.color = "var(--error)";
-        }
-      })
-      .catch(function (e) { hint.textContent = String(e); hint.style.color = "var(--error)"; });
-  }
-  [["ai_model", "ai_url"], ["ai2_model", "ai2_url"]].forEach(function (p) {
-    loadAiModels(p[0], p[1]);
-    const u = document.getElementById(p[1]);
-    if (u) u.addEventListener("change", function () { loadAiModels(p[0], p[1]); });
-  });
 
   // Keep the scroll position across the "save all" round trip.
   document.getElementById("settings-form").addEventListener("submit", function () {

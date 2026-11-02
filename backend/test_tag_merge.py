@@ -12,7 +12,8 @@ S  Preview: same letters ticked; Bar/Bär and Gluhwein/Glühwein as umlaut
    English → German ticked only into an existing tag.
 A  Merge the ticked proposals: Immich (a repaired name created on the way),
    the sidecar, the unticked pair remembered; a second preview shows it
-   unticked and does not ask the AI again.
+   unticked and does not ask the AI again — with "Stehen gelassene neu
+   vorschlagen" it asks again and ticks by the usual rules.
 R  The routes: apply without preview, ids that were never proposed.
 E  Empty tags: a fresh tag is not looked at; nested empty ones go, a tag in
    use stays; one that got a photo since the preview is counted again and
@@ -135,7 +136,8 @@ async def run_scan(**flags) -> dict:
     from routers import api
     from routers import tools
     api._cleanup_reset("tag_merge")
-    await tools._scan_merge(True, True, flags.get("ai", True), flags.get("translate", True))
+    await tools._scan_merge(True, True, flags.get("ai", True), flags.get("translate", True),
+                            flags.get("again", False))
     return api._cleanup_progress
 
 
@@ -312,6 +314,24 @@ async def part_a(r: dict, assets: list[str]):
     it = item(res2.get("result") or {"items": []}, "Bar")
     check("A-10 next preview: Bar → Bär shown unticked as excluded, the AI not asked",
           it and it["kept_apart"] and not it["selected"] and it["verdict"] is None, f"{it}")
+    # Same letters are proposed ticked; left unticked once, only "again" ticks
+    # them. In the sidecar only: nothing for Immich to read back later.
+    subprocess.run(["exiftool", "-q", "-overwrite_original", "-Subject+=SEEUFER", SIDECAR], check=True)
+    await ts.remember({("SEEUFER", "Seeufer")}, set())
+    res3 = await run_scan(ai=False, translate=False)
+    it = item(res3.get("result") or {"items": []}, "SEEUFER")
+    check("A-11 a spelling left unticked before: shown, not ticked",
+          it and it["kind"] == "spelling" and it["kept_apart"] and not it["selected"], f"{it}")
+    res4 = await run_scan(ai=True, translate=False, again=True)
+    r4 = res4.get("result") or {"items": []}
+    it = item(r4, "SEEUFER")
+    check("A-12 again: ticked by the usual rule (same letters), still marked as unticked before",
+          r4.get("again") and it and it["kept_apart"] and it["selected"], f"{it}")
+    it = item(r4, "Bar")
+    check("A-13 again: the AI is asked about Bar → Bär anew, ticked only if it says the same",
+          it and it["kept_apart"] and it["verdict"] in ("same", "different")
+          and it["selected"] == (it["verdict"] == "same"), f"{it}")
+    subprocess.run(["exiftool", "-q", "-overwrite_original", "-Subject-=SEEUFER", SIDECAR], check=True)
 
 
 async def part_r():

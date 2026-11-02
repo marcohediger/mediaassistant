@@ -41,7 +41,7 @@ import unicodedata
 
 import httpx
 
-from ai_backends import acquire_ai_backend, get_total_slots
+from ai_backends import chat, get_total_slots
 from config import config_manager
 
 KEEP_APART_KEY = "tools.merge_keep_apart"
@@ -328,21 +328,15 @@ async def ask_ai(prompt: str, *, max_tokens: int = 300) -> dict:
 
 
 async def ask_ai_text(prompt: str, *, max_tokens: int = 300) -> str:
-    """One question to the AI backend; the answer's text (without <think>)."""
-    async with acquire_ai_backend() as backend:
-        if backend is None:
-            raise AIUnavailable("kein KI-Backend eingestellt")
-        headers = {"Content-Type": "application/json"}
-        if backend["api_key"] and backend["api_key"] != "not-needed":
-            headers["Authorization"] = f"Bearer {backend['api_key']}"
-        payload = {"model": backend["model"], "messages": [{"role": "user", "content": prompt}],
-                   "temperature": 0, "max_tokens": max_tokens}
-        try:
-            async with httpx.AsyncClient(timeout=int(await config_manager.get("ai.timeout", 120))) as client:
-                resp = await client.post(f"{backend['url'].rstrip('/')}/chat/completions",
-                                         json=payload, headers=headers)
-        except httpx.HTTPError as exc:
-            raise AIUnavailable(f"{type(exc).__name__}: {exc}") from exc
+    """One question to the AI backend; the answer's text (without <think>).
+    A backend that does not answer is set aside, the next one asked."""
+    payload = {"messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": max_tokens}
+    try:
+        backend, resp = await chat(payload, timeout=int(await config_manager.get("ai.timeout", 120)))
+    except httpx.HTTPError as exc:
+        raise AIUnavailable(f"{type(exc).__name__}: {exc}") from exc
+    if backend is None:
+        raise AIUnavailable("kein KI-Backend eingestellt")
     if resp.status_code != 200:
         raise AIUnavailable(f"HTTP {resp.status_code} — {resp.text[:160]}")
     try:

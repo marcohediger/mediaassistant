@@ -322,7 +322,7 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset:
                            "immich_per_asset": per_asset,
                            "immich_also_delete": also_delete,
                            "immich_tags": immich["tags"] if with_immich else []})
-        _cleanup_finish(result={
+        await _cleanup_finish(result={
             "mode": "scan",
             "cancelled": _cancelled(),
             "pattern": pattern,
@@ -341,7 +341,7 @@ async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset:
             f"Muster={pattern}",
         )
     except Exception as e:
-        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+        await _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
 async def _delete_tag_logged(delete_tag, tag: dict) -> bool:
@@ -456,7 +456,7 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
 
         # The preview is spent — the files no longer carry those keywords.
         _last_scan.clear()
-        _cleanup_finish(result={
+        await _cleanup_finish(result={
             "mode": "remove",
             "cancelled": _cancelled(),
             "pattern": pattern,
@@ -485,7 +485,7 @@ async def _remove(_pattern: str, _with_sidecars: bool, _with_immich: bool, _per_
             + (f", letzter Fehler: {immich_error}" if immich_error else ""),
         )
     except Exception as e:
-        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+        await _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
 async def _t(key: str) -> str:
@@ -550,7 +550,8 @@ async def _contexts(names: set[str], members: dict, sidecar_files: dict) -> dict
     return {n: [c for c in dict.fromkeys(v) if c][:ts.CONTEXT_PHOTOS] for n, v in out.items()}
 
 
-async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, translate: bool):
+async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, translate: bool,
+                      again: bool = False):
     """Preview: which spellings mean the same, which damaged names can be
     repaired, which tags of another language have a word in the language of
     the content (tag_spelling.py, content_language.py).
@@ -643,13 +644,16 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
                     done += 1
                     progress(done, _cleanup_progress["total"])
 
+        # An unticked pair stays unticked and the AI is not asked about it
+        # again — unless the user wants those proposals anew (`again`): then
+        # it is proposed like a new one, marked as unticked before.
         keep = await ts.kept_apart()
         items: list[dict] = []
 
         def add(name, into, kind, selected, **extra):
             kept = (name, into) in keep
             items.append({"id": len(items), "name": name, "into": into, "kind": kind,
-                          "selected": bool(selected) and not kept, "kept_apart": kept, **extra})
+                          "selected": bool(selected) and (again or not kept), "kept_apart": kept, **extra})
             return items[-1]
 
         # Families with the most to move first. A damaged spelling never wins
@@ -691,7 +695,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
                 add(name, lang.fix(name), "swiss", True)
 
         orphans = [o["name"] for o in grouping.orphans]
-        ask = [it for it in pairs if not it["kept_apart"]]
+        ask = [it for it in pairs if again or not it["kept_apart"]]
         _cleanup_phase("merge_context")
         progress(0, 0)
         contexts = await _contexts({n for it in ask for n in (it["name"], it["into"])} | set(orphans),
@@ -802,7 +806,11 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             checked = await ts.run_limited(found, lambda f: ts.check_translation(f[0], f[1], lang),
                                            progress=progress, cancelled=_cancelled)
             for (foreign, into, exists), answer in zip(found, checked):
-                if isinstance(answer, Exception) and not isinstance(answer, ts.AIUnavailable):
+                if isinstance(answer, ts.AIUnavailable):
+                    # Not reachable, or a rate limit that outlasted the waits:
+                    # said, never dropped without a word.
+                    ai_error = ai_error or str(answer)
+                elif isinstance(answer, Exception):
                     ai_failed["checks"] += 1
                     ai_failed["reason"] = ai_failed["reason"] or str(answer)[:200]
                 if not isinstance(answer, tuple):
@@ -823,13 +831,14 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
         _last_merge.update({"items": items, "ids": {n: (members.get(n) or {}).get("id") for n in shown},
                             "sidecar_files": sidecar_files, "sidecar_fields": sidecar_fields,
                             "sidecars_enabled": with_sidecars, "immich_enabled": with_immich})
-        _cleanup_finish(result={
+        await _cleanup_finish(result={
             "mode": "merge_scan",
             "cancelled": _cancelled(),
             "sidecars_enabled": with_sidecars,
             "immich_enabled": with_immich,
             "ai_enabled": use_ai,
             "translate_enabled": translate,
+            "again": again,
             "language": lang.code,
             "language_label": lang.label,
             "immich_error": immich_error,
@@ -853,7 +862,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             ", ".join(f"{k} {v}" for k, v in by_kind.items())
             + f"; ohne Lösung {len(unresolved)}" + (f"; KI: {ai_error}" if ai_error else "") + failed_text)
     except Exception as e:
-        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+        await _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
 def _merge_targets(items: list[dict], chosen: set[int]) -> dict[str, list[str]]:
@@ -1029,7 +1038,7 @@ async def _merge_apply(chosen: set[int]):
                     await log_warning("tools", "Schreibweisen: Nachkontrolle in Immich fehlgeschlagen", last_error)
 
         _last_merge.clear()
-        _cleanup_finish(result={
+        await _cleanup_finish(result={
             "mode": "merge_apply",
             "repaired": repaired,
             "cancelled": _cancelled(),
@@ -1046,7 +1055,7 @@ async def _merge_apply(chosen: set[int]):
             f"{sum(1 for it in items if it['id'] not in chosen)}"
             + (f", letzter Fehler: {last_error}" if last_error else ""))
     except Exception as e:
-        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+        await _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
 # --- Leere Tags löschen (tag_groups_migration.empty_tags) ---------------------
@@ -1070,14 +1079,14 @@ async def _empty_scan(include_foreign: bool):
         values = [_tag_value(t) for t in found["deletable"]]
         _last_empty.clear()
         _last_empty.update(values=values, include_foreign=include_foreign)
-        _cleanup_finish(result={"mode": "empty_scan", "cancelled": _cancelled(), "include_foreign": include_foreign,
+        await _cleanup_finish(result={"mode": "empty_scan", "cancelled": _cancelled(), "include_foreign": include_foreign,
                                 "tags": values, "foreign": found["foreign"], "kept_locked": found["kept_locked"],
                                 "young": found["young"], "count_failed": found["count_failed"]})
         await log_info("tools", f"Leere Tags, Vorschau: {len(values)} zu löschen",
                        f"fremde behalten {len(found['foreign'])}, gesperrte behalten {len(found['kept_locked'])}, "
                        f"jünger als {EMPTY_MIN_AGE_S // 60} Min {found['young']}")
     except Exception as e:
-        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+        await _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
 async def _empty_apply(include_foreign: bool):
@@ -1097,13 +1106,13 @@ async def _empty_apply(include_foreign: bool):
         progress(0, len(found["deletable"]))
         result = await mig.delete_empty(found, progress=progress, cancelled=_cancelled)
         _last_empty.clear()
-        _cleanup_finish(result={"mode": "empty_apply", "cancelled": _cancelled(), **result,
+        await _cleanup_finish(result={"mode": "empty_apply", "cancelled": _cancelled(), **result,
                                 "no_longer_empty": len(values) - len(found["deletable"])})
         await log_info("tools", f"Leere Tags gelöscht: {result['deleted']}",
                        f"fehlgeschlagen {result['failed']}, mit Unterebenen behalten {result['kept_with_children']}, "
                        f"nicht mehr leer {len(values) - len(found['deletable'])}")
     except Exception as e:
-        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+        await _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
 async def _start(request: Request, worker, *, require_preview: bool = False) -> JSONResponse:
@@ -1165,13 +1174,13 @@ async def _groups_scan(set_id: int, include_foreign: bool):
         _last_groups.clear()
         if result["jobs"].get("found"):
             _last_groups.update(set_id=set_id, include_foreign=include_foreign)
-        _cleanup_finish(result={"mode": "groups_scan", "set_id": set_id, "include_foreign": include_foreign,
+        await _cleanup_finish(result={"mode": "groups_scan", "set_id": set_id, "include_foreign": include_foreign,
                                 "cancelled": _cancelled(), **result})
         await log_info("tools", f"Tags in Gruppen umstellen, Vorschau: {result['to_convert']} Jobs umzustellen",
                        f"Set {set_id}; leere eigene Tags {result['empty']}, fremde leere {result['foreign_empty']}, "
                        f"Wurzeln {result['immich']['roots']}")
     except Exception as e:
-        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+        await _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
 async def _groups_apply(set_id: int, include_foreign: bool):
@@ -1188,9 +1197,9 @@ async def _groups_apply(set_id: int, include_foreign: bool):
         result = await mig.run(set_id, include_foreign=include_foreign, phase=phase, progress=progress,
                                cancelled=_cancelled)
         _last_groups.clear()
-        _cleanup_finish(result={"mode": "groups_apply", "set_id": set_id, "cancelled": _cancelled(), **result})
+        await _cleanup_finish(result={"mode": "groups_apply", "set_id": set_id, "cancelled": _cancelled(), **result})
     except Exception as e:
-        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+        await _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
 async def _groups_start(request: Request, worker, *, require_preview: bool = False) -> JSONResponse:
@@ -1240,6 +1249,8 @@ async def tools_page(request: Request):
     return await render(request, "tools.html", {
         # Target of "Schreibweisen zusammenführen" (content_language.py)
         "content_language": (await content_language.current()).label,
+        # Proposals the user left unticked ("Stehen gelassene neu vorschlagen").
+        "merge_kept_count": len(await ts.kept_apart()),
         "library_paths": await library_roots(),
         # The rerun card's set choice (Module neu ausführen für ein Set).
         "sets": sets,
@@ -1259,7 +1270,8 @@ async def scan_merge(request: Request):
         return JSONResponse({"ok": False, "detail": await _t("err_no_scope")}, status_code=400)
     _cancel["requested"] = False
     _cleanup_reset("tag_merge")
-    asyncio.create_task(_scan_merge(with_sidecars, with_immich, bool(form.get("ai")), bool(form.get("translate"))))
+    asyncio.create_task(_scan_merge(with_sidecars, with_immich, bool(form.get("ai")), bool(form.get("translate")),
+                                    bool(form.get("again"))))
     return JSONResponse({"ok": True})
 
 

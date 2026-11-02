@@ -1,5 +1,160 @@
 # Changelog
 
+## v3.7.0 — 2026-11-02
+
+### Neu: Modelle prüfen — nur bildfähige wählbar, Nachdenken automatisch abgeschaltet
+
+Die OpenAI-Schnittstelle nennt in `/models` nur die Namen der Modelle. Ob ein
+Modell Bilder versteht oder vor der Antwort „nachdenkt“, sagt sie nicht. Der
+Dialog zeigte darum alle Modelle, bei Infomaniak auch die drei
+Einbettungsmodelle. Ein denkendes Modell wie Qwen3.8 verbrauchte beim
+IA-05-Prompt alle 500 Tokens fürs Nachdenken und lieferte keinen Text.
+
+- **Knopf „Modelle prüfen“** im Dialog des KI-Backends: Jedes Modell bekommt über die Standard-Schnittstelle ein Testbild mit einer zufälligen zweistelligen Zahl und die Frage nach der Zahl. Nichts davon ist anbieterspezifisch.
+  - Wer die Zahl nennt, versteht Bilder. Eine Farbe lässt sich raten: Ein bildfähiges Modell nannte ein rotes Quadrat „White“.
+  - Ein Modell, das vorher denkt (`reasoning_tokens`), wird ein zweites Mal mit `reasoning_effort: "none"` gefragt. Antwortet es dann ohne Nachdenken, geht der Parameter künftig mit jeder Anfrage an dieses Modell. Sonst ist es für IA-05 ungeeignet.
+  - Angeboten werden nur geeignete Modelle. Die anderen stehen mit Grund darunter: erkennt das Testbild nicht, denkt und lässt sich nicht abschalten, lehnt die Anfrage ab, hat nicht geantwortet.
+  - Bei Infomaniak dauert die Prüfung aller zehn Modelle 2 Sekunden.
+- **Nur auf Knopfdruck:** Ein lokaler Server (LM Studio, Ollama) lädt für die Antwort jedes Modell und könnte das Modell verdrängen, mit dem die Pipeline arbeitet. Darum prüft das Öffnen des Dialogs nichts. Es wendet nur die gespeicherten Ergebnisse an, ungeprüfte Modelle stehen mit „nicht geprüft“ da.
+- **Beim Speichern** wird das gewählte Modell geprüft, wenn es noch nicht geprüft ist. Das gilt auch für ein von Hand eingetipptes, damit das Nachdenken von der ersten Anfrage an aus ist.
+- **Ergebnis pro Adresse und Modell** in `ai.model_caps`. Ein Modell, das nicht geantwortet hat, wird nicht als „ohne Bilder“ gespeichert.
+- **`reasoning_effort` nur, wo nachgewiesen:** Manche Backends lehnen den Parameter bei einem Modell ohne Nachdenken mit 400 ab, darum wird er nie pauschal gesendet.
+- **Weggefallen:** Der Sonderweg über LM Studios eigene Schnittstelle (`/api/v0/models`). Die aktuelle LM-Studio-Version bietet sie nicht mehr an, der Dialog zeigte dort ohnehin alle Modelle ungefiltert.
+- **Liste der Backends:** Sie meldet ein gespeichertes Modell, das die Prüfung als ungeeignet erkannt hat, mit „Modell ungeeignet“ und Grund.
+
+Gemessen bei Infomaniak, alle zehn Modelle geprüft:
+- **Bildfähig:** gemma-4-31B, Mistral-Small-4, Ministral-3, Apertus-v1.5
+- **Bildfähig, Nachdenken abgeschaltet:** Qwen3.8-27B, Qwen3.5-397B, Kimi-K2.6
+- **Abgelehnt:** die drei Einbettungsmodelle
+
+IA-05 mit Qwen3.8 und abgeschaltetem Nachdenken: 1.1 s statt 18 s ohne Antwort.
+
+Getestet in `test_ai_key.py` Teil C mit Test-Modellen jeder Art (liest die Zahl, blind, Einbettung, denkt und lässt sich abschalten, denkt immer, antwortet nicht). Das Test-Backend „liest“ die Zahl, indem es alle Kandidaten gleich zeichnet und vergleicht. Geprüft werden: Die Liste allein fragt kein Modell, geprüfte Ergebnisse bleiben, das Speichern prüft, und `chat()` schickt `reasoning_effort` nur an das denkende Modell. E2E **US-32**: Ein Backend wird mit einem denkenden Modell gespeichert, die Prüfung schaltet das Nachdenken ab, und ein Foto läuft mit `reasoning_effort: "none"` durch IA-05. US-23, US-30 und US-31 liefen auf Dev mit Qwen3.8 bei Infomaniak, der ganze Testlauf mit gemma-4 (siehe unten).
+
+### Neu: Ausfallsicherung zwischen den KI-Backends
+
+Mit zwei KI-Backends verteilte MediaAssistant die Anfragen nach freien
+Plätzen. Antwortete eines nicht, gingen weiter Anfragen daran, das Modul
+scheiterte, und die Dienst-Prüfung verlangte, dass *jedes* eingeschaltete
+Backend bereit ist. Die ganze Pipeline hielt an, obwohl das andere Backend
+bereit war.
+
+- **Wechsel:** IA-05, OCR (IA-06) und die Werkzeuge fragen über eine gemeinsame Funktion (`ai_backends.chat`). Scheitert eine Anfrage, prüft sie das Backend über `/models`. Gescheitert heisst: keine Verbindung, Zeitüberschreitung, HTTP 5xx, ein abgelehnter Key (401/403) oder ein Modell, das fehlt (404).
+  - Ist das Backend nicht bereit, wird es beiseitegestellt, und die Anfrage geht sofort an das nächste. Das Systemlog nennt Backend, Adresse und Grund.
+  - Ist es bereit, wird es wie bisher bis zu dreimal mit Pause erneut versucht.
+  - Eine abgelehnte Anfrage (z. B. 400, Bild zu gross) ist ein Fehler des Jobs, kein Grund zum Wechseln.
+- **Zurück:** Ein beiseitegestelltes Backend bekommt keine Anfragen. Nach 60 Sekunden wird es erneut geprüft und nimmt Anfragen an, sobald es bereit ist („KI-Backend 1 wieder bereit“).
+- **Dienst-Prüfung (Auto-Pause, Dashboard):** Die KI gilt als bereit, solange ein Backend bereit ist; die Meldung nennt das ausgefallene. Erst wenn keines mehr antwortet, hält die Pipeline an, wie bisher.
+- **Diagnose-API:** `ai.set_aside` listet die beiseitegestellten Backends.
+- **Ratenbegrenzung (HTTP 429):** Cloud-Anbieter begrenzen die Anfragen pro Minute, Infomaniak auf 50 (`x-ratelimit-limit`). Gemessen im Testlauf: Nach der Übersetzungssuche des Werkzeugs „Schreibweisen zusammenführen“ antwortete Infomaniak mit 429.
+  - Bisher wertete IA-05 das als Fehler des Jobs, und die Dienst-Prüfung hielt die Pipeline an.
+  - Jetzt wartet `chat()` auf demselben Backend und versucht es erneut (2, 4, 8, 16, 30 s, zusammen gut eine Minute; ein `Retry-After` des Servers gilt vor).
+  - Hält die Begrenzung länger an, ist es ein Dienstproblem: IA-05 und OCR pausieren die Pipeline, wie bei einem Ausfall, und der Health-Watcher setzt fort.
+  - **Die Grenze wird von vornherein eingehalten.** Warten allein reichte nicht: Die parallelen Fragen des Werkzeugs kamen nach dem Warten alle zugleich wieder und stiessen erneut an die Grenze (gemessen). `chat()` liest die Grenze aus den Antworten (`x-ratelimit-limit`, bei OpenAI `x-ratelimit-limit-requests`) und schickt einem Backend höchstens so viele Anfragen pro Minute. Meldet es `remaining: 0`, wartet `chat()` das Fenster ab.
+- **Werkzeug „Schreibweisen zusammenführen“:** Scheiterte die Prüffrage einer Übersetzung, weil die KI nicht verfügbar war (z. B. 429), fiel der Vorschlag still weg. Jetzt meldet die Vorschau das als `ai_error`.
+- **Leere Antwort:** Ein Modell, das erst „nachdenkt“, kann alle Tokens dafür verbrauchen und keinen Text liefern (gemessen mit Qwen3.8-27B bei Infomaniak). IA-05 stürzte dann mit `'NoneType' object has no attribute 'strip'` ab. Jetzt ist es ein Fehler des Jobs mit klarer Meldung (`finish_reason`, Hinweis auf ein anderes Modell). OCR liest eine leere Antwort als „kein Text“.
+
+Getestet in `test_ai_key.py` Teil F mit zwei Backends im Container (antwortet, 503, lehnt ab, keine Verbindung, 429): Wechsel, kein zweiter Versuch am ausgefallenen, Dienst-Prüfung, Rückkehr nach der Prüfung, kein Wechsel bei 400, beide aus → nicht bereit, zweimal 429 → gewartet und dieselbe Antwort, dauerhaft 429 → 429 zurück, angekündigte Grenze (3 pro Fenster) nie überschritten. E2E **US-31**: Backend 1 antwortet nicht, Backend 2 ist das eingestellte. Ein Foto läuft durch, IA-05 kommt von Backend 2, die Pipeline hält nie an, das Log nennt Backend 1.
+
+### Fix: KI-Backends mit API-Key (Infomaniak, OpenAI …) gelten nicht mehr als nicht erreichbar
+
+Nur die eigentlichen KI-Anfragen (IA-05, OCR, Werkzeuge) schickten den
+API-Key mit. Die Modellliste im Dialog, „Verbindung testen“, die Liste der
+Backends, die Modul-Karte im Dashboard und die Diagnose fragten `/models`
+ohne Key ab. Ein Backend, das einen verlangt, antwortete dort mit
+„HTTP 401“. Aufgefallen beim Einrichten von Infomaniak auf Dev; mit LM Studio,
+das keinen Key verlangt, blieb es unbemerkt.
+
+Schlimmer als die Anzeige: Dieselbe Prüfung entscheidet über die Auto-Pause
+(`services.py`). Mit einem solchen Backend galt die KI immer als nicht bereit.
+Der erste Fehler eines KI-Moduls hätte die Pipeline angehalten, und der
+Health-Watcher hätte sie nie fortgesetzt.
+
+- Alle diese Prüfungen schicken jetzt den gespeicherten Key mit (`ai_backends.auth_headers`, `stored_key`).
+- Die Modellliste im Dialog nimmt den eingetippten Key, sonst den gespeicherten dieses Backends. Sie wird neu geladen, sobald ein Key eingetippt ist.
+- Die Liste ist jetzt ein POST (`/settings/ai-models`), damit ein eingetippter Key nie in einer URL oder einem Zugriffslog steht.
+- Toter Code in `settings.js` (alte Modellliste ohne zugehörige Felder) entfernt.
+
+Getestet in `test_ai_key.py` (neu) mit einem Backend im Container, das nur
+auf seinen Key antwortet: Modellliste mit eingetipptem, falschem und
+gespeichertem Key, Liste der Backends, Dienst-Prüfung, ohne Key 401, der Key
+kommt in keiner Antwort zurück. Vor dem Fix 2/7, danach 7/7. Gegen
+Infomaniak selbst liefert die Liste die Modelle; fünf davon lesen ein Testbild
+richtig.
+
+**E2E US-23** („KI-Modell fehlt“) verstellt jetzt das Modell jedes
+eingeschalteten Backends statt fest das von Backend 1 — Dev kann für Tests
+eine externe KI als Backend 2 nutzen (siehe AGENTS.md).
+
+### Diagnose: Ergebnisse der Werkzeuge und der Wartung über die Diagnose-API (#57)
+
+Was ein Werkzeug oder eine Wartungsaufgabe gefunden hat, stand bisher nur auf
+der offenen Seite und im Speicher der App. Das Systemlog nannte nur Zahlen
+(„1679 Vorschläge“, „4600 jobs marked orphan“), nach einem Neustart war das
+Ergebnis weg. Von aussen liess sich weder prüfen, ob eine Aufgabe hängt, noch,
+was sie vorgeschlagen oder markiert hat.
+
+- **Letztes Ergebnis jeder Aufgabe wird aufbewahrt:** neue Tabelle
+  `maintenance_results`, eine Zeile je Aufgabe und Art (z. B.
+  `tag_merge:merge_scan` und `tag_merge:merge_apply`), mit Start, Ende,
+  Fehler und Ergebnis. Jede Liste ist auf 2000 Einträge begrenzt, die volle
+  Länge steht daneben (`items_total`). Die Zeile übersteht einen Neustart.
+- **Diagnose-API, nur lesend, mit Token wie bisher:**
+  - `maintenance`: die laufende oder letzte Aufgabe mit Phase, Zähler, Start und letzter Bewegung (`moved_at`). So unterscheidet sich eine langsame Aufgabe von einer, die hängt.
+  - `?task=<name>`: die gespeicherten Ergebnisse einer Aufgabe. Beim Zusammenführen sind das alle Vorschläge mit Name, Ziel, Art, Häkchen, Grund der KI und Anzahl Fotos und Dateien.
+  - `?status=<status>&since=<Datum>&limit=N`: Jobs eines Status, die sich seit dem Datum geändert haben, mit Schlüssel, Meldung, Art des Ziels und Set. Zum Beispiel alle heute als verwaist markierten.
+  - Tag-Namen und Pfade sind persönliche Daten und gehen nur an den Inhaber des Tokens.
+- **„Verwaiste aufräumen“ sagt, warum:** Ergebnis und Systemlog zählen nach
+  Grund (`file gone`, `immich asset gone`, `foreign file at original_path`,
+  `no path`), nach vorherigem Status und nach Art des Ziels; die Schlüssel
+  der markierten Jobs stehen im Ergebnis. Für schon markierte Jobs steht der
+  Grund in deren Meldung und ist über `?status=orphan` lesbar.
+
+Getestet in `test_maintenance_results.py` (neu): Vorschau „Schreibweisen
+zusammenführen“ über die App, Ergebnis über `?task=`; „Verwaiste
+aufräumen“ an einem Test-Job mit Grund, Status und Ziel, Liste über
+`?status=orphan&since=`; beides nach einem Neustart der App noch da; ohne
+Token 404, falsches Datum 400.
+
+Offen aus #57: eigene Phasen mit eigenem Zähler und die Laufzeit in der
+Anzeige (Punkte 1 und 2) sowie die Ausfälle der KI bei Umlaut-Fällen und
+Reparatur.
+
+### UI: Schreibweisen zusammenführen — stehen gelassene Vorschläge neu vorschlagen
+
+Was man in „Schreibweisen zusammenführen“ nicht anhakt, merkt sich das
+Werkzeug: Beim nächsten Suchen erscheint der Vorschlag wieder, aber nicht
+angehakt, und bei einem Umlaut-Fall fragt die KI nicht noch einmal. Das ist
+richtig, wenn man sich entschieden hat — nicht aber, wenn man einen
+Vorschlag nur stehen gelassen hat, weil man ohne die Bilder nicht sicher war.
+
+Neu gibt es dafür den Schalter **„Stehen gelassene neu vorschlagen“** (aus
+voreingestellt; die Beschreibung nennt, wie viele Vorschläge gemerkt sind).
+Mit ihm wird ein früher nicht angehakter Vorschlag wie ein neuer behandelt:
+Die KI prüft ihn wieder, angehakt wird nach denselben Regeln wie sonst. Das
+Kennzeichen heisst jetzt „früher nicht angehakt“ statt „von dir
+ausgenommen“ und steht auch mit Schalter da. Was man danach wieder nicht
+anhakt, bleibt gemerkt; was man anhakt, fällt aus der Liste.
+
+Die Rückfrage vor dem Zusammenführen sagte, nicht angehakte würden „beim
+nächsten Suchen nicht mehr angehakt“ — das las sich, als verschwänden sie.
+Sie sagt jetzt, dass sie wieder erscheinen, nicht angehakt, ausser mit dem
+Schalter.
+
+Getestet in `test_tag_merge.py` A-11 … A-13: eine gemerkte gleiche
+Schreibweise erscheint ohne Schalter nicht angehakt, mit Schalter angehakt;
+beim gemerkten Umlaut-Fall Bar/Bär antwortet mit Schalter die KI wieder.
+
+### Bekannt: kleines Modell übersieht in der Übersetzungssuche Namen (#58)
+
+Mit dem lokalen Modell von Live (qwen3.5-4b) war `test_tag_merge` im Testlauf
+für 3.7.0 47/50: In der Übersetzungssuche fehlte „Beach → Strand“. Daraus
+folgten die zwei weiteren roten Prüfungen. Dieselbe Gruppe direkt gefragt:
+einmal gefunden, einmal nicht. Mittags war der Test mit demselben Code grün,
+mit gemma-4 bei Infomaniak 50/50. Es liegt an der Trefferquote des kleinen
+Modells, nicht an 3.7.0. Ein übersehener Name steht einfach nicht in der
+Vorschau, eine neue Suche kann ihn finden. Verbesserung und Messung in #58.
+
 ## v3.6.0 — 2026-11-02
 
 ### Neu: Sprache der Inhalte einstellbar — Englisch oder Deutsch (Schweiz) (#56)

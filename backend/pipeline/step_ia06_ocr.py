@@ -1,9 +1,9 @@
-import asyncio
 import base64
 import json
 import os
 import httpx
-from ai_backends import acquire_ai_backend
+from ai_backends import chat
+from pipeline.step_ia05_ai import AIConnectionError
 from config import config_manager
 
 
@@ -65,59 +65,34 @@ async def execute(job, session) -> dict:
     mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
     mime_type = mime_map.get(os.path.splitext(image_path)[1].lower(), "image/jpeg")
 
-    # ── Acquire idle AI backend and make API call ───────────────────
-    async with acquire_ai_backend() as backend:
-        if not backend:
-            return {"status": "skipped", "reason": "not configured"}
-
-        url = backend["url"]
-        model = backend["model"]
-        api_key = backend["api_key"]
-
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": OCR_PROMPT},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "Erkenne allen sichtbaren Text in diesem Bild."},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
-                ]}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 1000,
-        }
-
-        headers = {"Content-Type": "application/json"}
-        if api_key and api_key != "not-needed":
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        ai_timeout = int(await config_manager.get("ai.timeout", 120))
-        max_retries = 2
-        resp = None
-        last_exc = None
-        for attempt in range(max_retries + 1):
-            try:
-                async with httpx.AsyncClient(timeout=ai_timeout) as client:
-                    resp = await client.post(
-                        f"{url.rstrip('/')}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
-                if resp.status_code < 500:
-                    break
-                last_exc = RuntimeError(f"OCR API Fehler: HTTP {resp.status_code}")
-            except httpx.ReadTimeout as e:
-                last_exc = e
-            if attempt < max_retries:
-                await asyncio.sleep(5 * (attempt + 1))
-
-    # Backend released
-    if resp is None:
-        raise RuntimeError(f"OCR API Timeout nach {max_retries + 1} Versuchen") from last_exc
+    # ── AI call: an idle backend, the next one if it does not answer ──
+    payload = {
+        "messages": [
+            {"role": "system", "content": OCR_PROMPT},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Erkenne allen sichtbaren Text in diesem Bild."},
+                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
+            ]}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1000,
+    }
+    ai_timeout = int(await config_manager.get("ai.timeout", 120))
+    attempts = 3
+    try:
+        backend, resp = await chat(payload, timeout=ai_timeout, attempts=attempts)
+    except httpx.HTTPError as exc:
+        raise AIConnectionError(f"OCR: KI-Backend nicht erreichbar nach {attempts} Versuchen "
+                                f"({type(exc).__name__}: {exc})") from exc
+    if backend is None:
+        return {"status": "skipped", "reason": "not configured"}
+    if resp.status_code >= 500 or resp.status_code == 429:
+        # The service's, not the job's: the pipeline pauses (services.py), as for IA-05.
+        raise AIConnectionError(f"OCR: KI-Backend liefert dauerhaft HTTP {resp.status_code}")
     if resp.status_code != 200:
         raise RuntimeError(f"OCR API Fehler: HTTP {resp.status_code}")
 
-    content = resp.json()["choices"][0]["message"]["content"].strip()
+    content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
     if content.startswith("```"):
         content = content.split("\n", 1)[1] if "\n" in content else content[3:]
         content = content.rsplit("```", 1)[0]

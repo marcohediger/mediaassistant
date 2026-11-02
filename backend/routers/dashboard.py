@@ -71,10 +71,14 @@ async def _probe_ai_backend(config_key: str, i18n: dict) -> tuple[bool, str]:
     # Long enough for a queued backend, short enough not to stall the dashboard.
     limit = max(5, min(limit, 30))
 
+    from ai_backends import auth_headers, stored_key
+    # With the key: a backend that wants one answers 401 without, and the
+    # pipeline would pause for a service that is there (services.py).
+    headers = auth_headers(await stored_key(config_key.split(".")[0]))
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=limit) as client:
-            resp = await client.get(f"{url.rstrip('/')}/models")
+            resp = await client.get(f"{url.rstrip('/')}/models", headers=headers)
     except (httpx.ConnectError, httpx.ConnectTimeout):
         return False, f"{_t('status_connection_failed', i18n)}: {url}"
     except httpx.ReadTimeout:
@@ -108,19 +112,26 @@ async def _check_ai_backend_2(i18n: dict) -> tuple[bool, str]:
 
 
 async def _check_ai_backends(i18n: dict) -> tuple[bool, str]:
-    """Every AI backend the pipeline may use (ai_backends picks either)."""
+    """Every AI backend the pipeline may use. Ready while one of them is:
+    ai_backends sets a backend that does not answer aside and asks the
+    other (failover), so one backend down is no reason to pause."""
     checks = []
     if await config_manager.is_module_enabled("ki_analyse"):
         checks.append(("ai.backend_url", _check_ai_backend))
     if await config_manager.is_module_enabled("ki_analyse_2") and await config_manager.get("ai2.backend_url"):
         checks.append(("ai2.backend_url", _check_ai_backend_2))
-    details = []
+    ready, down = [], []
     for key, fn in checks:
         ok, detail = await fn(i18n)
-        if not ok:
-            return False, detail if len(checks) == 1 else f"{await config_manager.get(key)}: {detail}"
-        details.append(detail)
-    return True, "; ".join(details) or _t("status_connected", i18n)
+        (ready if ok else down).append((key, detail))
+    if not checks:
+        return True, _t("status_connected", i18n)
+    if len(checks) == 1:
+        return bool(ready), (ready or down)[0][1]
+    urls = {key: await config_manager.get(key) for key, _ in checks}
+    if not ready:
+        return False, "; ".join(f"{urls[k]}: {d}" for k, d in down)
+    return True, "; ".join([d for _, d in ready] + [f"{urls[k]}: {d}" for k, d in down])
 
 
 async def _check_geocoding(i18n: dict) -> tuple[bool, str]:

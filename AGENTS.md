@@ -59,7 +59,7 @@ MediaAssistant/
 │   ├── content_language.py     # Sprache der Inhalte (en, de-CH): Gruppen-Namen, Prompt-Platzhalter, Geocoding-Sprache, ß → ss
 │   ├── folder_path.py          # Ordnerstruktur → Tags/Alben je nach Set-Optionen
 │   ├── safe_file.py            # safe_move(): copy → verify hash → delete (nur noch Baustein von fileops)
-│   ├── ai_backends.py          # Loadbalancer für mehrere OpenAI-kompat. Endpunkte
+│   ├── ai_backends.py          # Loadbalancer, Ausfallsicherung (chat), Modelle prüfen (model_caps) — OpenAI-kompat. Endpunkte
 │   ├── immich_client.py        # REST-Client für Immich
 │   ├── system_logger.py        # log_info/warning/error → system_logs Tabelle
 │   ├── pipeline/               # Die 11 Pipeline-Steps + Helpers
@@ -302,8 +302,23 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_ia04_convert.py` | IA-04 ohne ImageMagick: GIF (erstes Bild) und HEIC-Ausweichweg über Pillow, mit fehlschlagendem `heif-convert` im `PATH` | `docker exec mediaassistant-dev python /app/test_ia04_convert.py` |
 | `backend/test_tag_merge.py` | Werkzeuge „Schreibweisen zusammenführen" (`tag_spelling.py`) und „Leere Tags löschen" gegen echtes Immich und die echte KI: gleiche Buchstaben, Umlaut-Fälle (Bar/Bär getrennt, Gluhwein/Glühwein zusammen), Reparatur aus Beschreibung und durch die KI, Übersetzung in die Sprache der Inhalte, Häkchen und gemerkte Ausnahmen, Nachkontrolle in Immich, leere Tags samt Altersgrenze und Nachzählen, Sprache der Inhalte (L: ss-Regeln, Deutsch → Englisch); Teile wählbar | `docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E L]` |
 | `backend/test_content_language.py` | Sprache der Inhalte (`content_language.py`): Sprachtabelle, Prompt-Platzhalter, Fingerabdrücke (Standardsprache ändert nichts), Namen der Gruppen und Ordner, Geocoding gegen echtes Nominatim; Teile wählbar | `docker exec mediaassistant-dev python /app/test_content_language.py [T P F G O]` |
+| `backend/test_ai_key.py` | KI-Backends über die OpenAI-Schnittstelle: Ausfallsicherung (Teil F: Wechsel, beiseitegestellt, Rückkehr, kein Wechsel bei 400, beide aus), Modelle prüfen (Teil C: Testbild mit Zahl, Nachdenken abschalten, nur auf Knopfdruck, beim Speichern) und API-Key (Teil K): Modellliste (eingetippter, falscher, gespeicherter Key), Liste der Backends, Dienst-Prüfung der Auto-Pause schicken den Key; Backend im Container, das nur auf seinen Key antwortet; beide Backends werden für den Lauf umgestellt und exakt zurückgesetzt, die Pipeline pausiert | `docker exec mediaassistant-dev python /app/test_ai_key.py [K C F]` |
+| `backend/test_maintenance_results.py` | Ergebnisse der Werkzeuge und der Wartung (`maintenance_results`, #57) über die Diagnose-API: begrenzte Listen, Vorschau „Schreibweisen zusammenführen“ über `?task=`, „Verwaiste aufräumen“ mit Grund und `?status=orphan&since=`, nach einem Neustart der App noch da, Zugriff nur mit Token; Teile wählbar | `docker exec mediaassistant-dev python /app/test_maintenance_results.py [B T O R A]` |
 | `backend/test_ffmpeg_input.py` | ffmpeg/ffprobe nur mit den Demuxern der Video-Container (`-format_whitelist`, `inputs/common.py` `FFMPEG_VIDEO_INPUT`): echte Videos aller Container durch IA-01, IA-04 und die Vorschau (F1), DASH-Manifest als `.mp4` erreicht libxml2 nicht (F2, CVE-2026-6653) | `docker exec mediaassistant-dev python /app/test_ffmpeg_input.py [F1 F2]` |
 | `backend/test_storage.py` | Fehlendes Laufwerk (`storage.py`): Regeln der Markierung, `fileops` verweigert vor dem Intent, Prüfen markiert nichts als fehlend, Abgleich lässt offen, Watchdog, Parken aus „Review", Retry, Scanner, Pause von Hand, Knopf „neu markieren", Wartung „Verwaiste aufräumen" und „Erledigte Duplikat-Fehler aufräumen" ohne Laufwerk; Teile wählbar | `docker exec mediaassistant-dev python /app/test_storage.py [S1 … S12]` |
+
+### KI für Testläufe: Modell von Live oder externe schnelle KI
+
+Dev hat zwei KI-Backends, eingeschaltet ist immer nur eines:
+
+- **Backend 1:** dasselbe kleine lokale Modell wie Live, auf demselben KI-Server wie Live. Es ist langsam, und ein Testlauf bremst Live.
+- **Backend 2:** eine externe, schnelle KI, OpenAI-kompatibel und mit API-Key. Adresse und Anbieter stehen in `AGENTS.local.md`.
+
+Umschalten über die Module `ki_analyse` und `ki_analyse_2` (Einstellungen → KI-Backends, Schalter „Aktiv“). Nie beide gleichzeitig, sonst verteilt der Lastverteiler die Anfragen auf beide Modelle.
+
+- **Im Alltag** (Entwickeln, Zwischenläufe): Backend 2.
+- **Vor einem Release** zusätzlich `test_tag_merge.py` und E2E US-30 gegen Backend 1. Dort zählt die Qualität der Antworten des Modells von Live: Die Fehler aus 3.6.0 (unvollständiges JSON, flache Liste statt Paaren, verkehrt beantwortete Prüffrage) machte nur das kleine Modell.
+- **Mitten in einem Testlauf** nie umschalten.
 
 ### Pflicht-Vorstufe: startet die App überhaupt?
 
@@ -380,6 +395,8 @@ echte DB) und verifiziert das Endergebnis:
 | **US-26 / US-27: Laufwerk fehlt** | Basis-Pfad bzw. Eingang nicht eingebunden (leerer Einhängepunkt) → Pipeline pausiert mit Ordner, Job wartet, nichts auf die falsche Platte → Laufwerk zurück → Health-Watcher setzt fort → Job fertig, Ordner markiert |
 | **US-28: Auswahl löschen** | Job-Liste, Auswahl bzw. „Alle Treffer“ über die API der App → fertiger Job gelöscht, Datei im Papierkorb des Sets; Job in Verarbeitung, schon gelöschter und Job auf fehlendem Laufwerk unberührt (Pipeline pausiert); Job-Seite lehnt Löschen auf fehlendem Laufwerk ab; geänderte Trefferzahl → 409 |
 | **US-30: Sprache der Inhalte** | Foto aus Gießen mit Deutsch (Schweiz): Ort „Giessen“, nirgends ß; umgestellt auf Englisch, Foto aus Bern: englische Gruppen, Orte, Satz und KI-Tags; der deutsche Job bleibt, gilt als veraltet und steht bei „Tags in Gruppen umstellen“ (echte KI, echtes Nominatim) |
+| **US-32: Modell, das denkt** | Backend mit denkendem Modell gespeichert → Prüfung schaltet das Nachdenken ab (`reasoning_effort: none`) → Foto läuft durch IA-05 |
+| **US-31: Ein KI-Backend fällt aus** | Backend 1 antwortet nicht, Backend 2 ist das eingestellte → Foto läuft durch, IA-05 von Backend 2, Pipeline hält nie an, Log nennt Backend 1 |
 | **US-29: Fehler quittieren** | Auswahl bzw. „Alle Treffer“ quittiert → Dashboard zählt weniger, Filter „Fehler“ ohne, „Quittiert“ mit ihnen, Job sonst unverändert; aufheben (Leiste, Job-Seite); Retry scheitert erneut → wieder offen |
 | **US-11 … US-14: pHash, Keep, Batch-Clean** | pHash-Duplikat (andere Kompression), Keep mit Ordner-/Stichwort-Merge, Batch-Clean alle bzw. diese Seite |
 | **US-15: Geocoding neu (Immich)** | Modul einzeln neu → IA-07/IA-08 laufen nach → Tags in Immich per API aktualisiert; gleicher Ort → nichts kaskadiert |

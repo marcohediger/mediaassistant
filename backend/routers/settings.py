@@ -419,6 +419,12 @@ async def save_ai_backend(request: Request, n: int):
     await config_manager.set(f"{prefix}.slots", slots)
     if (data.get("api_key") or "").strip():
         await config_manager.set(f"{prefix}.api_key", data["api_key"].strip(), encrypted=True)
+    model = _sanitize((data.get("model") or "").strip())
+    if model:
+        # Checked once (ai_backends.model_caps) — a model typed in by hand
+        # too, so thinking is switched off from its first request on.
+        from ai_backends import model_caps, stored_key
+        await model_caps(url, await stored_key(prefix), [model])
     await config_manager.set_module_enabled(module, bool(data.get("enabled")))
     await log_info("settings", f"KI-Backend {n} gespeichert", f"{url} · Modell {data.get('model') or '—'} · {slots} Slots")
     return JSONResponse({"ok": True, "backends": await _ai_backends()})
@@ -441,15 +447,23 @@ async def delete_ai_backend(n: int):
 @router.get("/ai-backends/status")
 async def ai_backends_status():
     """Reachability and vision-model count per configured backend."""
+    from ai_backends import CAPS_KEY, caps_key, stored_key
+    known = await config_manager.get(CAPS_KEY, {}) or {}
     result = []
     for b in await _ai_backends():
         if not b["configured"]:
             continue
-        d = await _fetch_models(b["url"])
+        d = await _fetch_models(b["url"], await stored_key(AI_BACKENDS[b["id"]][0]))
         models = d.get("models") or []
+        # Cheap: the kept model checks only, none run here.
+        caps = {m: known.get(caps_key(b["url"], m)) for m in models}
+        checked = any(caps.values())
+        usable = [m for m in models if (caps[m] or {}).get("usable")] if checked else models
+        mine = caps.get(b["model"]) or {}
         result.append({"id": b["id"], "ok": bool(d.get("ok")), "detail": d.get("detail", ""),
-                       "models": len(models), "filtered": bool(d.get("filtered")),
-                       "model_available": (b["model"] in models) if b["model"] else None})
+                       "models": len(usable), "filtered": checked,
+                       "model_available": (b["model"] in models) if b["model"] else None,
+                       "model_unsuitable": mine.get("reason") if mine and not mine.get("usable") else ""})
     return JSONResponse({"ok": True, "backends": result})
 
 
@@ -480,12 +494,6 @@ async def _describe_immich_detail(detail: str) -> str:
     from immich_client import describe_connection_detail
     lang = await config_manager.get("ui.language", DEFAULT_LANGUAGE)
     return describe_connection_detail(detail, load_lang(lang))
-
-
-def _lmstudio_base(url: str) -> str:
-    """Strip the OpenAI-compatible `/v1` suffix to reach LM Studio's own API."""
-    base = url.rstrip("/")
-    return base[: -len("/v1")] if base.endswith("/v1") else base
 
 
 async def _diag_tokens() -> list[dict]:
@@ -572,59 +580,64 @@ async def delete_diagnostics_token(request: Request, token_id: str):
     return JSONResponse({"ok": True, "tokens": _diag_public(remaining)})
 
 
-async def _fetch_models(url: str) -> dict:
-    """Model ids of one backend, narrowed to vision models where the backend says which."""
-    def ids(entries, only_vision):
-        return sorted(
-            str(m["id"]) for m in entries
-            if isinstance(m, dict) and m.get("id")
-            and (not only_vision or m.get("type") == "vlm")
-        )
-
-    async with httpx.AsyncClient(timeout=8) as client:
-        try:
-            resp = await client.get(f"{_lmstudio_base(url)}/api/v0/models")
-            if resp.status_code == 200:
-                entries = resp.json().get("data", [])
-                if any(isinstance(m, dict) and m.get("type") for m in entries):
-                    return {"ok": True, "detail": "", "models": ids(entries, True), "filtered": True}
-        except Exception:
-            pass  # not an LM Studio backend — fall through to the generic list
-
-        try:
-            resp = await client.get(f"{url.rstrip('/')}/models")
-            if resp.status_code != 200:
-                return {"ok": False, "detail": f"HTTP {resp.status_code}", "models": [], "filtered": False}
-            entries = resp.json().get("data", [])
-        except Exception as e:
-            return {"ok": False, "detail": f"{type(e).__name__}: {e}", "models": [], "filtered": False}
-
-    return {"ok": True, "detail": "", "models": ids(entries, False), "filtered": False}
+async def _fetch_models(url: str, api_key: str = "") -> dict:
+    """Model ids of one backend from the standard /models — ids only, the
+    interface says nothing on pictures or thinking (ai_backends.model_caps).
+    With the backend's API key — a backend that wants one answers 401 without."""
+    from ai_backends import auth_headers
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(f"{url.rstrip('/')}/models", headers=auth_headers(api_key))
+        if resp.status_code != 200:
+            return {"ok": False, "detail": f"HTTP {resp.status_code}", "models": []}
+        entries = resp.json().get("data", [])
+    except Exception as e:
+        return {"ok": False, "detail": f"{type(e).__name__}: {e}", "models": []}
+    return {"ok": True, "detail": "", "models": sorted(str(m["id"]) for m in entries if isinstance(m, dict) and m.get("id"))}
 
 
-@router.get("/ai-models")
+@router.post("/ai-models")
 async def list_ai_models(request: Request):
-    """Model ids offered by a backend, narrowed to the ones that can see images.
+    """Model ids offered by a backend, narrowed to the ones IA-05 can use.
 
-    The OpenAI-compatible `/models` endpoint reports ids and nothing else. LM
-    Studio additionally serves `/api/v0/models`, where each entry carries a
-    `type` — `vlm` marks the vision-capable models, the only kind IA-05 can
-    use. Backends without that endpoint fall back to the plain list, flagged
-    so the UI says the capabilities are unknown instead of implying a filter
-    that never ran.
+    The OpenAI-compatible `/models` endpoint reports ids and nothing else, so
+    a model is checked the standard way (ai_backends.model_caps: a test
+    picture; thinking switched off where it can be) — the same for every
+    backend, no API of one product. Only on request (`check`, the button
+    "Modelle prüfen"): a local server loads each model it is asked about.
+    Without it the kept checks apply; a model never checked is offered and
+    marked as such (`unchecked`).
 
-    Takes the URL from the query when the field holds an unsaved value, so the
-    list can be pulled before saving — same contract as the connection tests.
+    Takes URL and key from the dialog when the fields hold unsaved values, so
+    the list can be pulled before saving — same contract as the connection
+    tests; an empty key field means the stored key of that backend. POST, so
+    a typed key never lands in a URL or an access log.
     """
-    url = (request.query_params.get("url") or "").strip()
-    if not url:
-        key = "ai2.backend_url" if request.query_params.get("backend") == "2" else "ai.backend_url"
-        url = await config_manager.get(key, "")
+    from ai_backends import known_caps, model_caps, stored_key
+    data = await request.json()
+    prefix = "ai2" if str(data.get("backend")) == "2" else "ai"
+    url = (data.get("url") or "").strip() or await config_manager.get(f"{prefix}.backend_url", "")
     if not url:
         return JSONResponse({"ok": False, "detail": await _t_settings("ai_models_no_url"),
                              "models": [], "filtered": False})
-
-    return JSONResponse(await _fetch_models(url))
+    api_key = (data.get("api_key") or "").strip() or await stored_key(prefix)
+    listed = await _fetch_models(url, api_key)
+    if not listed["ok"]:
+        return JSONResponse({**listed, "filtered": False, "unsuitable": []})
+    caps = (await model_caps(url, api_key, listed["models"], again=True) if data.get("check")
+            else await known_caps(url, listed["models"]))
+    # Never checked: no kept result (a check that got no answer is shown as such, not kept).
+    unchecked = [m for m in listed["models"] if not caps[m]]
+    return JSONResponse({
+        "ok": True, "detail": "", "filtered": len(unchecked) < len(listed["models"]),
+        "models": [m for m in listed["models"] if caps[m].get("usable") or m in unchecked],
+        "unchecked": unchecked,
+        # Why the others are not offered: no pictures, a model that cannot stop
+        # thinking, a refused request — or no answer now (asked again next time).
+        "unsuitable": [{"id": m, "reason": caps[m].get("reason") or "no_answer",
+                        "detail": caps[m].get("detail") or caps[m].get("error") or ""}
+                       for m in listed["models"] if m not in unchecked and not caps[m].get("usable")],
+    })
 
 
 

@@ -39,6 +39,12 @@
                 <p class="field-note warn" id="ai-model-warn" hidden>{{ t.settings.ai_model_not_offered | default('Dieses Modell bietet das Backend nicht an.') }}</p>
                 <p class="status-text" id="ai-model-status" role="status"></p>
                 <div class="ai-model-chips" id="ai-model-chips" role="group" aria-label="{{ t.settings.ai_models_pick | default('Verfügbare Modelle') }}" hidden></div>
+                <details class="ai-hidden" id="ai-model-hidden" hidden><summary></summary><ul></ul></details>
+                {#- Checks every model the backend lists: a test picture, thinking (ai_backends.model_caps). -#}
+                <div class="ai-inline ai-check">
+                    <button type="button" class="btn btn-secondary btn-sm" id="ai-check" aria-describedby="ai-check-hint">{{ t.settings.ai_models_check }}</button>
+                    <p class="field-hint" id="ai-check-hint">{{ t.settings.ai_models_check_hint }}</p>
+                </div>
             </div>
 
             <div class="field">

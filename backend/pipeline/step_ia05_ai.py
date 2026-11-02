@@ -4,7 +4,7 @@ import io
 import json
 import os
 import httpx
-from ai_backends import acquire_ai_backend
+from ai_backends import chat
 from config import config_manager
 from system_logger import log_warning
 from PIL import Image
@@ -353,73 +353,43 @@ Use this information together with the image content for your classification."""
             "image_url": {"url": f"data:{mime_type};base64,{img_data}"}
         })
 
-    # ── Acquire idle AI backend and make API call ───────────────────
-    async with acquire_ai_backend() as backend:
-        if not backend:
-            return {"status": "skipped", "reason": "not configured"}
-
-        url = backend["url"]
-        model = backend["model"]
-        api_key = backend["api_key"]
-
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": content_parts}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 500,
-            # Hardening against token-repetition loops in small vision models
-            # (e.g. qwen3-vl-4b filling max_tokens with the same word).
-            # Unknown fields are ignored by OpenAI-compatible backends.
-            "frequency_penalty": 0.5,
-            "presence_penalty": 0.3,
-        }
-
-        headers = {"Content-Type": "application/json"}
-        if api_key and api_key != "not-needed":
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        ai_timeout = int(await config_manager.get("ai.timeout", 120))
-        max_retries = 2
-        resp = None
-        last_exc = None
-        connection_error = False  # tracks whether retries failed for network reasons
-        for attempt in range(max_retries + 1):
-            try:
-                async with httpx.AsyncClient(timeout=ai_timeout) as client:
-                    resp = await client.post(
-                        f"{url.rstrip('/')}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
-                if resp.status_code < 500:
-                    connection_error = False
-                    break
-                # Server 5xx — treat as transient connection issue, retry
-                connection_error = True
-                last_exc = RuntimeError(f"KI-API Fehler: HTTP {resp.status_code} — {resp.text[:200]}")
-            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.NetworkError) as e:
-                connection_error = True
-                last_exc = e
-            if attempt < max_retries:
-                await asyncio.sleep(5 * (attempt + 1))
-
-    # Backend released — free large base64 data
-    num_images = len(image_data_list)
-    del image_data_list, content_parts, payload
-
-    if resp is None:
-        # All retries failed without ever getting a response — backend unreachable
+    # ── AI call: an idle backend, the next one if it does not answer ──
+    payload = {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content_parts}
+        ],
+        "temperature": 0.3,
+        "max_tokens": 500,
+        # Hardening against token-repetition loops in small vision models
+        # (e.g. qwen3-vl-4b filling max_tokens with the same word).
+        # Unknown fields are ignored by OpenAI-compatible backends.
+        "frequency_penalty": 0.5,
+        "presence_penalty": 0.3,
+    }
+    ai_timeout = int(await config_manager.get("ai.timeout", 120))
+    attempts = 3
+    try:
+        backend, resp = await chat(payload, timeout=ai_timeout, attempts=attempts)
+    except httpx.HTTPError as exc:
+        # No backend answered at all, each tried and set aside or retried.
         raise AIConnectionError(
-            f"KI-Backend nicht erreichbar nach {max_retries + 1} Versuchen "
-            f"({type(last_exc).__name__ if last_exc else 'unknown'}: {last_exc})"
-        ) from last_exc
-    if resp.status_code >= 500:
-        # Persistent 5xx after all retries — backend is up but broken
+            f"KI-Backend nicht erreichbar nach {attempts} Versuchen ({type(exc).__name__}: {exc})"
+        ) from exc
+    finally:
+        # Free the large base64 data
+        num_images = len(image_data_list)
+        del image_data_list, content_parts, payload
+    if backend is None:
+        return {"status": "skipped", "reason": "not configured"}
+    model = backend["model"]
+
+    if resp.status_code >= 500 or resp.status_code == 429:
+        # Persistent 5xx after all retries — backend is up but broken; a rate
+        # limit that outlasted the waits (ai_backends.RATE_WAITS). Neither is
+        # the job's fault: the pipeline pauses (services.py).
         raise AIConnectionError(
-            f"KI-Backend liefert dauerhaft HTTP {resp.status_code} nach {max_retries + 1} Versuchen — {resp.text[:200]}"
+            f"KI-Backend liefert dauerhaft HTTP {resp.status_code} nach {attempts} Versuchen — {resp.text[:200]}"
         )
     if resp.status_code != 200:
         # 4xx — backend rejects our request, probably config/payload issue.
@@ -427,7 +397,14 @@ Use this information together with the image content for your classification."""
         raise AIResponseError(f"KI-API Fehler: HTTP {resp.status_code} — {resp.text[:200]}")
 
     response_data = resp.json()
-    content = response_data["choices"][0]["message"]["content"]
+    choice = response_data["choices"][0]
+    content = choice["message"].get("content") or ""
+    if not content.strip():
+        # A reasoning model can spend every token on thinking (measured:
+        # Qwen3.8-27B, finish_reason "length", content empty) — the job's
+        # error, with the reason in words instead of a crash on None.
+        raise AIResponseError(f"Modell {model} lieferte keinen Text (finish_reason={choice.get('finish_reason')}) — "
+                              "ein Modell, das erst nachdenkt, braucht mehr als max_tokens; ein anderes Modell wählen")
 
     # Parse JSON from response (handle markdown code blocks)
     content = content.strip()

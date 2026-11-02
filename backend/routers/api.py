@@ -89,7 +89,18 @@ async def _bulk_reset_errors_in_background(job_ids: list[int]):
 # Only ONE cleanup task may run at a time. UI polls /api/jobs/cleanup-status
 # while a task is running and renders a progress bar. The other cleanup
 # buttons are disabled in the UI while `running=True`.
-_cleanup_progress: dict = {
+class _Progress(dict):
+    """The running task's progress; notes when its count or phase last moved
+    (``moved_at``) — a task that is slow looks different from one that hangs."""
+
+    def __setitem__(self, key, value):
+        if key in ("current", "total", "phase") and self.get(key) != value:
+            from datetime import datetime
+            super().__setitem__("moved_at", datetime.now().isoformat(timespec="seconds"))
+        super().__setitem__(key, value)
+
+
+_cleanup_progress: dict = _Progress({
     "running": False,
     "task": None,        # "orphans" | "stale_errors" | "stuck_duplicates" | "dup_errors" | Werkzeuge tasks
     "current": 0,
@@ -100,17 +111,19 @@ _cleanup_progress: dict = {
     "done": False,
     "error": None,
     "started_at": None,
-}
+    "moved_at": None,
+})
 
 
 def _cleanup_reset(task_name: str):
     global _cleanup_progress
     from datetime import datetime
-    _cleanup_progress = {
+    now = datetime.now().isoformat(timespec="seconds")
+    _cleanup_progress = _Progress({
         "running": True, "task": task_name, "current": 0, "total": 0,
         "phase": "starting", "phase_params": {}, "result": None, "done": False, "error": None,
-        "started_at": datetime.now().isoformat(timespec="seconds"),
-    }
+        "started_at": now, "moved_at": now,
+    })
 
 
 def _cleanup_phase(phase: str, **params):
@@ -120,13 +133,58 @@ def _cleanup_phase(phase: str, **params):
     _cleanup_progress["phase_params"] = params
 
 
-def _cleanup_finish(result: dict | None = None, error: str | None = None):
+# Entries kept per list of a stored result (a merge preview has well over a
+# thousand proposals; the orphan scan names every job it marked).
+RESULT_ENTRIES = 2000
+
+
+def _bounded(value):
+    """The result as stored: every list cut to RESULT_ENTRIES, its full
+    length beside it as "<name>_total"."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if isinstance(v, list) and len(v) > RESULT_ENTRIES:
+                out[f"{k}_total"] = len(v)
+                v = v[:RESULT_ENTRIES]
+            out[k] = _bounded(v)
+        return out
+    if isinstance(value, list):
+        return [_bounded(v) for v in value]
+    return value
+
+
+async def _cleanup_finish(result: dict | None = None, error: str | None = None):
     _cleanup_progress["running"] = False
     _cleanup_progress["done"] = True
     if result is not None:
         _cleanup_progress["result"] = result
     if error is not None:
         _cleanup_progress["error"] = error
+    await _store_result(dict(_cleanup_progress))
+
+
+async def _store_result(progress: dict):
+    """Keep the task's last result (#57): one row per task and mode, read
+    by the diagnostics API, kept across a restart. Never fails the task."""
+    from datetime import datetime
+    from models import MaintenanceResult
+    task = progress.get("task") or "unknown"
+    result = progress.get("result")
+    mode = result.get("mode") if isinstance(result, dict) else None
+    try:
+        started = datetime.fromisoformat(progress["started_at"]) if progress.get("started_at") else None
+        async with async_session() as session:
+            await session.merge(MaintenanceResult(
+                key=f"{task}:{mode}" if mode else task, task=task, started_at=started,
+                finished_at=datetime.now(), error=progress.get("error"),
+                result=_bounded(result) if result is not None else None))
+            await session.commit()
+    except Exception as exc:
+        try:
+            await log_warning("api", f"Ergebnis von „{task}“ nicht gespeichert", f"{type(exc).__name__}: {exc}")
+        except Exception:
+            pass
 
 
 @router.get("/jobs/cleanup-status")
@@ -227,6 +285,12 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
     total_orphaned = 0
     total_immich_skipped = 0
     total_storage = 0
+    # What the marked jobs were, so the result says why (#57): by reason,
+    # by previous status, by kind of target, and their keys.
+    by_reason: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    by_target: dict[str, int] = {}
+    marked: list[str] = []
     # A drive that is not mounted makes every file on it look gone: those
     # jobs are skipped, never orphaned (the infrastructure is no job's fault).
     drives = storage.Checker()
@@ -283,21 +347,28 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
             if reason == _ORPHAN_SKIP:
                 total_immich_skipped += 1
             elif reason:
-                orphan_ids.append((row.id, row.status, reason))
+                orphan_ids.append((row, reason))
 
         # Mark this batch as orphan — only rows still in the state we judged
         if orphan_ids:
             async with async_session() as session:
-                for jid, prev_status, reason in orphan_ids:
+                for row, reason in orphan_ids:
                     res = await session.execute(
                         sql_update(Job)
-                        .where(Job.id == jid, Job.status == prev_status)
+                        .where(Job.id == row.id, Job.status == row.status)
                         .values(
                             status="orphan",
-                            error_message=f"Auto-orphaned from {prev_status} ({reason}) at {datetime.now().isoformat(timespec='seconds')}",
+                            error_message=f"Auto-orphaned from {row.status} ({reason}) at {datetime.now().isoformat(timespec='seconds')}",
                         )
                     )
-                    total_orphaned += res.rowcount or 0
+                    if res.rowcount:
+                        total_orphaned += 1
+                        target = ("immich" if (row.target_path or "").startswith("immich:")
+                                  else "local" if row.target_path else "none")
+                        by_reason[reason] = by_reason.get(reason, 0) + 1
+                        by_status[row.status] = by_status.get(row.status, 0) + 1
+                        by_target[target] = by_target.get(target, 0) + 1
+                        marked.append(row.debug_key)
                 await session.commit()
 
         _cleanup_progress["current"] = total_checked
@@ -314,17 +385,22 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
             "api",
             f"Orphan-Cleanup done: {total_orphaned} jobs marked orphan",
             f"Checked {total_checked}, immich skipped {total_immich_skipped}, "
-            f"Laufwerk fehlt (übersprungen) {total_storage}" + (f": {missing}" if missing else ""),
+            f"Laufwerk fehlt (übersprungen) {total_storage}" + (f": {missing}" if missing else "")
+            + f"; Grund: {by_reason}; vorher: {by_status}; Ziel: {by_target}",
         )
     except Exception:
         pass
 
-    _cleanup_finish(result={
+    await _cleanup_finish(result={
         "checked": total_checked,
         "orphaned": total_orphaned,
         "immich_skipped": total_immich_skipped,
         "storage_skipped": total_storage,
         "storage": missing,
+        "by_reason": by_reason,
+        "by_status": by_status,
+        "by_target": by_target,
+        "marked": marked,
     })
 
 
@@ -677,7 +753,7 @@ async def _run_cleanup_stale_errors():
                   f"{len(history)}, ohne Hash (nie gelöscht): {no_hash}")
         await log_info("api", f"Stale-Error-Cleanup: {deleted} veraltete Fehler-Jobs gelöscht", detail)
 
-        _cleanup_finish(result={"deleted": deleted, "skipped": skipped, "candidates": len(rows),
+        await _cleanup_finish(result={"deleted": deleted, "skipped": skipped, "candidates": len(rows),
                                 "kept_history": len(history), "no_hash": no_hash})
     except Exception as exc:
         import traceback
@@ -686,7 +762,7 @@ async def _run_cleanup_stale_errors():
                               f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
         except Exception:
             pass
-        _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
+        await _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
 
 
 @router.post("/jobs/cleanup-stale-errors")
@@ -810,7 +886,7 @@ async def _run_cleanup_stuck_duplicate_winners():
         log = log_warning if skipped else log_info
         await log("api", f"Stuck-Duplicate-Winner-Cleanup: {total} Jobs bereinigt", detail)
 
-        _cleanup_finish(result={
+        await _cleanup_finish(result={
             "requeued": requeued, "marked_done": marked_done,
             "skipped": skipped, "raced": raced, "total": total,
         })
@@ -821,7 +897,7 @@ async def _run_cleanup_stuck_duplicate_winners():
                               f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
         except Exception:
             pass
-        _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
+        await _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
 
 
 @router.post("/jobs/cleanup-stuck-duplicate-winners")
@@ -1001,7 +1077,7 @@ async def _run_cleanup_dup_errors(mode: str, job_ids: list[int] | None):
                   **{b: items[:DUP_ERRORS_LIST_MAX] for b, items in buckets.items()}}
         if mode == "apply":
             result.update(deleted=len(deleted), deleted_jobs=deleted[:DUP_ERRORS_LIST_MAX], changed=changed)
-        _cleanup_finish(result=result)
+        await _cleanup_finish(result=result)
     except Exception as exc:
         import traceback
         try:
@@ -1009,7 +1085,7 @@ async def _run_cleanup_dup_errors(mode: str, job_ids: list[int] | None):
                               f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
         except Exception:
             pass
-        _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
+        await _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
 
 
 @router.post("/jobs/cleanup-duplicate-errors")
@@ -1435,7 +1511,7 @@ async def _run_delete_jobs(ids: list[int], scope: dict):
                   + (f" — {missing}" if missing else ""))
         log = log_warning if counts["storage"] or counts["files_kept"] else log_info
         await log("api", f"Auswahl löschen beendet: {counts['deleted']} von {len(ids)} Jobs gelöscht", detail)
-        _cleanup_finish(result={**counts, "total": len(ids), "storage_detail": missing})
+        await _cleanup_finish(result={**counts, "total": len(ids), "storage_detail": missing})
     except Exception as exc:
         import traceback
         try:
@@ -1443,7 +1519,7 @@ async def _run_delete_jobs(ids: list[int], scope: dict):
                               f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
         except Exception:
             pass
-        _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
+        await _cleanup_finish(error=f"{type(exc).__name__}: {exc}")
 
 
 async def _selection(request: Request):

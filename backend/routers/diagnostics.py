@@ -20,10 +20,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, func
 
+from ai_backends import auth_headers, set_aside, stored_key
 from config import config_manager
 from database import async_session
 from models import (
-    Config, ImmichUser, InboxDirectory, Job, LibraryCategory, ProcessingSet, SortingRule, SystemLog,
+    Config, ImmichUser, InboxDirectory, Job, LibraryCategory, MaintenanceResult, ProcessingSet, SortingRule,
+    SystemLog,
 )
 from storage import MARKED_KEY, MARKER
 from version import VERSION, VERSION_DATE
@@ -100,16 +102,17 @@ async def _secret_state(key: str) -> str:
         return "undecryptable"
 
 
-async def _probe(url: str) -> dict:
+async def _probe(url: str, headers: dict | None = None) -> dict:
     """Time a trivial GET. Slow answers are the signal — a backend that accepts
     the connection and then stalls looks identical to a healthy one in a plain
-    up/down check."""
+    up/down check. `headers` carry an AI backend's key; it goes to the backend
+    only, never into the report."""
     if not url:
         return {"configured": False}
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(url)
+            resp = await client.get(url, headers=headers or {})
         return {
             "configured": True,
             "status": resp.status_code,
@@ -191,6 +194,49 @@ async def diagnostics(request: Request):
                 log_query.order_by(SystemLog.id.desc()).limit(log_limit)
             )).all()
         ]
+
+        # The last results of a maintenance task or tool (#57): every mode
+        # of it, newest first. Tag names and paths are personal data — they
+        # go to the token holder only.
+        task_results = None
+        task_name = (request.query_params.get("task") or "").strip()
+        if task_name:
+            task_results = [
+                {"key": r.key, "started": str(r.started_at)[:19] if r.started_at else None,
+                 "finished": str(r.finished_at)[:19] if r.finished_at else None,
+                 "error": r.error, "result": r.result}
+                for r in (await session.execute(
+                    select(MaintenanceResult).where(MaintenanceResult.task == task_name)
+                    .order_by(MaintenanceResult.finished_at.desc())
+                )).scalars().all()
+            ]
+
+        # Jobs of one status, changed since a date — e.g. those the orphan
+        # scan marked today (?status=orphan&since=2026-11-02).
+        job_list = None
+        list_status = (request.query_params.get("status") or "").strip()
+        if list_status:
+            list_query = select(Job.debug_key, Job.status, Job.error_message, Job.target_path, Job.set_id,
+                                Job.created_at, Job.updated_at).where(Job.status == list_status)
+            since = (request.query_params.get("since") or "").strip()
+            if since:
+                try:
+                    from datetime import datetime
+                    list_query = list_query.where(Job.updated_at >= datetime.fromisoformat(since))
+                except ValueError:
+                    return JSONResponse({"detail": "since: ISO date expected"}, status_code=400)
+            list_limit = _int_param(request, "limit", 200, 10000)
+            job_list = {
+                "count": (await session.execute(
+                    select(func.count()).select_from(list_query.subquery()))).scalar(),
+                "jobs": [
+                    {"key": k, "status": st, "message": (m or "")[:300],
+                     "target": "immich" if (t or "").startswith("immich:") else "local" if t else "none",
+                     "set_id": sid, "created": str(c)[:19], "updated": str(u)[:19] if u else None}
+                    for k, st, m, t, sid, c, u in (await session.execute(
+                        list_query.order_by(Job.updated_at.desc()).limit(list_limit))).all()
+                ],
+            }
 
         job_detail = None
         if job_key:
@@ -350,11 +396,15 @@ async def diagnostics(request: Request):
         "ai": {
             "model": await config_manager.get("ai.model", ""),
             "slots": await config_manager.get("ai.slots", 1),
-            "probe": await _probe(f"{ai_url.rstrip('/')}/models" if ai_url else ""),
+            "probe": await _probe(f"{ai_url.rstrip('/')}/models" if ai_url else "",
+                                  auth_headers(await stored_key("ai"))),
             "model_2": await config_manager.get("ai2.model", ""),
-            "probe_2": await _probe(f"{ai2_url.rstrip('/')}/models" if ai2_url else ""),
+            "probe_2": await _probe(f"{ai2_url.rstrip('/')}/models" if ai2_url else "",
+                                    auth_headers(await stored_key("ai2"))),
             "api_key": await _secret_state("ai.api_key"),
             "api_key_2": await _secret_state("ai2.api_key"),
+            # Backends the failover set aside (ai_backends): no requests until ready again.
+            "set_aside": set_aside(),
         },
         "smtp": {
             "server": await config_manager.get("smtp.server", ""),
@@ -367,4 +417,16 @@ async def diagnostics(request: Request):
         "inboxes": inboxes,
         "recent_logs": recent_logs,
         "job": job_detail,
+        # The maintenance task or tool running now, or the last one (#57);
+        # its full result is behind ?task=<name>.
+        "maintenance": _maintenance(),
+        "task_results": task_results,
+        "job_list": job_list,
     })
+
+
+def _maintenance() -> dict:
+    from routers import api
+    progress = api._cleanup_progress
+    return {k: progress.get(k) for k in ("running", "task", "phase", "phase_params", "current", "total",
+                                         "started_at", "moved_at", "done", "error")}

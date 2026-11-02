@@ -163,6 +163,13 @@
                 </span>
                 {{ switch('merge_translate', True, 'mergeInvalidate()') }}
             </label>
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.tools.merge_again }}</span>
+                    <span class="ui-option-desc">{{ t.tools.merge_again_desc | replace('{n}', merge_kept_count | string) }}</span>
+                </span>
+                {{ switch('merge_again', False, 'mergeInvalidate()') }}
+            </label>
         </div>
     </div>
     <div class="ui-card-foot tools-actions">
@@ -737,6 +744,7 @@ function mergeRestore(res) {
     document.getElementById('merge_immich').checked = !!res.immich_enabled;
     document.getElementById('merge_ai').checked = !!res.ai_enabled;
     document.getElementById('merge_translate').checked = !!res.translate_enabled;
+    document.getElementById('merge_again').checked = !!res.again;
 }
 function mergeBusy(on) {
     document.getElementById('btn_merge_scan').disabled = on;
@@ -756,6 +764,7 @@ function mergeRun(mode) {
     if (document.getElementById('merge_immich').checked) { body.append('immich', '1'); }
     if (document.getElementById('merge_ai').checked) { body.append('ai', '1'); }
     if (document.getElementById('merge_translate').checked) { body.append('translate', '1'); }
+    if (document.getElementById('merge_again').checked) { body.append('again', '1'); }
     if (mode === 'apply') {
         // The ticked proposals; the unticked ones the server remembers.
         var ids = [];
@@ -819,7 +828,7 @@ function mergeWhy(it) {
     if (it.kind === 'umlaut') {
         bits.push('<span class="ui-badge is-warning">' + esc(L.merge_kind_umlaut) + '</span>');
         why = it.verdict === 'same' ? L.merge_ai_same : it.verdict === 'different' ? L.merge_ai_different
-            : (MERGE.ai_enabled && !it.kept_apart ? L.merge_ai_unknown : L.merge_ai_off);
+            : (MERGE.ai_enabled && (MERGE.again || !it.kept_apart) ? L.merge_ai_unknown : L.merge_ai_off);
     } else if (it.kind === 'repair') {
         why = it.evidence === 'context' ? L.merge_evidence_context : L.merge_evidence_ai;
     } else if (it.kind === 'translate') {
