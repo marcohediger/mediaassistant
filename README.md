@@ -216,39 +216,55 @@ Two switches decide where the removal happens, plus a sub-switch for Immich:
 ### Merging spelling variants
 
 Finds tags that mean the same thing but were written differently, and merges
-them onto one spelling:
+them onto one spelling. Every proposal has a tick box: you decide, and the tool
+remembers a proposal you leave unticked, so it comes back unticked next time.
 
 ```
-Strand | strand | STRAND        →  Strand
-Zürich | Zurich | Zuerich       →  Zürich
-Europapark | Europa Park        →  Europa Park
-Fußspuren | Fussspuren          →  Fußspuren
+Strand | strand | STRAND        →  Strand          same letters: ticked
+Fußspuren | Fussspuren          →  Fußspuren       same letters: ticked
+Gluhwein | Glühwein             →  Glühwein        umlaut dropped: the AI decides
+Bar | Bär                       →  stays apart     umlaut dropped: the AI decides
 ```
 
-The spelling with the most photos wins; on a tie, the longer one — that is the
-one that still has its umlauts and spacing. The others are moved onto it and
-only then deleted, so no photo loses a tag.
+**Same letters** — case, spacing, hyphens, `ä`/`ae`, `ß`/`ss`, accents of other
+languages — are proposed ticked. The spelling with the most photos wins; on a
+tie, the longer one. The others are moved onto it and only then deleted, so no
+photo loses a tag.
 
-Only names that are character-for-character the same word are merged. There is
-no fuzzy matching: `Haus` and `Maus` stay apart, and so do `Hund` and `Hunde`.
+**A dropped umlaut** can be the same word or another one (`Bar` is not `Bär`).
+The AI gets both words and the description and place of three photos of each,
+and answers "same" or "different" with a reason. Only "same" is ticked, and
+then the spelling with the umlaut is the target.
 
-**Broken umlauts are repaired.** A tag like `?berschwemmungen` is
-`Überschwemmungen` whose Ü a broken encoding destroyed. Which letter it was
-cannot be read off the string, so every plausible one is tried and only a
-spelling that actually exists can match:
+**Broken characters are repaired.** A tag like `H?hlenpfad` lost its ö to a
+broken encoding. With an intact spelling in the library, it joins it. Without
+one, the candidates are searched in the descriptions and places of its photos
+(`M?nchen` → `München` when the photos were taken in München), and only then is the
+AI asked. Its answer must fit the pattern, and every `?` must become a special
+letter: a broken encoding never eats a plain `o`, so `Hohlenpfad` is rejected.
+A `?` that belongs there (`WasIstDas?`) is recognised and left alone.
 
-```
-?berschwemmungen  →  Überschwemmungen
-K?se              →  Käse
-```
+**English tags** get their German word from the AI, checked with a second,
+narrower question. A proposal is ticked only if the German tag exists already
+and means exactly the same (`Green Background` → `Grüner Hintergrund`); one
+that would create a new tag waits for you.
 
-A damaged spelling never wins, even with more photos. Where it fits several
-words — `M?ller` fits both `Müller` and `Moller` — size decides, not the
-alphabet. With no partner at all, the tag is left alone rather than guessed.
+After merging in Immich, the tool waits until Immich has processed its
+sidecars and looks again: Immich 3.x sometimes puts an old spelling back or
+drops a new assignment right after a tag change, and those are repaired.
 
 > **Run both halves.** Merging in Immich alone does not hold: the old spelling
 > stays in the XMP sidecar and Immich re-creates it as a new tag on the next
 > re-index. Both switches are on by default for that reason.
+
+### Deleting empty tags
+
+Lists the tags in Immich no photo carries any more (photos in the trash and
+hidden ones count), and deletes them after a preview. By default only tags
+MediaAssistant wrote itself; foreign ones on request — photos in Immich's
+locked folder are invisible to the API, so a tag only they carry looks empty.
+A parent goes only after its children, tags younger than an hour are left
+alone, and each tag is counted again right before it is deleted.
 
 ## Diagnostics API
 

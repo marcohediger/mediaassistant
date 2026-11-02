@@ -55,6 +55,7 @@ MediaAssistant/
 │   ├── resources.py            # Betriebsmittel-Grenzen (ai, geo, immich, io, cpu), max_jobs
 │   ├── services.py             # Dienste der Pipeline (KI, Geocoding, Immich): Prüfung, Auto-Pause
 │   ├── storage.py              # Laufwerke der Sets (Eingänge, Basis-Pfade): Markierung .mediaassistant, Prüfung
+│   ├── tag_spelling.py         # Schreibweisen: Gruppen, Umlaut-Fälle, kaputte Zeichen, Englisch → Deutsch (KI)
 │   ├── folder_path.py          # Ordnerstruktur → Tags/Alben je nach Set-Optionen
 │   ├── safe_file.py            # safe_move(): copy → verify hash → delete (nur noch Baustein von fileops)
 │   ├── ai_backends.py          # Loadbalancer für mehrere OpenAI-kompat. Endpunkte
@@ -80,7 +81,7 @@ MediaAssistant/
 │   │   ├── review.py           # "Unknown" review queue
 │   │   ├── processing_sets.py  # JSON-API für Set-Liste und Set-Editor (Popup)
 │   │   ├── reruns.py           # /api/reruns: Module, Vorschau, Auftrag, Fortschritt, Abbrechen
-│   │   ├── tools.py            # Register "Werkzeuge": Tag-Aufräumen + Schreibweisen
+│   │   ├── tools.py            # Register "Werkzeuge": Tag-Aufräumen, Schreibweisen, leere Tags
 │   │   ├── diagnostics.py      # Nur-lesende Diagnose-API (Token aus Einstellungen)
 │   │   └── auth_oidc.py
 │   ├── templates/              # Jinja2 HTML (_icons.html = SVG-Sprite, _status.html = Status-Badge)
@@ -298,6 +299,7 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_executor.py` | Ausführung nach Abhängigkeiten: Register als einzige Quelle, IA-03 als Seiten-Task, Betriebsmittel-Grenzen, Stopp-Regeln | `docker exec mediaassistant-dev python /app/test_executor.py` |
 | `backend/test_immich_dedup.py` | Duplikat-Auflösung mit echtem Immich: geteiltes Asset bei Keep, Übertragung, Review-Fälle, Altbestand ohne Hash (D12), Gruppen-Art nur aus den Duplikat-Beziehungen + „Automatisch bereinigen" (D13); Teile wählbar | `docker exec mediaassistant-dev python /app/test_immich_dedup.py [D6 … D13]` |
 | `backend/test_ia04_convert.py` | IA-04 ohne ImageMagick: GIF (erstes Bild) und HEIC-Ausweichweg über Pillow, mit fehlschlagendem `heif-convert` im `PATH` | `docker exec mediaassistant-dev python /app/test_ia04_convert.py` |
+| `backend/test_tag_merge.py` | Werkzeuge „Schreibweisen zusammenführen" (`tag_spelling.py`) und „Leere Tags löschen" gegen echtes Immich und die echte KI: gleiche Buchstaben, Umlaut-Fälle (Bar/Bär getrennt, Gluhwein/Glühwein zusammen), Reparatur aus Beschreibung und durch die KI, Englisch → Deutsch, Häkchen und gemerkte Ausnahmen, Nachkontrolle in Immich, leere Tags samt Altersgrenze und Nachzählen; Teile wählbar | `docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E]` |
 | `backend/test_storage.py` | Fehlendes Laufwerk (`storage.py`): Regeln der Markierung, `fileops` verweigert vor dem Intent, Prüfen markiert nichts als fehlend, Abgleich lässt offen, Watchdog, Parken aus „Review", Retry, Scanner, Pause von Hand, Knopf „neu markieren"; Teile wählbar | `docker exec mediaassistant-dev python /app/test_storage.py [S1 … S10]` |
 
 ### Pflicht-Vorstufe: startet die App überhaupt?

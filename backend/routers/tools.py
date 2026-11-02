@@ -9,9 +9,7 @@ survive in the library and come back on any re-index.
 
 import asyncio
 import json
-import itertools
 import httpx
-import unicodedata
 import os
 import re
 import subprocess
@@ -19,6 +17,7 @@ import subprocess
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+import tag_spelling as ts
 from sets import library_roots
 from config import config_manager
 from system_logger import log_info, log_warning
@@ -31,7 +30,6 @@ router = APIRouter(prefix="/tools")
 SCAN_TIMEOUT_S = 1800
 REMOVE_CHUNK = 200
 MAX_SAMPLE = 25
-MAX_MERGE_SHOWN = 200
 
 # The result of the last preview. Removal works on exactly this set — never on
 # a fresh scan — so what gets deleted is what was shown, even if the pattern
@@ -288,148 +286,11 @@ async def _scan_immich(rx: re.Pattern, per_asset: bool) -> dict:
     }
 
 
-# --- Schreibweisen zusammenführen -------------------------------------------
+# --- Schreibweisen zusammenführen (tag_spelling.py) --------------------------
 
+# The last preview: its proposals (items) and what the merge needs to carry
+# out the ticked ones. A merge never works on a fresh scan.
 _last_merge: dict = {}
-
-
-def _merge_keys(name: str) -> set[str]:
-    """Normalised forms of a tag name, for grouping spelling variants.
-
-    Two keys per name, because German offers two ways to write an umlaut:
-    "Zürich" yields both `zurich` (diacritic dropped) and `zuerich` (umlaut
-    expanded), so it groups with "Zurich" as well as with "Zuerich". Letters
-    of any script survive — only case, diacritics, spacing and punctuation are
-    levelled, so Greek or Arabic names keep their identity instead of
-    collapsing into one empty key.
-    """
-    base = name.strip().lower()
-    expanded = base
-    for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
-        expanded = expanded.replace(a, b)
-
-    def norm(value: str) -> str:
-        value = unicodedata.normalize("NFKD", value)
-        value = "".join(c for c in value if not unicodedata.combining(c))
-        return "".join(c for c in value if c.isalnum())
-
-    return {k for k in (norm(base), norm(expanded)) if k}
-
-
-def _group_variants(tags: list[dict]) -> list[list[dict]]:
-    """Group tags that share any normalised form (transitively)."""
-    parent: dict[int, int] = {}
-
-    def find(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    def union(a: int, b: int) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    by_key: dict[str, int] = {}
-    for i, t in enumerate(tags):
-        parent[i] = i
-        for k in _merge_keys(_tag_name(t)):
-            if k in by_key:
-                union(by_key[k], i)
-            else:
-                by_key[k] = i
-
-    buckets: dict[int, list[dict]] = {}
-    for i, t in enumerate(tags):
-        buckets.setdefault(find(i), []).append(t)
-    return [g for g in buckets.values() if len(g) > 1]
-
-
-_DAMAGED_CHARS = ("?", "\ufffd")
-
-
-def _is_damaged(name: str) -> bool:
-    return any(ch in name for ch in _DAMAGED_CHARS)
-
-
-# What a destroyed character can stand for. `ss` and `ß` are both here and
-# both needed: `Au?en` is `Außen`, whose two normalised forms are `außen`
-# and `aussen` — a single `s` matches neither of them.
-_REPAIRS = ("a", "o", "u", "e", "s", "ss", "ß")
-
-
-def _damaged_keys(name: str) -> set[str]:
-    """Keys for a name whose special characters a broken encoding destroyed.
-
-    `?berschwemmungen` is `Überschwemmungen` with the Ü lost, `Au?en` is
-    `Außen` with the ß lost. Which character it was cannot be read off the
-    string, so every plausible one is tried; a wrong guess simply finds no
-    partner and the name stays untouched.
-    """
-    base = name.strip().lower()
-    slots = [i for i, ch in enumerate(base) if ch in _DAMAGED_CHARS]
-    if not slots or len(slots) > 2:
-        return set()
-    keys: set[str] = set()
-    for combo in itertools.product(_REPAIRS, repeat=len(slots)):
-        chars = list(base)
-        for pos, ch in zip(slots, combo):
-            chars[pos] = ch
-        keys |= _merge_keys("".join(chars))
-    return keys
-
-
-def _build_groups(names: list[dict]) -> tuple[list[list[dict]], list[tuple[dict, list[dict]]]]:
-    """Spelling groups, with damaged names hung on afterwards.
-
-    A damaged name must never bridge two healthy ones: `M?ller` matches both
-    `Müller` and `Moller`, and merging those two would be wrong. So the strong
-    variants are grouped first and a damaged name is only ever attached to an
-    existing group. Where it fits more than one, it is handed back unresolved
-    for the caller to decide by size instead of by guesswork.
-    """
-    groups = _group_variants(names)
-    index: dict[str, int] = {}
-    for gi, g in enumerate(groups):
-        for t in g:
-            index[_tag_name(t)] = gi
-    by_key: dict[str, list[dict]] = {}
-    for t in names:
-        if _is_damaged(_tag_name(t)):
-            continue
-        for k in _merge_keys(_tag_name(t)):
-            by_key.setdefault(k, []).append(t)
-
-    pending: list[tuple[dict, list[dict]]] = []
-    for t in names:
-        name = _tag_name(t)
-        if not _is_damaged(name) or name in index:
-            continue
-        cands = {_tag_name(c): c for k in _damaged_keys(name) for c in by_key.get(k, [])}
-        if not cands:
-            continue
-        targets = list(cands.values())
-        # Candidates that already sit in one group are not a real choice —
-        # `?berschwemmungen` fitting both `Überschwemmungen` and its lowercase
-        # twin means one destination, not two.
-        where = {index.get(_tag_name(c), f"einzeln:{_tag_name(c)}") for c in targets}
-        if len(where) == 1:
-            _attach(groups, index, targets[0], t)
-        else:
-            pending.append((t, targets))
-    return groups, pending
-
-
-def _attach(groups: list[list[dict]], index: dict[str, int], target: dict, damaged: dict) -> None:
-    gi = index.get(_tag_name(target))
-    if gi is None:
-        groups.append([target, damaged])
-        gi = len(groups) - 1
-        index[_tag_name(target)] = gi
-    else:
-        groups[gi].append(damaged)
-    index[_tag_name(damaged)] = gi
 
 
 async def _scan(pattern: str, with_sidecars: bool, with_immich: bool, per_asset: bool, also_delete: bool):
@@ -667,15 +528,43 @@ async def _retry_once(label: str, factory):
         return await factory()
 
 
-async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
-    """Preview: which spellings mean the same thing, and which one survives.
+async def _contexts(names: set[str], members: dict, sidecar_files: dict) -> dict[str, list[str]]:
+    """What the photos of each tag show: description and place of a few of
+    them, from Immich and from the sidecars."""
+    out: dict[str, list[str]] = {n: [] for n in names}
+    with_id = [n for n in names if (members.get(n) or {}).get("id")]
+    sem = asyncio.Semaphore(8)
+
+    async def read(name):
+        async with sem:
+            return await ts.immich_context(members[name]["id"])
+    results = await asyncio.gather(*(read(n) for n in with_id), return_exceptions=True)
+    for n, res in zip(with_id, results):
+        if isinstance(res, list):
+            out[n].extend(res)
+    files = {n: [f for f in sidecar_files.get(n, []) if not _is_part_file(f)][:ts.CONTEXT_PHOTOS]
+             for n in names if len(out[n]) < ts.CONTEXT_PHOTOS}
+    read = await asyncio.to_thread(ts.sidecar_context, sorted({f for fs in files.values() for f in fs}))
+    for n, fs in files.items():
+        out[n].extend(read[f] for f in fs if read.get(f))
+    return {n: [c for c in dict.fromkeys(v) if c][:ts.CONTEXT_PHOTOS] for n, v in out.items()}
+
+
+async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, translate: bool):
+    """Preview: which spellings mean the same, which damaged names can be
+    repaired, which English tags have a German word (tag_spelling.py).
 
     Both stores are searched, because a spelling that lives on only in an XMP
     sidecar is exactly what re-creates a tag in Immich after it was deleted —
-    measured on a running instance, sidecar in hand.
+    measured on a running instance, sidecar in hand. Every proposal is one
+    item, name → into, that the user can untick; the merge carries out the
+    ticked ones.
     """
     from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
     from immich_client import list_tags, count_tag_assets
+
+    def progress(done, total):
+        _cleanup_progress["current"], _cleanup_progress["total"] = done, total
     try:
         library = await library_roots()
         # Only flat keywords: a spelling merge deletes the losing tag, and in a
@@ -712,104 +601,286 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, *_ignored):
 
         universe = [{"name": n, "id": (immich_tags.get(n) or {}).get("id")}
                     for n in sorted(set(sidecar_files) | set(immich_tags)) if n.strip()]
-        groups, pending = _build_groups(universe)
-
+        members = {e["name"]: e for e in universe}
+        grouping = ts.Grouping(universe)
         counts: dict[str, int] = {}
 
-        async def assets_of(entry: dict) -> int:
-            name = entry["name"]
+        async def assets_of(name: str) -> int:
             if name not in counts:
+                tag_id = (members.get(name) or {}).get("id")
                 try:
-                    counts[name] = await count_tag_assets(entry["id"]) if entry.get("id") else 0
+                    counts[name] = await count_tag_assets(tag_id) if tag_id else 0
                 except Exception:
                     counts[name] = 0
             return counts[name]
 
+        def usage(name: str) -> int:
+            return counts.get(name, 0) + len(sidecar_files.get(name, []))
+
         # A damaged name that fits several spellings goes to the biggest one —
         # a decision by size beats a decision by alphabet.
-        for damaged, targets in pending:
+        for damaged, targets in grouping.pending:
             for t in targets:
-                await assets_of(t)
-            best = max(targets, key=lambda t: (counts[t["name"]], len(t["name"])))
-            index = {_tag_name(m): gi for gi, g in enumerate(groups) for m in g}
-            _attach(groups, index, best, damaged)
+                await assets_of(t["name"])
+            grouping.attach(damaged, max(targets, key=lambda t: (usage(t["name"]), len(t["name"]))))
 
+        families = grouping.families()
         _cleanup_phase("counting_assets")
-        _cleanup_progress["total"] = sum(len(g) for g in groups)
+        progress(0, sum(len(c) for f in families for c in f))
         done = 0
-        plan = []
-        for g in groups:
-            if _cancelled():
-                break
-            members = []
-            for entry in g:
-                name = entry["name"]
-                files = sidecar_files.get(name, [])
-                members.append({"id": entry.get("id"), "name": name,
-                                "assets": await assets_of(entry), "files": len(files)})
-                done += 1
-                _cleanup_progress["current"] = done
-            # A damaged spelling can never win. Otherwise the most-used one
-            # wins, and on a tie the longer name — that is the one that still
-            # carries its umlauts and its spacing.
-            members.sort(key=lambda m: (_is_damaged(m["name"]), -(m["assets"] + m["files"]),
-                                        -len(m["name"]), m["name"]))
-            plan.append({"winner": members[0], "losers": members[1:]})
+        for family in families:
+            for cluster in family:
+                for m in cluster:
+                    if _cancelled():
+                        break
+                    await assets_of(m["name"])
+                    done += 1
+                    progress(done, _cleanup_progress["total"])
 
-        plan.sort(key=lambda g: -sum(m["assets"] + m["files"] for m in g["losers"]))
+        keep = await ts.kept_apart()
+        items: list[dict] = []
 
-        # Damaged names that found no healthy partner are left untouched on
-        # purpose — but silently leaving them out means the user never learns
-        # they are still there. So they are reported.
-        grouped = {m["name"] for g in plan for m in [g["winner"]] + g["losers"]}
-        orphans = sorted(e["name"] for e in universe
-                         if _is_damaged(e["name"]) and e["name"] not in grouped)
+        def add(name, into, kind, selected, **extra):
+            kept = (name, into) in keep
+            items.append({"id": len(items), "name": name, "into": into, "kind": kind,
+                          "selected": bool(selected) and not kept, "kept_apart": kept, **extra})
+            return items[-1]
+
+        # Families with the most to move first. A damaged spelling never wins
+        # its cluster; otherwise the most-used one, on a tie the longer name —
+        # the one that still carries its umlauts and its spacing.
+        families.sort(key=lambda f: -sum(usage(m["name"]) for c in f for m in c))
+        pairs = []
+        for fi, family in enumerate(families):
+            winners = []
+            for cluster in family:
+                cluster.sort(key=lambda m: (ts.is_damaged(m["name"]), -usage(m["name"]), -len(m["name"]), m["name"]))
+                winners.append(cluster[0]["name"])
+                for m in cluster[1:]:
+                    add(m["name"], cluster[0]["name"], "damaged" if ts.is_damaged(m["name"]) else "spelling",
+                        True, family=fi)
+            if len(family) > 1:
+                # Same words but for an umlaut: the spelling with the umlauts is
+                # the target — the one without is the degraded form.
+                target = max(winners, key=lambda n: (ts.umlauts(n),
+                                                     sum(usage(m["name"]) for m in grouping.cluster_of(n)), len(n)))
+                for w in winners:
+                    if w != target:
+                        pairs.append(add(w, target, "umlaut", False, family=fi, verdict=None, reason=""))
+
+        orphans = [o["name"] for o in grouping.orphans]
+        ask = [it for it in pairs if not it["kept_apart"]]
+        _cleanup_phase("merge_context")
+        progress(0, 0)
+        contexts = await _contexts({n for it in ask for n in (it["name"], it["into"])} | set(orphans),
+                                   members, sidecar_files)
+        repairs, unresolved = [], []
+        for name in orphans:
+            word = ts.evidence(name, contexts.get(name, []))
+            if word:
+                repairs.append(add(name, word, "repair", True, evidence="context", reason=""))
+            else:
+                unresolved.append(name)
+
+        ai_error, not_damaged = "", []
+        if use_ai and (ask or unresolved) and not _cancelled():
+            tasks = [("pair", it) for it in ask] + [("repair", n) for n in unresolved]
+
+            async def check(task):
+                kind, obj = task
+                if kind == "pair":
+                    return await ts.same_word(obj["name"], obj["into"], contexts.get(obj["name"], []),
+                                              contexts.get(obj["into"], []))
+                return await ts.ai_repair(obj, contexts.get(obj, []))
+
+            _cleanup_phase("merge_ai")
+            # One question first: an AI that is not there fails once, not per tag.
+            try:
+                first = [await check(tasks[0])]
+            except ts.AIUnavailable as exc:
+                ai_error, first = str(exc), None
+            except Exception as exc:
+                first = [exc]
+            if first is not None:
+                answers = first + await ts.run_limited(tasks[1:], check, progress=progress, cancelled=_cancelled)
+                still = []
+                for (kind, obj), answer in zip(tasks, answers):
+                    if isinstance(answer, ts.AIUnavailable):
+                        ai_error = ai_error or str(answer)
+                    if answer is None or isinstance(answer, Exception):
+                        if kind == "repair":
+                            still.append(obj)
+                        continue
+                    if kind == "pair":
+                        same, reason = answer
+                        obj["verdict"] = None if same is None else ("same" if same else "different")
+                        obj["reason"] = reason
+                        obj["selected"] = same is True
+                    else:
+                        word, reason = answer
+                        if word == obj:
+                            not_damaged.append(obj)
+                        elif word:
+                            repairs.append(add(obj, word, "repair", True, evidence="ai", reason=reason))
+                        else:
+                            still.append(obj)
+                unresolved = still
+
+        if translate and not ai_error and not _cancelled():
+            # The healthy spelling of each cluster; one with umlauts is German already.
+            winner_of = {ts.strict_key(c[0]["name"]): c[0]["name"] for c in grouping.clusters}
+            names = [c[0]["name"] for c in grouping.clusters if not ts.umlauts(c[0]["name"])
+                     and "ß" not in c[0]["name"]]
+            batches = [names[i:i + ts.TRANSLATE_BATCH] for i in range(0, len(names), ts.TRANSLATE_BATCH)]
+            proposed = {it["name"] for it in items}  # one proposal per name
+            _cleanup_phase("merge_translate")
+            found = []
+            for answer in await ts.run_limited(batches, ts.english_batch, progress=progress, cancelled=_cancelled):
+                if isinstance(answer, ts.AIUnavailable):
+                    ai_error = ai_error or str(answer)
+                if not isinstance(answer, dict):
+                    continue
+                for english, german in answer.items():
+                    if english in proposed:
+                        continue
+                    proposed.add(english)
+                    existing = winner_of.get(ts.strict_key(german))
+                    if existing and grouping.cluster_of(existing) is grouping.cluster_of(english):
+                        continue
+                    found.append((english, existing or german, bool(existing)))
+            checked = await ts.run_limited(found, lambda f: ts.check_translation(f[0], f[1]),
+                                           progress=progress, cancelled=_cancelled)
+            for (english, into, exists), answer in zip(found, checked):
+                if not isinstance(answer, tuple):
+                    continue
+                is_english, same = answer
+                if not is_english:
+                    continue  # a German name the batch took for English
+                # Ticked only into an existing tag of exactly the same meaning; the rest waits for the user.
+                add(english, into, "translate", exists and same, new=not exists, same=same)
+
+        for it in items:
+            await assets_of(it["name"])
+            if it["into"] in members:
+                await assets_of(it["into"])
+        shown = {n: {"assets": counts.get(n, 0), "files": len(sidecar_files.get(n, [])), "exists": n in members}
+                 for it in items for n in (it["name"], it["into"])}
         _last_merge.clear()
-        _last_merge.update({"groups": plan, "sidecar_files": sidecar_files, "sidecar_fields": sidecar_fields,
+        _last_merge.update({"items": items, "ids": {n: (members.get(n) or {}).get("id") for n in shown},
+                            "sidecar_files": sidecar_files, "sidecar_fields": sidecar_fields,
                             "sidecars_enabled": with_sidecars, "immich_enabled": with_immich})
         _cleanup_finish(result={
             "mode": "merge_scan",
             "cancelled": _cancelled(),
             "sidecars_enabled": with_sidecars,
             "immich_enabled": with_immich,
+            "ai_enabled": use_ai,
+            "translate_enabled": translate,
             "immich_error": immich_error,
-            "groups": plan[:MAX_MERGE_SHOWN],
-            "group_count": len(plan),
-            "moves": sum(m["assets"] for g in plan for m in g["losers"]),
-            "files": len({f for g in plan for m in g["losers"]
-                          for f in sidecar_files.get(m["name"], [])}),
-            "orphans": orphans[:MAX_SAMPLE],
-            "orphan_count": len(orphans),
+            "ai_error": ai_error,
+            "items": items,
+            "members": shown,
+            # Damaged names nobody could repair are left untouched on purpose —
+            # but silently leaving them out means the user never learns they
+            # are still there. So they are reported.
+            "orphans": sorted(unresolved),
+            "not_damaged": sorted(not_damaged),
         })
-        await log_info("tools", f"Schreibweisen: {len(plan)} Gruppen gefunden",
-                       f"{sum(len(g['losers']) for g in plan)} Schreibweisen würden zusammengeführt")
+        by_kind = {k: sum(1 for it in items if it["kind"] == k)
+                   for k in ("spelling", "damaged", "umlaut", "repair", "translate")}
+        await log_info("tools", f"Schreibweisen: {len(items)} Vorschläge",
+                       ", ".join(f"{k} {v}" for k, v in by_kind.items())
+                       + f"; ohne Lösung {len(unresolved)}" + (f"; KI: {ai_error}" if ai_error else ""))
     except Exception as e:
         _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
 
-async def _merge_apply(*_ignored):
-    """Carry out exactly the groups the preview listed.
+def _merge_targets(items: list[dict], chosen: set[int]) -> dict[str, list[str]]:
+    """target -> names merged into it, following ticked proposals to the end
+    ("BAR" → "Bar" → "Bär" goes straight to "Bär")."""
+    into = {it["name"]: it["into"] for it in items if it["id"] in chosen}
+
+    def final(name):
+        seen = set()
+        while name in into and name not in seen:
+            seen.add(name)
+            name = into[name]
+        return name
+    targets: dict[str, list[str]] = {}
+    for name in into:
+        target = final(name)
+        if target != name:
+            targets.setdefault(target, []).append(name)
+    return targets
+
+
+SETTLE_ROUNDS = 3
+
+
+async def _settle_merge(moves: list[tuple[str, str, list[str]]]) -> list[str]:
+    """Look again once Immich's queues are idle, and repair.
+
+    After a tag change Immich writes the asset's sidecar and reads it back;
+    under load it puts the old spelling back or drops the new assignment
+    (measured on 3.x — IA-08 checks its own tags the same way). `moves`:
+    (target, merged name, asset ids moved). Returns the names repaired."""
+    from immich_client import delete_tag, list_tag_assets, list_tags, tag_assets, wait_queues_idle
+    repaired: list[str] = []
+    for _round in range(SETTLE_ROUNDS):
+        await wait_queues_idle()
+        tags = {_tag_value(t): t for t in await list_tags()}
+        fixed = 0
+        for winner, name, asset_ids in moves:
+            target, back = tags.get(winner), tags.get(name)
+            if back:
+                ids = await list_tag_assets(back["id"])
+                if target and ids:
+                    await tag_assets(target["id"], ids)
+                await delete_tag(back["id"])
+                repaired.append(name)
+                fixed += 1
+            if target and asset_ids:
+                have = set(await list_tag_assets(target["id"]))
+                missing = [a for a in asset_ids if a not in have]
+                if missing:
+                    for start in range(0, len(missing), REMOVE_CHUNK):
+                        await tag_assets(target["id"], missing[start:start + REMOVE_CHUNK])
+                    repaired.append(winner)
+                    fixed += 1
+        if not fixed:
+            break
+        await log_info("tools", f"Schreibweisen: Immich hat {fixed} alte Zuordnungen zurückgesetzt, korrigiert",
+                       ", ".join(dict.fromkeys(repaired))[:300])
+    return list(dict.fromkeys(repaired))
+
+
+async def _merge_apply(chosen: set[int]):
+    """Carry out the ticked proposals of the preview; remember the unticked.
 
     Sidecars first, Immich second — the same order the removal uses, because
     the sidecar is what a re-index reads back.
     """
     from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
-    from immich_client import list_tag_assets, tag_assets, delete_tag
+    from immich_client import ensure_tag_path, list_tag_assets, tag_assets, delete_tag
     try:
-        groups = list(_last_merge.get("groups") or [])
+        items = list(_last_merge.get("items") or [])
+        ids = dict(_last_merge.get("ids") or {})
         sidecar_files = dict(_last_merge.get("sidecar_files") or {})
         sidecar_fields = dict(_last_merge.get("sidecar_fields") or {})
         do_sidecars = bool(_last_merge.get("sidecars_enabled"))
         do_immich = bool(_last_merge.get("immich_enabled"))
+        await ts.remember({(it["name"], it["into"]) for it in items if it["id"] not in chosen},
+                          {(it["name"], it["into"]) for it in items if it["id"] in chosen})
+        targets = _merge_targets(items, chosen)
         files_changed, files_failed = 0, 0
         merged, moved, failed, last_error = 0, 0, 0, ""
         failed_names: list[str] = []
+        moves: list[tuple[str, str, list[str]]] = []
+        repaired: list[str] = []
 
         if do_sidecars:
             plans = []
-            for g in groups:
-                winner = g["winner"]["name"]
-                losers = [m["name"] for m in g["losers"]]
+            for winner, losers in targets.items():
                 files = sorted({f for n in losers for f in sidecar_files.get(n, [])
                                 if f and not _is_part_file(f)})
                 if files:
@@ -847,34 +918,37 @@ async def _merge_apply(*_ignored):
                                f"fehlgeschlagen={bad_group}")
 
         if do_immich:
-            _cleanup_progress["total"] = len(groups)
+            _cleanup_progress["total"] = len(targets)
             _cleanup_progress["current"] = 0
-            for i, g in enumerate(groups, 1):
+            for i, (winner, losers) in enumerate(targets.items(), 1):
                 if _cancelled():
                     break
-                _cleanup_phase("merging_immich", name=g["winner"]["name"])
-                for loser in g["losers"]:
-                    if not loser.get("id"):
+                _cleanup_phase("merging_immich", name=winner)
+                winner_id = ids.get(winner)
+                for name in losers:
+                    loser_id = ids.get(name)
+                    if not loser_id:
                         continue
-                    name = loser["name"]
-                    winner_name = g["winner"]["name"]
                     try:
-                        ids = await _retry_once(f'„{name}“ lesen',
-                                                lambda: list_tag_assets(loser["id"]))
-                        await log_info("tools", f'Schreibweise „{name}“ wird in „{winner_name}“ zusammengeführt',
-                                       f"{len(ids)} Zuordnungen umhängen, dann Tag-ID {loser['id']} löschen")
-                        if ids and g["winner"].get("id"):
-                            for start in range(0, len(ids), REMOVE_CHUNK):
-                                chunk = ids[start:start + REMOVE_CHUNK]
-                                await _retry_once(
-                                    f'„{name}“ umhängen',
-                                    lambda c=chunk: tag_assets(g["winner"]["id"], c))
-                            moved += len(ids)
-                        await _retry_once(f'„{name}“ löschen',
-                                          lambda: delete_tag(loser["id"]))
+                        found = await _retry_once(f'„{name}“ lesen', lambda: list_tag_assets(loser_id))
+                        if found and not winner_id:
+                            # A repaired or translated name may not exist yet;
+                            # without it the assets would lose the keyword.
+                            winner_id = (await _retry_once(f'„{winner}“ anlegen',
+                                                           lambda: ensure_tag_path(winner)))["id"]
+                            ids[winner] = winner_id
+                        await log_info("tools", f'Schreibweise „{name}“ wird in „{winner}“ zusammengeführt',
+                                       f"{len(found)} Zuordnungen umhängen, dann Tag-ID {loser_id} löschen")
+                        for start in range(0, len(found), REMOVE_CHUNK):
+                            chunk = found[start:start + REMOVE_CHUNK]
+                            await _retry_once(f'„{name}“ umhängen',
+                                              lambda c=chunk: tag_assets(winner_id, c))
+                        moved += len(found)
+                        await _retry_once(f'„{name}“ löschen', lambda: delete_tag(loser_id))
                         merged += 1
-                        await log_info("tools", f'Schreibweise „{name}“ in „{winner_name}“ zusammengeführt',
-                                       f"{len(ids)} Zuordnungen umgehängt, Tag gelöscht")
+                        moves.append((winner, name, found))
+                        await log_info("tools", f'Schreibweise „{name}“ in „{winner}“ zusammengeführt',
+                                       f"{len(found)} Zuordnungen umgehängt, Tag gelöscht")
                     except Exception as e:
                         failed += 1
                         last_error = _reason(e)
@@ -884,20 +958,89 @@ async def _merge_apply(*_ignored):
                         await log_warning(
                             "tools", f'Schreibweise „{name}“ nicht zusammengeführt', last_error)
                 _cleanup_progress["current"] = i
+            if moves and not _cancelled():
+                _cleanup_phase("merge_verifying")
+                _cleanup_progress["current"], _cleanup_progress["total"] = 0, 0
+                try:
+                    repaired = await _settle_merge(moves)
+                except Exception as e:
+                    last_error = _reason(e)
+                    await log_warning("tools", "Schreibweisen: Nachkontrolle in Immich fehlgeschlagen", last_error)
 
         _last_merge.clear()
         _cleanup_finish(result={
             "mode": "merge_apply",
+            "repaired": repaired,
             "cancelled": _cancelled(),
             "sidecars_enabled": do_sidecars, "immich_enabled": do_immich,
             "files_changed": files_changed, "files_failed": files_failed,
             "merged": merged, "moved": moved, "failed": failed, "error": last_error,
             "failed_names": failed_names[:MAX_SAMPLE],
+            "kept_apart": sum(1 for it in items if it["id"] not in chosen),
         })
         await log_info(
             "tools",
             f"Schreibweisen zusammengeführt: {merged} Tags, {moved} Zuordnungen, {files_changed} Sidecars",
-            f"fehlgeschlagen={failed}/{files_failed}" + (f", letzter Fehler: {last_error}" if last_error else ""))
+            f"fehlgeschlagen={failed}/{files_failed}; nicht angehakt (gemerkt) "
+            f"{sum(1 for it in items if it['id'] not in chosen)}"
+            + (f", letzter Fehler: {last_error}" if last_error else ""))
+    except Exception as e:
+        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+
+
+# --- Leere Tags löschen (tag_groups_migration.empty_tags) ---------------------
+
+# Tags younger than this are left alone: the pipeline creates a tag a moment
+# before it tags the photo, and Immich's index lags behind as well.
+EMPTY_MIN_AGE_S = 3600
+_last_empty: dict = {}
+
+
+async def _empty_scan(include_foreign: bool):
+    import tag_groups_migration as mig
+    from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
+
+    def progress(done, total):
+        _cleanup_progress["current"], _cleanup_progress["total"] = done, total
+    try:
+        _cleanup_phase("counting_tags")
+        found = await mig.empty_tags(include_foreign=include_foreign, progress=progress, cancelled=_cancelled,
+                                     min_age_s=EMPTY_MIN_AGE_S)
+        values = [_tag_value(t) for t in found["deletable"]]
+        _last_empty.clear()
+        _last_empty.update(values=values, include_foreign=include_foreign)
+        _cleanup_finish(result={"mode": "empty_scan", "cancelled": _cancelled(), "include_foreign": include_foreign,
+                                "tags": values, "foreign": found["foreign"], "kept_locked": found["kept_locked"],
+                                "young": found["young"], "count_failed": found["count_failed"]})
+        await log_info("tools", f"Leere Tags, Vorschau: {len(values)} zu löschen",
+                       f"fremde behalten {len(found['foreign'])}, gesperrte behalten {len(found['kept_locked'])}, "
+                       f"jünger als {EMPTY_MIN_AGE_S // 60} Min {found['young']}")
+    except Exception as e:
+        _cleanup_finish(error=f"{type(e).__name__}: {e}")
+
+
+async def _empty_apply(include_foreign: bool):
+    """Delete the previewed empty tags — each counted again first: a tag that
+    got a photo since the preview stays."""
+    import tag_groups_migration as mig
+    from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
+
+    def progress(done, total):
+        _cleanup_progress["current"], _cleanup_progress["total"] = done, total
+    try:
+        values = set(_last_empty.get("values") or [])
+        _cleanup_phase("counting_tags")
+        found = await mig.empty_tags(include_foreign=include_foreign, progress=progress, cancelled=_cancelled,
+                                     restrict=lambda v: v in values, min_age_s=EMPTY_MIN_AGE_S)
+        _cleanup_phase("deleting_empty_tags")
+        progress(0, len(found["deletable"]))
+        result = await mig.delete_empty(found, progress=progress, cancelled=_cancelled)
+        _last_empty.clear()
+        _cleanup_finish(result={"mode": "empty_apply", "cancelled": _cancelled(), **result,
+                                "no_longer_empty": len(values) - len(found["deletable"])})
+        await log_info("tools", f"Leere Tags gelöscht: {result['deleted']}",
+                       f"fehlgeschlagen {result['failed']}, mit Unterebenen behalten {result['kept_with_children']}, "
+                       f"nicht mehr leer {len(values) - len(found['deletable'])}")
     except Exception as e:
         _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
@@ -1041,7 +1184,7 @@ async def tools_page(request: Request):
 
 @router.post("/merge/scan")
 async def scan_merge(request: Request):
-    """Preview of the spelling groups — reads only."""
+    """Preview of the spelling proposals — reads only (the AI is asked, nothing changes)."""
     from routers.api import _cleanup_progress, _cleanup_reset
     if _cleanup_progress.get("running"):
         return JSONResponse({"ok": False, "detail": await _t("err_busy")}, status_code=409)
@@ -1052,26 +1195,59 @@ async def scan_merge(request: Request):
         return JSONResponse({"ok": False, "detail": await _t("err_no_scope")}, status_code=400)
     _cancel["requested"] = False
     _cleanup_reset("tag_merge")
-    asyncio.create_task(_scan_merge(with_sidecars, with_immich))
+    asyncio.create_task(_scan_merge(with_sidecars, with_immich, bool(form.get("ai")), bool(form.get("translate"))))
     return JSONResponse({"ok": True})
 
 
 @router.post("/merge/apply")
 async def apply_merge(request: Request):
-    """Carry out exactly the groups the preview listed."""
+    """Carry out the ticked proposals of the preview (`selected`: their ids)."""
     from routers.api import _cleanup_progress, _cleanup_reset
     if _cleanup_progress.get("running"):
         return JSONResponse({"ok": False, "detail": await _t("err_busy")}, status_code=409)
-    if not _last_merge.get("groups"):
+    if not _last_merge.get("items"):
         return JSONResponse({"ok": False, "detail": await _t("err_no_preview")}, status_code=409)
     form = await request.form()
     if (bool(form.get("sidecars")) != bool(_last_merge.get("sidecars_enabled"))
             or bool(form.get("immich")) != bool(_last_merge.get("immich_enabled"))):
         return JSONResponse({"ok": False, "detail": await _t("err_changed")}, status_code=409)
+    try:
+        chosen = {int(i) for i in (form.get("selected") or "").split(",") if i.strip()}
+    except ValueError:
+        return JSONResponse({"ok": False, "detail": await _t("err_changed")}, status_code=400)
+    if not chosen <= {it["id"] for it in _last_merge["items"]}:
+        return JSONResponse({"ok": False, "detail": await _t("err_changed")}, status_code=409)
     _cancel["requested"] = False
     _cleanup_reset("tag_merge")
-    asyncio.create_task(_merge_apply())
+    asyncio.create_task(_merge_apply(chosen))
     return JSONResponse({"ok": True})
+
+
+async def _empty_start(request: Request, worker, *, require_preview: bool = False) -> JSONResponse:
+    from routers.api import _cleanup_progress, _cleanup_reset
+    form = await request.form()
+    include_foreign = bool(form.get("foreign"))
+    if _cleanup_progress.get("running"):
+        return JSONResponse({"ok": False, "detail": await _t("err_busy")}, status_code=409)
+    if require_preview and (not _last_empty.get("values")
+                            or bool(_last_empty.get("include_foreign")) != include_foreign):
+        return JSONResponse({"ok": False, "detail": await _t("err_no_preview")}, status_code=409)
+    _cancel["requested"] = False
+    _cleanup_reset("tag_empty")
+    asyncio.create_task(worker(include_foreign))
+    return JSONResponse({"ok": True})
+
+
+@router.post("/empty/scan")
+async def scan_empty_tags(request: Request):
+    """Preview: the tags no photo carries — counts only, deletes nothing."""
+    return await _empty_start(request, _empty_scan)
+
+
+@router.post("/empty/apply")
+async def apply_empty_tags(request: Request):
+    """Delete the previewed empty tags — refused without a preview of the same choice."""
+    return await _empty_start(request, _empty_apply, require_preview=True)
 
 
 @router.post("/tags/cancel")

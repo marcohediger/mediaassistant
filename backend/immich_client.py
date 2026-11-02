@@ -1113,6 +1113,38 @@ async def untag_assets(tag_id: str, asset_ids: list[str], *, api_key: str | None
         raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")
 
 
+async def wait_queues_idle(queues=("metadataExtraction", "sidecar"), *, timeout: float = 120,
+                           fallback_s: float = 8, api_key: str | None = None) -> bool:
+    """Wait until Immich's metadata and sidecar queues are empty.
+
+    After a tag change Immich writes the asset's sidecar and reads it back; a
+    check right away sees a state that is about to change (measured on 3.x:
+    an old tag returns, a new assignment vanishes). Without the right to read
+    the queues (no admin key) a fixed pause stands in. True when idle."""
+    url, api_key = await _resolve_api_key(api_key)
+    if not url or not api_key:
+        return False
+    deadline = asyncio.get_running_loop().time() + timeout
+    await asyncio.sleep(2)
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            try:
+                resp = await client.get(f"{url}/api/jobs", headers={"x-api-key": api_key})
+            except httpx.HTTPError:
+                resp = None
+            if resp is None or resp.status_code != 200:
+                await asyncio.sleep(fallback_s)
+                return False
+            data = resp.json() or {}
+            busy = sum(((data.get(q) or {}).get("jobCounts") or {}).get(k, 0)
+                       for q in queues for k in ("active", "waiting", "delayed"))
+            if not busy:
+                return True
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(1)
+
+
 async def delete_tag(tag_id: str, *, api_key: str | None = None) -> None:
     """Delete one tag. Its asset assignments go with it, the assets stay.
 

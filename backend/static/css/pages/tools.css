@@ -47,12 +47,25 @@
     margin-left: 0.15rem; padding-left: 0.35rem; border-left: 1px solid var(--ui-line);
     font-variant-numeric: tabular-nums; color: var(--text-muted);
 }
+/* Merge proposals: a checkbox per name, why it is proposed beside it.
+   An unticked name stays as it is — shown faded and struck through. */
+.tools-picks { display: flex; flex-direction: column; gap: 0.35rem; }
+.tools-pick-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; min-width: 0; }
+.tools-pick { display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0; cursor: pointer; }
+.tools-pick input { flex: none; width: 1rem; height: 1rem; margin: 0; accent-color: var(--primary); cursor: pointer; }
+.tools-pick input:not(:checked) + .ui-tag { opacity: 0.55; text-decoration: line-through; }
+.tools-why { font-size: var(--ui-fs-xs); line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
 .tools-sample { display: flex; flex-direction: column; align-items: flex-start; gap: 0.35rem; min-width: 0; }
 .tools-sample-title { margin: 0; max-width: 80ch; font-size: var(--ui-fs-xs); font-weight: 500; line-height: 1.5; color: var(--text-muted); }
 .tools-sample > :is(.ui-path, .ui-copyable) { max-width: 100%; }
 
 @media (max-width: 600px) {
     .tools-result { padding: 1rem; }
+    /* Merge proposals: the target above its names, not two squeezed columns */
+    .tools-merge-table thead { display: none; }
+    .tools-merge-table tr, .tools-merge-table td { display: block; height: auto; }
+    .tools-merge-table td + td { padding-top: 0; padding-left: 1.25rem; }
+    .tools-merge-table .ui-tag { max-width: 100%; }
     .tools-actions .ui-btn { flex: 1 1 auto; }
 }
 

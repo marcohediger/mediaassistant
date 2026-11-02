@@ -148,6 +148,22 @@
             </div>
             <p class="ui-hint">{{ t.tools.merge_scope_hint }}</p>
         </div>
+        <div class="ui-option-list">
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.tools.merge_ai }}</span>
+                    <span class="ui-option-desc">{{ t.tools.merge_ai_desc }}</span>
+                </span>
+                {{ switch('merge_ai', True, 'mergeInvalidate()') }}
+            </label>
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.tools.merge_translate }}</span>
+                    <span class="ui-option-desc">{{ t.tools.merge_translate_desc }}</span>
+                </span>
+                {{ switch('merge_translate', True, 'mergeInvalidate()') }}
+            </label>
+        </div>
     </div>
     <div class="ui-card-foot tools-actions">
         <button type="button" class="ui-btn ui-btn-primary" id="btn_merge_scan" onclick="mergeRun('scan')">{{ icon('search') }}{{ t.tools.merge_scan }}</button>
@@ -158,6 +174,38 @@
              aria-valuemin="0" aria-valuemax="100" aria-labelledby="merge-title" hidden><div class="ui-progress-bar"></div></div>
     </div>
     <div id="merge_result" class="tools-result"></div>
+</section>
+
+{# Tags no photo carries any more (tag_groups_migration.empty_tags) #}
+<section class="ui-card tools-card" id="section-tag-empty" aria-labelledby="empty-title">
+    <div class="ui-card-head">
+        <span class="ui-icon-tile is-warning">{{ icon('trash', 18) }}</span>
+        <div class="ui-card-head-text">
+            <h2 class="ui-card-title" id="empty-title">{{ t.tools.empty_title }}</h2>
+            <p class="ui-card-desc">{{ t.tools.empty_desc }}</p>
+        </div>
+    </div>
+    <div class="ui-card-body ui-form">
+        <p class="tools-text">{{ t.tools.empty_hint }}</p>
+        <div class="ui-option-list">
+            <label class="ui-option">
+                <span class="ui-option-text">
+                    <span class="ui-option-title">{{ t.tools.empty_foreign }}</span>
+                    <span class="ui-option-desc">{{ t.tools.empty_foreign_desc }}</span>
+                </span>
+                {{ switch('empty_foreign', False, 'emptyInvalidate()') }}
+            </label>
+        </div>
+    </div>
+    <div class="ui-card-foot tools-actions">
+        <button type="button" class="ui-btn ui-btn-primary" id="btn_empty_scan" onclick="emptyRun('scan')">{{ icon('search') }}{{ t.tools.empty_scan }}</button>
+        <button type="button" class="ui-btn ui-btn-danger" id="btn_empty_apply" disabled onclick="emptyApply()">{{ icon('trash') }}{{ t.tools.empty_apply }}</button>
+        <button type="button" class="ui-btn ui-btn-secondary" id="btn_empty_cancel" style="display: none;" onclick="sidecarCancel()">{{ icon('x') }}{{ t.tools.cancel }}</button>
+        <span id="empty_state" class="tools-state" role="status" aria-live="polite"></span>
+        <div class="ui-progress ui-progress-sm tools-progress" id="empty_progress" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-labelledby="empty-title" hidden><div class="ui-progress-bar"></div></div>
+    </div>
+    <div id="empty_result" class="tools-result"></div>
 </section>
 
 {# Switch a set's photos in Immich over to tag groups (tag_groups_migration.py):
@@ -401,6 +449,11 @@ function sidecarResume() {
                     pollMerge();
                     return;
                 }
+                if (p.task === 'tag_empty') {
+                    emptyBusy(true);
+                    pollEmpty();
+                    return;
+                }
                 if (p.task === 'tag_groups') {
                     groupsBusy(true);
                     pollGroups();
@@ -423,6 +476,13 @@ function sidecarResume() {
             if (p.task === 'tag_merge' && p.result) {
                 if (p.result.mode === 'merge_scan') { mergeRestore(p.result); }
                 renderMerge(p.result);
+                return;
+            }
+            if (p.task === 'tag_empty' && p.result) {
+                if (p.result.mode === 'empty_scan') {
+                    document.getElementById('empty_foreign').checked = !!p.result.include_foreign;
+                }
+                renderEmpty(p.result);
                 return;
             }
             if (p.task === 'sidecar_tags' && p.result) {
@@ -668,12 +728,15 @@ function mergeInvalidate() {
     // Any change voids the preview — the server refuses an apply whose scope
     // differs from the previewed one, this keeps the buttons honest.
     MERGE_READY = false;
+    MERGE = null;
     document.getElementById('btn_merge_apply').disabled = true;
     document.getElementById('merge_result').innerHTML = '';
 }
 function mergeRestore(res) {
     document.getElementById('merge_sidecars').checked = !!res.sidecars_enabled;
     document.getElementById('merge_immich').checked = !!res.immich_enabled;
+    document.getElementById('merge_ai').checked = !!res.ai_enabled;
+    document.getElementById('merge_translate').checked = !!res.translate_enabled;
 }
 function mergeBusy(on) {
     document.getElementById('btn_merge_scan').disabled = on;
@@ -688,12 +751,20 @@ function mergeFail(msg) {
     mergeBusy(false);
 }
 function mergeRun(mode) {
-    setState('merge_state', L.running);
-    if (mode === 'scan') { MERGE_READY = false; document.getElementById('merge_result').innerHTML = ''; }
-    mergeBusy(true);
     var body = new URLSearchParams();
     if (document.getElementById('merge_sidecars').checked) { body.append('sidecars', '1'); }
     if (document.getElementById('merge_immich').checked) { body.append('immich', '1'); }
+    if (document.getElementById('merge_ai').checked) { body.append('ai', '1'); }
+    if (document.getElementById('merge_translate').checked) { body.append('translate', '1'); }
+    if (mode === 'apply') {
+        // The ticked proposals; the unticked ones the server remembers.
+        var ids = [];
+        document.querySelectorAll('#merge_result .merge-pick:checked').forEach(function (c) { ids.push(c.value); });
+        body.append('selected', ids.join(','));
+    }
+    setState('merge_state', L.running);
+    if (mode === 'scan') { MERGE_READY = false; document.getElementById('merge_result').innerHTML = ''; }
+    mergeBusy(true);
     fetch('/tools/merge/' + mode, {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -725,73 +796,208 @@ function pollMerge() {
           renderMerge(p.result);
       }).catch(function (e) { mergeFail(String(e)); });
 }
+
+var MERGE = null;  // the preview shown: its items and the counts of their names
+function mergeChip(name, cls) {
+    var m = MERGE.members[name] || {};
+    var n;
+    if (m.exists === false) {
+        n = L.merge_new;
+    } else {
+        var parts = [];
+        if (MERGE.immich_enabled) { parts.push((m.assets || 0) + ' B'); }
+        if (MERGE.sidecars_enabled) { parts.push((m.files || 0) + ' D'); }
+        n = parts.join(', ');
+    }
+    return '<span class="ui-tag' + (cls ? ' ' + cls : '') + '" title="' + esc(name) + '">' + esc(name) +
+           '<span class="tools-tag-n">' + esc(n) + '</span></span>';
+}
+function mergeWhy(it) {
+    var bits = [];
+    if (it.kept_apart) { bits.push('<span class="ui-badge is-neutral">' + esc(L.merge_kept) + '</span>'); }
+    var why = '';
+    if (it.kind === 'umlaut') {
+        bits.push('<span class="ui-badge is-warning">' + esc(L.merge_kind_umlaut) + '</span>');
+        why = it.verdict === 'same' ? L.merge_ai_same : it.verdict === 'different' ? L.merge_ai_different
+            : (MERGE.ai_enabled && !it.kept_apart ? L.merge_ai_unknown : L.merge_ai_off);
+    } else if (it.kind === 'repair') {
+        why = it.evidence === 'context' ? L.merge_evidence_context : L.merge_evidence_ai;
+    } else if (it.kind === 'translate') {
+        why = it.new ? L.merge_translate_new : (it.same ? '' : L.merge_translate_unsure);
+    } else if (it.kind === 'damaged') {
+        why = L.merge_kind_damaged;
+    }
+    if (why) { bits.push('<span class="tools-why">' + esc(why) + (it.reason ? ' — ' + esc(it.reason) : '') + '</span>'); }
+    return bits.join('');
+}
+function mergeTable(title, list) {
+    if (!list.length) { return ''; }
+    // One row per target; spellings of one family stay together.
+    var rows = [], at = {};
+    list.forEach(function (it) {
+        var key = (it.family != null ? 'f' + it.family : 'i' + it.id) + '|' + it.into;
+        if (!(key in at)) { at[key] = rows.length; rows.push({into: it.into, items: []}); }
+        rows[at[key]].items.push(it);
+    });
+    var h = '<div class="tools-sample"><p class="tools-sample-title">' + esc(title) + '</p></div>' +
+            '<div class="ui-table-card tools-table"><table class="ui-table ui-table-compact tools-merge-table">' +
+            '<thead><tr><th scope="col">' + esc(L.merge_winner) + '</th><th scope="col">' + esc(L.merge_sources) +
+            '</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+        h += '<tr><td>' + mergeChip(r.into, 'is-success') + '</td><td><div class="tools-picks">';
+        r.items.forEach(function (it) {
+            h += '<div class="tools-pick-row"><label class="tools-pick"><input type="checkbox" class="merge-pick" value="' +
+                 it.id + '"' + (it.selected ? ' checked' : '') + ' onchange="mergeCount()" aria-label="' +
+                 esc(L.merge_pick.replace('{name}', it.name).replace('{into}', it.into)) + '">' + mergeChip(it.name) +
+                 '</label>' + mergeWhy(it) + '</div>';
+        });
+        h += '</div></td></tr>';
+    });
+    return h + '</tbody></table></div>';
+}
+function mergeCount() {
+    var el = document.getElementById('merge_count');
+    if (!el) { return; }
+    var n = document.querySelectorAll('#merge_result .merge-pick:checked').length;
+    el.innerHTML = L.merge_found.replace('{n}', '<strong>' + MERGE.items.length + '</strong>')
+                                .replace('{selected}', '<strong>' + n + '</strong>');
+}
 function renderMerge(res) {
     var box = document.getElementById('merge_result');
     if (!res) { box.innerHTML = ''; return; }
     var h = res.cancelled ? note(esc(L.cancelled), 'warning') : '';
-    var orphans = function () {
-        var more = res.orphan_count > res.orphans.length
-            ? '<span class="ui-muted ui-text-xs">' + esc(L.more.replace('{n}', res.orphan_count - res.orphans.length)) + '</span>' : '';
-        return '<div class="tools-sample"><p class="tools-sample-title">' + esc(L.merge_orphans) + '</p>' +
-               tags(res.orphans.map(function (n) { return tag(n); }).concat(more ? [more] : [])) + '</div>';
+    var list = function (title, names) {
+        return '<div class="tools-sample"><p class="tools-sample-title">' + esc(title) + '</p>' +
+               tags(names.map(function (n) { return tag(n); })) + '</div>';
     };
     if (res.mode === 'merge_scan') {
-        if (!res.group_count) {
-            h += hint(esc(L.merge_none));
-            if (res.orphan_count) { h += orphans(); }
-            box.innerHTML = h;
-            return;
-        }
-        var s = '<strong>' + res.group_count + '</strong> ' + esc(L.merge_groups);
-        if (res.immich_enabled) { s += ', ' + res.moves + ' ' + esc(L.merge_moves); }
-        if (res.sidecars_enabled) { s += ', ' + res.files + ' ' + esc(L.merge_files); }
-        h += line(s);
+        MERGE = res;
         if (res.immich_error) { h += note(esc(res.immich_error), 'error'); }
-        var num = function (m) {
-            var parts = [];
-            if (res.immich_enabled) { parts.push(m.assets + ' B'); }
-            if (res.sidecars_enabled) { parts.push(m.files + ' D'); }
-            return parts.join(', ');
-        };
-        var chip = function (m, cls) {
-            return '<span class="ui-tag' + (cls ? ' ' + cls : '') + '" title="' + esc(m.name) + '">' + esc(m.name) +
-                   '<span class="tools-tag-n">' + esc(num(m)) + '</span></span>';
-        };
-        h += '<div class="ui-table-card tools-table"><table class="ui-table ui-table-compact tools-merge-table">' +
-             '<thead><tr><th scope="col">' + esc(L.merge_winner) + '</th><th scope="col">' + esc(L.tag) +
-             '</th></tr></thead><tbody>';
-        res.groups.forEach(function (g) {
-            h += '<tr><td>' + chip(g.winner, 'is-success') + '</td><td>' +
-                 tags(g.losers.map(function (l) { return chip(l); })) + '</td></tr>';
-        });
-        h += '</tbody></table></div>';
-        if (res.group_count > res.groups.length) {
-            h += hint(esc(L.merge_shown.replace('{n}', res.groups.length)));
+        if (res.ai_error) { h += note(esc(L.merge_ai_error.replace('{error}', res.ai_error)), 'warning'); }
+        if (!res.items.length) {
+            h += hint(esc(L.merge_none));
+        } else {
+            h += '<p class="tools-line" id="merge_count"></p>';
+            var of = function (kinds) { return res.items.filter(function (it) { return kinds.indexOf(it.kind) >= 0; }); };
+            h += mergeTable(L.merge_section_spelling, of(['spelling', 'damaged', 'umlaut']));
+            h += mergeTable(L.merge_section_repair, of(['repair']));
+            h += mergeTable(L.merge_section_translate, of(['translate']));
         }
-        if (res.orphan_count) { h += orphans(); }
-        h += note(esc(L.merge_preview_note), 'info');
-        MERGE_READY = true;
-        document.getElementById('btn_merge_apply').disabled = false;
-    } else {
-        if (res.sidecars_enabled) {
-            var f = '<strong>' + res.files_changed + '</strong> ' + esc(L.merge_files_done);
-            if (res.files_failed) { f += ' — ' + res.files_failed + ' ' + esc(L.failed); }
-            h += line(f);
-        }
-        if (res.immich_enabled) {
-            var m = '<strong>' + res.merged + '</strong> ' + esc(L.merge_done) + ', ' +
-                    res.moved + ' ' + esc(L.merge_moved);
-            if (res.failed) { m += ' — ' + res.failed + ' ' + esc(L.failed); }
-            h += line(m);
-            if (res.failed_names && res.failed_names.length) {
-                h += '<div class="tools-sample"><p class="tools-sample-title">' + esc(L.merge_failed_names) + '</p>' +
-                     tags(res.failed_names.map(function (n) { return tag(n); })) + '</div>';
-            }
-        }
-        if (res.error) { h += note(esc(res.error), 'error'); }
-        MERGE_READY = false;
+        if (res.not_damaged.length) { h += list(L.merge_not_damaged, res.not_damaged); }
+        if (res.orphans.length) { h += list(L.merge_orphans, res.orphans); }
+        if (res.items.length) { h += note(esc(L.merge_preview_note), 'info'); }
+        box.innerHTML = h;
+        mergeCount();
+        MERGE_READY = res.items.length > 0 && !res.cancelled;
+        document.getElementById('btn_merge_apply').disabled = !MERGE_READY;
+        return;
     }
+    if (res.sidecars_enabled) {
+        var f = '<strong>' + res.files_changed + '</strong> ' + esc(L.merge_files_done);
+        if (res.files_failed) { f += ' — ' + res.files_failed + ' ' + esc(L.failed); }
+        h += line(f);
+    }
+    if (res.immich_enabled) {
+        var m = '<strong>' + res.merged + '</strong> ' + esc(L.merge_done) + ', ' +
+                res.moved + ' ' + esc(L.merge_moved);
+        if (res.failed) { m += ' — ' + res.failed + ' ' + esc(L.failed); }
+        h += line(m);
+        if (res.failed_names && res.failed_names.length) { h += list(L.merge_failed_names, res.failed_names); }
+    }
+    if (res.repaired && res.repaired.length) { h += hint(esc(L.merge_repaired.replace('{n}', res.repaired.length))); }
+    if (res.kept_apart) { h += hint(esc(L.merge_kept_done.replace('{n}', res.kept_apart))); }
+    if (res.error) { h += note(esc(res.error), 'error'); }
+    MERGE_READY = false;
     box.innerHTML = h;
+}
+
+// --- Leere Tags löschen -------------------------------------------------------
+var EMPTY_READY = false;
+function emptyInvalidate() {
+    EMPTY_READY = false;
+    document.getElementById('btn_empty_apply').disabled = true;
+    document.getElementById('empty_result').innerHTML = '';
+}
+function emptyBusy(on) {
+    document.getElementById('btn_empty_scan').disabled = on;
+    document.getElementById('btn_empty_apply').disabled = on || !EMPTY_READY;
+    var c = document.getElementById('btn_empty_cancel');
+    c.style.display = on ? '' : 'none';
+    c.disabled = false;
+    if (!on) { showProgress('empty_progress', null); }
+}
+function emptyFail(msg) {
+    setState('empty_state', msg, true);
+    emptyBusy(false);
+}
+function emptyRun(mode) {
+    var body = new URLSearchParams();
+    if (document.getElementById('empty_foreign').checked) { body.append('foreign', '1'); }
+    setState('empty_state', L.running);
+    if (mode === 'scan') { emptyInvalidate(); }
+    emptyBusy(true);
+    fetch('/tools/empty/' + mode, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body
+    }).then(function (r) { return r.json(); })
+      .then(function (d) {
+          if (!d.ok) { emptyFail(d.detail); return; }
+          pollEmpty();
+      }).catch(function (e) { emptyFail(String(e)); });
+}
+function emptyApply() {
+    if (!confirm(L.empty_confirm)) { return; }
+    emptyRun('apply');
+}
+function pollEmpty() {
+    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
+      .then(function (p) {
+          if (p.running) {
+              var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
+              setState('empty_state', phaseText(p) + n);
+              showProgress('empty_progress', p);
+              setTimeout(pollEmpty, 1000);
+              return;
+          }
+          if (p.error) { emptyFail(p.error); return; }
+          setState('empty_state', '');
+          renderEmpty(p.result);
+          emptyBusy(false);
+      }).catch(function (e) { emptyFail(String(e)); });
+}
+function renderEmpty(res) {
+    var out = document.getElementById('empty_result');
+    if (!res) { out.innerHTML = ''; return; }
+    var h = res.cancelled ? note(esc(L.cancelled), 'warning') : '';
+    var count = function (text, n) { return text.replace('{n}', n); };
+    if (res.mode === 'empty_scan') {
+        if (!res.tags.length) {
+            h += note(esc(L.empty_none), 'success');
+        } else {
+            h += line('<strong>' + res.tags.length + '</strong> ' + esc(L.empty_found));
+            h += tags(res.tags.map(function (n) { return tag(n); }));
+        }
+        if (res.foreign.length) {
+            h += '<div class="tools-sample"><p class="tools-sample-title">' + esc(count(L.empty_foreign_kept, res.foreign.length)) +
+                 '</p>' + tags(res.foreign.map(function (n) { return tag(n); })) + '</div>';
+        }
+        if (res.kept_locked.length) { h += hint(esc(count(L.empty_locked_kept, res.kept_locked.length))); }
+        if (res.young) { h += hint(esc(count(L.empty_young, res.young))); }
+        if (res.count_failed) { h += note(esc(count(L.empty_count_failed, res.count_failed)), 'warning'); }
+        if (res.tags.length) { h += note(esc(L.merge_preview_note), 'info'); }
+        EMPTY_READY = res.tags.length > 0 && !res.cancelled;
+        document.getElementById('btn_empty_apply').disabled = !EMPTY_READY;
+        out.innerHTML = h;
+        return;
+    }
+    h += line('<strong>' + res.deleted + '</strong> ' + esc(L.empty_deleted) +
+              (res.failed ? ' — ' + res.failed + ' ' + esc(L.failed) : ''));
+    if (res.kept_with_children) { h += hint(esc(count(L.empty_kept_children, res.kept_with_children))); }
+    if (res.no_longer_empty) { h += hint(esc(count(L.empty_no_longer, res.no_longer_empty))); }
+    EMPTY_READY = false;
+    document.getElementById('btn_empty_apply').disabled = true;
+    out.innerHTML = h;
 }
 </script>
 <script>

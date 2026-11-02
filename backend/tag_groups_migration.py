@@ -35,6 +35,7 @@ children of a deleted tag along, so nothing is taken uninvited.
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
@@ -248,14 +249,20 @@ async def _count(tag_id: str, api_key=None) -> int:
 
 
 async def empty_tags(*, include_foreign: bool = False, progress=None, cancelled=lambda: False,
-                     restrict=None) -> dict:
+                     restrict=None, min_age_s: float = 0) -> dict:
     """Tags whose subtree carries no visible asset, split into those that may
     be deleted and the foreign ones kept. Deepest first. `restrict(value)`
-    limits the look to some tags (a test's own)."""
+    limits the look to some tags (a test's own); a tag created less than
+    `min_age_s` ago is not looked at (``young``: how many)."""
     from immich_client import list_tags
     all_tags = tags = await list_tags()
     if restrict is not None:
         tags = [t for t in tags if restrict(_value(t))]
+    young = 0
+    if min_age_s:
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=min_age_s)
+        old = [t for t in tags if _created(t) <= cutoff]
+        young, tags = len(tags) - len(old), old
     own, protected = await own_values()
     by_id = {t.get("id"): t for t in tags}
     depth = {t.get("id"): _value(t).count("/") for t in tags}
@@ -281,7 +288,15 @@ async def empty_tags(*, include_foreign: bool = False, progress=None, cancelled=
         else:
             foreign.append(v)
     return {"tags": all_tags, "by_id": by_id, "deletable": deletable, "foreign": sorted(foreign),
-            "kept_locked": sorted(kept_locked), "count_failed": failed}
+            "kept_locked": sorted(kept_locked), "count_failed": failed, "young": young}
+
+
+def _created(tag: dict) -> datetime:
+    """When Immich created the tag; unknown counts as new."""
+    try:
+        return datetime.fromisoformat(str(tag.get("createdAt")).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now(timezone.utc)
 
 
 async def delete_empty(found: dict, *, progress=None, cancelled=lambda: False) -> dict:

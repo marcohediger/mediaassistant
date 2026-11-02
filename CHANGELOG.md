@@ -1,5 +1,76 @@
 # Changelog
 
+## v3.4.0 — 2026-11-02
+
+### Werkzeuge: Schreibweisen zusammenführen mit Häkchen, KI und Reparatur
+
+Bisher führte „Zusammenführen" jede gefundene Gruppe zusammen, auch Gruppen,
+die über den 200 angezeigten lagen und die niemand gesehen hatte. Weil ein
+weggefallener Umlaut als gleiche Schreibweise galt, landete so auch „Bär" in
+„Bar". Kaputte Namen ohne heile Entsprechung („H?hlenpfad") blieben liegen.
+
+Jetzt ist jeder Vorschlag ein Häkchen, und zusammengeführt wird nur, was
+angehakt ist. Was du nicht anhakst, merkt sich das Werkzeug
+(`tools.merge_keep_apart`). Beim nächsten Suchen erscheint es abgewählt mit
+„von dir ausgenommen", und die KI wird dafür nicht mehr gefragt. Die Logik
+steht in `tag_spelling.py`:
+
+- **Gleiche Buchstaben** (Gross/klein, Leerzeichen, Bindestriche, ä↔ae,
+  ß↔ss, Akzente wie é↔e) sind angehakt, wie bisher.
+- **Ein weggefallener Umlaut** (Bar/Bär, Zurich/Zürich) ist ein eigener,
+  unklarer Fall. Die KI bekommt beide Wörter und Beschreibung und Ort von je
+  drei Fotos und antwortet mit „dasselbe" oder „verschieden", samt Grund. Nur
+  „dasselbe" ist angehakt, und das Ziel ist dann die Schreibweise mit Umlaut.
+- **Kaputte Zeichen ohne heile Entsprechung** werden wiederhergestellt.
+  Zuerst wird in Beschreibung und Ort der Fotos nach genau einer passenden
+  Schreibweise gesucht, erst dann die KI gefragt. Ihre Antwort zählt nur, wenn
+  sie genau ins Muster passt und jedes `?` zu einem Sonderbuchstaben wird.
+  Eine Kodierungs-Panne frisst nie ein gewöhnliches `o`, deshalb wird
+  „Hohlenpfad" abgelehnt. Ein `?`, das dazugehört („WasIstDas?"), erkennt die
+  KI und lässt es stehen. Fehlt der richtige Tag in Immich noch, wird er
+  angelegt.
+- **Englische Tags:** Die KI nennt in Paketen von 40 Tags das deutsche Wort.
+  Eine zweite, engere Frage prüft, ob der Name überhaupt englisch ist und
+  genau dasselbe bedeutet. Gemessen mit qwen3.5-4b hielt die erste Frage
+  allein auch deutsche Tags für englisch („Mahlzeit → Essen") und übersetzte
+  zu breit („Social Media Interface → Benutzeroberfläche"). Angehakt ist ein
+  Vorschlag nur, wenn der deutsche Tag schon existiert und genau dasselbe
+  bedeutet. Einer, der einen neuen Tag anlegen würde, bleibt abgewählt.
+
+**Nachkontrolle in Immich.** Nach einem Tag-Wechsel schreibt Immich die
+Sidecar und liest sie wieder ein. Unter Last setzt es dabei die alte
+Schreibweise zurück oder verliert die neue Zuordnung. Das ist im Test
+aufgetreten: „seeufer" war nach dem Zusammenführen wieder da. Das Werkzeug
+wartet deshalb, bis Immichs Warteschlangen für Metadaten und Sidecars leer
+sind, sieht nach und repariert, so wie IA-08 es für seine eigenen Tags tut
+(`immich_client.wait_queues_idle`).
+
+Behoben ist dabei auch ein Fall von Datenverlust bei Tags: Gab es die
+Ziel-Schreibweise nur in Sidecars und nicht in Immich, wurde der unterlegene
+Tag in Immich gelöscht, ohne seine Fotos umzuhängen. Fotos ohne Sidecar
+verloren so das Schlagwort. Jetzt wird das Ziel vorher angelegt.
+
+### Werkzeuge: Leere Tags löschen
+
+Neue Karte im Register „Werkzeuge". Sie listet die Tags in Immich, die kein
+Foto mehr trägt, und löscht sie nach einer Vorschau. Gezählt wird mit dem Tag
+und seinen Unterebenen, Papierkorb und versteckte Fotos eingeschlossen; das
+ist dieselbe Zählung, die „Tags in Gruppen umstellen" schon nutzt
+(`tag_groups_migration.empty_tags`).
+
+- Gelöscht werden nur Tags, die MediaAssistant selbst geschrieben hat.
+  Fremde nur auf Wunsch, denn Fotos im gesperrten Ordner sieht die API nicht,
+  und ein Tag, den nur solche Fotos tragen, wirkt leer.
+- Ein Eltern-Tag kommt erst nach seinen Kindern dran.
+- Tags, die jünger als eine Stunde sind, bleiben unberührt, weil die Pipeline
+  einen Tag einen Moment vor der Zuordnung anlegt.
+- Vor dem Löschen wird jeder Tag noch einmal gezählt. Hat er seit der
+  Vorschau ein Foto bekommen, bleibt er.
+
+Getestet mit dem neuen `test_tag_merge.py` gegen echtes Immich und die echte
+KI: Regeln, Vorschau, Zusammenführen samt Sidecar, gemerkte Ausnahme, Routen
+und leere Tags.
+
 ## v3.3.0 — 2026-10-29
 
 ### Pipeline: Fehlt ein Laufwerk, hält sie an — auch dafür ist der Job nicht schuld
