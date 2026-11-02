@@ -1,5 +1,69 @@
 # Changelog
 
+## v3.6.0 — 2026-11-02
+
+### Neu: Sprache der Inhalte einstellbar — Englisch oder Deutsch (Schweiz) (#56)
+
+Bisher schrieb MediaAssistant alle Inhalte fest auf Deutsch, nur die Oberfläche
+liess sich umstellen. Neu gibt es unter Einstellungen „Sprache der Inhalte“ mit
+zwei Sprachen: **Deutsch (Schweiz)** (Standard, bestehende Installationen
+bleiben dabei) und **Englisch**. Jede Sprache ist ein Eintrag in
+`content_language.py`; eine weitere ist später ein neuer Eintrag. Der
+Einstellung folgen:
+
+- **KI (IA-05):** Quelle, Tags und Beschreibung entstehen in dieser Sprache.
+  - Der Standard-Prompt hat dafür Platzhalter: `{language}` und die Beispiele `{source_examples_images}`, `{source_examples_videos}`, `{scene_examples}`, `{category_examples}`.
+  - Ein eigener Prompt folgt der Sprache nur, wenn er die Platzhalter verwendet; sonst bleibt er, wie er ist.
+- **Geocoding (IA-03):** Ortsnamen kommen in der Sprache (Nominatim `accept-language`, Photon, Google), und der Zwischenspeicher hält die Sprachen auseinander.
+- **Tag-Gruppen und Ordner-Tags:**
+  - Wurzeln „01 Kategorie“ … „05 Hinweise“ bzw. „01 Category“ … „05 Notes“
+  - Hinweise „unscharf“ / „Text erkannt“ bzw. „blurry“ / „text detected“, auch im flachen Modus (dort stand bisher fest „blurry“ und „OCR“)
+  - Ordner-Wurzel „Ordner“ bzw. „Folders“
+  - Gruppen und Ordner jeder Sprache gelten als MediaAssistants eigene Tags.
+- **Beschreibung (IA-07):** „Aufgenommen in …“ bzw. „Taken in …“.
+- **Neue Sets** bekommen die Standard-Kategorien in der Sprache. Bestehende Sets bleiben.
+- **OCR (IA-06):** Der Prompt ist jetzt sprachneutral auf Englisch, der Text bleibt im Original. „Smart“ erkennt auch englische Quellen („Receipt“).
+
+**Gespeicherter Prompt ohne Platzhalter.** Dev und Live haben eine ältere Kopie des Standard-Prompts gespeichert (Zeichen für Zeichen der bisherige Standard, „in GERMAN“). Sie bleibt, wie sie ist: Ein Zurücksetzen beim Update hätte alle KI-Ergebnisse als veraltet markiert. Die Einstellungsseite weist darauf hin, und das Prompt-Feld leeren und speichern stellt den Standard mit Platzhaltern her.
+
+**Deutsch (Schweiz) schreibt nie „ß“, immer „ss“.** Das gilt für alles, was
+die KI und das Geocoding liefern: Aus „Gießen“ wird „Giessen“. Der Prompt
+verlangt es, und was trotzdem mit ß kommt, wird vor dem Speichern und beim
+Schreiben umgesetzt. Ältere Ergebnisse erscheinen so ohne ß, sobald IA-07
+neu schreibt. Der erkannte Text aus OCR bleibt unverändert.
+
+**Umstellen gilt für das, was ab dann verarbeitet wird.** Was schon in Immich
+und in den Dateien steht, bleibt, bis du es neu verarbeitest. Die Sprache
+zählt im Fingerabdruck von IA-03, IA-05, IA-07 und (mit Tag-Gruppen) IA-08,
+deren bisherige Ergebnisse gelten nach dem Umstellen also als veraltet:
+- „Module neu ausführen“ mit „Nur veraltete“ schreibt sie neu.
+- „Tags in Gruppen umstellen“ benennt die Gruppen um.
+- Für die Standardsprache zählt die Sprache nicht, das Update macht also nichts veraltet.
+
+### Werkzeuge: „Schreibweisen zusammenführen“ übersetzt in die Sprache der Inhalte
+
+- **Übersetzen:** Aus „Englische Tags suchen“ wird „In die Zielsprache übersetzen“. Übersetzt wird jeder Tag in einer anderen Sprache in die Sprache der Inhalte, nicht mehr fest Englisch → Deutsch. Die Häkchen-Regel bleibt: angehakt nur in einen bestehenden Tag mit genau derselben Bedeutung.
+- **Trefferquote:** Die KI muss jetzt für jeden Namen einer Gruppe antworten. Bisher nannte sie nur die fremdsprachigen und übersah viele, sobald die meisten einer Gruppe fremd waren: Mit Englisch als Ziel fand sie 17 von rund 35 deutschen Namen, mit der neuen Frage 37 von 40. Die Suche dauert dadurch etwa doppelt so lange.
+- **Deutsch (Schweiz):** Die ss-Schreibweise gewinnt immer, auch mit weniger Fotos („Straße“ → „Strasse“). Ein Name nur mit ß wird umbenannt („Fußball“ → „Fussball“, neue Art „Schweizer Schreibung“). Reparaturen kaputter Zeichen enden ohne ß.
+- **Englisch:** Fehlende Umlaute werden nicht geprüft (eine deutsche Regel).
+- **Prüffrage positiv gestellt:** „Ist A ein deutsches (englisches) Wort?“ statt „in einer anderen Sprache als …?“. Verneint und mit dem langen Sprachnamen samt ß-Regel antwortete das Modell verkehrt: „Beach“ deutsch, „Mahlzeit“ fremd.
+- **Ausfälle der KI:** Die KI liess das JSON einer Gruppe ab und zu unvollständig (gemessen: 2 von 12 Gruppen). Bisher fiel die ganze Gruppe dann still weg, und ihre Tags wurden nicht geprüft; so fehlte im Test einmal „Beach“ → „Strand“.
+  - Die Paare werden jetzt einzeln gelesen, jedes vollständige zählt.
+  - Eine Gruppe ohne brauchbare Antwort wird in zwei Hälften neu gefragt, bis hinunter auf fünf Namen. Dieselbe Frage nochmals bringt bei Temperatur 0 dieselbe Antwort; gemessen: zweimal eine flache Namensliste statt Paaren.
+  - Was dann noch fehlt, nennen Vorschau und Systemlog mit Anzahl und Grund (ein Teil von #57).
+- **Begründungen der KI** erscheinen in der Sprache der Oberfläche.
+- **Lehnwörter:** Die Beispiele für Wörter, die in der Zielsprache ebenso üblich sind, stehen je Sprache in der Tabelle (Deutsch wie bisher: Screenshot, Design, Meme …).
+
+### Tests
+
+- Neues `test_content_language.py` (32 Prüfungen):
+  - Sprachtabelle und Prompt ohne offene Platzhalter
+  - Fingerabdrücke: Standardsprache ändert nichts, Englisch genau IA-03, IA-05, IA-07 (und IA-08 mit Gruppen)
+  - Namen der Gruppen und Ordner
+  - Geocoding gegen das echte Nominatim, Gießen in beiden Sprachen
+- `test_tag_merge.py` Teil L: ss-Regeln samt Zusammenführen in Immich, Übersetzung Deutsch → Englisch.
+- E2E US-30: ein Foto aus Gießen auf Deutsch (Schweiz) ohne ß, dann Englisch mit einem Foto aus Bern. Danach gilt der deutsche Job als veraltet und steht bei „Tags in Gruppen umstellen“.
+
 ## v3.5.1 — 2026-11-02
 
 ### Fix: Authlib 1.9.2 (CVE-2026-96760 und weitere Hinweise)

@@ -39,9 +39,10 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
+import content_language
 import tag_groups as tg
 from database import async_session
-from folder_path import ROOT_TAG
+from folder_path import is_folder_tree
 from system_logger import log_info, log_warning
 
 logger = logging.getLogger("mediaassistant.tag_groups_migration")
@@ -67,6 +68,7 @@ async def job_overview(set_id: int) -> dict:
     from sqlalchemy import or_
     from models import Job, ProcessingSet
     from sets import get_set
+    scheme = (await content_language.current()).scheme
     async with async_session() as session:
         ps = await session.get(ProcessingSet, set_id)
         if ps is None:
@@ -79,7 +81,7 @@ async def job_overview(set_id: int) -> dict:
                                           Job.target_path.like("immich:%"))
         in_immich = (await session.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
         marker = _marker()
-        wrong = or_(marker.is_(None), marker != tg.SCHEME) if ps.tag_groups else marker.is_not(None)
+        wrong = or_(marker.is_(None), marker != scheme) if ps.tag_groups else marker.is_not(None)
         keys = list((await session.execute(base.where(wrong).order_by(Job.created_at, Job.id))).scalars().all())
         locked = (await session.execute(select(func.count()).select_from(Job).where(
             of_set, Job.status.in_(("done", "review")), Job.target_path.like("immich:%"),
@@ -167,35 +169,36 @@ def _sort_key(name: str) -> str:
     return "".join(c for c in name if c.isalnum()).casefold()
 
 
-def sorts_before_groups(name: str) -> bool:
+def sorts_before_groups(name: str, roots=tg.ROOTS) -> bool:
     """Whether Immich lists a root tag above the groups. It lists tags in
     the database's order (ORDER BY value, Postgres collation en_US.utf8),
     which ignores punctuation, symbols and spaces at the first level
     (measured: ".." < "01 Kategorie" < "2026" < "3" < "Abend" < "#Hinweise"
     < "Höhle" < "+Kategorie"). Approximated by comparing letters and digits
     only."""
-    return _sort_key(name) < min(_sort_key(r) for r in tg.ROOTS)
+    return _sort_key(name) < min(_sort_key(r) for r in roots)
 
 
-def root_overview(tags: list[dict]) -> dict:
-    """Root tags: how many, which of the group roots exist, the others."""
-    roots = sorted(_value(t) for t in tags if not t.get("parentId"))
-    present = [r for r in tg.ROOTS if r in roots]
-    others = [r for r in roots if r not in tg.ROOTS]
-    return {"tags_total": len(tags), "roots": len(roots), "groups": len(tg.ROOTS), "groups_present": present,
+def root_overview(tags: list[dict], roots=tg.ROOTS) -> dict:
+    """Root tags: how many, which of the group roots (of the language in
+    use) exist, the others."""
+    names = sorted(_value(t) for t in tags if not t.get("parentId"))
+    present = [r for r in roots if r in names]
+    others = [r for r in names if r not in roots]
+    return {"tags_total": len(tags), "roots": len(names), "groups": len(roots), "groups_present": present,
             "others": len(others), "others_sample": others[:MAX_SAMPLE],
-            "above_groups": len([r for r in others if sorts_before_groups(r)])}
+            "above_groups": len([r for r in others if sorts_before_groups(r, roots)])}
 
 
 def _flat(name: str) -> str:
-    return name if tg.is_grouped(name) or name.startswith(ROOT_TAG + "/") else name.replace("/", " - ")
+    return name if tg.is_grouped(name) or is_folder_tree(name) else name.replace("/", " - ")
 
 
 async def own_values() -> tuple[set, set]:
     """(values MediaAssistant ever wrote to Immich, values of assets it
     locked) — from every recorded IA-08 run, with their parents."""
     from models import ModuleRun
-    own, protected = set(tg.ROOTS) | {ROOT_TAG}, set()
+    own, protected = set(content_language.ALL_ROOTS) | set(content_language.ALL_FOLDER_ROOTS), set()
     async with async_session() as session:
         rows = await session.stream(select(ModuleRun.result).where(ModuleRun.module == "IA-08"))
         async for (result,) in rows:
@@ -228,7 +231,7 @@ def _written_values(name: str) -> set:
 
 
 def _is_own(value: str, own: set) -> bool:
-    return value in own or value.startswith(ROOT_TAG + "/") or tg.is_grouped(value)
+    return value in own or is_folder_tree(value) or tg.is_grouped(value)
 
 
 async def _count(tag_id: str, api_key=None) -> int:
@@ -344,7 +347,8 @@ async def _job_rows(set_id: int):
         first = await get_set(session, None)
         of_set = or_(Job.set_id == set_id, Job.set_id.is_(None)) if first and first.id == set_id \
             else Job.set_id == set_id
-        matches = _marker() == tg.SCHEME if ps.tag_groups else _marker().is_(None)
+        scheme = (await content_language.current()).scheme
+        matches = _marker() == scheme if ps.tag_groups else _marker().is_(None)
         rows = (await session.execute(select(Job.id, Job.debug_key, Job.target_path, Job.step_result).where(
             of_set, Job.status.in_(("done", "review")), Job.target_path.like("immich:%"), matches)
             .order_by(Job.id))).all()
@@ -390,7 +394,7 @@ async def former_roots() -> set:
         markers = (await session.execute(select(distinct(func.json_extract(ModuleRun.result, "$.tag_groups")))
                                          .where(ModuleRun.module == "IA-07"))).scalars().all()
     roots = {r for m in markers if isinstance(m, str) for r in m.split("|") if r}
-    return roots - set(tg.ROOTS)
+    return roots - set((await content_language.current()).roots)
 
 
 async def check_and_repair(set_id: int, *, rounds: int = 3, progress=None, cancelled=lambda: False,
@@ -491,12 +495,13 @@ async def preview(set_id: int, *, include_foreign: bool = False, progress=None, 
     from immich_client import list_tags
     jobs = await job_overview(set_id)
     tags = await list_tags()
+    roots = (await content_language.current()).roots
     found = await empty_tags(include_foreign=include_foreign, progress=progress, cancelled=cancelled,
                              restrict=restrict)
     return {"jobs": {k: v for k, v in jobs.items() if k != "to_convert"},
             "to_convert": len(jobs.get("to_convert") or []),
             "to_convert_sample": (jobs.get("to_convert") or [])[:10],
-            "immich": root_overview(tags),
+            "immich": root_overview(tags, roots),
             "empty": len(found["deletable"]), "empty_sample": [_value(t) for t in found["deletable"]][:MAX_SAMPLE],
             "foreign_empty": len(found["foreign"]), "foreign_sample": found["foreign"][:MAX_SAMPLE],
             "kept_locked": len(found["kept_locked"]), "count_failed": found["count_failed"]}
@@ -506,13 +511,14 @@ async def run(set_id: int, *, include_foreign: bool = False, phase=None, progres
               cancelled=lambda: False, restrict=None) -> dict:
     """Convert, wait for Immich's index, delete the empty tags, report."""
     from immich_client import list_tags
-    before = root_overview(await list_tags())
+    roots = (await content_language.current()).roots
+    before = root_overview(await list_tags(), roots)
     if phase:
         phase("groups_converting")
     converted = await convert(set_id, progress=progress, cancelled=cancelled)
     result = {"before": before, "converted": converted}
     if converted.get("error") or cancelled():
-        result["after"] = root_overview(await list_tags())
+        result["after"] = root_overview(await list_tags(), roots)
         return result
     await asyncio.sleep(INDEX_LAG_S)
     if phase:
@@ -529,7 +535,7 @@ async def run(set_id: int, *, include_foreign: bool = False, phase=None, progres
     result["foreign_empty"] = len(found["foreign"])
     result["foreign_sample"] = found["foreign"][:MAX_SAMPLE]
     result["kept_locked"] = len(found["kept_locked"])
-    result["after"] = root_overview(await list_tags())
+    result["after"] = root_overview(await list_tags(), roots)
     await log_info("tools", "Tags in Gruppen umstellen abgeschlossen",
                    f"Jobs {converted['counts']}, abgelehnt {converted['refused']}; leere Tags gelöscht "
                    f"{result['deleted']['deleted']}, fremde leere behalten {result['foreign_empty']}; "

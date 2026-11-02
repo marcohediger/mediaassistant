@@ -33,23 +33,26 @@ tags as before. The folder tags use the root "04 Album" instead of
 "Ordner" (folder_path.FolderOptions.group); the folder tag mode still
 decides the shape below it.
 
-``ROOTS`` is the one place the root names live: IA-07, IA-08, the folder
-tags, the conversion tool, the set editor's example and the tests read
-them from here. ``SCHEME`` marks a result made with these roots, so a
-renamed root shows which jobs still carry the old names.
+The root names and the notes depend on the language of the content
+(content_language.py: "01 Kategorie" … in Swiss German, "01 Category" … in
+English); the functions take the language, the constants below are the
+names of the default language. A result made with the groups carries the
+scheme it used (``Language.scheme``), so after a change of language — or a
+renamed root — the tool "Tags in Gruppen umstellen" finds the jobs that
+still carry the old names. A path below a root of *any* language counts as
+MediaAssistant's (``is_grouped``).
 """
 import re
 
-# The five roots, in the order the tags are written. Renaming one is a
-# change here; the tool "Tags in Gruppen umstellen" then converts the jobs
-# whose marker names the old scheme.
-ROOTS = ("01 Kategorie", "02 Quelle", "03 Orte", "04 Album", "05 Hinweise")
-CATEGORY, SOURCE, PLACES, ALBUM, NOTES = ROOTS
-SCHEME = "|".join(ROOTS)
+from content_language import ALL_ROOTS, DEFAULT, Language, get as _language
 
-# The leaves below NOTES.
-NOTE_BLURRY = "unscharf"   # IA-05 quality "blurry"
-NOTE_TEXT = "Text erkannt"  # IA-06 found text
+_DEFAULT = _language(DEFAULT)
+# The names of the default language, in the order the tags are written.
+ROOTS = _DEFAULT.roots
+CATEGORY, SOURCE, PLACES, ALBUM, NOTES = ROOTS
+SCHEME = _DEFAULT.scheme
+NOTE_BLURRY = _DEFAULT.note_blurry   # IA-05 quality "blurry"
+NOTE_TEXT = _DEFAULT.note_text       # IA-06 found text
 
 # Geocoding fields, top down: the levels below PLACES. No state or canton
 # (decided 2026-10-24: "Schweiz/Bern/Bern" read as a doubled town); a
@@ -81,25 +84,25 @@ def path(root: str, *levels) -> str | None:
     return "/".join([root, *parts]) if parts else None
 
 
-def place_path(geo: dict | None) -> str | None:
+def place_path(geo: dict | None, lang: Language = _DEFAULT) -> str | None:
     """PLACES/country/city/suburb — empty levels skipped (no city: the
     country only; the state is never used)."""
     geo = geo or {}
-    return path(PLACES, *(geo.get(f) for f in PLACE_FIELDS))
+    return path(lang.roots[2], *(lang.fix(geo.get(f)) for f in PLACE_FIELDS))
 
 
 def is_grouped(value) -> bool:
-    """A path below one of the roots."""
-    return isinstance(value, str) and any(value.startswith(root + "/") for root in ROOTS)
+    """A path below one of the roots, of any language."""
+    return isinstance(value, str) and any(value.startswith(root + "/") for root in ALL_ROOTS)
 
 
-def content_tags(ai: dict | None) -> list[str]:
+def content_tags(ai: dict | None, lang: Language = _DEFAULT) -> list[str]:
     """The AI's content tags as flat tags: one level each (``level``), never
     only a year, each once — compared without case, as Immich does."""
     out: list[str] = []
     seen: set = set()
     for tag in (ai or {}).get("tags") or []:
-        value = level(tag)
+        value = level(lang.fix(tag))
         if value and not is_year(value) and value.casefold() not in seen:
             seen.add(value.casefold())
             out.append(value)
@@ -107,30 +110,32 @@ def content_tags(ai: dict | None) -> list[str]:
 
 
 def grouped_tags(*, category_label: str | None, ai: dict | None, geo: dict | None, ocr: dict | None,
-                 folder_paths=()) -> list[str]:
-    """Every tag of a file with the groups on, in the order of ROOTS, the
-    flat content tags after the source.
+                 folder_paths=(), lang: Language = _DEFAULT) -> list[str]:
+    """Every tag of a file with the groups on, in the order of the roots,
+    the flat content tags after the source. What the AI and the geocoder
+    gave is written as the language writes it (``Language.fix``).
 
-    `folder_paths` are the folder tags already under ALBUM
-    (folder_path.folder_targets with the group set)."""
+    `folder_paths` are the folder tags already under the language's album
+    root (folder_path.folder_targets with the group set)."""
     ai, ocr = ai or {}, ocr or {}
+    category, source, _places, _album, notes = lang.roots
     out: list[str] = []
 
     def add(value):
         if value and value not in out:
             out.append(value)
 
-    add(path(CATEGORY, category_label))
-    add(path(SOURCE, ai.get("source")))
-    for tag in content_tags(ai):
+    add(path(category, category_label))
+    add(path(source, lang.fix(ai.get("source"))))
+    for tag in content_tags(ai, lang):
         add(tag)
-    add(place_path(geo))
+    add(place_path(geo, lang))
     for p in folder_paths:
         add(p)
     if ai.get("quality") == "blurry":
-        add(path(NOTES, NOTE_BLURRY))
+        add(path(notes, lang.note_blurry))
     if ocr.get("has_text"):
-        add(path(NOTES, NOTE_TEXT))
+        add(path(notes, lang.note_text))
     return out
 
 
@@ -158,25 +163,32 @@ async def enabled(job=None, *, set_id=None) -> bool:
 
 # The set editor's example: a blurry camera photo from the beach in Palma,
 # in the folder of the folder-structure example (i18n sets.folder_example_file).
+# Its values per language: Language.examples.
 EXAMPLE_FOLDER = "Ferien/Mallorca/2019/07/DCIM/104_PANA"
-EXAMPLE_FILE = {"category_label": "Persönliches Foto",
-                "ai": {"source": "Kamerafoto", "tags": ["Strand", "Meer"], "quality": "blurry"},
-                "geo": {"country": "Spanien", "state": "Balearische Inseln", "city": "Palma"},
-                "ocr": {}}
 
 
-async def editor_example() -> dict:
+def example_file(lang: Language = _DEFAULT) -> dict:
+    ex = lang.examples
+    return {"category_label": ex["category_label"],
+            "ai": {"source": ex["source"], "tags": list(ex["tags"]), "quality": "blurry"},
+            "geo": {"country": ex["country"], "state": ex["state"], "city": ex["city"]},
+            "ocr": {}}
+
+
+async def editor_example(lang: Language = _DEFAULT) -> dict:
     """What the example file gets with tag groups, computed by the code that
     writes the tags: per root the values below it, the flat content tags,
     the folder tags per folder tag mode. {"roots": [(root, [value, …]), …],
-    "flat": [tag, …], "album": {mode: [value, …]}, "album_root": ALBUM}."""
+    "flat": [tag, …], "album": {mode: [value, …]}, "album_root": album root}."""
     from types import SimpleNamespace
     from folder_path import TAG_MODES, FolderOptions, folder_targets
+    album_root = lang.roots[3]
     job = SimpleNamespace(step_result={"IA-02": {"folder_path": EXAMPLE_FOLDER}})
     album = {}
     for mode in TAG_MODES:
-        found = await folder_targets(job, options=FolderOptions(tag_mode=mode, group=ALBUM))
-        album[mode] = [p[len(ALBUM) + 1:] for p in found.tag_paths]
-    tags = grouped_tags(**EXAMPLE_FILE)
-    roots = [(root, [p[len(root) + 1:] for p in tags if p.startswith(root + "/")]) for root in ROOTS]
-    return {"roots": roots, "flat": [t for t in tags if not is_grouped(t)], "album": album, "album_root": ALBUM}
+        found = await folder_targets(job, options=FolderOptions(tag_mode=mode, group=album_root))
+        album[mode] = [p[len(album_root) + 1:] for p in found.tag_paths]
+    tags = grouped_tags(**example_file(lang), lang=lang)
+    roots = [(root, [p[len(root) + 1:] for p in tags if p.startswith(root + "/")]) for root in lang.roots]
+    return {"roots": roots, "flat": [t for t in tags if not is_grouped(t)], "album": album,
+            "album_root": album_root}

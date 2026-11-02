@@ -283,9 +283,8 @@ def _ext(row) -> str:
 
 
 def _ocr_relevant(ia05: dict) -> bool:
-    ai_type = (ia05.get("type") or "")
-    source = (ia05.get("source") or "").lower()
-    return ai_type.lower() == "screenshot" or "dokument" in source or "document" in source or "quittung" in source
+    from pipeline.step_ia06_ocr import ocr_relevant
+    return ocr_relevant(ia05.get("type"), ia05.get("source"))
 
 
 def predict_skip(code: str, row, view: dict, snap: dict, ctx: Context, options: dict,

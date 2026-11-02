@@ -45,7 +45,7 @@ Respond ONLY with valid JSON (no markdown, no surrounding text):
 }
 
 ## 1) type — Category (target library folder)
-Use one of the category labels EXACTLY as provided in the list (e.g. "Persönliches Foto", "Screenshot").
+Use one of the category labels EXACTLY as provided in the list (e.g. {category_examples}).
 
 CRITICAL RULES for pre-classification handling:
 - If a static rule assigned a category AND the metadata supports it (e.g. camera make/model present, GPS coordinates, real EXIF date), you MUST keep that classification. The metadata is objective evidence — do NOT override it based on image appearance alone.
@@ -77,19 +77,19 @@ Strong signals for screenshot (use Screenshot category!):
 - IMPORTANT: If the description mentions a social media post (Facebook, Instagram, etc.) or an app interface, classify as Screenshot, NOT as personal photo
 
 ## 2) source — Origin / provenance
-Describes where the image came from. Capitalize first letter, human-readable, in GERMAN.
-Examples for images: Kamerafoto, Selfie, Drohnenfoto, Meme, Internetbild, Werbung, Infografik, Dokument, Quittung, Screenshot App, Screenshot Web, Sticker, Comic, Weitergeleitetes Bild
-Examples for videos: Kameravideo, Selfie-Video, Drohnenvideo, Internetvideo, Weitergeleitetes Video, Bildschirmaufnahme
+Describes where the image came from. Capitalize first letter, human-readable, in {language}.
+Examples for images: {source_examples_images}
+Examples for videos: {source_examples_videos}
 You may define new fitting sources if none of the examples match.
 
 ## 3) tags — Descriptive content tags
-3-8 tags describing the image content. In GERMAN, capitalize first letter, human-readable.
+3-8 tags describing the image content. In {language}, capitalize first letter, human-readable.
 IMPORTANT: Only assign tags for things that are CLEARLY VISIBLE in the image. Never invent or guess tags. If you are unsure about an object, do NOT tag it.
-Tags should cover broad categories like: scene type (e.g. Landschaft, Innenraum), main subjects actually visible, activity, location type, notable objects, atmosphere.
+Tags should cover broad categories like: scene type (e.g. {scene_examples}), main subjects actually visible, activity, location type, notable objects, atmosphere.
 Do NOT use a fixed vocabulary — derive tags strictly from what you actually see.
 
 ## Other fields:
-- description: In GERMAN, factual, 1-2 sentences
+- description: In {language}, factual, 1-2 sentences
 - people_count: Number of visible people (0 if none)
 - quality: Technical image quality
 - confidence: How certain about the type classification (0.0-1.0)
@@ -155,7 +155,13 @@ async def execute(job, session) -> dict:
     # The Settings UI "Reset" button stores an empty string in the DB
     # (so the row stays for audit), so the get(..., DEFAULT) form alone
     # would return "" and ship an empty system prompt to the AI.
-    system_prompt = await config_manager.get("ai.prompt", "") or DEFAULT_SYSTEM_PROMPT
+    # {language} and the examples follow the language of the content
+    # (content_language.py) — in the built-in prompt and in an own one that
+    # uses the placeholders.
+    import content_language
+    lang = await content_language.current()
+    system_prompt = content_language.render_prompt(
+        await config_manager.get("ai.prompt", "") or DEFAULT_SYSTEM_PROMPT, lang)
 
     # Mindestgrösse prüfen — zu kleine Bilder erzeugen AI-Halluzinationen
     exif = (job.step_result or {}).get("IA-01", {})
@@ -460,6 +466,14 @@ Use this information together with the image content for your classification."""
             "quality": "unbekannt",
             "confidence": 0.0,
         }
+
+    # As the language writes it (Swiss German: "ss" for "ß") — a small model
+    # does not always keep to the prompt.
+    for key in ("source", "description"):
+        if key in result:
+            result[key] = lang.fix(result[key])
+    if isinstance(result.get("tags"), list):
+        result["tags"] = [lang.fix(t) for t in result["tags"]]
 
     # Drop keywords that mix writing systems before anything stores them —
     # once such a tag reaches Immich it has to be hunted down by hand.

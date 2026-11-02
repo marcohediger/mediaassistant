@@ -42,6 +42,7 @@ async def _get_modules_dict() -> dict:
 
 
 from pipeline.step_ia05_ai import DEFAULT_SYSTEM_PROMPT as _DEFAULT_AI_PROMPT
+import content_language
 
 
 async def _stored_key_len(value_or_none) -> int:
@@ -68,6 +69,10 @@ async def _get_cfg() -> dict:
         "ai_url": await config_manager.get("ai.backend_url", ""),
         "ai_model": await config_manager.get("ai.model", ""),
         "ai_prompt": await config_manager.get("ai.prompt", "") or _DEFAULT_AI_PROMPT,
+        "content_language": (await content_language.current()).code,
+        # A stored prompt without {language} does not follow the language.
+        "ai_prompt_follows_language": "{language}" in (await config_manager.get("ai.prompt", "") or "{language}"),
+        "content_languages": [(code, lang.label) for code, lang in content_language.LANGUAGES.items()],
         "ai_api_key_len": await _stored_key_len(stored_keys["ai"]),
         "ai2_api_key_len": await _stored_key_len(stored_keys["ai2"]),
         "ai_image_resize": await config_manager.get("ai.image_resize", False),
@@ -132,7 +137,7 @@ async def settings_page(request: Request):
 
     import tag_groups
     return await render(request, "settings.html", {
-        "tag_group_example": await tag_groups.editor_example(),
+        "tag_group_example": await tag_groups.editor_example(await content_language.current()),
         "modules": type("M", (), modules)(),
         "cfg": type("C", (), cfg)(),
         "sets": sets,
@@ -185,6 +190,16 @@ async def save_settings(request: Request):
     if "ai_prompt" in form:
         ai_prompt = form["ai_prompt"].strip()
         await config_manager.set("ai.prompt", "" if ai_prompt == _DEFAULT_AI_PROMPT.strip() else ai_prompt)
+
+    # Language of the content (content_language.py): only a known one; a
+    # change applies to what is processed from now on.
+    if form.get("content_language") in content_language.LANGUAGES:
+        new_lang = form["content_language"]
+        old_lang = (await content_language.current()).code
+        if new_lang != old_lang:
+            await config_manager.set(content_language.CONFIG_KEY, new_lang)
+            await log_info("settings", f"Sprache der Inhalte: {old_lang} → {new_lang}",
+                           "gilt für alles, was ab jetzt verarbeitet wird; Bestehendes bleibt bis zum Neu-Verarbeiten")
 
     # Geocoding
     await config_manager.set("geo.provider", form.get("geo_provider", "nominatim"))

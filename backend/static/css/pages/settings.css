@@ -7,6 +7,8 @@
 
 /* Flash message under the page head */
 .st-flash { margin: 0 0 1.25rem; }
+/* Under the content language: the stored AI prompt names a language of its own */
+.st-prompt-language { margin-top: var(--ui-space-3); }
 
 /* ── Module sections ────────────────────────────────────────────────
    A switched-off module keeps its options editable (they are saved

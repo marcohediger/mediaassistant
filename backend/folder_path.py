@@ -35,8 +35,11 @@ Rules, the same for both options (not for ``legacy``):
   year);
 * at most ``MAX_LEVELS`` levels; deeper ones are cut.
 
-With the set's tag groups on (tag_groups.py) the folder tags go under the
-root ``tag_groups.ALBUM`` ("04 Album") instead of "Ordner" (``FolderOptions.group``), and every kind
+The root of a nested folder tag depends on the language of the content
+(content_language.py: "Ordner" in Swiss German, "Folders" in English;
+``FolderOptions.root``). With the set's tag groups on (tag_groups.py) the
+folder tags go under the language's album root ("04 Album") instead
+(``FolderOptions.group``), and every kind
 of them becomes a path: nested ``04 Album/A/B/C``, flat ``04 Album/A``,
 ``04 Album/B``…, legacy ``04 Album/<each old tag>``. A pure year level
 (``2023``) is dropped there — ``Wandern/Alpstein/2023`` gives
@@ -48,9 +51,10 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from tag_groups import ALBUM as GROUP_ALBUM, is_grouped, level as group_level
+from content_language import ALL_FOLDER_ROOTS, DEFAULT, get as _language
+from tag_groups import is_grouped, level as group_level
 
-ROOT_TAG = "Ordner"
+ROOT_TAG = _language(DEFAULT).folder_root  # the default language's folder root
 MAX_LEVELS = 4
 
 _DROP = (
@@ -70,7 +74,8 @@ TAG_MODES = ("none", "flat", "legacy", "nested")
 class FolderOptions:
     tag_mode: str = "none"  # none / flat / legacy / nested
     albums: bool = False    # one album per folder
-    group: str | None = None  # tag groups on: the root of every folder tag (tag_groups.ALBUM)
+    group: str | None = None  # tag groups on: the root of every folder tag (the language's album root)
+    root: str = ROOT_TAG      # without groups: the root of nested folder tags (the language's folder root)
 
     @property
     def flat(self) -> bool:
@@ -226,8 +231,8 @@ def legacy_album_name(rel: str | None) -> str | None:
 
 
 def is_folder_tree(value) -> bool:
-    """A nested folder tag below "Ordner"."""
-    return isinstance(value, str) and value.startswith(ROOT_TAG + "/")
+    """A nested folder tag below the folder root of any language ("Ordner", "Folders")."""
+    return isinstance(value, str) and any(value.startswith(root + "/") for root in ALL_FOLDER_ROOTS)
 
 
 def is_tag_path(value) -> bool:
@@ -291,9 +296,11 @@ async def folder_options(job) -> FolderOptions:
         processing_set = await get_set(session, getattr(job, "set_id", None))
     if not processing_set:
         return FolderOptions()
+    import content_language
+    lang = await content_language.current()
     mode = processing_set.folder_tag_mode if processing_set.folder_tag_mode in TAG_MODES else "none"
     return FolderOptions(tag_mode=mode, albums=bool(processing_set.folder_albums),
-                         group=GROUP_ALBUM if processing_set.tag_groups else None)
+                         group=lang.roots[3] if processing_set.tag_groups else None, root=lang.folder_root)
 
 
 def _add(items: list, value) -> None:
@@ -334,7 +341,7 @@ async def folder_targets(job, *, ia02: dict | None = None,
         paths = [own, *(record.get("donor_folder_paths") or [])]
         for rel in paths:
             if opts.nested:
-                _add(out.tag_paths, tag_path(rel, opts.group or ROOT_TAG, years=not opts.group))
+                _add(out.tag_paths, tag_path(rel, opts.group or opts.root, years=not opts.group))
             if opts.flat:
                 for level in tag_levels(rel, years=not opts.group):
                     single(level)

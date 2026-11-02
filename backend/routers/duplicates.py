@@ -1341,10 +1341,12 @@ async def _apply_merge_in_immich(kept, asset_id: str, merge: _Merge, notes: list
         # Tag groups: the donors' content tags stay flat (never a bare year),
         # the place of a donor whose GPS was taken over and the folders go
         # into their groups (tag_groups.py).
-        new_tags = [t for t in tag_groups.content_tags({"tags": merge.taken_keywords})
+        import content_language
+        lang = await content_language.current()
+        new_tags = [t for t in tag_groups.content_tags({"tags": merge.taken_keywords}, lang)
                     if t not in written and t not in on_asset]
         ia03 = merge.step_result.get("IA-03") if isinstance(merge.step_result.get("IA-03"), dict) else {}
-        wanted = [tag_groups.place_path(ia03)] if ia03.get("copied_from") else []
+        wanted = [tag_groups.place_path(ia03, lang)] if ia03.get("copied_from") else []
         new_paths = [p for p in dict.fromkeys([*wanted, *folder.tag_paths])
                      if p and p not in on_asset and p not in written]
     else:

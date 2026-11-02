@@ -7,19 +7,31 @@ from ai_backends import acquire_ai_backend
 from config import config_manager
 
 
-OCR_PROMPT = """Untersuche dieses Bild auf sichtbaren Text. Antworte ausschliesslich mit validem JSON (kein Markdown).
+# The text is transcribed as it stands in the image, whatever the language
+# of the content (content_language.py) — the prompt itself is neutral.
+OCR_PROMPT = """Examine this image for visible text. Answer only with valid JSON (no markdown).
 
 {
   "has_text": true/false,
-  "text": "Der gesamte erkannte Text",
-  "text_type": "schild|dokument|screenshot|whiteboard|handschrift|sonstiges|keiner",
+  "text": "All recognised text, exactly as written in the image",
+  "text_type": "sign|document|screenshot|whiteboard|handwriting|other|none",
   "language": "de|en|fr|it|..."
 }
 
-Regeln:
-- Wenn kein Text sichtbar ist: has_text=false, text="", text_type="keiner"
-- Erfasse ALLEN sichtbaren Text (Schilder, Beschriftungen, Bildschirminhalte, Dokumente)
-- Behalte die originale Formatierung bei wo sinnvoll"""
+Rules:
+- If no text is visible: has_text=false, text="", text_type="none"
+- Capture ALL visible text (signs, labels, screen content, documents) in its original language; do not translate
+- Keep the original formatting where it makes sense"""
+
+# Sources that call for OCR in smart mode — the AI's source (IA-05) in either
+# language of the content.
+_OCR_SOURCES = ("dokument", "document", "quittung", "receipt")
+
+
+def ocr_relevant(ai_type: str | None, source: str | None) -> bool:
+    """Smart mode: a screenshot, a document or a receipt."""
+    source = (source or "").lower()
+    return (ai_type or "").lower() == "screenshot" or any(word in source for word in _OCR_SOURCES)
 
 
 # Reason of a skip in smart mode (no text expected): the module did what the
@@ -39,9 +51,7 @@ async def execute(job, session) -> dict:
     if ocr_mode == "smart":
         ai_result = (job.step_result or {}).get("IA-05", {})
         ai_type = ai_result.get("type", "")
-        ai_source = ai_result.get("source", "").lower()
-        is_ocr_relevant = ai_type.lower() == "screenshot" or "dokument" in ai_source or "document" in ai_source or "quittung" in ai_source
-        if ai_type and not is_ocr_relevant and not ai_result.get("parse_error"):
+        if ai_type and not ocr_relevant(ai_type, ai_result.get("source")) and not ai_result.get("parse_error"):
             return {"status": "skipped", "reason": f"type={ai_type}, {SMART_NOT_NEEDED}"}
 
     # Use pre-converted temp file from IA-04 if available

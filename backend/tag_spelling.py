@@ -1,27 +1,33 @@
 """Spelling variants of tags — which names mean the same, which damaged names
-can be repaired, which English tags have a German counterpart. The logic
-behind the tool "Schreibweisen zusammenführen" (routers/tools.py runs the
-scan and the merge).
+can be repaired, which tags of another language have a counterpart in the
+language of the content (content_language.py). The logic behind the tool
+"Schreibweisen zusammenführen" (routers/tools.py runs the scan and the
+merge).
 
 From safe to uncertain:
 
 - Same letters (safe): case, spacing, hyphens, punctuation, ä↔ae, ß↔ss and
   the accents of other languages (é↔e). Proposed ticked.
-- A dropped umlaut (unclear): "Bar" and "Bär", "Zurich" and "Zürich" — the
-  same word without its umlaut, or another word. The AI decides with the
-  descriptions and places of a few photos of each tag as context; when it
-  says they are the same, the spelling with the umlaut is the target.
-  Without an answer the proposal stays unticked.
+- A dropped umlaut (unclear, Swiss German only): "Bar" and "Bär", "Zurich"
+  and "Zürich" — the same word without its umlaut, or another word. The AI
+  decides with the descriptions and places of a few photos of each tag as
+  context; when it says they are the same, the spelling with the umlaut is
+  the target. Without an answer the proposal stays unticked.
+- Swiss German writes "ss" for "ß": the "ss" spelling is the target, a
+  name with "ß" only is renamed.
 - Damaged names ("H?hlenpfad": a broken encoding turned each special
   character into "?"). With a healthy partner they join its group, as
   before. Without one the candidate spellings are searched in the
   descriptions and places of their photos, else the AI is asked. An answer
   counts only if it fits the pattern and every "?" became a non-ASCII letter
   — an encoding loss never eats a plain letter.
-- English tags: the AI names the German word, a second, narrower question
-  confirms that the name is English and the word means exactly the same.
-  Proposed ticked only when both hold and a tag of that spelling exists
-  already; a new tag waits for the user.
+- Tags in another language: the AI names the word in the language of the
+  content, a second, narrower question confirms that the name is not in
+  that language and the word means exactly the same. Proposed ticked only
+  when both hold and a tag of that spelling exists already; a new tag
+  waits for the user.
+
+The AI's reasons come in the language of the interface (``reasons``).
 
 The user has the last word: every proposal can be unticked, and the tool
 remembers an unticked pair (config ``tools.merge_keep_apart``).
@@ -314,6 +320,15 @@ def _json_object(content: str):
 async def ask_ai(prompt: str, *, max_tokens: int = 300) -> dict:
     """One question to the AI backend; the answer as a JSON object.
     AIUnavailable when it cannot be asked, ValueError for an unusable answer."""
+    content = await ask_ai_text(prompt, max_tokens=max_tokens)
+    result = _json_object(content)
+    if not isinstance(result, dict):
+        raise ValueError(f"keine JSON-Antwort: {content[:120]!r}")
+    return result
+
+
+async def ask_ai_text(prompt: str, *, max_tokens: int = 300) -> str:
+    """One question to the AI backend; the answer's text (without <think>)."""
     async with acquire_ai_backend() as backend:
         if backend is None:
             raise AIUnavailable("kein KI-Backend eingestellt")
@@ -334,10 +349,24 @@ async def ask_ai(prompt: str, *, max_tokens: int = 300) -> dict:
         content = resp.json()["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise ValueError(f"unerwartete Antwort: {resp.text[:160]}") from exc
-    result = _json_object(content)
-    if not isinstance(result, dict):
-        raise ValueError(f"keine JSON-Antwort: {content[:120]!r}")
-    return result
+    return re.sub(r"<think>.*?</think>", "", content or "", flags=re.S)
+
+
+# One ["keyword", "translation"] entry of foreign_batch's answer, read on its
+# own: the AI now and then leaves the JSON unfinished (no closing brace,
+# measured with qwen3.5-4b on 2 of 12 batches), and every complete entry
+# before that still counts.
+_PAIR = re.compile(r'\[\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\]')
+
+
+def _pairs(content: str) -> list[tuple[str, str]]:
+    out = []
+    for a, b in _PAIR.findall(content):
+        try:
+            out.append((json.loads(f'"{a}"'), json.loads(f'"{b}"')))
+        except ValueError:
+            continue
+    return out
 
 
 def _photos(name: str, context: list[str]) -> str:
@@ -345,18 +374,19 @@ def _photos(name: str, context: list[str]) -> str:
     return f'Photos tagged "{name}":\n{lines}'
 
 
-async def same_word(a: str, b: str, context_a: list[str], context_b: list[str]) -> tuple[bool | None, str]:
+async def same_word(a: str, b: str, context_a: list[str], context_b: list[str], *,
+                    reasons: str = "German") -> tuple[bool | None, str]:
     """Do two names that differ by dropped umlauts mean the same?"""
     answer = await ask_ai(
         f'Two keywords of a German photo collection differ only by umlauts: "{a}" and "{b}".\n'
         f"{_photos(a, context_a)}\n{_photos(b, context_b)}\n"
         "Do they mean the same thing (one is just written without the umlaut) or are they different words? "
-        'Answer only with JSON: {"same": true or false, "reason": "one short sentence in German"}')
+        f'Answer only with JSON: {{"same": true or false, "reason": "one short sentence in {reasons}"}}')
     same = answer.get("same")
     return (same if isinstance(same, bool) else None), str(answer.get("reason") or "")[:300]
 
 
-async def ai_repair(name: str, context: list[str]) -> tuple[str | None, str]:
+async def ai_repair(name: str, context: list[str], *, reasons: str = "German") -> tuple[str | None, str]:
     """The repaired spelling the AI names, checked against the pattern;
     the name itself when its "?" is meant (a question)."""
     answer = await ask_ai(
@@ -364,7 +394,7 @@ async def ai_repair(name: str, context: list[str]) -> tuple[str | None, str]:
         "lost letter, almost always a German umlaut or ß (ä ö ü ß, at the start of a word Ä Ö Ü), rarely é è à.\n"
         f"Descriptions and places of photos with this keyword:\n{_photos(name, context)}\n"
         'What is the correct keyword? Answer only with JSON: {"word": "the corrected keyword", '
-        '"reason": "one short sentence in German"}. If the "?" is meant to be there (e.g. a question), return '
+        f'"reason": "one short sentence in {reasons}"}}. If the "?" is meant to be there (e.g. a question), return '
         'the keyword unchanged. If you do not know, answer {"word": null, "reason": "..."}.')
     word, reason = answer.get("word"), str(answer.get("reason") or "")[:300]
     if isinstance(word, str) and word.strip() == name:
@@ -372,42 +402,59 @@ async def ai_repair(name: str, context: list[str]) -> tuple[str | None, str]:
     return fits(name, word), reason
 
 
-async def english_batch(names: list[str]) -> dict[str, str]:
-    """English name -> German keyword, for one batch of names."""
-    listing = "\n".join(f"- {n}" for n in names)
-    answer = await ask_ai(
-        "The keywords of a photo collection should be German. Which of these keywords are English?\n"
-        f"{listing}\n"
-        "For every English keyword give the usual German keyword. Leave out keywords that are German, names of "
-        "places, people or brands, and English words that are just as common in German (Screenshot, Design, "
-        "Meme, Interface, Pixel). Answer only with compact JSON, no explanation: "
-        '{"english": [["English keyword exactly as given", "German keyword"], ...]}',
-        max_tokens=1200)
+async def foreign_batch(names: list[str], lang) -> dict[str, str]:
+    """Name in another language -> keyword in the language of the content
+    (content_language.Language), for one batch of names.
+
+    The AI answers for every name of the numbered list. Asked only for the
+    foreign ones it overlooked many of them once most of a batch was foreign
+    (measured with qwen3.5-4b, English as the target: 17 of about 35 German
+    names, "Schneemann" not among them; every name answered: 37, with it).
+    That takes about twice as long."""
+    listing = "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
+    target = lang.ai_name
+    content = await ask_ai_text(
+        f"The keywords of a photo collection should be in {target}. Go through EVERY keyword of this numbered "
+        f"list and decide for each one.\n{listing}\n"
+        f"For each keyword give the usual keyword in {target} if it is in another language; give \"\" if it is in "
+        f"{target} already, a name of a place, person or brand, or a foreign word just as common in {target} "
+        f"({lang.loanwords}). Answer only with compact JSON, one entry per keyword in the same order: "
+        '{"keywords": [["keyword exactly as given", "keyword in the target language or empty"], ...]}',
+        max_tokens=60 * len(names) + 200)
+    pairs = _pairs(content)
+    if not pairs:
+        raise ValueError(f"keine Einträge in der Antwort: {content[:120]!r}")
     wanted = set(names)
     out = {}
-    for pair in answer.get("english") or []:
-        if not (isinstance(pair, list) and len(pair) == 2 and all(isinstance(p, str) for p in pair)):
-            continue
-        english, german = pair[0].strip(), pair[1].strip()
-        if english in wanted and german and len(german) <= 80 and "/" not in german \
-                and not is_damaged(german) and strict_key(german) != strict_key(english):
-            out[english] = german
+    for foreign, own in pairs:
+        foreign, own = foreign.strip(), lang.fix(own.strip())
+        if foreign in wanted and own and len(own) <= 80 and "/" not in own \
+                and not is_damaged(own) and strict_key(own) != strict_key(foreign):
+            out[foreign] = own
     return out
 
 
-async def check_translation(english: str, german: str) -> tuple[bool, bool]:
-    """(is the name English at all, does the German word mean exactly the
-    same). The batch question mistakes German names for English now and
-    then ("Mahlzeit" → "Essen") and maps to broader words ("Social Media
+async def check_translation(foreign: str, own: str, lang) -> tuple[bool, bool]:
+    """(is the name in another language at all, does the word in the
+    language of the content mean exactly the same). The batch question
+    mistakes names in the language for foreign ones now and then
+    ("Mahlzeit" → "Essen") and maps to broader words ("Social Media
     Interface" → "Benutzeroberfläche"); this narrower question catches both
     (measured with qwen3.5-4b). It also says no to some good pairs — those
-    are shown unticked, which is the harmless way to be wrong."""
+    are shown unticked, which is the harmless way to be wrong.
+
+    Asked the other way round ("in another language than …?") and with the
+    long name of the prompts that write text, the model answered the first
+    question backwards ("Beach" German, "Mahlzeit" foreign): it is asked
+    whether A is a word of the language, by its plain name."""
+    target = lang.plain_name
     answer = await ask_ai(
-        f'Keyword A: "{english}"\nKeyword B: "{german}"\n'
-        "Answer two questions about these photo keywords. 1) Is keyword A English (not German)? "
-        "2) Does keyword B mean exactly the same as keyword A, in German — not broader, not narrower, not just "
-        'related? Answer only with JSON: {"a_is_english": true or false, "same_meaning": true or false}')
-    return answer.get("a_is_english") is True, answer.get("same_meaning") is True
+        f'Keyword A: "{foreign}"\nKeyword B: "{own}"\n'
+        f"Answer two questions about these photo keywords. 1) Is keyword A a {target} word (a word of the "
+        f"{target} language)? 2) Does keyword B mean exactly the same as keyword A, in {target} — not broader, "
+        "not narrower, not just related? Answer only with JSON: "
+        '{"a_is_target_language": true or false, "same_meaning": true or false}')
+    return answer.get("a_is_target_language") is False, answer.get("same_meaning") is True
 
 
 async def run_limited(items, fn, *, progress=None, cancelled=lambda: False):

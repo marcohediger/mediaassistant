@@ -158,7 +158,8 @@ async def _create(name: str, copy_from: int | None) -> int:
         if source:
             await copy_set_contents(session, source.id, ps.id)
         else:
-            seed_set_defaults(session, ps.id)
+            import content_language
+            seed_set_defaults(session, ps.id, (await content_language.current()).categories)
         await session.commit()
         new_id = ps.id
     await log_info("sets", f"Verarbeitungs-Set „{name}\" angelegt",

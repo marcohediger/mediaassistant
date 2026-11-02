@@ -30,6 +30,7 @@ Stories:
   US-23 … US-27: Dienst bzw. Laufwerk fehlt → Pipeline pausiert, Job wartet
   US-28: Ausgewählte Jobs löschen (Job-Liste, auch „Alle Treffer“)
   US-29: Fehler quittieren (Dashboard, Filter, Aufheben, erneut gescheitert)
+  US-30: Sprache der Inhalte: Deutsch (Schweiz) ohne ß, dann Englisch; alter Job veraltet
 """
 import asyncio, contextlib, sys, os, time, shutil, random, hashlib, itertools
 sys.path.insert(0, "/app")
@@ -2067,6 +2068,7 @@ async def cleanup_tag_group_stories():
     roots (a root only if it did not exist before), the content tags and the
     flat ones of US-22's first run."""
     import tag_groups as tg
+    from content_language import ALL_ROOTS
     from immich_client import delete_tag, list_tags
     if not TG_TAGS_BEFORE:
         return
@@ -2084,7 +2086,7 @@ async def cleanup_tag_group_stories():
                 parent = by_id.get(t.get("parentId"))
                 if parent is not None and parent.get("value") not in TG_TAGS_BEFORE:
                     continue  # goes with its new parent
-                if tg.is_grouped(value) or value in tg.ROOTS or value in TG_FLAT or str(TS) in value:
+                if tg.is_grouped(value) or value in ALL_ROOTS or value in TG_FLAT or str(TS) in value:
                     await delete_tag(t["id"])
         except Exception as exc:
             print(f"  cleanup: tag groups: {exc}")
@@ -2177,8 +2179,9 @@ async def test_us22_tag_groups_rerun():
         job = await get_job(job_id)
         if job.immich_asset_id:
             CLEANUP_ASSETS.append(job.immich_asset_id)
+        # The notes follow the language of the content, without groups too.
         flat = ["Persönliches Foto", "Kamerafoto", f"Konzert{TS}", "Bühne", "Schweiz", "Bern", "Länggasse",
-                "blurry", "OCR"]
+                tg.NOTE_BLURRY, tg.NOTE_TEXT]
         TG_FLAT.extend(flat)
         tags0 = await get_immich_tags(job.immich_asset_id) if job.immich_asset_id else []
         check("US22-01 Erstlauf ohne Gruppen: MAs flache Tags in Immich",
@@ -2734,6 +2737,94 @@ async def test_us29_acknowledge_errors():
           and e2.debug_key in await listed("error", q), f"{status} {e2_now.status} ack={e2_now.error_acknowledged_at}")
 
 
+# ══════════════════════════════════════════════════════════════
+# US-30: language of the content (content_language.py, issue #56)
+# Real AI and real geocoding. A photo from Giessen (DE) in Swiss German —
+# no "ß" anywhere —, then the language switched to English and a photo
+# from Bern: English groups, places, sentence and AI tags. The first job
+# keeps its German tags until processed again: it counts as outdated and
+# "Tags in Gruppen umstellen" lists it.
+# ══════════════════════════════════════════════════════════════
+async def test_us30_content_language():
+    print("\n-- US-30: Sprache der Inhalte (Deutsch Schweiz, dann Englisch) --")
+    import content_language as cl
+    import job_view
+    import tag_groups_migration as tgm
+    from config import config_manager
+    from immich_client import list_tags
+    from pipeline import rerun as rerun_plan
+    if not TG_TAGS_BEFORE:
+        TG_TAGS_BEFORE.update(t.get("value") for t in await list_tags())
+    before = await config_manager.get(cl.CONFIG_KEY)
+    de, en = cl.get("de-CH"), cl.get("en")
+    # The built-in prompt: a stored one without {language} (dev and live keep
+    # an old copy of the default) stays in its language, as it should.
+    async with RerunStage(), ConfigStage(ai__prompt=""):
+        set_id = await tg_set("us30", groups=True)
+        try:
+            await config_manager.set(cl.CONFIG_KEY, "de-CH")
+            first = f"{INBOX}/__e2e_us30a_{TS}.jpg"
+            make_unique_jpg(first)
+            add_gps(first, 50.5841, 8.6784)  # Giessen
+            CLEANUP_FILES.append(first)
+            j1 = await get_job(await create_and_run_job(os.path.basename(first), first, use_immich=True,
+                                                        set_id=set_id))
+            if j1.immich_asset_id:
+                CLEANUP_ASSETS.append(j1.immich_asset_id)
+            check("US30-01 Deutsch (Schweiz): Job fertig, Asset in Immich", j1.status == "done" and bool(j1.immich_asset_id),
+                  f"{j1.status} {j1.error_message}")
+            sr = j1.step_result or {}
+            tags1 = await get_immich_tags(j1.immich_asset_id) if j1.immich_asset_id else []
+            ai1 = sr.get("IA-05") or {}
+            text1 = [*tags1, (sr.get("IA-07") or {}).get("description_written") or "", ai1.get("description") or "",
+                     ai1.get("source") or "", *(ai1.get("tags") or []), *(str(v) for v in (sr.get("IA-03") or {}).values())]
+            check("US30-02 Ort als 03 Orte/Deutschland/Giessen (Nominatim sagt Gießen)",
+                  any(t.startswith("03 Orte/Deutschland/Giessen") for t in tags1), f"{tags1}")
+            check("US30-03 nirgends ein ß: Tags, KI-Ergebnis, Ort, Beschreibung",
+                  not [t for t in text1 if "ß" in t], f"{[t for t in text1 if 'ß' in t]}")
+            check("US30-04 Satz zum Ort auf Deutsch, Gruppen-Wurzeln deutsch",
+                  "Aufgenommen in" in ((sr.get("IA-07") or {}).get("description_written") or "")
+                  and all(t.split("/")[0] in de.roots for t in tags1 if "/" in t), f"{tags1}")
+
+            await config_manager.set(cl.CONFIG_KEY, "en")
+            second = f"{INBOX}/__e2e_us30b_{TS}.jpg"
+            make_unique_jpg(second)
+            add_gps(second)  # Bern
+            CLEANUP_FILES.append(second)
+            j2 = await get_job(await create_and_run_job(os.path.basename(second), second, use_immich=True,
+                                                        set_id=set_id))
+            if j2.immich_asset_id:
+                CLEANUP_ASSETS.append(j2.immich_asset_id)
+            check("US30-05 Englisch: Job fertig, Asset in Immich", j2.status == "done" and bool(j2.immich_asset_id),
+                  f"{j2.status} {j2.error_message}")
+            sr2 = j2.step_result or {}
+            tags2 = await get_immich_tags(j2.immich_asset_id) if j2.immich_asset_id else []
+            check("US30-06 englische Gruppen: 01 Category, 02 Source, 03 Places/Switzerland/Bern",
+                  any(t.startswith("01 Category/") for t in tags2) and any(t.startswith("02 Source/") for t in tags2)
+                  and any(t.startswith("03 Places/Switzerland/Bern") for t in tags2), f"{tags2}")
+            check("US30-07 keine deutsche Gruppe am neuen Asset",
+                  not [t for t in tags2 if t.split("/")[0] in de.roots], f"{tags2}")
+            ai2 = sr2.get("IA-05") or {}
+            german = [t for t in [*(ai2.get("tags") or []), ai2.get("description") or ""] if set(t) & set("äöüÄÖÜß")]
+            check("US30-08 KI auf Englisch: Tags da, keine deutschen Umlaute, Satz „Taken in …“",
+                  bool(ai2.get("tags")) and not german
+                  and "Taken in" in ((sr2.get("IA-07") or {}).get("description_written") or ""),
+                  f"{ai2.get('tags')} {german} {(sr2.get('IA-07') or {}).get('description_written')}")
+            rows = (await job_view.job_runs([j1.id]))[j1.id]
+            stale = (await rerun_plan.stale_modules([j1], {j1.id: rows}))[j1.id]
+            check("US30-09 der deutsche Job bleibt, wie er ist, gilt aber als veraltet (IA-03, IA-05, IA-07, IA-08)",
+                  {"IA-03", "IA-05", "IA-07", "IA-08"} <= stale and not stale & {"IA-01", "IA-02"}
+                  and sorted(await get_immich_tags(j1.immich_asset_id)) == sorted(tags1), f"{sorted(stale)}")
+            overview = await tgm.job_overview(set_id)
+            check("US30-10 „Tags in Gruppen umstellen“ führt den deutschen Job, nicht den englischen",
+                  j1.debug_key in overview.get("to_convert", []) and j2.debug_key not in overview.get("to_convert", []),
+                  f"{overview.get('to_convert')}")
+            for ai in (ai1, ai2):
+                TG_FLAT.extend(t for t in (ai.get("tags") or []) if t not in TG_TAGS_BEFORE)
+        finally:
+            await config_manager.set(cl.CONFIG_KEY, before if before is not None else "")
+
+
 async def main():
     from config import config_manager
     from immich_client import get_immich_config
@@ -2784,6 +2875,7 @@ async def main():
         test_us27_inbox_drive_missing,
         test_us28_delete_selection,
         test_us29_acknowledge_errors,
+        test_us30_content_language,
     ]
     wanted = [a.lower() for a in sys.argv[1:]]
     if wanted:

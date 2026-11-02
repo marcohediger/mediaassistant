@@ -552,7 +552,8 @@ async def _contexts(names: set[str], members: dict, sidecar_files: dict) -> dict
 
 async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, translate: bool):
     """Preview: which spellings mean the same, which damaged names can be
-    repaired, which English tags have a German word (tag_spelling.py).
+    repaired, which tags of another language have a word in the language of
+    the content (tag_spelling.py, content_language.py).
 
     Both stores are searched, because a spelling that lives on only in an XMP
     sidecar is exactly what re-creates a tag in Immich after it was deleted —
@@ -566,6 +567,11 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
     def progress(done, total):
         _cleanup_progress["current"], _cleanup_progress["total"] = done, total
     try:
+        import content_language
+        from i18n import DEFAULT_LANGUAGE
+        lang = await content_language.current()
+        # The AI's reasons are shown to the user: in the interface's language.
+        reasons = "German" if await config_manager.get("ui.language", DEFAULT_LANGUAGE) == "de" else "English"
         library = await library_roots()
         # Only flat keywords: a spelling merge deletes the losing tag, and in a
         # tree that would take its whole subtree along (nested folder tags,
@@ -647,19 +653,28 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             return items[-1]
 
         # Families with the most to move first. A damaged spelling never wins
-        # its cluster; otherwise the most-used one, on a tie the longer name —
-        # the one that still carries its umlauts and its spacing.
+        # its cluster, nor one the language does not write (Swiss German: "ß");
+        # otherwise the most-used one, on a tie the longer name — the one that
+        # still carries its umlauts and its spacing. A winner the language
+        # writes differently ("Fußball" with no "Fussball") is renamed.
         families.sort(key=lambda f: -sum(usage(m["name"]) for c in f for m in c))
         pairs = []
+        handled: set = set()
         for fi, family in enumerate(families):
             winners = []
             for cluster in family:
-                cluster.sort(key=lambda m: (ts.is_damaged(m["name"]), -usage(m["name"]), -len(m["name"]), m["name"]))
-                winners.append(cluster[0]["name"])
+                cluster.sort(key=lambda m: (ts.is_damaged(m["name"]), lang.fix(m["name"]) != m["name"],
+                                            -usage(m["name"]), -len(m["name"]), m["name"]))
+                winner = cluster[0]["name"]
+                target = lang.fix(winner)
+                if target != winner:
+                    add(winner, target, "swiss", True, family=fi)
+                winners.append(winner)  # the umlaut pairs chain on to `target` (_merge_targets)
                 for m in cluster[1:]:
-                    add(m["name"], cluster[0]["name"], "damaged" if ts.is_damaged(m["name"]) else "spelling",
+                    add(m["name"], target, "damaged" if ts.is_damaged(m["name"]) else "spelling",
                         True, family=fi)
-            if len(family) > 1:
+            handled.update(m["name"] for cluster in family for m in cluster)
+            if len(family) > 1 and lang.umlaut_rules:
                 # Same words but for an umlaut: the spelling with the umlauts is
                 # the target — the one without is the degraded form.
                 target = max(winners, key=lambda n: (ts.umlauts(n),
@@ -667,6 +682,13 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
                 for w in winners:
                     if w != target:
                         pairs.append(add(w, target, "umlaut", False, family=fi, verdict=None, reason=""))
+
+        # A name with no other spelling that the language writes differently
+        # (Swiss German "Fußball" alone): renamed.
+        for cluster in grouping.clusters:
+            name = cluster[0]["name"]
+            if name not in handled and not ts.is_damaged(name) and lang.fix(name) != name:
+                add(name, lang.fix(name), "swiss", True)
 
         orphans = [o["name"] for o in grouping.orphans]
         ask = [it for it in pairs if not it["kept_apart"]]
@@ -676,13 +698,16 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
                                    members, sidecar_files)
         repairs, unresolved = [], []
         for name in orphans:
-            word = ts.evidence(name, contexts.get(name, []))
+            word = lang.fix(ts.evidence(name, contexts.get(name, [])))
             if word:
                 repairs.append(add(name, word, "repair", True, evidence="context", reason=""))
             else:
                 unresolved.append(name)
 
         ai_error, not_damaged = "", []
+        # Questions the AI answered with nothing usable (not "not reachable"):
+        # counted and reported, never dropped without a word.
+        ai_failed = {"batches": 0, "names": 0, "checks": 0, "reason": ""}
         if use_ai and (ask or unresolved) and not _cancelled():
             tasks = [("pair", it) for it in ask] + [("repair", n) for n in unresolved]
 
@@ -690,8 +715,8 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
                 kind, obj = task
                 if kind == "pair":
                     return await ts.same_word(obj["name"], obj["into"], contexts.get(obj["name"], []),
-                                              contexts.get(obj["into"], []))
-                return await ts.ai_repair(obj, contexts.get(obj, []))
+                                              contexts.get(obj["into"], []), reasons=reasons)
+                return await ts.ai_repair(obj, contexts.get(obj, []), reasons=reasons)
 
             _cleanup_phase("merge_ai")
             # One question first: an AI that is not there fails once, not per tag.
@@ -721,43 +746,72 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
                         if word == obj:
                             not_damaged.append(obj)
                         elif word:
-                            repairs.append(add(obj, word, "repair", True, evidence="ai", reason=reason))
+                            repairs.append(add(obj, lang.fix(word), "repair", True, evidence="ai", reason=reason))
                         else:
                             still.append(obj)
                 unresolved = still
 
         if translate and not ai_error and not _cancelled():
-            # The healthy spelling of each cluster; one with umlauts is German already.
+            # Into the language of the content: the healthy spelling of each
+            # cluster, without the names that are in it for sure (Swiss
+            # German: with an umlaut or "ß").
             winner_of = {ts.strict_key(c[0]["name"]): c[0]["name"] for c in grouping.clusters}
-            names = [c[0]["name"] for c in grouping.clusters if not ts.umlauts(c[0]["name"])
-                     and "ß" not in c[0]["name"]]
+            names = [c[0]["name"] for c in grouping.clusters if not lang.surely_own(c[0]["name"])]
             batches = [names[i:i + ts.TRANSLATE_BATCH] for i in range(0, len(names), ts.TRANSLATE_BATCH)]
             proposed = {it["name"] for it in items}  # one proposal per name
             _cleanup_phase("merge_translate")
+
+            async def ask(batch):
+                """A batch without a usable answer (another format, nothing
+                readable) is asked again in two halves, down to five names: a
+                different question — the same one again, at temperature 0,
+                gets the same answer (measured: a flat list of the names, twice)."""
+                try:
+                    return await ts.foreign_batch(batch, lang)
+                except ts.AIUnavailable:
+                    raise
+                except Exception as exc:
+                    if len(batch) <= 5 or _cancelled():
+                        ai_failed["batches"] += 1
+                        ai_failed["names"] += len(batch)
+                        ai_failed["reason"] = ai_failed["reason"] or str(exc)[:200]
+                        return {}
+                    half = (len(batch) + 1) // 2
+                    out = {}
+                    for part in (batch[:half], batch[half:]):
+                        out.update(await ask(part))
+                    return out
+            answers = await ts.run_limited(batches, ask, progress=progress, cancelled=_cancelled)
             found = []
-            for answer in await ts.run_limited(batches, ts.english_batch, progress=progress, cancelled=_cancelled):
+            for answer in answers:
                 if isinstance(answer, ts.AIUnavailable):
                     ai_error = ai_error or str(answer)
+                elif isinstance(answer, Exception):
+                    ai_failed["batches"] += 1
+                    ai_failed["reason"] = ai_failed["reason"] or str(answer)[:200]
                 if not isinstance(answer, dict):
                     continue
-                for english, german in answer.items():
-                    if english in proposed:
+                for foreign, own in answer.items():
+                    if foreign in proposed:
                         continue
-                    proposed.add(english)
-                    existing = winner_of.get(ts.strict_key(german))
-                    if existing and grouping.cluster_of(existing) is grouping.cluster_of(english):
+                    proposed.add(foreign)
+                    existing = winner_of.get(ts.strict_key(own))
+                    if existing and grouping.cluster_of(existing) is grouping.cluster_of(foreign):
                         continue
-                    found.append((english, existing or german, bool(existing)))
-            checked = await ts.run_limited(found, lambda f: ts.check_translation(f[0], f[1]),
+                    found.append((foreign, lang.fix(existing) if existing else own, bool(existing)))
+            checked = await ts.run_limited(found, lambda f: ts.check_translation(f[0], f[1], lang),
                                            progress=progress, cancelled=_cancelled)
-            for (english, into, exists), answer in zip(found, checked):
+            for (foreign, into, exists), answer in zip(found, checked):
+                if isinstance(answer, Exception) and not isinstance(answer, ts.AIUnavailable):
+                    ai_failed["checks"] += 1
+                    ai_failed["reason"] = ai_failed["reason"] or str(answer)[:200]
                 if not isinstance(answer, tuple):
                     continue
-                is_english, same = answer
-                if not is_english:
-                    continue  # a German name the batch took for English
+                is_foreign, same = answer
+                if not is_foreign:
+                    continue  # a name in the language the batch took for a foreign one
                 # Ticked only into an existing tag of exactly the same meaning; the rest waits for the user.
-                add(english, into, "translate", exists and same, new=not exists, same=same)
+                add(foreign, into, "translate", exists and same, new=not exists, same=same)
 
         for it in items:
             await assets_of(it["name"])
@@ -776,8 +830,11 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             "immich_enabled": with_immich,
             "ai_enabled": use_ai,
             "translate_enabled": translate,
+            "language": lang.code,
+            "language_label": lang.label,
             "immich_error": immich_error,
             "ai_error": ai_error,
+            "ai_failed": ai_failed,
             "items": items,
             "members": shown,
             # Damaged names nobody could repair are left untouched on purpose —
@@ -787,10 +844,14 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             "not_damaged": sorted(not_damaged),
         })
         by_kind = {k: sum(1 for it in items if it["kind"] == k)
-                   for k in ("spelling", "damaged", "umlaut", "repair", "translate")}
-        await log_info("tools", f"Schreibweisen: {len(items)} Vorschläge",
-                       ", ".join(f"{k} {v}" for k, v in by_kind.items())
-                       + f"; ohne Lösung {len(unresolved)}" + (f"; KI: {ai_error}" if ai_error else ""))
+                   for k in ("spelling", "swiss", "damaged", "umlaut", "repair", "translate")}
+        failed_text = (f"; KI ohne brauchbare Antwort: {ai_failed['batches']} Gruppen ({ai_failed['names']} Namen "
+                       f"nicht geprüft), {ai_failed['checks']} Prüffragen — {ai_failed['reason']}"
+                       if ai_failed["batches"] or ai_failed["checks"] else "")
+        await (log_warning if failed_text else log_info)(
+            "tools", f"Schreibweisen: {len(items)} Vorschläge",
+            ", ".join(f"{k} {v}" for k, v in by_kind.items())
+            + f"; ohne Lösung {len(unresolved)}" + (f"; KI: {ai_error}" if ai_error else "") + failed_text)
     except Exception as e:
         _cleanup_finish(error=f"{type(e).__name__}: {e}")
 
@@ -1175,7 +1236,10 @@ async def tools_page(request: Request):
         sets = [{"id": i, "name": n, "tag_groups": bool(g)} for i, n, g in (await session.execute(
             select(ProcessingSet.id, ProcessingSet.name, ProcessingSet.tag_groups)
             .order_by(ProcessingSet.position, ProcessingSet.id))).all()]
+    import content_language
     return await render(request, "tools.html", {
+        # Target of "Schreibweisen zusammenführen" (content_language.py)
+        "content_language": (await content_language.current()).label,
         "library_paths": await library_roots(),
         # The rerun card's set choice (Module neu ausführen für ein Set).
         "sets": sets,

@@ -30,14 +30,15 @@ _last_request_ts = 0.0
 _MIN_INTERVAL_SEC = 1.1  # 1.1 to be safe (Nominatim measures strictly)
 
 # In-memory cache: round coords to 4 decimal places (~11m precision) so
-# adjacent photos from a single location share the same geocoding result.
-# Max 1024 entries; simple FIFO eviction.
-_geo_cache: dict[tuple[float, float], dict] = {}
+# adjacent photos from a single location share the same geocoding result —
+# per language of the content, whose names it holds. Max 1024 entries;
+# simple FIFO eviction.
+_geo_cache: dict[tuple, dict] = {}
 _GEO_CACHE_MAX = 1024
 
 
-def _cache_key(lat: float, lon: float) -> tuple[float, float]:
-    return (round(lat, 4), round(lon, 4))
+def _cache_key(lat: float, lon: float, language: str) -> tuple:
+    return (round(lat, 4), round(lon, 4), language)
 
 
 async def _throttle():
@@ -116,11 +117,11 @@ async def _http_get_with_retry(url: str, params: dict, headers: dict | None = No
         return resp
 
 
-async def _reverse_nominatim(url: str, lat: float, lon: float) -> dict:
+async def _reverse_nominatim(url: str, lat: float, lon: float, lang) -> dict:
     await _throttle()
     resp = await _http_get_with_retry(
         f"{url.rstrip('/')}/reverse",
-        params={"lat": lat, "lon": lon, "format": "json", "accept-language": "de"},
+        params={"lat": lat, "lon": lon, "format": "json", "accept-language": lang.geo},
         headers={"User-Agent": USER_AGENT},
     )
     if resp.status_code != 200:
@@ -136,10 +137,10 @@ async def _reverse_nominatim(url: str, lat: float, lon: float) -> dict:
     }
 
 
-async def _reverse_photon(url: str, lat: float, lon: float) -> dict:
+async def _reverse_photon(url: str, lat: float, lon: float, lang) -> dict:
     resp = await _http_get_with_retry(
         f"{url.rstrip('/')}/reverse",
-        params={"lat": lat, "lon": lon, "lang": "de"},
+        params={"lat": lat, "lon": lon, "lang": lang.photon},
         headers={"User-Agent": USER_AGENT},
     )
     if resp.status_code != 200:
@@ -158,10 +159,10 @@ async def _reverse_photon(url: str, lat: float, lon: float) -> dict:
     }
 
 
-async def _reverse_google(url: str, lat: float, lon: float, api_key: str) -> dict:
+async def _reverse_google(url: str, lat: float, lon: float, api_key: str, lang) -> dict:
     resp = await _http_get_with_retry(
         f"{url.rstrip('/')}/json",
-        params={"latlng": f"{lat},{lon}", "key": api_key, "language": "de"},
+        params={"latlng": f"{lat},{lon}", "key": api_key, "language": lang.geo.split(",")[0]},
         headers={"User-Agent": USER_AGENT},
     )
     if resp.status_code != 200:
@@ -210,8 +211,12 @@ async def execute(job, session) -> dict:
     if not url:
         return {"status": "skipped", "reason": "no geocoding URL configured"}
 
+    # Place names in the language of the content (content_language.py)
+    import content_language
+    lang = await content_language.current()
+
     # In-memory cache lookup (key rounded to ~11m precision)
-    ck = _cache_key(lat, lon)
+    ck = _cache_key(lat, lon, lang.code)
     if ck in _geo_cache:
         cached = dict(_geo_cache[ck])
         cached["lat"] = lat
@@ -221,11 +226,11 @@ async def execute(job, session) -> dict:
 
     try:
         if provider == "photon":
-            geo = await _reverse_photon(url, lat, lon)
+            geo = await _reverse_photon(url, lat, lon, lang)
         elif provider == "google":
-            geo = await _reverse_google(url, lat, lon, api_key)
+            geo = await _reverse_google(url, lat, lon, api_key, lang)
         else:
-            geo = await _reverse_nominatim(url, lat, lon)
+            geo = await _reverse_nominatim(url, lat, lon, lang)
     except GeocodingConnectionError:
         # Backend completely unreachable — let it bubble so the pipeline can
         # auto-pause and the health_watcher can auto-resume on recovery.
@@ -235,6 +240,8 @@ async def execute(job, session) -> dict:
         # — only this job's IA-03 is marked error, pipeline continues.
         return {"status": "error", "reason": str(e), "provider": provider}
 
+    # As the language writes them: Swiss German "Giessen" for "Gießen"
+    geo = {k: lang.fix(v) for k, v in geo.items()}
     geo["provider"] = provider
     geo["lat"] = lat
     geo["lon"] = lon

@@ -130,7 +130,7 @@
         <span class="ui-icon-tile is-violet">{{ icon('merge', 18) }}</span>
         <div class="ui-card-head-text">
             <h2 class="ui-card-title" id="merge-title">{{ t.tools.merge_title }}</h2>
-            <p class="ui-card-desc">{{ t.tools.merge_desc }}</p>
+            <p class="ui-card-desc">{{ t.tools.merge_desc | replace('{language}', content_language) }}</p>
         </div>
     </div>
     <div class="ui-card-body ui-form">
@@ -159,7 +159,7 @@
             <label class="ui-option">
                 <span class="ui-option-text">
                     <span class="ui-option-title">{{ t.tools.merge_translate }}</span>
-                    <span class="ui-option-desc">{{ t.tools.merge_translate_desc }}</span>
+                    <span class="ui-option-desc">{{ t.tools.merge_translate_desc | replace('{language}', content_language) }}</span>
                 </span>
                 {{ switch('merge_translate', True, 'mergeInvalidate()') }}
             </label>
@@ -826,6 +826,8 @@ function mergeWhy(it) {
         why = it.new ? L.merge_translate_new : (it.same ? '' : L.merge_translate_unsure);
     } else if (it.kind === 'damaged') {
         why = L.merge_kind_damaged;
+    } else if (it.kind === 'swiss') {
+        why = L.merge_kind_swiss;
     }
     if (why) { bits.push('<span class="tools-why">' + esc(why) + (it.reason ? ' — ' + esc(it.reason) : '') + '</span>'); }
     return bits.join('');
@@ -874,14 +876,19 @@ function renderMerge(res) {
         MERGE = res;
         if (res.immich_error) { h += note(esc(res.immich_error), 'error'); }
         if (res.ai_error) { h += note(esc(L.merge_ai_error.replace('{error}', res.ai_error)), 'warning'); }
+        var failed = res.ai_failed || {};
+        if (failed.batches || failed.checks) {
+            h += note(esc(L.merge_ai_failed.replace('{names}', failed.names || 0).replace('{checks}', failed.checks || 0)
+                          .replace('{reason}', failed.reason || '')), 'warning');
+        }
         if (!res.items.length) {
             h += hint(esc(L.merge_none));
         } else {
             h += '<p class="tools-line" id="merge_count"></p>';
             var of = function (kinds) { return res.items.filter(function (it) { return kinds.indexOf(it.kind) >= 0; }); };
-            h += mergeTable(L.merge_section_spelling, of(['spelling', 'damaged', 'umlaut']));
+            h += mergeTable(L.merge_section_spelling, of(['spelling', 'swiss', 'damaged', 'umlaut']));
             h += mergeTable(L.merge_section_repair, of(['repair']));
-            h += mergeTable(L.merge_section_translate, of(['translate']));
+            h += mergeTable(L.merge_section_translate.replace('{language}', res.language_label || ''), of(['translate']));
         }
         if (res.not_damaged.length) { h += list(L.merge_not_damaged, res.not_damaged); }
         if (res.orphans.length) { h += list(L.merge_orphans, res.orphans); }

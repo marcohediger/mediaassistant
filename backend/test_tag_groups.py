@@ -573,8 +573,10 @@ async def story_e5_e6(std_id):
     async with Stage(AI, GEO, OCR):
         job = await run_file(set_id, inbox, path)
     asset = job.immich_asset_id
+    # The notes follow the language of the content (content_language.py),
+    # without groups too ("blurry"/"OCR" before 3.6).
     flat_ma = ["Persönliches Foto", "Kamerafoto", f"Festivalkonzert{TS}", "Bühne", "Schweiz", "Bern", "Länggasse",
-               "blurry", "OCR", f"Ski{TS}"]
+               tg.NOTE_BLURRY, tg.NOTE_TEXT, f"Ski{TS}"]
     tags0 = await asset_tags(asset) if asset else []
     check("E5-01 groups off: today's flat tags, no group root", job.status == "done"
           and set(flat_ma) <= set(tags0) and not any(tg.is_grouped(t) for t in tags0), f"{tags0}")

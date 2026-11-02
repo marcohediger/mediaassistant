@@ -29,12 +29,14 @@ _EXIFTOOL_TIMEOUT = 30
 
 async def execute(job, session) -> dict:
     """IA-07, see _execute. A result made with the set's tag groups on names
-    the scheme it used (``tag_groups: tag_groups.SCHEME``): the tool that
-    switches a set's photos over (tag_groups_migration.py) tells converted
-    jobs — and those made with roots named differently — by it."""
+    the scheme it used (``tag_groups``: the roots of the language of the
+    content, joined with "|"): the tool that switches a set's photos over
+    (tag_groups_migration.py) tells converted jobs — and those made with
+    roots named differently, or in another language — by it."""
+    import content_language
     result = await _execute(job, session)
     if isinstance(result, dict) and await tag_groups.enabled(job):
-        result["tag_groups"] = tag_groups.SCHEME
+        result["tag_groups"] = (await content_language.current()).scheme
     return result
 
 
@@ -91,6 +93,12 @@ async def _execute(job, session) -> dict:
     ai_result = step_results.get("IA-05", {})
     ocr_result = step_results.get("IA-06", {})
     geo_result = step_results.get("IA-03", {})
+    # The language of the content (content_language.py): the names of the
+    # groups and notes, the sentence on the place. What the AI and the
+    # geocoder gave is written as it writes it (Swiss German "ss" for "ß"),
+    # also from results made before; the OCR text stays as it was read.
+    import content_language
+    lang = await content_language.current()
 
     # Collect keywords
     keywords = []
@@ -111,7 +119,7 @@ async def _execute(job, session) -> dict:
         from pipeline.step_ia08_sort import decide_category
         decision = await decide_category(job, session)
         tag_paths = tag_groups.grouped_tags(category_label=decision.label, ai=ai_result, geo=geo_result,
-                                            ocr=ocr_result, folder_paths=tag_paths)
+                                            ocr=ocr_result, folder_paths=tag_paths, lang=lang)
         keywords = tag_groups.flat_words(tag_paths)
     else:
         # From AI analysis (type + tags + source)
@@ -121,26 +129,26 @@ async def _execute(job, session) -> dict:
         if ai_type and ai_type != "unknown":
             keywords.append(ai_type)
         if ai_result.get("tags"):
-            keywords.extend(ai_result["tags"])
+            keywords.extend(lang.fix(t) for t in ai_result["tags"])
         if ai_result.get("source"):
-            keywords.append(ai_result["source"])
+            keywords.append(lang.fix(ai_result["source"]))
         if ai_result.get("quality") == "blurry":
-            keywords.append("blurry")
+            keywords.append(lang.note_blurry)
 
         # From geocoding (all available fields)
         for geo_field in ("country", "state", "city", "suburb"):
-            val = geo_result.get(geo_field)
+            val = lang.fix(geo_result.get(geo_field))
             if val and val not in keywords:
                 keywords.append(val)
 
         # From OCR — just flag that text was detected (actual text is in UserComment)
         if ocr_result.get("has_text"):
-            keywords.append("OCR")
+            keywords.append(lang.note_text)
 
     # Build description
     description_parts = []
     if ai_result.get("description"):
-        description_parts.append(ai_result["description"])
+        description_parts.append(lang.fix(ai_result["description"]))
     # Google Takeout JSON description as fallback (only if no AI description)
     if not ai_result.get("description") and exif_data.get("google_json_description"):
         description_parts.append(exif_data["google_json_description"])
@@ -148,7 +156,8 @@ async def _execute(job, session) -> dict:
         location = geo_result["city"]
         if geo_result.get("suburb"):
             location = f"{geo_result['suburb']}, {location}"
-        description_parts.append(f"Aufgenommen in {location}, {geo_result['country']}.")
+        place = lang.fix(f"{location}, {geo_result['country']}")
+        description_parts.append(lang.taken_in.format(place=place))
 
     description = " ".join(description_parts)
 

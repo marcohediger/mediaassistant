@@ -160,7 +160,8 @@ def descriptor(code: str) -> dict:
 
 _CONFIG_KEYS = ("duplikat.phash_threshold", "duplikat.raw_jpg_pair", "geo.provider", "geo.url",
                 "video.thumbnail_enabled", "video.thumbnail_frames", "video.thumbnail_scale",
-                "ai.prompt", "ai.model", "ai2.model", "ai.image_resize", "ai.image_max_px")
+                "ai.prompt", "ai.model", "ai2.model", "ai.image_resize", "ai.image_max_px",
+                "content.language")
 _MODULE_KEYS = ("geocoding", "duplikat_erkennung", "ki_analyse", "ki_analyse_2")
 
 
@@ -195,6 +196,9 @@ async def global_settings(session) -> dict:
                "models": [cfg.get("ai.model") if mods.get("ki_analyse") else None,
                           cfg.get("ai2.model") if mods.get("ki_analyse_2") else None],
                "resize": bool(cfg.get("ai.image_resize", False)), "max_px": cfg.get("ai.image_max_px", 1024)},
+        # The language of the content (content_language.py): what IA-03, IA-05,
+        # IA-07 and IA-08 write depends on it.
+        "language": cfg.get("content.language") or "",
     }
 
 
@@ -240,9 +244,16 @@ async def settings_snapshot(session, job, *, global_cfg: dict | None = None,
     return {**g, **s}
 
 
-def _groups_scheme() -> str:
-    from tag_groups import SCHEME
-    return SCHEME
+def _groups_scheme(snap: dict) -> str:
+    import content_language
+    return content_language.get(snap.get("language")).scheme
+
+
+def _language(snap: dict) -> dict:
+    """The content language as a fingerprint counts it: nothing for the
+    default (content_language.fingerprint_part)."""
+    import content_language
+    return content_language.fingerprint_part(snap.get("language"))
 
 
 def _job_cfg(code: str, job, snap: dict) -> dict:
@@ -252,22 +263,24 @@ def _job_cfg(code: str, job, snap: dict) -> dict:
     if code == "IA-02":
         return {"on": snap["modules"]["duplikat_erkennung"], **snap["duplikat"]}
     if code == "IA-03":
-        return {"on": snap["modules"]["geocoding"], **snap["geo"]}
+        return {"on": snap["modules"]["geocoding"], **snap["geo"], **_language(snap)}
     if code == "IA-04":
         return dict(snap["video"])
     if code == "IA-05":
-        return {**snap["ai"], "categories": [c[:2] for c in snap["categories"]], "rules": snap["rules"]}
+        return {**snap["ai"], "categories": [c[:2] for c in snap["categories"]], "rules": snap["rules"],
+                **_language(snap)}
     if code == "IA-06":
         return {"ocr_enabled": s.get("ocr_enabled"), "ocr_mode": s.get("ocr_mode")}
     # Tag groups (tag_groups.py) count only while on: a set that never had
     # them keeps the fingerprints of its runs from before the option.
     if code == "IA-07":
         cfg = {"write_mode": s.get("write_mode"), "folder_tag_mode": s.get("folder_tag_mode"),
-               "folder_albums": s.get("folder_albums"), "dry_run": bool(getattr(job, "dry_run", False))}
+               "folder_albums": s.get("folder_albums"), "dry_run": bool(getattr(job, "dry_run", False)),
+               **_language(snap)}
         if s.get("tag_groups"):
             # IA-07 then writes the category IA-08 sorts by: it reads the rules
             # too. The scheme (root names) counts: renamed roots make it stale.
-            cfg.update(tag_groups=_groups_scheme(), categories=[c[:2] for c in snap["categories"]],
+            cfg.update(tag_groups=_groups_scheme(snap), categories=[c[:2] for c in snap["categories"]],
                        rules=snap["rules"])
         return cfg
     if code == "IA-08":
@@ -277,7 +290,7 @@ def _job_cfg(code: str, job, snap: dict) -> dict:
                "folder_tag_mode": s.get("folder_tag_mode"), "folder_albums": s.get("folder_albums"),
                "dry_run": bool(getattr(job, "dry_run", False))}
         if s.get("tag_groups"):
-            cfg["tag_groups"] = _groups_scheme()
+            cfg["tag_groups"] = _groups_scheme(snap)
         return cfg
     return {}
 

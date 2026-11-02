@@ -56,11 +56,13 @@ COPIED_FIELDS = (
 )
 
 
-def seed_set_defaults(session, set_id: int) -> None:
-    """Give a set the default categories and rules. Caller commits."""
+def seed_set_defaults(session, set_id: int, labels: dict | None = None) -> None:
+    """Give a set the default categories and rules. `labels` names the
+    categories in the language of the content (content_language.Language.categories);
+    without, the default language's. Caller commits."""
     for key, label, path, fixed, archive, pos in DEFAULT_CATEGORIES:
-        session.add(LibraryCategory(set_id=set_id, key=key, label=label, path_template=path,
-                                    fixed=fixed, immich_archive=archive, position=pos))
+        session.add(LibraryCategory(set_id=set_id, key=key, label=(labels or {}).get(key, label),
+                                    path_template=path, fixed=fixed, immich_archive=archive, position=pos))
     for pos, condition, value, category, media in DEFAULT_RULES:
         session.add(SortingRule(set_id=set_id, position=pos, condition=condition, value=value,
                                 target_category=category, media_type=media, active=True))

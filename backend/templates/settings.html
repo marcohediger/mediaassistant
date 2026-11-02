@@ -30,6 +30,39 @@
 
 {% include "settings/_sets_list.html" %}
 
+<!-- Language of the content (content_language.py) — not the interface language -->
+<div class="settings-section" id="section-content-language">
+    <div class="section-header">
+        <div class="section-title">
+            <h2 id="content-language-title">{{ t.settings.content_language }}</h2>
+            <span class="section-desc">{{ t.settings.content_language_desc }}</span>
+        </div>
+    </div>
+    <div class="section-body">
+        <div class="ui-option-list">
+            <div class="ui-option">
+                <span class="ui-option-text">
+                    <label class="ui-option-title" for="content_language">{{ t.settings.content_language_select }}</label>
+                    <span class="ui-option-desc" id="content_language_hint">{{ t.settings.content_language_hint }} {{ t.settings.content_language_prompt_note }}</span>
+                </span>
+                <div class="ui-option-control">
+                    <select class="ui-select" id="content_language" name="content_language" aria-describedby="content_language_hint">
+                        {% for code, label in cfg.content_languages %}
+                        <option value="{{ code }}" {{ 'selected' if code == cfg.content_language else '' }}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+        {% if not cfg.ai_prompt_follows_language %}
+        <div class="ui-alert is-warning st-prompt-language" role="note">
+            {{ icon('alert-triangle', 18) }}
+            <div class="ui-alert-body"><p class="ui-alert-text">{{ t.settings.content_language_prompt_fixed }}</p></div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
 <!-- Duplicate Detection -->
 <div class="settings-section st-module" id="section-duplicates">
     <div class="section-header">

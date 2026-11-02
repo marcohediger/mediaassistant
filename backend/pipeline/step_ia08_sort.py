@@ -764,9 +764,11 @@ async def _execute(job, session) -> dict:
         # (IA-07's tag_paths_written). The category is this step's decision
         # (IA-07 makes the same one for the file); IA-07's flat words for
         # other programs stay in the file only.
-        tag_keywords = [p for p in [tag_groups.path(tag_groups.CATEGORY, decision.label)] if p]
+        import content_language
+        category_root = (await content_language.current()).roots[0]
+        tag_keywords = [p for p in [tag_groups.path(category_root, decision.label)] if p]
         for p in ia07_result.get("tag_paths_written") or []:
-            if p not in tag_keywords and not p.startswith(tag_groups.CATEGORY + "/"):
+            if p not in tag_keywords and not p.startswith(category_root + "/"):
                 tag_keywords.append(p)
     else:
         tag_keywords = [decision.label]

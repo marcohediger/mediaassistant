@@ -2,7 +2,7 @@
 (routers/tools.py, tag_spelling.py, tag_groups_migration.empty_tags) against
 the real dev Immich and the real AI backend.
 
-    docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E H]
+    docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E L]
 
 K  Keys and repair rules without Immich: same letters, dropped umlaut,
    candidates, an answer must fit the pattern with a non-ASCII letter.
@@ -17,6 +17,11 @@ R  The routes: apply without preview, ids that were never proposed.
 E  Empty tags: a fresh tag is not looked at; nested empty ones go, a tag in
    use stays; one that got a photo since the preview is counted again and
    stays.
+L  The language of the content (content_language.py): Swiss German makes
+   the "ss" spelling the target even with fewer photos and renames a name
+   with "ß" only, carried out in Immich; English proposes no umlaut cases
+   and translates a German tag into an existing English one. Runs last —
+   it scans and merges anew.
 
 Real assets (synthetic pictures) are uploaded and deleted again; tags the
 test created and its sandbox go too, the remembered decisions are restored.
@@ -161,6 +166,10 @@ def part_k():
           and ts.fits("Wasser??", "Wassers") is None and ts.fits("M?nchen", "münchen") == "München")
     check("K-08 evidence: exactly one candidate in the photos' texts",
           ts.evidence("M?nchen", ["Bahnhof (München, Bayern)"]) == "München" and ts.evidence("M?nchen", ["Bahnhof"]) is None)
+    cut = '{"keywords": [["Screenshot", ""], ["Strand", "Beach"], ["Er sagt \\"Hallo\\"", "He says \\"Hi\\""], ["Schnee", "Sn'
+    check("K-09 an unfinished answer of the AI still gives every complete pair (measured: 2 of 12 batches)",
+          ts._pairs(cut) == [("Screenshot", ""), ("Strand", "Beach"), ('Er sagt "Hallo"', 'He says "Hi"')],
+          f"{ts._pairs(cut)}")
 
 
 async def setup():
@@ -225,6 +234,9 @@ async def part_s() -> dict:
     r = res.get("result") or {"items": [], "orphans": [], "not_damaged": [], "members": {}}
     if r.get("ai_error"):
         check("S-00b AI reachable", False, r["ai_error"])
+    failed = r.get("ai_failed") or {}
+    check("S-00c questions without a usable answer are counted, none left after the second try",
+          set(failed) == {"batches", "names", "checks", "reason"} and not failed["batches"], f"{failed}")
     it = item(r, "seeufer")
     check("S-01 seeufer → Seeufer: same letters, ticked",
           it and it["into"] == "Seeufer" and it["kind"] == "spelling" and it["selected"], f"{it}")
@@ -353,6 +365,62 @@ async def part_e(assets: list[str]):
           EMPTY["leer"] in t and res.get("no_longer_empty") == 1 and EMPTY["full"] in t, f"{res}")
 
 
+async def part_l():
+    print("\n-- L: language of the content --")
+    import content_language as cl
+    from config import config_manager
+    from routers import api
+    from routers import tools
+    before = await config_manager.get(cl.CONFIG_KEY)
+    a = [await upload(d) for d in ("Eine Strasse in der Altstadt", "Strasse am Abend", "Strasse im Regen",
+                                   "Ein Fussball auf dem Rasen", "Eine Figur aus Schnee vor dem Haus")]
+    await immich_idle()
+    sharp, swiss, ball = f"Straße{TS}", f"Strasse{TS}", f"Fußball{TS}"
+    await tag(sharp, a[0], a[1])
+    await tag(swiss, a[2])
+    await tag(ball, a[3])
+    await tag("Schneemann", a[4])
+    await immich_idle()
+    await asyncio.sleep(3)
+    try:
+        await config_manager.set(cl.CONFIG_KEY, "de-CH")
+        res = await run_scan(ai=False, translate=False)
+        r = res.get("result") or {"items": []}
+        it = item(r, sharp)
+        check("L-01 Swiss German: Straße → Strasse although Straße has more photos, ticked",
+              it and it["into"] == swiss and it["kind"] == "spelling" and it["selected"], f"{it}")
+        it = item(r, ball)
+        check("L-02 Swiss German: Fußball alone is renamed Fussball (kind swiss), ticked",
+              it and it["into"] == f"Fussball{TS}" and it["kind"] == "swiss" and it["selected"], f"{it}")
+        check("L-03 Swiss German: no proposal leads into a name with ß",
+              not [x for x in r["items"] if "ß" in x["into"]], f"{[x['into'] for x in r['items'] if 'ß' in x['into']]}")
+        chosen = {x["id"] for x in r["items"] if x["name"] in (sharp, ball)}
+        api._cleanup_reset("tag_merge")
+        await tools._merge_apply(chosen)
+        await immich_idle()
+        await asyncio.sleep(3)
+        t = await tags_now()
+        check("L-04 merged in Immich: Strasse carries all three, Fussball created with its photo, no ß left",
+              sharp not in t and ball not in t and await count(swiss, t) == 3 and await count(f"Fussball{TS}", t) == 1,
+              f"{api._cleanup_progress.get('error')} {[v for v in t if str(TS) in v]}")
+
+        await config_manager.set(cl.CONFIG_KEY, "en")
+        res = await run_scan(ai=True, translate=True)
+        r = res.get("result") or {"items": []}
+        if r.get("ai_error"):
+            check("L-05a AI reachable", False, r["ai_error"])
+        check("L-05 English: no umlaut cases and no Swiss renames", r.get("language") == "en"
+              and not [x for x in r["items"] if x["kind"] in ("umlaut", "swiss")],
+              f"{[(x['name'], x['kind']) for x in r['items'] if x['kind'] in ('umlaut', 'swiss')][:5]}")
+        it = item(r, "Schneemann")
+        check("L-06 English: Schneemann → the existing Snowman, ticked only if the AI confirms the same meaning",
+              it and it["kind"] == "translate" and it["into"] == "Snowman" and not it["new"]
+              and it["selected"] == it["same"], f"{it}")
+        check("L-07 English: Snowman itself is not translated", item(r, "Snowman") is None, f"{item(r, 'Snowman')}")
+    finally:
+        await config_manager.set(cl.CONFIG_KEY, before if before is not None else "")
+
+
 async def cleanup():
     from config import config_manager
     from immich_client import delete_asset, delete_tag
@@ -383,14 +451,14 @@ async def cleanup():
 
 
 async def main():
-    wanted = {a.upper() for a in sys.argv[1:]} or set("KSARE")
+    wanted = {a.upper() for a in sys.argv[1:]} or set("KSAREL")
     print("=" * 60)
     print("Schreibweisen zusammenführen, leere Tags löschen")
     print("=" * 60)
     if "K" in wanted:
         part_k()
     try:
-        if wanted & set("SARE"):
+        if wanted & set("SAREL"):
             assets = await setup()
             r = await part_s() if wanted & set("SA") else None
             if "A" in wanted and r:
@@ -399,12 +467,14 @@ async def main():
                 await part_r()
             if "E" in wanted:
                 await part_e(assets)
+            if "L" in wanted:
+                await part_l()
     except Exception as exc:
         import traceback
         traceback.print_exc()
         FAIL.append(f"crashed: {type(exc).__name__}: {exc}")
     finally:
-        if wanted & set("SARE"):
+        if wanted & set("SAREL"):
             await cleanup()
     print(f"\n{len(PASS)}/{len(PASS) + len(FAIL)} PASS")
     for f in FAIL:

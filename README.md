@@ -223,17 +223,19 @@ remembers a proposal you leave unticked, so it comes back unticked next time.
 
 ```
 Strand | strand | STRAND        →  Strand          same letters: ticked
-Fußspuren | Fussspuren          →  Fußspuren       same letters: ticked
+Fußspuren | Fussspuren          →  Fussspuren      same letters, Swiss spelling wins: ticked
+Fußball (alone)                 →  Fussball        Swiss spelling: ticked
 Gluhwein | Glühwein             →  Glühwein        umlaut dropped: the AI decides
 Bar | Bär                       →  stays apart     umlaut dropped: the AI decides
 ```
 
 **Same letters** — case, spacing, hyphens, `ä`/`ae`, `ß`/`ss`, accents of other
 languages — are proposed ticked. The spelling with the most photos wins; on a
-tie, the longer one. The others are moved onto it and only then deleted, so no
-photo loses a tag.
+tie, the longer one. With German (Switzerland) as the language of the content
+the `ss` spelling always wins, and a name with `ß` alone is renamed. The others
+are moved onto it and only then deleted, so no photo loses a tag.
 
-**A dropped umlaut** can be the same word or another one (`Bar` is not `Bär`).
+**A dropped umlaut** (German only) can be the same word or another one (`Bar` is not `Bär`).
 The AI gets both words and the description and place of three photos of each,
 and answers "same" or "different" with a reason. Only "same" is ticked, and
 then the spelling with the umlaut is the target.
@@ -246,10 +248,11 @@ AI asked. Its answer must fit the pattern, and every `?` must become a special
 letter: a broken encoding never eats a plain `o`, so `Hohlenpfad` is rejected.
 A `?` that belongs there (`WasIstDas?`) is recognised and left alone.
 
-**English tags** get their German word from the AI, checked with a second,
-narrower question. A proposal is ticked only if the German tag exists already
-and means exactly the same (`Green Background` → `Grüner Hintergrund`); one
-that would create a new tag waits for you.
+**Tags in another language** get their word in the language of the content
+from the AI (English → German, or German → English), checked with a second,
+narrower question. A proposal is ticked only if that tag exists already and
+means exactly the same (`Green Background` → `Grüner Hintergrund`); one that
+would create a new tag waits for you.
 
 After merging in Immich, the tool waits until Immich has processed its
 sidecars and looks again: Immich 3.x sometimes puts an old spelling back or
@@ -343,6 +346,7 @@ Each processing set has its own base path and categories; target paths use place
 - **AI:** Any OpenAI-compatible Vision API (LM Studio, Ollama, etc.)
 - **Geocoding:** Nominatim, Photon, or Google Maps
 - **i18n:** German and English
+- **Language of the content** (Settings): English or German (Switzerland, never `ß`) for the AI's tags and descriptions, place names, tag group names and default categories — independent of the interface language. A change applies to what is processed from then on; the affected modules then count as outdated.
 - **Theme:** Dark and Light mode
 
 ## Authentication (SSO)
