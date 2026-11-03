@@ -13,7 +13,8 @@ F  Fingerprints: the default language leaves those of runs from before the
    changes IA-03, IA-05, IA-07 and — with tag groups — IA-08, nothing else.
 G  Tag groups and folders: the names per language, a path below a root or
    folder root of either language counts as MediaAssistant's, Swiss German
-   values never carry "ß".
+   values never carry "ß"; a content tag naming the photo's own place is
+   left out (the place is in its group).
 O  Geocoding against the real Nominatim: Giessen (DE) in Swiss German
    ("Giessen", "Deutschland") and in English ("Germany"), cached per language.
 """
@@ -150,6 +151,12 @@ async def part_g():
     check("G-05 nested folder tags below the language's folder root",
           nested_en.tag_paths == ["Folders/Ferien/Mallorca"] and nested_de.tag_paths == ["Ordner/Ferien/Mallorca"],
           f"{nested_en.tag_paths} {nested_de.tag_paths}")
+    places = tg.grouped_tags(category_label="Persönliches Foto", ocr={}, lang=de,
+                             ai={"source": "Kamerafoto", "tags": ["Strand", "Schweiz", "BERN", "Bergsee"]},
+                             geo={"country": "Schweiz", "state": "Bern", "city": "Bern"})
+    check("G-07 a content tag that names a place of the photo is left out, the place is in its group",
+          places == ["01 Kategorie/Persönliches Foto", "02 Quelle/Kamerafoto", "Strand", "Bergsee",
+                     "03 Orte/Schweiz/Bern"], f"{places}")
     ex = await tg.editor_example(en)
     check("G-06 the set editor's example in English", [r for r, _ in ex["roots"]] == list(en.roots)
           and ex["album_root"] == "04 Album" and dict(ex["roots"])["03 Places"] == ["Spain/Palma"], f"{ex['roots']}")

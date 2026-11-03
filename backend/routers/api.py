@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import subprocess
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -207,10 +208,17 @@ async def _orphan_reason(row, copies: list, check_immich: bool) -> str | None:
     copy failing it is verified, which re-hashes it and marks it missing
     when it is gone. Without a copy that checks out, the job's target
     decides, as before the register — never original_path alone, where
-    another file may lie under the same name (R-01/R-02).
+    another file may lie under the same name (R-01/R-02). An empty target
+    with a known Immich asset is that asset (live 2026-11-02: ~800 regular
+    uploads had lost their target_path and were taken for "no path").
+
+    An asset Immich answers "not found" for is gone — unless IA-08 moved it
+    into the locked folder (NSFW): the API key cannot see those either
+    (live: 20 such jobs taken for "immich asset gone"). An answer Immich
+    gives no state for (401, 5xx, timeout) decides nothing.
     """
     import fileops
-    from immich_client import asset_exists
+    import immich_client as ic
 
     immich_unknown = False
     for c in copies:
@@ -241,13 +249,17 @@ async def _orphan_reason(row, copies: list, check_immich: bool) -> str | None:
             continue
 
     path = row.target_path
-    if path and path.startswith("immich:"):
+    asset_id = path[len("immich:"):] if path and path.startswith("immich:") else (None if path else row.immich_asset_id)
+    if asset_id:
         if not check_immich:
             return _ORPHAN_SKIP
         try:
-            return None if await asset_exists(path[len("immich:"):]) else "immich asset gone"
+            state = await ic.get_asset_state(asset_id)
         except Exception:
             return _ORPHAN_SKIP
+        if state != ic.ASSET_MISSING or await fileops.locked_by_ma(row.id, asset_id):
+            return None
+        return "immich asset gone"
     if path:
         return None if await asyncio.to_thread(os.path.exists, path) else "file gone"
     if immich_unknown:
@@ -267,8 +279,10 @@ async def _orphan_reason(row, copies: list, check_immich: bool) -> str | None:
 async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None = None):
     """Scan all settled jobs (done/duplicate/review) and mark those whose
     content is gone as 'orphan'. Stores the previous status in
-    error_message for possible un-orphan recovery. Changes nothing on disk
-    or in Immich; the register is brought in line where a copy is missing.
+    error_message for un-orphan recovery: an orphan whose content is found
+    again (an asset that came back, or one an earlier scan missed) gets its
+    previous status back. Changes nothing on disk or in Immich; the
+    register is brought in line where a copy is missing.
     `only` limits the scan to some jobs (a test's own).
     """
     from datetime import datetime
@@ -279,6 +293,8 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
     import storage
 
     SETTLED_STATES = ("done", "duplicate", "review")
+    # Orphans are looked at again: one marked by mistake comes back.
+    SCANNED = (*SETTLED_STATES, "orphan")
     BATCH_SIZE = 200
     last_id = 0
     total_checked = 0
@@ -291,6 +307,7 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
     by_status: dict[str, int] = {}
     by_target: dict[str, int] = {}
     marked: list[str] = []
+    restored: list[str] = []
     # A drive that is not mounted makes every file on it look gone: those
     # jobs are skipped, never orphaned (the infrastructure is no job's fault).
     drives = storage.Checker()
@@ -299,7 +316,7 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
     try:
         async with async_session() as session:
             r = await session.execute(
-                select(func.count(Job.id)).where(Job.status.in_(SETTLED_STATES))
+                select(func.count(Job.id)).where(Job.status.in_(SCANNED))
             )
             _cleanup_progress["total"] = r.scalar() or 0
             _cleanup_phase("scanning")
@@ -312,8 +329,8 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
         async with async_session() as session:
             result = await session.execute(
                 select(Job.id, Job.debug_key, Job.status, Job.target_path, Job.original_path,
-                       Job.file_hash)
-                .where(Job.status.in_(SETTLED_STATES), Job.id > last_id,
+                       Job.file_hash, Job.immich_asset_id, Job.error_message)
+                .where(Job.status.in_(SCANNED), Job.id > last_id,
                        Job.id.in_(only) if only is not None else true())
                 .order_by(Job.id)
                 .limit(BATCH_SIZE)
@@ -337,6 +354,7 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
             copies.setdefault(jid, []).append(c)
 
         orphan_ids = []
+        found_again = []  # orphans whose content is there: (row, previous status)
         for row in rows:
             total_checked += 1
             paths = [c.location for c in copies.get(row.id, []) if c.kind != "immich"]
@@ -344,7 +362,12 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
                 total_storage += 1
                 continue
             reason = await _orphan_reason(row, copies.get(row.id, []), check_immich)
-            if reason == _ORPHAN_SKIP:
+            if row.status == "orphan":
+                # Only an automatic mark is taken back, to the status it names.
+                previous = re.match(r"Auto-orphaned from (\w+) ", row.error_message or "")
+                if reason is None and previous and previous.group(1) in SETTLED_STATES:
+                    found_again.append((row, previous.group(1)))
+            elif reason == _ORPHAN_SKIP:
                 total_immich_skipped += 1
             elif reason:
                 orphan_ids.append((row, reason))
@@ -370,6 +393,17 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
                         by_target[target] = by_target.get(target, 0) + 1
                         marked.append(row.debug_key)
                 await session.commit()
+        if found_again:
+            async with async_session() as session:
+                for row, previous in found_again:
+                    # The target the content was found at: an empty one gets the asset.
+                    target = row.target_path or (f"immich:{row.immich_asset_id}" if row.immich_asset_id else None)
+                    res = await session.execute(
+                        sql_update(Job).where(Job.id == row.id, Job.status == "orphan")
+                        .values(status=previous, error_message=None, target_path=target))
+                    if res.rowcount:
+                        restored.append(row.debug_key)
+                await session.commit()
 
         _cleanup_progress["current"] = total_checked
         # Tiny pause to avoid blocking the event loop / DB pool
@@ -386,7 +420,9 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
             f"Orphan-Cleanup done: {total_orphaned} jobs marked orphan",
             f"Checked {total_checked}, immich skipped {total_immich_skipped}, "
             f"Laufwerk fehlt (übersprungen) {total_storage}" + (f": {missing}" if missing else "")
-            + f"; Grund: {by_reason}; vorher: {by_status}; Ziel: {by_target}",
+            + f"; Grund: {by_reason}; vorher: {by_status}; Ziel: {by_target}"
+            + (f"; zurückgeholt (Inhalt wieder gefunden) {len(restored)}: {', '.join(restored)[:2000]}"
+               if restored else ""),
         )
     except Exception:
         pass
@@ -401,6 +437,8 @@ async def _scan_orphans_in_background(check_immich: bool, only: list[int] | None
         "by_status": by_status,
         "by_target": by_target,
         "marked": marked,
+        "restored": len(restored),
+        "restored_keys": restored,
     })
 
 

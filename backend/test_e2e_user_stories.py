@@ -2532,6 +2532,164 @@ async def test_us32_model_that_thinks():
         await restore_pause(found)
 
 
+async def test_us33_place_name_into_tree():
+    """US-33: a flat place name goes into the places tree ("Schreibweisen
+    zusammenführen"): the photo of a pipeline job that carries it flat
+    gets the node and loses the flat tag. The branch is one of the test's
+    own (a real place name would be shared with the rest of the dev
+    library, and the geocoder is not needed for the tool)."""
+    print("\n-- US-33: flacher Ortsname wandert in den Ortsbaum --")
+    import content_language
+    from immich_client import delete_tag, ensure_tag_path, list_tags, tag_assets
+    from routers import api, tools
+    root = (await content_language.current()).roots[2]
+    land = f"E2Eland{TS}"
+    path = f"{INBOX}/__e2e_us33_{TS}.jpg"
+    make_unique_jpg(path)
+    CLEANUP_FILES.append(path)
+    found = await saved_pause()
+    await restore_pause({k: (False if k == "paused" else "") for k in _PAUSE_KEYS})
+    try:
+        job_id = await create_and_run_job(os.path.basename(path), path, use_immich=True)
+        await wait_done([job_id], timeout=300)
+        asset = (await get_job(job_id)).immich_asset_id
+        if asset:
+            CLEANUP_ASSETS.append(asset)
+        await ensure_tag_path(f"{root}/{land}")  # the branch, as IA-08 builds one
+        flat = await ensure_tag_path(land)
+        await tag_assets(flat["id"], [asset])
+        await asyncio.sleep(4)  # Immich's index lags behind a tag write
+        api._cleanup_reset("tag_merge")
+        await tools._scan_merge(False, True, False, False)
+        res = api._cleanup_progress.get("result") or {}
+        it = next((i for i in res.get("items") or [] if i["name"] == land), None)
+        check("US33-01 Vorschlag: der flache Ortsname in seinen Ast, angehakt, das Bild bekommt ihn",
+              it and it["kind"] == "place" and it["into"] == f"{root}/{land}" and it["selected"]
+              and it["without_place"] == 1, f"{it}")
+        api._cleanup_reset("tag_merge")
+        await tools._merge_apply({it["id"]} if it else set())
+        await asyncio.sleep(4)
+        tags = await get_immich_tags(asset)
+        check("US33-02 das Bild trägt den Ast, das flache Tag ist weg",
+              f"{root}/{land}" in tags and land not in tags and land not in {t["value"] for t in await list_tags()},
+              f"{sorted(tags)}")
+    finally:
+        tags = {t["value"]: t for t in await list_tags()}
+        for value in (f"{root}/{land}", land):
+            if value in tags:
+                await delete_tag(tags[value]["id"])
+        await restore_pause(found)
+
+
+async def test_us34_orphan_found_again():
+    """US-34: a job the orphan scan marked by mistake comes back (live
+    2026-11-02: ~800 regular Immich uploads had lost their target_path and
+    were taken for "no path"). The next scan finds the asset by the job's
+    asset id and gives the job its status and target back."""
+    print("\n-- US-34: Verwaiste aufräumen holt einen zu Unrecht verwaisten Job zurück --")
+    import sqlalchemy
+    from database import async_session
+    from models import Job
+    from routers import api
+    path = f"{INBOX}/__e2e_us34_{TS}.jpg"
+    make_unique_jpg(path)
+    CLEANUP_FILES.append(path)
+    found = await saved_pause()
+    await restore_pause({k: (False if k == "paused" else "") for k in _PAUSE_KEYS})
+    try:
+        job_id = await create_and_run_job(os.path.basename(path), path, use_immich=True)
+        await wait_done([job_id], timeout=300)
+        job = await get_job(job_id)
+        asset = job.immich_asset_id
+        if asset:
+            CLEANUP_ASSETS.append(asset)
+        check("US34-01 Foto in Immich, Job fertig", job.status == "done" and asset, f"{job.status} {asset}")
+        # The state found on live: target lost, orphaned with the automatic note.
+        async with async_session() as s:
+            await s.execute(sqlalchemy.update(Job).where(Job.id == job_id).values(
+                status="orphan", target_path=None,
+                error_message="Auto-orphaned from done (no path) at 2026-11-02T08:08:03"))
+            await s.commit()
+        api._cleanup_reset("orphans")
+        await api._scan_orphans_in_background(True, only=[job_id])
+        res = api._cleanup_progress.get("result") or {}
+        job = await get_job(job_id)
+        check("US34-02 der nächste Lauf holt ihn zurück: fertig, Ziel nachgetragen, Hinweis weg",
+              job.status == "done" and job.target_path == f"immich:{asset}" and not job.error_message,
+              f"{job.status} {job.target_path} {job.error_message}")
+        check("US34-03 das Ergebnis nennt ihn", res.get("restored") == 1
+              and res.get("restored_keys") == [job.debug_key] and not res.get("orphaned"), f"{res}")
+    finally:
+        await restore_pause(found)
+
+
+async def test_us35_damaged_tags():
+    """US-35: damaged tags nobody could repair, in "Schreibweisen
+    zusammenführen": one the user spells right by hand, one whose pictures
+    are tagged anew — their job runs IA-05 again (rerun, Immich API mode)
+    and the damaged tag leaves the pictures with a job; a picture without
+    one keeps it."""
+    print("\n-- US-35: kaputte Tags ohne Lösung: von Hand berichtigen, neu taggen --")
+    from immich_client import delete_tag, ensure_tag_path, list_tag_assets, list_tags, tag_assets
+    from routers import api, tools
+    retag_name, fix_name, fixed = f"Xq?zv{TS}", f"Wr?ng{TS}", f"Wrang{TS}"
+    path, loose = f"{INBOX}/__e2e_us35_{TS}.jpg", f"/app/data/__e2e_us35_loose_{TS}.jpg"
+    make_unique_jpg(path)
+    make_unique_jpg(loose)
+    CLEANUP_FILES.extend([path, loose])
+    found = await saved_pause()
+    await restore_pause({k: (False if k == "paused" else "") for k in _PAUSE_KEYS})
+    try:
+        job_id = await create_and_run_job(os.path.basename(path), path, use_immich=True)
+        await wait_done([job_id], timeout=300)
+        job = await get_job(job_id)
+        asset = job.immich_asset_id
+        if asset:
+            CLEANUP_ASSETS.append(asset)
+        other = await phone_upload(loose, "us35")
+        t_retag, t_fix = await ensure_tag_path(retag_name), await ensure_tag_path(fix_name)
+        await tag_assets(t_retag["id"], [asset, other])
+        await tag_assets(t_fix["id"], [asset])
+        await asyncio.sleep(4)  # Immich's index lags behind a tag write
+        ia05_before = len([r for r in await runs_of(job_id) if r.module == "IA-05"])
+
+        api._cleanup_reset("tag_merge")
+        await tools._scan_merge(False, True, False, False)  # Immich only, no AI: nothing repairs them
+        res = api._cleanup_progress.get("result") or {}
+        check("US35-01 beide kaputten Tags ohne Lösung, je mit ihren Bildern",
+              {retag_name, fix_name} <= set(res.get("orphans") or [])
+              and (res.get("members") or {}).get(retag_name, {}).get("assets") == 2, f"{res.get('orphans')}")
+
+        api._cleanup_reset("tag_merge")
+        await tools._merge_apply(set(), {fix_name: fixed}, [retag_name])
+        out = api._cleanup_progress.get("result") or {}
+        rt = out.get("retag") or {}
+        check("US35-02 neu taggen: ein Job eingereiht, das Bild ohne Job behält das Tag",
+              rt.get("jobs") == 1 and rt.get("kept") == 1 and rt.get("rerun_id"), f"{rt} {out.get('error')}")
+        await asyncio.sleep(4)
+        tags = {t["value"]: t for t in await list_tags()}
+        check("US35-03 von Hand berichtigt: das Bild trägt die richtige Schreibweise, die kaputte ist weg",
+              fix_name not in tags and fixed in tags and asset in await list_tag_assets(tags[fixed]["id"]),
+              f"{[v for v in tags if str(TS) in v]}")
+        check("US35-04 das kaputte Tag nur noch am Bild ohne Job",
+              retag_name in tags and await list_tag_assets(tags[retag_name]["id"]) == [other], "")
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline and await rerun_state(rt.get("rerun_id")) not in ("done", "cancelled"):
+            await asyncio.sleep(2)
+        job = await get_job(job_id)
+        ia05_after = len([r for r in await runs_of(job_id) if r.module == "IA-05"])
+        check("US35-05 der Job lief neu: IA-05 noch einmal, fertig, das kaputte Tag kommt nicht zurück",
+              job.status == "done" and ia05_after > ia05_before
+              and asset not in await list_tag_assets(tags[retag_name]["id"]),
+              f"status={job.status} IA-05 {ia05_before}->{ia05_after}")
+    finally:
+        tags = {t["value"]: t for t in await list_tags()}
+        for name in (retag_name, fix_name, fixed):
+            if name in tags:
+                await delete_tag(tags[name]["id"])
+        await restore_pause(found)
+
+
 async def test_us24_immich_down():
     print("\n-- US-24: Immich nicht erreichbar --")
     await service_story("US24", "Immich", ConfigStage(immich__url="http://127.0.0.1:9"),
@@ -3056,6 +3214,9 @@ async def main():
         test_us23_ai_model_missing,
         test_us31_ai_failover,
         test_us32_model_that_thinks,
+        test_us33_place_name_into_tree,
+        test_us34_orphan_found_again,
+        test_us35_damaged_tags,
         test_us24_immich_down,
         test_us25_geocoding_unusable,
         test_us26_library_drive_missing,

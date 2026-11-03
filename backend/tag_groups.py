@@ -115,6 +115,11 @@ def grouped_tags(*, category_label: str | None, ai: dict | None, geo: dict | Non
     the flat content tags after the source. What the AI and the geocoder
     gave is written as the language writes it (``Language.fix``).
 
+    A content tag that names a place of this photo (its country, state,
+    city or suburb) is left out: the place is under the places root. The
+    AI copies it from the metadata now and then (live: about one job in
+    30 got a flat "Schweiz" next to "03 Orte/Schweiz/…").
+
     `folder_paths` are the folder tags already under the language's album
     root (folder_path.folder_targets with the group set)."""
     ai, ocr = ai or {}, ocr or {}
@@ -127,8 +132,10 @@ def grouped_tags(*, category_label: str | None, ai: dict | None, geo: dict | Non
 
     add(path(category, category_label))
     add(path(source, lang.fix(ai.get("source"))))
+    own_places = {str(lang.fix((geo or {}).get(f))).casefold() for f in PLACE_FIELDS if (geo or {}).get(f)}
     for tag in content_tags(ai, lang):
-        add(tag)
+        if tag.casefold() not in own_places:
+            add(tag)
     add(place_path(geo, lang))
     for p in folder_paths:
         add(p)

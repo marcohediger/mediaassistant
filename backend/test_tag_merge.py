@@ -2,12 +2,13 @@
 (routers/tools.py, tag_spelling.py, tag_groups_migration.empty_tags) against
 the real dev Immich and the real AI backend.
 
-    docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E L]
+    docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E L P]
 
 K  Keys and repair rules without Immich: same letters, dropped umlaut,
    candidates, an answer must fit the pattern with a non-ASCII letter.
 S  Preview: same letters ticked; Bar/Bär and Gluhwein/Glühwein as umlaut
-   cases decided by the AI with the photos' descriptions; a damaged name
+   cases decided by the AI with the photos' descriptions, the target the
+   spelling with more photos (Kräne → Krane), on a tie the umlaut one; a damaged name
    repaired from a description, one by the AI, a meant "?" left alone;
    English → German ticked only into an existing tag.
 A  Merge the ticked proposals: Immich (a repaired name created on the way),
@@ -23,6 +24,11 @@ L  The language of the content (content_language.py): Swiss German makes
    with "ß" only, carried out in Immich; English proposes no umlaut cases
    and translates a German tag into an existing English one. Runs last —
    it scans and merges anew.
+P  Flat place names into the places tree: a name one node bears goes into
+   it (ticked), one two branches bear is proposed unticked with the other
+   named; another spelling chains on; the photo that has the place keeps
+   just its node, the one with only flat names gets the deepest node and
+   not its parent besides.
 
 Real assets (synthetic pictures) are uploaded and deleted again; tags the
 test created and its sandbox go too, the remembered decisions are restored.
@@ -55,7 +61,7 @@ TAGS_BEFORE: set[str] = set()
 KEEP_BEFORE = None
 # Real words: the AI has to judge them. They must not exist on dev yet.
 WORDS = ["Seeufer", "seeufer", "Bar", "Bär", "Gluhwein", "Glühwein", "Beach", "Strand", "Snowman",
-         "H?hlenpfad", "Gem?se", "WasIstDas?"]
+         "H?hlenpfad", "Gem?se", "WasIstDas?", "Krane", "Kräne"]
 CREATED = WORDS + ["Höhlenpfad", "Gemüse", "Schneemann"]
 EMPTY = {"leer": f"MergeLeer{TS}", "parent": f"MergeLeerEltern{TS}", "child": f"MergeLeerEltern{TS}/Kind",
          "full": f"MergeVoll{TS}"}
@@ -115,6 +121,11 @@ async def tag(name: str, *asset_ids) -> str:
     return leaf["id"]
 
 
+async def tag_assets_of(tag_id: str, *asset_ids) -> None:
+    from immich_client import tag_assets
+    await tag_assets(tag_id, list(asset_ids))
+
+
 async def tags_now() -> dict:
     from immich_client import list_tags
     return {t["value"]: t for t in await list_tags()}
@@ -143,6 +154,12 @@ async def run_scan(**flags) -> dict:
 
 def item(res, name):
     return next((it for it in res["items"] if it["name"] == name), None)
+
+
+def pair(res, a, b):
+    """The proposal between a and b, in whichever direction: the target of
+    an umlaut case is the spelling with more uses (photos and sidecars)."""
+    return next((it for it in res["items"] if {it["name"], it["into"]} == {a, b}), None)
 
 
 # ---------------------------------------------------------------------------
@@ -218,11 +235,13 @@ async def setup():
     await tag("Beach", a[10])
     await tag("Snowman", a[11])
     await tag("WasIstDas?", a[12])
+    await tag("Krane", a[0], a[1], a[2])  # two valid plurals: the one with more photos wins
+    await tag("Kräne", a[3])
     await immich_idle()
     await asyncio.sleep(3)  # Immich's index lags behind a tag write
     t = await tags_now()
     want = {"Seeufer": 3, "seeufer": 1, "Bar": 1, "Bär": 1, "Gluhwein": 1, "Glühwein": 1, "H?hlenpfad": 1,
-            "Gem?se": 1, "Strand": 1, "Beach": 1, "Snowman": 1, "WasIstDas?": 1}
+            "Gem?se": 1, "Strand": 1, "Beach": 1, "Snowman": 1, "WasIstDas?": 1, "Krane": 3, "Kräne": 1}
     got = {n: await count(n, t) for n in want}
     check("S-pre the test's tags carry their pictures in Immich", got == want, f"{got}")
     return a
@@ -242,9 +261,9 @@ async def part_s() -> dict:
     it = item(r, "seeufer")
     check("S-01 seeufer → Seeufer: same letters, ticked",
           it and it["into"] == "Seeufer" and it["kind"] == "spelling" and it["selected"], f"{it}")
-    it = item(r, "Bar")
-    check("S-02 Bar → Bär: umlaut case, the AI answered, ticked only if it says the same",
-          it and it["into"] == "Bär" and it["kind"] == "umlaut" and it["verdict"] in ("same", "different")
+    it = pair(r, "Bar", "Bär")
+    check("S-02 Bar / Bär: umlaut case, the AI answered, ticked only if it says the same",
+          it and it["kind"] == "umlaut" and it["verdict"] in ("same", "different")
           and it["selected"] == (it["verdict"] == "same") and it["reason"], f"{it}")
     check("S-03 the AI keeps Bar and Bär apart (photos: a cocktail bar, a bear)",
           it and it["verdict"] == "different", f"{it and (it['verdict'], it['reason'])}")
@@ -271,6 +290,9 @@ async def part_s() -> dict:
     it = item(r, "Snowman")
     check("S-09 Snowman: a new German tag would be created — not ticked",
           it is None or (it["new"] and not it["selected"]), f"{it}")
+    it = item(r, "Kräne")
+    check("S-11 umlaut case: the spelling with more photos is the target (Kräne → Krane, not the other way)",
+          it and it["kind"] == "umlaut" and it["into"] == "Krane" and item(r, "Krane") is None, f"{it}")
     m = r["members"]
     check("S-10 counts: Immich pictures and sidecar files per name",
           (m.get("Seeufer") or {}).get("assets") == 3 and (m.get("seeufer") or {}).get("files") == 1
@@ -308,11 +330,11 @@ async def part_a(r: dict, assets: list[str]):
           {"Seeufer", "Höhlenpfad", "Strand", "Bar"} <= set(subj)
           and not {"seeufer", "H?hlenpfad", "Beach"} & set(subj), f"{subj}")
     keep = {tuple(p) for p in await config_manager.get(ts.KEEP_APART_KEY, [])}
-    check("A-09 the unticked pair Bar → Bär is remembered, the ticked ones are not",
-          ("Bar", "Bär") in keep and ("seeufer", "Seeufer") not in keep, f"{sorted(keep)[:6]}")
+    check("A-09 the unticked pair Bar / Bär is remembered, the ticked ones are not",
+          bool({("Bar", "Bär"), ("Bär", "Bar")} & keep) and ("seeufer", "Seeufer") not in keep, f"{sorted(keep)[:6]}")
     res2 = await run_scan(ai=False, translate=False)
-    it = item(res2.get("result") or {"items": []}, "Bar")
-    check("A-10 next preview: Bar → Bär shown unticked as excluded, the AI not asked",
+    it = pair(res2.get("result") or {"items": []}, "Bar", "Bär")
+    check("A-10 next preview: Bar / Bär shown unticked as excluded, the AI not asked",
           it and it["kept_apart"] and not it["selected"] and it["verdict"] is None, f"{it}")
     # Same letters are proposed ticked; left unticked once, only "again" ticks
     # them. In the sidecar only: nothing for Immich to read back later.
@@ -327,8 +349,8 @@ async def part_a(r: dict, assets: list[str]):
     it = item(r4, "SEEUFER")
     check("A-12 again: ticked by the usual rule (same letters), still marked as unticked before",
           r4.get("again") and it and it["kept_apart"] and it["selected"], f"{it}")
-    it = item(r4, "Bar")
-    check("A-13 again: the AI is asked about Bar → Bär anew, ticked only if it says the same",
+    it = pair(r4, "Bar", "Bär")
+    check("A-13 again: the AI is asked about Bar / Bär anew, ticked only if it says the same",
           it and it["kept_apart"] and it["verdict"] in ("same", "different")
           and it["selected"] == (it["verdict"] == "same"), f"{it}")
     subprocess.run(["exiftool", "-q", "-overwrite_original", "-Subject-=SEEUFER", SIDECAR], check=True)
@@ -441,6 +463,90 @@ async def part_l():
         await config_manager.set(cl.CONFIG_KEY, before if before is not None else "")
 
 
+async def part_p():
+    print("\n-- P: flat place names into the places tree --")
+    import content_language as cl
+    from immich_client import delete_tag, ensure_tag_path, get_immich_config, list_tag_assets
+    from routers import api
+    from routers import tools
+    root = (await cl.current()).roots[2]
+    land, city, dup, shout = f"Testland{TS}", f"Teststadt{TS}", f"Doppel{TS}", f"TESTLAND{TS}"
+    a = [await upload(d) for d in ("Altstadt mit Brunnen", "Markt in der Altstadt", "Hafen am Abend")]
+    await immich_idle()
+    city_node = await ensure_tag_path(f"{root}/{land}/{city}")  # as IA-08 builds it
+    await ensure_tag_path(f"{root}/{land}/{dup}")
+    await ensure_tag_path(f"{root}/Anderland{TS}/{dup}")        # a name two branches bear
+    await tag_assets_of(city_node["id"], a[0])                  # a[0]: the place in the tree already
+    await tag(land, a[0], a[1])
+    await tag(city, a[1])                                       # a[1]: only flat names
+    await tag(shout, a[1])
+    await tag(dup, a[2])
+    # Sidecars: one with a more exact place in its tree, one with a tree but no
+    # place, one without a tree at all (it keeps its flat name).
+    side = {k: f"{LIB}/photos/place_{k}_{TS}.jpg.xmp" for k in ("placed", "tree", "flat")}
+    for k, extra in (("placed", ["-TagsList=" + land, f"-TagsList={root}/{land}/{city}"]),
+                     ("tree", ["-TagsList=" + land]), ("flat", [])):
+        subprocess.run(["exiftool", "-q", "-o", side[k], f"-Subject={land}", *extra], check=True)
+    await immich_idle()
+    await asyncio.sleep(3)
+    try:
+        res = await run_scan(ai=False, translate=False)
+        r = res.get("result") or {"items": []}
+        it = item(r, land)
+        check("P-01 a flat place name goes into its node, ticked; one photo has the place, one gets it",
+              it and it["kind"] == "place" and it["into"] == f"{root}/{land}" and it["selected"]
+              and it["with_place"] == 1 and it["without_place"] == 1, f"{it}")
+        it = item(r, city)
+        check("P-02 a city: into its node below the country", it and it["kind"] == "place"
+              and it["into"] == f"{root}/{land}/{city}" and it["selected"], f"{it}")
+        it = item(r, dup)
+        check("P-03 a name two branches bear: proposed, not ticked, the other branch named",
+              it and it["kind"] == "place" and not it["selected"] and len(it["others"]) == 1, f"{it}")
+        it = item(r, shout)
+        check("P-04 another spelling of it: into the flat name first (the chain goes on into the node)",
+              it and it["kind"] == "spelling" and it["into"] == land and it["selected"], f"{it}")
+        check("P-05 the node is shown as existing, with its photos",
+              (r["members"].get(f"{root}/{land}") or {}).get("exists") is True)
+        chosen = {i["id"] for i in r["items"] if i["name"] in (land, city, shout) and i["selected"]}
+        api._cleanup_reset("tag_merge")
+        await tools._merge_apply(chosen)
+        out = api._cleanup_progress.get("result") or {}
+        await immich_idle()
+        await asyncio.sleep(3)
+        t = await tags_now()
+        check("P-06 the flat place names are gone, the ambiguous one stays",
+              not {land, city, shout} & set(t) and dup in t and not out.get("failed"), f"{out}")
+        url, key = await get_immich_config()
+        async with httpx.AsyncClient(timeout=30) as c:
+            tags_of = {x: {tg["value"] for tg in (await c.get(f"{url}/api/assets/{x}", headers={"x-api-key": key})).json()
+                           .get("tags") or []} for x in a}
+        check("P-07 the photo with the place keeps it, no parent node on top",
+              tags_of[a[0]] == {f"{root}/{land}/{city}"}, f"{tags_of[a[0]]}")
+        check("P-08 the photo with only flat names gets the deepest place, not the country besides",
+              tags_of[a[1]] == {f"{root}/{land}/{city}"}, f"{tags_of[a[1]]}")
+        check("P-09 the ambiguous one is untouched", tags_of[a[2]] == {dup}, f"{tags_of[a[2]]}")
+
+        def fields(path):
+            out = subprocess.run(["exiftool", "-j", "-Subject", "-TagsList", path], capture_output=True).stdout
+            e = json.loads(out or b"[{}]")[0]
+            as_list = lambda v: v if isinstance(v, list) else ([v] if v else [])  # noqa: E731
+            return set(as_list(e.get("Subject"))), set(as_list(e.get("TagsList")))
+        subj, tree = fields(side["placed"])
+        check("P-10 sidecar with a more exact place: loses the flat name, keeps its place, no parent added",
+              land not in subj and tree == {f"{root}/{land}/{city}"}, f"{subj} {tree}")
+        subj, tree = fields(side["tree"])
+        check("P-11 sidecar with a tree but no place: gets the node", land not in subj and tree == {f"{root}/{land}"},
+              f"{subj} {tree}")
+        subj, tree = fields(side["flat"])
+        check("P-12 sidecar without a tree: untouched (keeps its flat place name)", subj == {land} and not tree,
+              f"{subj} {tree}")
+    finally:
+        t = await tags_now()
+        for value in (f"{root}/{land}", f"{root}/Anderland{TS}"):
+            if value in t:
+                await delete_tag(t[value]["id"])
+
+
 async def cleanup():
     from config import config_manager
     from immich_client import delete_asset, delete_tag
@@ -471,14 +577,14 @@ async def cleanup():
 
 
 async def main():
-    wanted = {a.upper() for a in sys.argv[1:]} or set("KSAREL")
+    wanted = {a.upper() for a in sys.argv[1:]} or set("KSARELP")
     print("=" * 60)
     print("Schreibweisen zusammenführen, leere Tags löschen")
     print("=" * 60)
     if "K" in wanted:
         part_k()
     try:
-        if wanted & set("SAREL"):
+        if wanted & set("SARELP"):
             assets = await setup()
             r = await part_s() if wanted & set("SA") else None
             if "A" in wanted and r:
@@ -489,12 +595,14 @@ async def main():
                 await part_e(assets)
             if "L" in wanted:
                 await part_l()
+            if "P" in wanted:
+                await part_p()
     except Exception as exc:
         import traceback
         traceback.print_exc()
         FAIL.append(f"crashed: {type(exc).__name__}: {exc}")
     finally:
-        if wanted & set("SAREL"):
+        if wanted & set("SARELP"):
             await cleanup()
     print(f"\n{len(PASS)}/{len(PASS) + len(FAIL)} PASS")
     for f in FAIL:

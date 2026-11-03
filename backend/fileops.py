@@ -1617,15 +1617,23 @@ async def _set_asset_state(row: FileCopy, state: str) -> FileCopy:
     return cur
 
 
-async def _locked_by_ma(session, row: FileCopy) -> bool:
+async def _locked_by_ma(session, job_id: int | None, asset_id: str) -> bool:
     """IA-08 locked this asset (NSFW) before locks went through lock_asset()."""
-    if row.job_id is None:
+    if job_id is None:
         return False
-    result = (await session.execute(select(Job.step_result).where(Job.id == row.job_id))).scalar()
+    result = (await session.execute(select(Job.step_result).where(Job.id == job_id))).scalar()
     ia08 = result.get("IA-08") if isinstance(result, dict) else None
     if not isinstance(ia08, dict) or not ia08.get("immich_locked"):
         return False
-    return row.location in (ia08.get("immich_asset_id"), ia08.get("immich_id"))
+    return asset_id in (ia08.get("immich_asset_id"), ia08.get("immich_id"))
+
+
+async def locked_by_ma(job_id: int, asset_id: str) -> bool:
+    """Whether IA-08 moved this job's asset into Immich's locked folder
+    (NSFW). The API key cannot see such an asset — Immich answers as for one
+    that is gone — so a job without a register row is told by this alone."""
+    async with async_session() as session:
+        return await _locked_by_ma(session, job_id, asset_id)
 
 
 async def _adopt_asset(session, jref: _JobRef, asset_id: str, sha: str | None, size: int | None,
@@ -2370,7 +2378,7 @@ async def _verify_immich(row: FileCopy, actor: str) -> FileCopy:
                                copy_id=cur.id, sha256_before=cur.sha256, size=cur.size, actor=actor,
                                reason="Immich hat seinen Papierkorb geleert", state="done",
                                finished_at=now, detail={"observed": "Asset nicht mehr in Immich"}))
-        elif before == "locked" or await _locked_by_ma(session, cur):
+        elif before == "locked" or await _locked_by_ma(session, cur.job_id, cur.location):
             if before != "locked":
                 cur.state = "locked"
                 message, level = "gesperrt (Locked Folder) — für den API-Key unsichtbar, nicht verloren", log_info

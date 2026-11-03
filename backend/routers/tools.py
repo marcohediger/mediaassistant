@@ -17,6 +17,7 @@ import subprocess
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+import content_language
 import tag_spelling as ts
 from sets import library_roots
 from config import config_manager
@@ -30,6 +31,13 @@ router = APIRouter(prefix="/tools")
 SCAN_TIMEOUT_S = 1800
 REMOVE_CHUNK = 200
 MAX_SAMPLE = 25
+# The places root of every language ("03 Orte", "03 Places"): a flat tag that
+# names a node below one of them goes into that node (_scan_merge).
+PLACE_ROOTS = tuple(dict.fromkeys(lang.roots[2] for lang in content_language.LANGUAGES.values()))
+
+
+def _is_place_path(value: str) -> bool:
+    return value.startswith(tuple(f"{root}/" for root in PLACE_ROOTS))
 
 # The result of the last preview. Removal works on exactly this set — never on
 # a fresh scan — so what gets deleted is what was shown, even if the pattern
@@ -563,7 +571,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
     ticked ones.
     """
     from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
-    from immich_client import list_tags, count_tag_assets
+    from immich_client import list_tags, count_tag_assets, list_tag_assets
 
     def progress(done, total):
         _cleanup_progress["current"], _cleanup_progress["total"] = done, total
@@ -579,12 +587,17 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
         # folder_path.py). Nested values are left as they are.
         sidecar_files: dict[str, list[str]] = {}
         sidecar_fields: dict[str, dict[str, list[str]]] = {}  # keyword -> sidecar -> fields
+        # The places a sidecar has in its tree already ("03 Orte/Schweiz/Bern"):
+        # a flat place name goes into its node only where the file has none.
+        sidecar_places: dict[str, list[str]] = {}
         if with_sidecars:
             _cleanup_phase("reading_sidecars")
             for entry in await _read_library_subjects(library):
                 src = entry.get("SourceFile", "")
-                for field_name, raw, _shown in _keyword_entries(entry):
+                for field_name, raw, shown in _keyword_entries(entry):
                     if _is_nested(field_name, raw):
+                        if _is_place_path(shown):
+                            sidecar_places.setdefault(src, []).append(shown)
                         continue
                     files = sidecar_files.setdefault(raw, [])
                     if src not in files:
@@ -594,15 +607,21 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
                         fields.append(field_name)
 
         immich_tags: dict[str, dict] = {}
+        # The places tree of every language: a node's own name -> its tags
+        # ("Schweiz" -> "03 Orte/Schweiz"), for the flat place names below.
+        place_nodes: dict[str, list[dict]] = {}
         immich_error = ""
         if with_immich:
             _cleanup_phase("reading_immich_tags")
             try:
                 all_tags = await list_tags()
                 parents = {t.get("parentId") for t in all_tags if t.get("parentId")}
+                place_roots = tuple(f"{root}/" for root in PLACE_ROOTS)
                 for t in all_tags:
                     if not t.get("parentId") and t.get("id") not in parents:
                         immich_tags[_tag_value(t)] = t
+                    if _tag_value(t).startswith(place_roots):
+                        place_nodes.setdefault(_tag_value(t).rsplit("/", 1)[-1].casefold(), []).append(t)
             except Exception as e:
                 immich_error = f"{type(e).__name__}: {e}"
 
@@ -632,6 +651,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             grouping.attach(damaged, max(targets, key=lambda t: (usage(t["name"]), len(t["name"]))))
 
         families = grouping.families()
+        place_targets: dict[str, int] = {}  # node of a place proposal -> its photos
         _cleanup_phase("counting_assets")
         progress(0, sum(len(c) for f in families for c in f))
         done = 0
@@ -679,10 +699,14 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
                         True, family=fi)
             handled.update(m["name"] for cluster in family for m in cluster)
             if len(family) > 1 and lang.umlaut_rules:
-                # Same words but for an umlaut: the spelling with the umlauts is
-                # the target — the one without is the degraded form.
-                target = max(winners, key=lambda n: (ts.umlauts(n),
-                                                     sum(usage(m["name"]) for m in grouping.cluster_of(n)), len(n)))
+                # Same words but for an umlaut: the spelling with more photos is
+                # the target, on a tie the one with the umlauts. "Always the
+                # umlaut" took the other for a degraded form — wrong for names
+                # and words with two valid forms (measured on live: a name with
+                # 21 photos proposed into its all-caps umlaut spelling with 1,
+                # "Krane" (21) into "Kräne" (1)).
+                target = max(winners, key=lambda n: (sum(usage(m["name"]) for m in grouping.cluster_of(n)),
+                                                     ts.umlauts(n), len(n)))
                 for w in winners:
                     if w != target:
                         pairs.append(add(w, target, "umlaut", False, family=fi, verdict=None, reason=""))
@@ -693,6 +717,33 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             name = cluster[0]["name"]
             if name not in handled and not ts.is_damaged(name) and lang.fix(name) != name:
                 add(name, lang.fix(name), "swiss", True)
+
+        # A flat tag that names a place of the places tree goes into its node
+        # ("Schweiz" -> "03 Orte/Schweiz"): the photos that have the place in
+        # the tree already only lose the flat tag, the others get the node.
+        # Flat place names came from files of the time before tag groups and
+        # from the AI (live: 2632 photos with a flat "Schweiz"). Ticked only
+        # when one node bears the name; with several, the one with the most
+        # photos is proposed and the others named.
+        if place_nodes:
+            _cleanup_phase("merge_places")
+            candidates = [(c[0]["name"], lang.fix(c[0]["name"])) for c in grouping.clusters
+                          if not ts.is_damaged(c[0]["name"]) and lang.fix(c[0]["name"]).casefold() in place_nodes]
+            progress(0, len(candidates))
+            for done, (winner, name) in enumerate(candidates, 1):
+                if _cancelled():
+                    break
+                nodes = place_nodes[name.casefold()]
+                sizes = {t["id"]: await count_tag_assets(t["id"]) for t in nodes} if len(nodes) > 1 else {}
+                node = max(nodes, key=lambda t: sizes.get(t["id"], 0))
+                flat_ids = members.get(winner, {}).get("id")
+                flat = set(await list_tag_assets(flat_ids)) if flat_ids else set()
+                placed = set(await list_tag_assets(node["id"])) if flat else set()
+                place_targets[_tag_value(node)] = len(placed) or await count_tag_assets(node["id"])
+                add(name, _tag_value(node), "place", len(nodes) == 1,
+                    with_place=len(flat & placed), without_place=len(flat - placed),
+                    others=[_tag_value(t) for t in nodes if t is not node][:5])
+                progress(done, len(candidates))
 
         orphans = [o["name"] for o in grouping.orphans]
         ask = [it for it in pairs if again or not it["kept_apart"]]
@@ -825,12 +876,19 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             await assets_of(it["name"])
             if it["into"] in members:
                 await assets_of(it["into"])
+        # The damaged names nobody could repair get a row each (a spelling to
+        # type in, or their photos tagged anew) — with their counts.
+        for name in unresolved:
+            await assets_of(name)
         shown = {n: {"assets": counts.get(n, 0), "files": len(sidecar_files.get(n, [])), "exists": n in members}
-                 for it in items for n in (it["name"], it["into"])}
+                 for n in [*(n for it in items for n in (it["name"], it["into"])), *unresolved]}
+        shown.update({n: {"assets": c, "files": 0, "exists": True} for n, c in place_targets.items()})
         _last_merge.clear()
         _last_merge.update({"items": items, "ids": {n: (members.get(n) or {}).get("id") for n in shown},
                             "sidecar_files": sidecar_files, "sidecar_fields": sidecar_fields,
-                            "sidecars_enabled": with_sidecars, "immich_enabled": with_immich})
+                            "sidecar_places": sidecar_places,
+                            "sidecars_enabled": with_sidecars, "immich_enabled": with_immich,
+                            "orphans": sorted(unresolved), "language": lang.code})
         await _cleanup_finish(result={
             "mode": "merge_scan",
             "cancelled": _cancelled(),
@@ -853,7 +911,7 @@ async def _scan_merge(with_sidecars: bool, with_immich: bool, use_ai: bool, tran
             "not_damaged": sorted(not_damaged),
         })
         by_kind = {k: sum(1 for it in items if it["kind"] == k)
-                   for k in ("spelling", "swiss", "damaged", "umlaut", "repair", "translate")}
+                   for k in ("spelling", "swiss", "damaged", "umlaut", "repair", "translate", "place")}
         failed_text = (f"; KI ohne brauchbare Antwort: {ai_failed['batches']} Gruppen ({ai_failed['names']} Namen "
                        f"nicht geprüft), {ai_failed['checks']} Prüffragen — {ai_failed['reason']}"
                        if ai_failed["batches"] or ai_failed["checks"] else "")
@@ -924,24 +982,47 @@ async def _settle_merge(moves: list[tuple[str, str, list[str]]]) -> list[str]:
     return list(dict.fromkeys(repaired))
 
 
-async def _merge_apply(chosen: set[int]):
+# Proposals the user may turn around (←): two spellings of one word, and a
+# translation into a tag that exists. A damaged name, a repair, a Swiss
+# spelling or a place go one way only.
+SWAPPABLE = ("spelling", "umlaut", "translate")
+
+
+async def _merge_apply(chosen: set[int], fixes: dict | None = None, retag: list | None = None,
+                       swapped: set[int] | None = None):
     """Carry out the ticked proposals of the preview; remember the unticked.
 
     Sidecars first, Immich second — the same order the removal uses, because
     the sidecar is what a re-index reads back.
+
+    The damaged names the preview could not repair: a spelling the user
+    typed in (`fixes`, name -> spelling) is a repair like any other; the
+    photos of the names in `retag` are tagged anew (_retag). The proposals
+    in `swapped` the user turned around (←): the target goes into the name.
     """
     from routers.api import _cleanup_progress, _cleanup_finish, _cleanup_phase
     from immich_client import ensure_tag_path, list_tag_assets, tag_assets, delete_tag
     try:
         items = list(_last_merge.get("items") or [])
+        chosen = set(chosen)
+        for name, spelling in (fixes or {}).items():
+            items.append({"id": len(items), "name": name, "into": spelling, "kind": "repair",
+                          "evidence": "user", "selected": True})
+            chosen.add(items[-1]["id"])
         ids = dict(_last_merge.get("ids") or {})
         sidecar_files = dict(_last_merge.get("sidecar_files") or {})
         sidecar_fields = dict(_last_merge.get("sidecar_fields") or {})
+        sidecar_places = dict(_last_merge.get("sidecar_places") or {})
         do_sidecars = bool(_last_merge.get("sidecars_enabled"))
         do_immich = bool(_last_merge.get("immich_enabled"))
         await ts.remember({(it["name"], it["into"]) for it in items if it["id"] not in chosen},
                           {(it["name"], it["into"]) for it in items if it["id"] in chosen})
+        items = [{**it, "name": it["into"], "into": it["name"]} if it["id"] in (swapped or set()) else it
+                 for it in items]
         targets = _merge_targets(items, chosen)
+        # Places last and the deeper ones first: a photo that got "…/Schweiz/Bern"
+        # counts as having "…/Schweiz" and does not get that node as well.
+        targets = dict(sorted(targets.items(), key=lambda kv: kv[0].count("/") * -1 if _is_place_path(kv[0]) else 1))
         files_changed, files_failed = 0, 0
         merged, moved, failed, last_error = 0, 0, 0, ""
         failed_names: list[str] = []
@@ -974,6 +1055,30 @@ async def _merge_apply(chosen: set[int]):
                                     or {"Subject"})
                     by_fields.setdefault(tuple(fields), []).append(f)
                 for fields, subset in by_fields.items():
+                    if _is_place_path(winner):
+                        # A path belongs in the tree fields only; a file without
+                        # one keeps its flat place name rather than lose it. A
+                        # file with the place in its tree already — or a more
+                        # exact one below it — only loses the flat name.
+                        tree = [fld for fld in fields if fld in ("TagsList", "HierarchicalSubject")]
+                        if not tree:
+                            continue
+                        args = [f"-{fld}-={n}" for fld in fields for n in losers]
+                        placed = [f for f in subset if any(p == winner or p.startswith(winner + "/")
+                                                           for p in sidecar_places.get(f, []))]
+                        for group, add_path in ((placed, False), ([f for f in subset if f not in placed], True)):
+                            if not group:
+                                continue
+                            extra = []
+                            for fld in tree if add_path else ():
+                                value = winner if fld == "TagsList" else winner.replace("/", "|")
+                                extra += [f"-{fld}-={value}", f"-{fld}+={value}"]
+                            ok, bad = await _rewrite_sidecars(group, args + extra, "tools:tag_merge",
+                                                              progress_offset=done)
+                            done += len(group)
+                            ok_group += ok
+                            bad_group += bad
+                        continue
                     # Removing the winner before adding it keeps files that already
                     # carry both spellings from ending up with it twice.
                     args = [a for fld in fields for a in
@@ -990,11 +1095,16 @@ async def _merge_apply(chosen: set[int]):
         if do_immich:
             _cleanup_progress["total"] = len(targets)
             _cleanup_progress["current"] = 0
+            # Photos this run put into a place node: Immich's index lags ~2 s
+            # behind a tag write, so a parent node would not list them yet.
+            put_in_place: dict[str, set] = {}
             for i, (winner, losers) in enumerate(targets.items(), 1):
                 if _cancelled():
                     break
                 _cleanup_phase("merging_immich", name=winner)
                 winner_id = ids.get(winner)
+                # A place node lists the photos of its whole branch (measured).
+                placed = None
                 for name in losers:
                     loser_id = ids.get(name)
                     if not loser_id:
@@ -1007,10 +1117,22 @@ async def _merge_apply(chosen: set[int]):
                             winner_id = (await _retry_once(f'„{winner}“ anlegen',
                                                            lambda: ensure_tag_path(winner)))["id"]
                             ids[winner] = winner_id
+                        to_tag = found
+                        if _is_place_path(winner) and winner_id:
+                            if placed is None:
+                                placed = set(await _retry_once(f'„{winner}“ lesen', lambda: list_tag_assets(winner_id)))
+                                for node, photos in put_in_place.items():
+                                    if node.startswith(winner + "/"):
+                                        placed |= photos
+                            to_tag = [a for a in found if a not in placed]
+                            placed |= set(to_tag)
+                            put_in_place.setdefault(winner, set()).update(to_tag)
                         await log_info("tools", f'Schreibweise „{name}“ wird in „{winner}“ zusammengeführt',
+                                       f"{len(to_tag)} Zuordnungen umhängen ({len(found) - len(to_tag)} haben den Ort "
+                                       f"schon), dann Tag-ID {loser_id} löschen" if to_tag is not found else
                                        f"{len(found)} Zuordnungen umhängen, dann Tag-ID {loser_id} löschen")
-                        for start in range(0, len(found), REMOVE_CHUNK):
-                            chunk = found[start:start + REMOVE_CHUNK]
+                        for start in range(0, len(to_tag), REMOVE_CHUNK):
+                            chunk = to_tag[start:start + REMOVE_CHUNK]
                             await _retry_once(f'„{name}“ umhängen',
                                               lambda c=chunk: tag_assets(winner_id, c))
                         moved += len(found)
@@ -1037,6 +1159,12 @@ async def _merge_apply(chosen: set[int]):
                     last_error = _reason(e)
                     await log_warning("tools", "Schreibweisen: Nachkontrolle in Immich fehlgeschlagen", last_error)
 
+        retagged = {}
+        if retag and not _cancelled():
+            _cleanup_phase("merge_retag")
+            _cleanup_progress["current"], _cleanup_progress["total"] = 0, 0
+            retagged = await _retag(retag, ids, sidecar_files, sidecar_fields, do_sidecars, do_immich)
+
         _last_merge.clear()
         await _cleanup_finish(result={
             "mode": "merge_apply",
@@ -1047,6 +1175,8 @@ async def _merge_apply(chosen: set[int]):
             "merged": merged, "moved": moved, "failed": failed, "error": last_error,
             "failed_names": failed_names[:MAX_SAMPLE],
             "kept_apart": sum(1 for it in items if it["id"] not in chosen),
+            "fixed": len(fixes or {}),
+            "retag": retagged,
         })
         await log_info(
             "tools",
@@ -1056,6 +1186,87 @@ async def _merge_apply(chosen: set[int]):
             + (f", letzter Fehler: {last_error}" if last_error else ""))
     except Exception as e:
         await _cleanup_finish(error=f"{type(e).__name__}: {e}")
+
+
+async def _retag(names: list[str], ids: dict, sidecar_files: dict, sidecar_fields: dict,
+                 do_sidecars: bool, do_immich: bool) -> dict:
+    """Tag the photos of damaged names anew and take the damaged names away.
+
+    The photos' jobs run IA-05 again (AI), IA-07 and IA-08 following — one
+    request "Neu ausführen" in Immich's API mode, through the queue like
+    every rerun. The damaged name comes from files of the time before the
+    encoding fix; MediaAssistant only removes tags it wrote itself, so a new
+    run alone would leave it. It is taken off the photos whose job the
+    request took — in Immich and in their sidecars; a photo without a job,
+    or whose job the request refused, keeps it. A request already running
+    (only one at a time) leaves everything as it is."""
+    import reruns
+    from database import async_session
+    from models import Job, RerunItem
+    from pipeline.rerun import RerunError
+    from immich_client import delete_tag, list_tag_assets, untag_assets
+    from sqlalchemy import select
+    assets = {n: (await _retry_once(f'„{n}“ lesen', lambda n=n: list_tag_assets(ids[n])))
+              if do_immich and ids.get(n) else [] for n in names}
+    files = {n: [f for f in sidecar_files.get(n, []) if f and not _is_part_file(f)] if do_sidecars else []
+             for n in names}
+    media = {f[:-len(".xmp")]: f for n in names for f in files[n] if f.lower().endswith(".xmp")}
+    all_assets = {a for n in names for a in assets[n]}
+    async with async_session() as session:
+        rows = (await session.execute(select(Job.id, Job.debug_key, Job.immich_asset_id, Job.target_path).where(
+            Job.status.in_(("done", "review")),
+            Job.immich_asset_id.in_(all_assets) | Job.target_path.in_(
+                [f"immich:{a}" for a in all_assets] + list(media))))).all()
+    if not rows:
+        return {"names": len(names), "jobs": 0, "kept": sum(len(assets[n]) + len(files[n]) for n in names)}
+    keys = list(dict.fromkeys(r.debug_key for r in rows))
+    await log_info("tools", f"Schreibweisen: Bilder von {len(names)} kaputten Tags werden neu getaggt",
+                   f"{len(keys)} Jobs (Neu ausführen IA-05, IA-07, IA-08); Tags: " + ", ".join(names)[:300])
+    try:
+        made = await reruns.create({"target": {"kind": "jobs", "keys": keys}, "modules": ["IA-05"],
+                                    "options": {"immich": "api", "cascade": "auto"}}, actor="tools:tag_merge")
+    except RerunError as e:
+        await log_warning("tools", "Schreibweisen: Neu taggen nicht gestartet, die kaputten Tags bleiben", e.key)
+        return {"names": len(names), "jobs": 0, "error": e.key}
+    async with async_session() as session:
+        taken = set((await session.execute(select(RerunItem.job_id).where(
+            RerunItem.rerun_id == made["rerun_id"]))).scalars().all())
+    by_asset, by_media = {}, {}
+    for r in rows:
+        if r.id in taken:
+            if r.immich_asset_id:
+                by_asset[r.immich_asset_id] = r.debug_key
+            if r.target_path:
+                tp = r.target_path
+                by_asset.update({tp[len("immich:"):]: r.debug_key} if tp.startswith("immich:") else {})
+                by_media.update({tp: r.debug_key} if tp in media else {})
+    untagged, kept, files_changed = 0, 0, 0
+    for n in names:
+        mine = [a for a in assets[n] if a in by_asset]
+        kept += len(assets[n]) - len(mine)
+        if mine:
+            await log_info("tools", f'Kaputtes Tag „{n}“ wird von {len(mine)} Bildern entfernt',
+                           f"Tag-ID {ids[n]}; {len(assets[n]) - len(mine)} Bilder ohne Job behalten es")
+            for start in range(0, len(mine), REMOVE_CHUNK):
+                chunk = mine[start:start + REMOVE_CHUNK]
+                await _retry_once(f'„{n}“ entfernen', lambda c=chunk: untag_assets(ids[n], c))
+            untagged += len(mine)
+            if len(mine) == len(assets[n]):
+                await _retry_once(f'„{n}“ löschen', lambda: delete_tag(ids[n]))
+            await log_info("tools", f'Kaputtes Tag „{n}“ von {len(mine)} Bildern entfernt', "")
+        sidecars = [f for f in files[n] if f[:-len(".xmp")] in by_media]
+        kept += len(files[n]) - len(sidecars)
+        by_fields: dict[tuple, list[str]] = {}
+        for f in sidecars:
+            by_fields.setdefault(tuple(sorted((sidecar_fields.get(n) or {}).get(f, []) or ["Subject"])), []).append(f)
+        for fields, subset in by_fields.items():
+            ok, _bad = await _rewrite_sidecars(subset, [f"-{fld}-={n}" for fld in fields], "tools:tag_merge")
+            files_changed += ok
+    await log_info("tools", f"Schreibweisen: neu taggen eingereiht (Neu ausführen #{made['rerun_id']})",
+                   f"{made['total']} Jobs, {made['refused']} abgelehnt; kaputte Tags von {untagged} Bildern und "
+                   f"{files_changed} Sidecars entfernt, {kept} behalten sie (ohne Job)")
+    return {"names": len(names), "jobs": made["total"], "refused": made["refused"], "rerun_id": made["rerun_id"],
+            "untagged": untagged, "files_changed": files_changed, "kept": kept}
 
 
 # --- Leere Tags löschen (tag_groups_migration.empty_tags) ---------------------
@@ -1289,13 +1500,30 @@ async def apply_merge(request: Request):
         return JSONResponse({"ok": False, "detail": await _t("err_changed")}, status_code=409)
     try:
         chosen = {int(i) for i in (form.get("selected") or "").split(",") if i.strip()}
+        swapped = {int(i) for i in (form.get("swapped") or "").split(",") if i.strip()}
     except ValueError:
         return JSONResponse({"ok": False, "detail": await _t("err_changed")}, status_code=400)
-    if not chosen <= {it["id"] for it in _last_merge["items"]}:
+    kinds = {it["id"]: it["kind"] for it in _last_merge["items"]}
+    new = {it["id"] for it in _last_merge["items"] if it.get("new")}
+    if not chosen <= set(kinds) or not swapped <= chosen or any(kinds[i] not in SWAPPABLE or i in new
+                                                                 for i in swapped):
         return JSONResponse({"ok": False, "detail": await _t("err_changed")}, status_code=409)
+    # The damaged names without a repair: a spelling typed in, or tag anew.
+    import content_language
+    lang = content_language.get(_last_merge.get("language"))
+    orphans = set(_last_merge.get("orphans") or [])
+    try:
+        fixes = {str(k): lang.fix(str(v).strip()) for k, v in json.loads(form.get("fixes") or "{}").items()
+                 if str(v).strip()}
+        retag = [str(n) for n in json.loads(form.get("retag") or "[]")]
+    except (ValueError, AttributeError):
+        return JSONResponse({"ok": False, "detail": await _t("err_changed")}, status_code=400)
+    if (not set(fixes) <= orphans or not set(retag) <= orphans or set(fixes) & set(retag)
+            or any(len(v) > 80 or "/" in v or ts.is_damaged(v) for v in fixes.values())):
+        return JSONResponse({"ok": False, "detail": await _t("err_changed")}, status_code=400)
     _cancel["requested"] = False
     _cleanup_reset("tag_merge")
-    asyncio.create_task(_merge_apply(chosen))
+    asyncio.create_task(_merge_apply(chosen, fixes, retag, swapped))
     return JSONResponse({"ok": True})
 
 

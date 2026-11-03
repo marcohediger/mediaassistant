@@ -1,5 +1,84 @@
 # Changelog
 
+## v3.8.0 — 2026-11-03
+
+### Fix: „Verwaiste aufräumen“ markierte Jobs, deren Inhalt in Immich noch da ist
+
+Auf Live hat der Lauf vom 2026-11-02 4600 Jobs als verwaist markiert. Die
+Auswertung über die Diagnose-API (neu in 3.7.0):
+
+- **Rund 3500 sind Spender aus der Duplikat-Auflösung vom April.** Ihre eigene Datei wurde damals entfernt, der Inhalt liegt im Original in Immich. Sie bleiben verwaist, verloren ist nichts.
+- **Rund 800 (Stichprobe 12 von 40 `no path`) waren normale Uploads nach Immich mit leerer Spalte `target_path`.** Die Prüfung schaute nur auf diese Spalte und übersah die Asset-ID des Jobs.
+- **20 der 62 `immich asset gone` hatte MediaAssistant wegen NSFW selbst in den gesperrten Ordner gelegt.** Ein API-Key sieht solche Assets nicht, Immich antwortet wie bei einem gelöschten. `fileops` kannte den Fall schon (Sperrmarke von IA-08), „Verwaiste aufräumen“ fragte bei Jobs ohne Registereintrag aber nur `asset_exists`. Das wertete jede Antwort ausser 200 als „weg“, auch ein 401.
+
+Jetzt:
+- Bei leerem `target_path` wird die Asset-ID geprüft.
+- Den Zustand eines Assets liefert `get_asset_state`. Eine Antwort ohne Zustand (401, 5xx, Zeitüberschreitung) entscheidet nichts.
+- Ein Asset, das IA-08 gesperrt hat, gilt als vorhanden (`fileops.locked_by_ma`).
+- **Schon verwaiste Jobs werden erneut geprüft.** Ist ihr Inhalt da, bekommen sie ihren früheren Status zurück. Der steht in der Meldung „Auto-orphaned from …“. Ein leeres Ziel wird nachgetragen, die Meldung gelöscht.
+- Ergebnis, Systemlog und Wartungsseite nennen, wie viele zurückkamen.
+
+Auf Live holt ein Klick auf „Verwaiste aufräumen“ (mit Immich) die falsch markierten zurück. Assets, die du selbst gesperrt hast, kann ein API-Key nicht von gelöschten unterscheiden. Ihre Jobs bleiben verwaist, das ist nur eine Markierung.
+
+Getestet: `test_maintenance_results.py` Teil W (rot vor dem Fix: 2/6, danach 6/6) und E2E **US-34** mit einem echten Upload, dessen Zustand wie auf Live nachgestellt wird.
+
+### Neu: flache Ortsnamen in den Ortsbaum (Schreibweisen zusammenführen)
+
+Auf Live tragen 2632 Bilder ein flaches „Schweiz“ neben „03 Orte/Schweiz/…“.
+Die Quellen: alte Schlüsselwörter in den Dateien aus der Zeit vor den
+Tag-Gruppen, darunter die kaputt geschriebenen „?sterreich“ und „Z?rich“,
+die KI, die den Ort als Inhalts-Tag setzt (etwa jedes 30. Bild), und andere
+Programme.
+
+- **Vorschlag:** Ein flaches Tag, dessen Name einem Ort im Ortsbaum entspricht, egal welcher Sprache, wird vorgeschlagen, etwa „Schweiz“ → „03 Orte/Schweiz“. Trägt nur ein Ast den Namen, steht die Zeile auf →. Tragen mehrere ihn, steht sie auf ✕, und die anderen Äste werden genannt.
+- **Bilder:** Hat ein Bild den Ort im Baum schon, auch genauer, behält es seinen Ort und verliert nur das flache Tag. Die anderen bekommen den Ast. Tiefere Orte werden zuerst bearbeitet, damit ein Bild nicht zusätzlich den Elternknoten bekommt. Immichs Index hinkt nach, darum merkt sich der Lauf, was er selbst zugewiesen hat.
+- **Ketten funktionieren:** „SCHWEIZ“ → „Schweiz“ → „03 Orte/Schweiz“.
+- **Sidecars:** Den Pfad bekommen nur Dateien mit Ortsfeld (`TagsList`) und ohne Ort darin. Eine Datei mit genauerem Ort verliert nur das flache Tag. Eine Datei ohne Ortsfeld bleibt unverändert und behält ihren Ort.
+- **Keine neuen flachen Orte:** IA-07 lässt bei Tag-Gruppen Inhalts-Tags der KI weg, die einem Ort des eigenen Fotos entsprechen (Land, Stadt, Ortsteil). Die Fingerabdrücke ändern sich dadurch nicht, bestehende Ergebnisse gelten nicht als veraltet.
+
+Gemessen an Immich 3.3.5: Die Suche nach einem Tag findet auch die Bilder seiner Unterebenen. Zwei Tags in einer Suche liefern nichts, die Schnittmenge rechnet MediaAssistant selbst.
+
+Getestet: `test_tag_merge.py` Teil P (12 Prüfungen, Immich und Sidecars), `test_content_language.py` G-07 und E2E **US-33** mit einem echten Pipeline-Foto.
+
+### Neu: kaputte Wörter ohne Lösung — von Hand berichtigen oder Bilder neu taggen
+
+Kaputte Schreibweisen, die weder eine heile Schreibweise noch die Fotos
+noch die KI erklären, standen bisher nur als Liste da. Jetzt hat jedes Wort
+eine eigene Zeile:
+
+- **→ mit Eingabefeld:** Die eingetippte Schreibweise wird wie eine Reparatur übernommen. Tippen wählt → von selbst.
+- **↻ Bilder neu taggen:** Die Jobs der Bilder laufen über „Neu ausführen“ noch einmal ab IA-05 (KI, dann IA-07 und IA-08, Immich-Modus `api`, über die Warteschlange). Das kaputte Tag wird nur bei Bildern entfernt, deren Job der Auftrag angenommen hat, in Immich und in den Sidecars. Neu taggen allein würde es nicht entfernen, es stammt aus alten Dateien und nicht von MediaAssistant. Bilder ohne Job behalten es. Läuft schon ein Sammelauftrag, wird nichts angefasst, und das Ergebnis sagt das.
+- **✕:** Nichts geschieht, wie bisher.
+
+Getestet: E2E **US-35**. Ein echtes Foto bekommt zwei kaputte Tags, ein Bild ohne Job eines davon. Das eine wird von Hand berichtigt, beim anderen wird neu getaggt. Geprüft wird: Auftrag angelegt, Tag nur beim Bild mit Job entfernt, IA-05 lief neu.
+
+### UI: Schreibweisen zusammenführen — eine Liste, Richtung statt Häkchen
+
+- **Eine Liste statt fünf Abschnitten,** gruppiert nach Art. Jede Gruppe hat eine Kopfzeile, jede Zeile vorne ein farbiges Symbol: Schreibweise grau, regionale Anpassung (Schweizer Schreibung: ss statt ß) pink, Umlaut violett, kaputtes Zeichen gelb, repariert blau, andere Sprache hellblau, Ort grün, ohne Lösung rot. Eine Legende oben zählt die Arten und springt zur Gruppe.
+- **Richtung statt Häkchen:**
+  - **→** führt links in rechts zusammen.
+  - **←** kehrt um. Das gibt es bei zwei Schreibweisen eines Wortes und bei Übersetzungen in ein bestehendes Tag. Bei einer Übersetzung in ein neues Tag ist ← ausgegraut, mit Erklärung.
+  - **✕** führt nicht zusammen. Es ist rot, wenn es gewählt ist, und wird gemerkt wie bisher.
+- **Durchgestrichen ist, was wegfällt,** grün, was bleibt. Bisher war das nicht angehakte Tag durchgestrichen, also genau umgekehrt.
+- Die Texte sprechen von →, ← und ✕ statt von Häkchen.
+
+### Fix: Umlaut-Fälle — die Schreibweise mit mehr Bildern ist das Ziel
+
+Bisher war die Schreibweise mit Umlaut immer das Ziel, weil die andere als
+beschädigt galt. Bei Namen und bei Wörtern mit zwei gültigen Formen stimmt
+das nicht. Auf Live: ein Name mit 21 Bildern sollte in seine Schreibweise in
+Grossbuchstaben mit Umlaut und 1 Bild aufgehen, „Krane“ (21) in „Kräne“ (1).
+Jetzt ist das Ziel die Schreibweise mit mehr Bildern und Sidecars, bei
+Gleichstand die mit Umlaut. Bei den vier Umlaut-Fällen von Live, die die KI
+als dasselbe Wort erkennt, ergibt das in allen vier die richtige Richtung.
+Getestet: `test_tag_merge.py` S-11, rot mit der alten Regel, grün mit der neuen.
+
+### Bekannt: weiterhin #58
+
+Mit dem lokalen Modell von Live (qwen3.5-4b) übersah die Übersetzungssuche
+wie in 3.7.0 „Beach → Strand“: `test_tag_merge` 60/63. Mit gemma-4 bei
+Infomaniak 63/63, US-30 lokal 10/10.
+
 ## v3.7.0 — 2026-11-02
 
 ### Neu: Modelle prüfen — nur bildfähige wählbar, Nachdenken automatisch abgeschaltet

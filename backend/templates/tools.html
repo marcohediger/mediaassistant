@@ -766,10 +766,24 @@ function mergeRun(mode) {
     if (document.getElementById('merge_translate').checked) { body.append('translate', '1'); }
     if (document.getElementById('merge_again').checked) { body.append('again', '1'); }
     if (mode === 'apply') {
-        // The ticked proposals; the unticked ones the server remembers.
-        var ids = [];
-        document.querySelectorAll('#merge_result .merge-pick:checked').forEach(function (c) { ids.push(c.value); });
+        // The proposals to carry out (→ or ←, ← turned round); those left
+        // with ✕ the server remembers.
+        var ids = [], swapped = [];
+        document.querySelectorAll('#merge_result .merge-dir:checked').forEach(function (c) {
+            if (c.value !== 'no') { ids.push(c.dataset.id); }
+            if (c.value === 'back') { swapped.push(c.dataset.id); }
+        });
         body.append('selected', ids.join(','));
+        body.append('swapped', swapped.join(','));
+        // Damaged names without a repair: a spelling typed in, or their photos tagged anew.
+        var fixes = {}, retag = [];
+        document.querySelectorAll('#merge_result .merge-orphan-dir:checked').forEach(function (c) {
+            var field = c.closest('tr').querySelector('.merge-fix');
+            if (c.value === 'fwd' && field.value.trim()) { fixes[c.dataset.name] = field.value.trim(); }
+            if (c.value === 'retag') { retag.push(c.dataset.name); }
+        });
+        body.append('fixes', JSON.stringify(fixes));
+        body.append('retag', JSON.stringify(retag));
     }
     setState('merge_state', L.running);
     if (mode === 'scan') { MERGE_READY = false; document.getElementById('merge_result').innerHTML = ''; }
@@ -826,7 +840,6 @@ function mergeWhy(it) {
     if (it.kept_apart) { bits.push('<span class="ui-badge is-neutral">' + esc(L.merge_kept) + '</span>'); }
     var why = '';
     if (it.kind === 'umlaut') {
-        bits.push('<span class="ui-badge is-warning">' + esc(L.merge_kind_umlaut) + '</span>');
         why = it.verdict === 'same' ? L.merge_ai_same : it.verdict === 'different' ? L.merge_ai_different
             : (MERGE.ai_enabled && (MERGE.again || !it.kept_apart) ? L.merge_ai_unknown : L.merge_ai_off);
     } else if (it.kind === 'repair') {
@@ -837,39 +850,151 @@ function mergeWhy(it) {
         why = L.merge_kind_damaged;
     } else if (it.kind === 'swiss') {
         why = L.merge_kind_swiss;
+    } else if (it.kind === 'place') {
+        why = L.merge_kind_place.replace('{with}', it.with_place || 0).replace('{without}', it.without_place || 0);
+        if (it.others && it.others.length) { why += ' — ' + L.merge_place_others.replace('{paths}', it.others.join(', ')); }
     }
     if (why) { bits.push('<span class="tools-why">' + esc(why) + (it.reason ? ' — ' + esc(it.reason) : '') + '</span>'); }
     return bits.join('');
 }
-function mergeTable(title, list) {
-    if (!list.length) { return ''; }
-    // One row per target; spellings of one family stay together.
-    var rows = [], at = {};
-    list.forEach(function (it) {
-        var key = (it.family != null ? 'f' + it.family : 'i' + it.id) + '|' + it.into;
-        if (!(key in at)) { at[key] = rows.length; rows.push({into: it.into, items: []}); }
-        rows[at[key]].items.push(it);
+// Proposals whose direction the user may turn around: two spellings of one
+// word, and a translation into a tag that exists. A damaged name, a repair,
+// a Swiss spelling or a place goes one way only.
+var MERGE_SWAPPABLE = ['spelling', 'umlaut', 'translate'];
+function mergeSwappable(it) { return MERGE_SWAPPABLE.indexOf(it.kind) >= 0 && !it.new; }
+function mergeDir(it) {
+    var name = 'merge_dir_' + it.id, value = it.selected ? 'fwd' : 'no';
+    var opt = function (v, sign, label, off) {
+        return '<label class="ui-seg" title="' + esc(label) + '"><input type="radio" class="merge-dir" name="' + name +
+               '" value="' + v + '" data-id="' + it.id + '"' + (v === value ? ' checked' : '') + (off ? ' disabled' : '') +
+               ' onchange="mergeDirChange(this)" aria-label="' + esc(label) + '"><span aria-hidden="true">' + sign +
+               '</span></label>';
+    };
+    var fill = function (text) { return String(text || '').replace('{a}', it.name).replace('{b}', it.into); };
+    // A translation into a tag that does not exist yet: the other way would
+    // merge nothing — shown, but off, and the title says why.
+    var back = mergeSwappable(it) ? opt('back', '←', fill(L.merge_dir_back))
+             : MERGE_SWAPPABLE.indexOf(it.kind) >= 0 ? opt('back', '←', fill(L.merge_dir_back_new), true) : '';
+    return '<div class="ui-segmented tools-dir" role="radiogroup" aria-label="' + esc(fill(L.merge_dir_label)) + '">' +
+           opt('fwd', '→', fill(L.merge_dir_fwd)) + opt('no', '✕', L.merge_dir_no) + back + '</div>';
+}
+function mergeRowState(row, value) {
+    // The tag that goes is struck through, the one that stays is green.
+    row.classList.toggle('is-fwd', value === 'fwd');
+    row.classList.toggle('is-back', value === 'back');
+    row.classList.toggle('is-no', value === 'no');
+    row.querySelector('.merge-a').classList.toggle('is-success', value === 'back');
+    row.querySelector('.merge-b').classList.toggle('is-success', value === 'fwd');
+}
+function mergeDirChange(input) {
+    mergeRowState(input.closest('tr'), input.value);
+    mergeCount();
+}
+// The kinds of proposal, in the order of the list, each with its sign.
+var MERGE_KINDS = ['spelling', 'umlaut', 'swiss', 'damaged', 'repair', 'translate', 'place', 'orphan'];
+// Sign and tone of each kind: grey for plain spellings, warmer for what
+// needs a look (a damaged character, no solution at all).
+var MERGE_SIGN = {spelling: {icon: 'merge', tone: 'neutral'}, umlaut: {glyph: 'Ä', tone: 'violet'},
+                  swiss: {icon: 'languages', tone: 'regional'}, damaged: {icon: 'alert-triangle', tone: 'warning'},
+                  repair: {icon: 'wrench', tone: 'accent'}, translate: {icon: 'globe', tone: 'info'},
+                  place: {icon: 'map-pin', tone: 'success'}, orphan: {icon: 'help', tone: 'error'}};
+function mergeKind(kind) {
+    var sign = MERGE_SIGN[kind], label = L['merge_type_' + kind] || kind;
+    var inner = sign.icon ? '<svg class="ui-i" width="14" height="14" aria-hidden="true" focusable="false"><use href="#ui-i-' +
+                            sign.icon + '"/></svg>' : '<span aria-hidden="true">' + esc(sign.glyph) + '</span>';
+    return '<span class="ui-icon-tile ui-icon-tile-sm tools-kind is-' + sign.tone + '" title="' + esc(label) +
+           '" role="img" aria-label="' + esc(label) + '">' + inner + '</span>';
+}
+function mergeLegendFit() {
+    // One line if it fits, else two even rows (4 + 4, not 7 + 1), else two
+    // columns, else one.
+    var el = document.querySelector('#merge_result .tools-legend');
+    if (!el) { return; }
+    var n = el.children.length;
+    var tries = [n, Math.ceil(n / 2), 2, 1];
+    for (var i = 0; i < tries.length; i++) {
+        el.style.gridTemplateColumns = 'repeat(' + tries[i] + ', max-content)';
+        if (el.scrollWidth <= el.clientWidth + 1) { return; }
+    }
+}
+window.addEventListener('resize', function () {
+    clearTimeout(window._mergeLegendTimer);
+    window._mergeLegendTimer = setTimeout(mergeLegendFit, 120);
+});
+function mergeList(res) {
+    // One list for every kind of proposal, a sign in front; the damaged
+    // names without a repair last: → into a spelling typed in, ↻ their
+    // pictures tagged anew, ✕ nothing.
+    var rows = MERGE_KINDS.map(function (k) {
+        return k === 'orphan' ? res.orphans.map(function (n) { return {kind: 'orphan', name: n}; })
+                              : res.items.filter(function (it) { return it.kind === k; });
     });
-    var h = '<div class="tools-sample"><p class="tools-sample-title">' + esc(title) + '</p></div>' +
+    // The legend jumps to the group of its kind.
+    var legend = MERGE_KINDS.map(function (k, i) {
+        return rows[i].length ? '<a class="tools-legend-item" href="#merge_group_' + k + '">' + mergeKind(k) +
+                                esc(L['merge_type_' + k] || k) + ' <span class="tools-tag-n">' + rows[i].length +
+                                '</span></a>' : '';
+    }).join('');
+    var h = '<p class="tools-legend">' + legend + '</p>' +
             '<div class="ui-table-card tools-table"><table class="ui-table ui-table-compact tools-merge-table">' +
-            '<thead><tr><th scope="col">' + esc(L.merge_winner) + '</th><th scope="col">' + esc(L.merge_sources) +
+            '<thead><tr><th scope="col"><span class="ui-sr-only">' + esc(L.merge_col_kind) + '</span></th>' +
+            '<th scope="col">' + esc(L.merge_col_tag) + '</th><th scope="col">' + esc(L.merge_col_dir) +
+            '</th><th scope="col">' + esc(L.merge_col_tag) + '</th><th scope="col">' + esc(L.merge_col_why) +
             '</th></tr></thead><tbody>';
-    rows.forEach(function (r) {
-        h += '<tr><td>' + mergeChip(r.into, 'is-success') + '</td><td><div class="tools-picks">';
-        r.items.forEach(function (it) {
-            h += '<div class="tools-pick-row"><label class="tools-pick"><input type="checkbox" class="merge-pick" value="' +
-                 it.id + '"' + (it.selected ? ' checked' : '') + ' onchange="mergeCount()" aria-label="' +
-                 esc(L.merge_pick.replace('{name}', it.name).replace('{into}', it.into)) + '">' + mergeChip(it.name) +
-                 '</label>' + mergeWhy(it) + '</div>';
+    rows.forEach(function (list, i) {
+        if (!list.length) { return; }
+        var k = MERGE_KINDS[i];
+        h += '<tr class="tools-group" id="merge_group_' + k + '"><th colspan="5" scope="colgroup"><span class="tools-group-head">' +
+             mergeKind(k) + esc(L['merge_type_' + k] || k) + ' <span class="tools-tag-n">' + list.length + '</span></span></th></tr>';
+        list.forEach(function (it) {
+            if (it.kind === 'orphan') { h += mergeOrphanRow(it.name); return; }
+            var v = it.selected ? 'fwd' : 'no';
+            h += '<tr class="is-' + v + '"><td>' + mergeKind(it.kind) + '</td><td>' + mergeChip(it.name, 'merge-a') +
+                 '</td><td>' + mergeDir(it) + '</td><td>' + mergeChip(it.into, 'merge-b' + (v === 'fwd' ? ' is-success' : '')) +
+                 '</td><td><div class="tools-pick-row">' + mergeWhy(it) + '</div></td></tr>';
         });
-        h += '</div></td></tr>';
     });
     return h + '</tbody></table></div>';
+}
+function mergeOrphanRow(n) {
+    var name = 'merge_orphan_' + n;
+    var opt = function (v, sign, label) {
+        return '<label class="ui-seg" title="' + esc(label) + '"><input type="radio" class="merge-orphan-dir" name="' +
+               esc(name) + '" value="' + v + '" data-name="' + esc(n) + '"' + (v === 'no' ? ' checked' : '') +
+               ' onchange="mergeOrphanChange(this)" aria-label="' + esc(label) + '"><span aria-hidden="true">' + sign +
+               '</span></label>';
+    };
+    return '<tr class="is-no"><td>' + mergeKind('orphan') + '</td><td>' + mergeChip(n, 'merge-a') + '</td><td>' +
+           '<div class="ui-segmented tools-dir" role="radiogroup" aria-label="' + esc(L.merge_orphan_label.replace('{name}', n)) + '">' +
+           opt('fwd', '→', L.merge_orphan_fix_label.replace('{name}', n)) + opt('no', '✕', L.merge_dir_no) +
+           opt('retag', '↻', L.merge_orphan_retag_label.replace('{name}', n)) + '</div></td>' +
+           '<td><input type="text" class="ui-input ui-input-sm merge-fix" data-name="' + esc(n) +
+           '" maxlength="80" autocomplete="off" spellcheck="false" placeholder="' + esc(L.merge_orphan_fix) +
+           '" aria-label="' + esc(L.merge_orphan_fix_label.replace('{name}', n)) + '" oninput="mergeOrphanType(this)"></td>' +
+           '<td><span class="tools-why">' + esc(L.merge_orphan_why) + '</span></td></tr>';
+}
+function mergeOrphanChange(input) {
+    var row = input.closest('tr');
+    row.classList.toggle('is-fwd', input.value === 'fwd');
+    row.classList.toggle('is-back', false);
+    row.classList.toggle('is-retag', input.value === 'retag');
+    row.classList.toggle('is-no', input.value === 'no');
+    if (input.value === 'fwd') { row.querySelector('.merge-fix').focus(); }
+}
+function mergeOrphanType(field) {
+    // Typing a spelling chooses → (and clearing it ✕ again).
+    var row = field.closest('tr');
+    var want = field.value.trim() ? 'fwd' : 'no';
+    var radio = row.querySelector('.merge-orphan-dir[value="' + want + '"]');
+    if (!radio.checked && !row.querySelector('.merge-orphan-dir[value="retag"]').checked) {
+        radio.checked = true;
+        mergeOrphanChange(radio);
+    }
 }
 function mergeCount() {
     var el = document.getElementById('merge_count');
     if (!el) { return; }
-    var n = document.querySelectorAll('#merge_result .merge-pick:checked').length;
+    var n = document.querySelectorAll('#merge_result .merge-dir:checked:not([value="no"])').length;
     el.innerHTML = L.merge_found.replace('{n}', '<strong>' + MERGE.items.length + '</strong>')
                                 .replace('{selected}', '<strong>' + n + '</strong>');
 }
@@ -890,21 +1015,18 @@ function renderMerge(res) {
             h += note(esc(L.merge_ai_failed.replace('{names}', failed.names || 0).replace('{checks}', failed.checks || 0)
                           .replace('{reason}', failed.reason || '')), 'warning');
         }
-        if (!res.items.length) {
+        if (!res.items.length && !res.orphans.length) {
             h += hint(esc(L.merge_none));
         } else {
             h += '<p class="tools-line" id="merge_count"></p>';
-            var of = function (kinds) { return res.items.filter(function (it) { return kinds.indexOf(it.kind) >= 0; }); };
-            h += mergeTable(L.merge_section_spelling, of(['spelling', 'swiss', 'damaged', 'umlaut']));
-            h += mergeTable(L.merge_section_repair, of(['repair']));
-            h += mergeTable(L.merge_section_translate.replace('{language}', res.language_label || ''), of(['translate']));
         }
+        if (res.items.length || res.orphans.length) { h += mergeList(res); }
         if (res.not_damaged.length) { h += list(L.merge_not_damaged, res.not_damaged); }
-        if (res.orphans.length) { h += list(L.merge_orphans, res.orphans); }
-        if (res.items.length) { h += note(esc(L.merge_preview_note), 'info'); }
+        if (res.items.length || res.orphans.length) { h += note(esc(L.merge_preview_note), 'info'); }
         box.innerHTML = h;
+        mergeLegendFit();
         mergeCount();
-        MERGE_READY = res.items.length > 0 && !res.cancelled;
+        MERGE_READY = (res.items.length > 0 || res.orphans.length > 0) && !res.cancelled;
         document.getElementById('btn_merge_apply').disabled = !MERGE_READY;
         return;
     }
@@ -921,6 +1043,16 @@ function renderMerge(res) {
         if (res.failed_names && res.failed_names.length) { h += list(L.merge_failed_names, res.failed_names); }
     }
     if (res.repaired && res.repaired.length) { h += hint(esc(L.merge_repaired.replace('{n}', res.repaired.length))); }
+    var rt = res.retag || {};
+    if (rt.error) {
+        h += note(esc(rt.error === 'rerun_running' || rt.error === 'already_pending' ? L.merge_retag_busy
+                      : L.merge_retag_error.replace('{error}', rt.error)), 'warning');
+    } else if (rt.names && !rt.jobs) {
+        h += hint(esc(L.merge_retag_none));
+    } else if (rt.jobs) {
+        h += hint(esc(L.merge_retag_done.replace('{jobs}', rt.jobs).replace('{rerun}', rt.rerun_id)
+                      .replace('{kept}', rt.kept || 0)));
+    }
     if (res.kept_apart) { h += hint(esc(L.merge_kept_done.replace('{n}', res.kept_apart))); }
     if (res.error) { h += note(esc(res.error), 'error'); }
     MERGE_READY = false;

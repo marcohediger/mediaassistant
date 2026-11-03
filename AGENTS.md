@@ -300,10 +300,10 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_executor.py` | Ausführung nach Abhängigkeiten: Register als einzige Quelle, IA-03 als Seiten-Task, Betriebsmittel-Grenzen, Stopp-Regeln | `docker exec mediaassistant-dev python /app/test_executor.py` |
 | `backend/test_immich_dedup.py` | Duplikat-Auflösung mit echtem Immich: geteiltes Asset bei Keep, Übertragung, Review-Fälle, Altbestand ohne Hash (D12), Gruppen-Art nur aus den Duplikat-Beziehungen + „Automatisch bereinigen" (D13); Teile wählbar | `docker exec mediaassistant-dev python /app/test_immich_dedup.py [D6 … D13]` |
 | `backend/test_ia04_convert.py` | IA-04 ohne ImageMagick: GIF (erstes Bild) und HEIC-Ausweichweg über Pillow, mit fehlschlagendem `heif-convert` im `PATH` | `docker exec mediaassistant-dev python /app/test_ia04_convert.py` |
-| `backend/test_tag_merge.py` | Werkzeuge „Schreibweisen zusammenführen" (`tag_spelling.py`) und „Leere Tags löschen" gegen echtes Immich und die echte KI: gleiche Buchstaben, Umlaut-Fälle (Bar/Bär getrennt, Gluhwein/Glühwein zusammen), Reparatur aus Beschreibung und durch die KI, Übersetzung in die Sprache der Inhalte, Häkchen und gemerkte Ausnahmen, Nachkontrolle in Immich, leere Tags samt Altersgrenze und Nachzählen, Sprache der Inhalte (L: ss-Regeln, Deutsch → Englisch); Teile wählbar | `docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E L]` |
+| `backend/test_tag_merge.py` | Werkzeuge „Schreibweisen zusammenführen" (`tag_spelling.py`) und „Leere Tags löschen" gegen echtes Immich und die echte KI: gleiche Buchstaben, Umlaut-Fälle (Bar/Bär getrennt, Gluhwein/Glühwein zusammen), Reparatur aus Beschreibung und durch die KI, Übersetzung in die Sprache der Inhalte, Richtung (→ ✕ ←) und gemerkte Ausnahmen, Umlaut-Ziel nach Anzahl Bilder (Krane/Kräne), Nachkontrolle in Immich, leere Tags samt Altersgrenze und Nachzählen, Sprache der Inhalte (L: ss-Regeln, Deutsch → Englisch), flache Ortsnamen in den Ortsbaum (P: Immich und Sidecars, genauerer Ort bleibt); Teile wählbar | `docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E L P]` |
 | `backend/test_content_language.py` | Sprache der Inhalte (`content_language.py`): Sprachtabelle, Prompt-Platzhalter, Fingerabdrücke (Standardsprache ändert nichts), Namen der Gruppen und Ordner, Geocoding gegen echtes Nominatim; Teile wählbar | `docker exec mediaassistant-dev python /app/test_content_language.py [T P F G O]` |
 | `backend/test_ai_key.py` | KI-Backends über die OpenAI-Schnittstelle: Ausfallsicherung (Teil F: Wechsel, beiseitegestellt, Rückkehr, kein Wechsel bei 400, beide aus), Modelle prüfen (Teil C: Testbild mit Zahl, Nachdenken abschalten, nur auf Knopfdruck, beim Speichern) und API-Key (Teil K): Modellliste (eingetippter, falscher, gespeicherter Key), Liste der Backends, Dienst-Prüfung der Auto-Pause schicken den Key; Backend im Container, das nur auf seinen Key antwortet; beide Backends werden für den Lauf umgestellt und exakt zurückgesetzt, die Pipeline pausiert | `docker exec mediaassistant-dev python /app/test_ai_key.py [K C F]` |
-| `backend/test_maintenance_results.py` | Ergebnisse der Werkzeuge und der Wartung (`maintenance_results`, #57) über die Diagnose-API: begrenzte Listen, Vorschau „Schreibweisen zusammenführen“ über `?task=`, „Verwaiste aufräumen“ mit Grund und `?status=orphan&since=`, nach einem Neustart der App noch da, Zugriff nur mit Token; Teile wählbar | `docker exec mediaassistant-dev python /app/test_maintenance_results.py [B T O R A]` |
+| `backend/test_maintenance_results.py` | Ergebnisse der Werkzeuge und der Wartung (`maintenance_results`, #57) über die Diagnose-API: begrenzte Listen, Vorschau „Schreibweisen zusammenführen“ über `?task=`, „Verwaiste aufräumen“ mit Grund und `?status=orphan&since=`, nach einem Neustart der App noch da, Zugriff nur mit Token; zu Unrecht Verwaiste (W: leeres Ziel mit Asset, von MA gesperrt, Zurückholen); Teile wählbar | `docker exec mediaassistant-dev python /app/test_maintenance_results.py [B T O R A W]` |
 | `backend/test_ffmpeg_input.py` | ffmpeg/ffprobe nur mit den Demuxern der Video-Container (`-format_whitelist`, `inputs/common.py` `FFMPEG_VIDEO_INPUT`): echte Videos aller Container durch IA-01, IA-04 und die Vorschau (F1), DASH-Manifest als `.mp4` erreicht libxml2 nicht (F2, CVE-2026-6653) | `docker exec mediaassistant-dev python /app/test_ffmpeg_input.py [F1 F2]` |
 | `backend/test_storage.py` | Fehlendes Laufwerk (`storage.py`): Regeln der Markierung, `fileops` verweigert vor dem Intent, Prüfen markiert nichts als fehlend, Abgleich lässt offen, Watchdog, Parken aus „Review", Retry, Scanner, Pause von Hand, Knopf „neu markieren", Wartung „Verwaiste aufräumen" und „Erledigte Duplikat-Fehler aufräumen" ohne Laufwerk; Teile wählbar | `docker exec mediaassistant-dev python /app/test_storage.py [S1 … S12]` |
 
@@ -395,6 +395,9 @@ echte DB) und verifiziert das Endergebnis:
 | **US-26 / US-27: Laufwerk fehlt** | Basis-Pfad bzw. Eingang nicht eingebunden (leerer Einhängepunkt) → Pipeline pausiert mit Ordner, Job wartet, nichts auf die falsche Platte → Laufwerk zurück → Health-Watcher setzt fort → Job fertig, Ordner markiert |
 | **US-28: Auswahl löschen** | Job-Liste, Auswahl bzw. „Alle Treffer“ über die API der App → fertiger Job gelöscht, Datei im Papierkorb des Sets; Job in Verarbeitung, schon gelöschter und Job auf fehlendem Laufwerk unberührt (Pipeline pausiert); Job-Seite lehnt Löschen auf fehlendem Laufwerk ab; geänderte Trefferzahl → 409 |
 | **US-30: Sprache der Inhalte** | Foto aus Gießen mit Deutsch (Schweiz): Ort „Giessen“, nirgends ß; umgestellt auf Englisch, Foto aus Bern: englische Gruppen, Orte, Satz und KI-Tags; der deutsche Job bleibt, gilt als veraltet und steht bei „Tags in Gruppen umstellen“ (echte KI, echtes Nominatim) |
+| **US-33: Ortsname in den Ortsbaum** | Pipeline-Foto mit flachem Ortsnamen → „Schreibweisen zusammenführen“ → das Bild trägt den Ast, das flache Tag ist weg |
+| **US-34: Verwaiste zurückholen** | Echter Upload, Zustand von Live nachgestellt (Ziel leer, automatisch verwaist) → „Verwaiste aufräumen“ → Job wieder `done`, Ziel nachgetragen |
+| **US-35: Kaputte Tags ohne Lösung** | Eines von Hand berichtigt (→), beim anderen die Bilder neu getaggt (↻): Auftrag „Neu ausführen“, Tag nur beim Bild mit Job entfernt, IA-05 neu |
 | **US-32: Modell, das denkt** | Backend mit denkendem Modell gespeichert → Prüfung schaltet das Nachdenken ab (`reasoning_effort: none`) → Foto läuft durch IA-05 |
 | **US-31: Ein KI-Backend fällt aus** | Backend 1 antwortet nicht, Backend 2 ist das eingestellte → Foto läuft durch, IA-05 von Backend 2, Pipeline hält nie an, Log nennt Backend 1 |
 | **US-29: Fehler quittieren** | Auswahl bzw. „Alle Treffer“ quittiert → Dashboard zählt weniger, Filter „Fehler“ ohne, „Quittiert“ mit ihnen, Job sonst unverändert; aufheben (Leiste, Job-Seite); Retry scheitert erneut → wieder offen |
@@ -638,7 +641,7 @@ den Worker gewartet wird** — erst committen/schliessen.
 
 ## Immich-Stolperfallen
 
-Alle drei an einer laufenden Instanz gemessen, nicht aus der Doku
+Alle an einer laufenden Instanz gemessen, nicht aus der Doku
 abgeleitet. Immichs API-Beschreibungen sind hier irreführend.
 
 ### Der Index hinkt ~2 s nach
@@ -665,6 +668,23 @@ nächste Einlesevorgang das Tag **neu an — mit neuer ID**:
 Jede Tag-Operation in Immich ist deshalb nur dauerhaft, wenn die Sidecar
 mitgezogen wird. Deswegen haben Aufräumen und Zusammenführen beide
 Schalter, und deswegen ist die Sidecar-Hälfte voreingestellt an.
+
+### `search/metadata` ignoriert unbekannte Filter
+
+Ein Filter, den Immich nicht kennt (gemessen: `deviceId` in Immich 3.3.5),
+wird stillschweigend weggelassen. Die Suche liefert dann die **ganze
+Bibliothek**, ohne Fehler. Am 2026-11-03 landeten so auf Dev 50 fremde
+Bilder im Papierkorb (wiederhergestellt). **Vor jeder Aktion auf
+Suchergebnissen prüfen, ob der Filter gegriffen hat** (Anzahl, Merkmale der
+Treffer). Auch `deviceId` und `deviceAssetId` liefert `GET /assets/{id}` in
+Immich 3 nicht mehr.
+
+### Tag-Suche: Unterebenen ja, Schnittmenge nein
+
+`list_tag_assets` / `search/metadata` mit einem Tag findet auch die Bilder
+seiner Unterebenen („03 Orte/Schweiz“ findet „…/Schweiz/Bern“). Zwei Tags in
+**einer** Suche (`tagIds: [a, b]`) liefern dagegen nichts, auch wenn ein Bild
+beide trägt — die Schnittmenge selbst aus zwei Listen bilden.
 
 ### `search/metadata` zählt die Seite, nicht den Treffer
 

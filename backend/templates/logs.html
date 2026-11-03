@@ -266,6 +266,9 @@ function _formatResult(task, result) {
             checked: result.checked || 0,
             skipped: result.immich_skipped || 0,
         });
+        if (result.restored) {
+            msg += '\n  ' + _t('orphans_restored', {n: result.restored});
+        }
         if (result.storage_skipped) {
             msg += '\n  ' + _t('orphans_storage', {n: result.storage_skipped, detail: result.storage || ''});
         }

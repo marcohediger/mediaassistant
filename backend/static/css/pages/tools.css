@@ -53,7 +53,31 @@
 .tools-pick-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; min-width: 0; }
 .tools-pick { display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0; cursor: pointer; }
 .tools-pick input { flex: none; width: 1rem; height: 1rem; margin: 0; accent-color: var(--primary); cursor: pointer; }
-.tools-pick input:not(:checked) + .ui-tag { opacity: 0.55; text-decoration: line-through; }
+/* The direction of a proposal: the tag that goes into the other and is
+   deleted is struck through; with ✕ both stay, only quieter. */
+.tools-merge-table tr.is-fwd .merge-a, .tools-merge-table tr.is-back .merge-b { text-decoration: line-through; }
+.tools-merge-table tr.is-no .ui-tag { opacity: 0.55; }
+.tools-merge-table tr.is-retag .merge-a { text-decoration: line-through; }
+/* The sign of a proposal's kind (a toned icon tile), the legend above the
+   list (it jumps to the groups) and the head row of each group. */
+/* The design system's tones are all taken: "regional" mixes two of them (pink). */
+.tools-kind.is-regional { --ui-tone: color-mix(in srgb, var(--ui-violet) 45%, var(--error)); --ui-tone-text: color-mix(in srgb, var(--ui-violet) 45%, var(--error)); }
+.tools-kind.ui-icon-tile-sm { width: 1.5rem; height: 1.5rem; border-radius: 6px; font-size: var(--ui-fs-xs); font-weight: 700; line-height: 1; }
+/* Columns set by mergeLegendFit(): one row, or two even ones. */
+.tools-legend { display: grid; grid-template-columns: repeat(8, max-content); gap: 0.45rem 1.25rem; overflow: hidden; margin: 0.5rem 0 0.6rem; font-size: var(--ui-fs-sm); color: var(--text-muted); }
+.tools-legend-item { display: inline-flex; align-items: center; gap: 0.4rem; color: inherit; text-decoration: none; border-radius: 6px; }
+.tools-legend-item:hover { color: var(--text); }
+.tools-legend-item:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.tools-merge-table tr.tools-group th {
+    padding-top: 0.9rem; text-align: left; font-size: var(--ui-fs-sm); font-weight: 600; color: var(--text);
+    background: color-mix(in srgb, var(--bg-input) 55%, transparent);
+}
+.tools-group-head { display: inline-flex; align-items: center; gap: 0.5rem; }
+.tools-merge-table .merge-fix { min-width: 10rem; }
+.tools-dir .ui-seg { height: 1.6rem; padding: 0 0.6rem; font-size: var(--ui-fs-md, 0.9375rem); }
+.tools-dir .ui-seg:has(input:disabled) { opacity: 0.35; cursor: not-allowed; }
+/* ✕ chosen: nothing is merged — in red. */
+.tools-dir .ui-seg:has(input[value="no"]:checked) { color: var(--error); }
 .tools-why { font-size: var(--ui-fs-xs); line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
 .tools-sample { display: flex; flex-direction: column; align-items: flex-start; gap: 0.35rem; min-width: 0; }
 .tools-sample-title { margin: 0; max-width: 80ch; font-size: var(--ui-fs-xs); font-weight: 500; line-height: 1.5; color: var(--text-muted); }
