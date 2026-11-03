@@ -938,7 +938,9 @@
     "merge_type_orphan": "ohne Lösung",
     "merge_orphan_label": "Was mit „{name}“ geschieht",
     "merge_orphan_why": "weder heile Schreibweise noch Fotos noch KI verraten das Wort — von Hand eintippen (→) oder neu taggen (↻)",
-    "merge_dir_back_new": "„{b}“ gibt es noch nicht — umgekehrt gäbe es nichts zusammenzuführen. ✕ lässt „{a}“ stehen."
+    "merge_dir_back_new": "„{b}“ gibt es noch nicht — umgekehrt gäbe es nichts zusammenzuführen. ✕ lässt „{a}“ stehen.",
+    "poll_retry": "Verbindung unterbrochen, versuche erneut …",
+    "poll_lost": "Keine Verbindung zum Server — die Aufgabe läuft dort weiter. Seite neu laden, um sie wieder zu verfolgen."
   },
   "sets": {
     "title": "Verarbeitungs-Sets",

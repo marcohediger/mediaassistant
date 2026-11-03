@@ -571,9 +571,28 @@ function groupsRestore(res) {
     if (res.set_id) { document.getElementById('groups_set').value = String(res.set_id); }
     document.getElementById('groups_foreign').checked = !!res.include_foreign;
 }
+// The state of the running task. One failed poll — a reverse proxy's error
+// page, an expired login, a moment without network — must not stop the page
+// from following a task that goes on on the server: it tries again every
+// POLL_RETRY_MS for a minute, then says so (live: a long merge scan showed
+// "<!DOCTYPE …" is not valid JSON and stopped following).
+var POLL_RETRY_MS = 3000, POLL_RETRIES = 20;
+function pollStatus(stateId, onStatus, onFail, tries) {
+    fetch('/api/jobs/cleanup-status', {cache: 'no-store'})
+        .then(function (r) {
+            if (!r.ok || (r.headers.get('content-type') || '').indexOf('json') < 0) {
+                throw new Error('HTTP ' + r.status);
+            }
+            return r.json();
+        })
+        .then(onStatus, function () {
+            if ((tries || 0) + 1 >= POLL_RETRIES) { onFail(L.poll_lost); return; }
+            setState(stateId, L.poll_retry);
+            setTimeout(function () { pollStatus(stateId, onStatus, onFail, (tries || 0) + 1); }, POLL_RETRY_MS);
+        });
+}
 function pollGroups() {
-    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
-      .then(function (p) {
+    pollStatus('groups_state', function (p) {
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
               setState('groups_state', phaseText(p) + n);
@@ -585,7 +604,7 @@ function pollGroups() {
           setState('groups_state', '');
           renderGroups(p.result);
           groupsBusy(false);
-      }).catch(function (e) { groupsFail(String(e)); });
+    }, groupsFail);
 }
 function groupsFill(text, values) {
     return text.replace(/\{(\w+)\}/g, function (m, k) {
@@ -642,8 +661,7 @@ function renderGroups(res) {
 }
 
 function pollSidecar() {
-    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
-      .then(function (p) {
+    pollStatus('sidecar_state', function (p) {
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
               setState('sidecar_state', phaseText(p) + n);
@@ -655,7 +673,7 @@ function pollSidecar() {
           if (p.error) { sidecarFail(p.error); return; }
           setState('sidecar_state', '');
           renderSidecar(p.result);
-      }).catch(function (e) { sidecarFail(String(e)); });
+    }, sidecarFail);
 }
 
 function renderImmichPreview(im) {
@@ -804,8 +822,7 @@ function mergeApply() {
     mergeRun('apply');
 }
 function pollMerge() {
-    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
-      .then(function (p) {
+    pollStatus('merge_state', function (p) {
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
               setState('merge_state', phaseText(p) + n);
@@ -817,7 +834,7 @@ function pollMerge() {
           if (p.error) { mergeFail(p.error); return; }
           setState('merge_state', '');
           renderMerge(p.result);
-      }).catch(function (e) { mergeFail(String(e)); });
+    }, mergeFail);
 }
 
 var MERGE = null;  // the preview shown: its items and the counts of their names
@@ -1099,8 +1116,7 @@ function emptyApply() {
     emptyRun('apply');
 }
 function pollEmpty() {
-    fetch('/api/jobs/cleanup-status').then(function (r) { return r.json(); })
-      .then(function (p) {
+    pollStatus('empty_state', function (p) {
           if (p.running) {
               var n = p.total ? ' (' + p.current + '/' + p.total + ')' : '';
               setState('empty_state', phaseText(p) + n);
@@ -1112,7 +1128,7 @@ function pollEmpty() {
           setState('empty_state', '');
           renderEmpty(p.result);
           emptyBusy(false);
-      }).catch(function (e) { emptyFail(String(e)); });
+    }, emptyFail);
 }
 function renderEmpty(res) {
     var out = document.getElementById('empty_result');

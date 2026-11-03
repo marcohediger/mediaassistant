@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.8.1 — 2026-11-03
+
+### Fix: Werkzeuge verlieren eine lange Aufgabe nicht mehr aus den Augen
+
+Auf Live brach die Anzeige von „Schreibweisen suchen“ mitten in der Suche ab
+mit „SyntaxError: Unexpected token '<', "<!DOCTYPE "… is not valid JSON“.
+Die Suche lief auf dem Server weiter, nur die Seite fragte nicht mehr nach.
+Die Seite fragt jede Sekunde nach dem Stand der Aufgabe. Kam dabei ein
+einziges Mal HTML statt JSON zurück, gab sie auf. Das passiert, wenn der
+Reverse Proxy kurz eine Fehlerseite liefert oder wenn die Anmeldung während
+einer langen Suche abläuft.
+
+Jetzt versucht jedes Werkzeug der Seite (Tag-Aufräumen, Schreibweisen
+zusammenführen, leere Tags, Tags in Gruppen umstellen) nach einem
+Fehlschlag eine Minute lang alle 3 Sekunden weiter und zeigt „Verbindung
+unterbrochen, versuche erneut …“. Erst danach meldet es, dass die Aufgabe
+auf dem Server weiterläuft und ein Neuladen der Seite sie wieder zeigt. Die
+Wartungsseite war schon fehlertolerant.
+
+Geprüft im Browser (Playwright gegen Dev): zwei Fehlerseiten des Proxys,
+dann die echte Antwort, und das Ergebnis erscheint; bei dauerhaftem Ausfall
+erscheint nach 20 Versuchen der Hinweis zum Neuladen.
+
 ## v3.8.0 — 2026-11-03
 
 ### Fix: „Verwaiste aufräumen“ markierte Jobs, deren Inhalt in Immich noch da ist

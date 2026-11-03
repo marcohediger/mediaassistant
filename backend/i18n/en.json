@@ -938,7 +938,9 @@
     "merge_type_orphan": "no solution",
     "merge_orphan_label": "What happens to “{name}”",
     "merge_orphan_why": "neither a healthy spelling nor the photos nor the AI tell the word — type it in (→) or tag anew (↻)",
-    "merge_dir_back_new": "“{b}” does not exist yet — the other way there would be nothing to merge. ✕ leaves “{a}” as it is."
+    "merge_dir_back_new": "“{b}” does not exist yet — the other way there would be nothing to merge. ✕ leaves “{a}” as it is.",
+    "poll_retry": "Connection interrupted, trying again …",
+    "poll_lost": "No connection to the server — the task goes on there. Reload the page to follow it again."
   },
   "sets": {
     "title": "Processing sets",
