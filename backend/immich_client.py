@@ -1150,13 +1150,20 @@ async def delete_tag(tag_id: str, *, api_key: str | None = None) -> None:
 
     Immich cascades to child tags (`tag.parentId` is ON DELETE CASCADE), so
     callers must know the descendants before calling this.
+
+    A tag that is gone already counts as deleted: Immich 3 answers it with
+    400 "Not found or no tag.delete access" (a missing right is a 403), and
+    a call that timed out has often deleted it after all (measured on live:
+    a tag with thousands of photos took longer than 30 s).
     """
     url, api_key = await _resolve_api_key(api_key)
     if not url or not api_key:
         raise RuntimeError("Immich-URL oder API-Key fehlt")
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.delete(f"{url}/api/tags/{tag_id}", headers={"x-api-key": api_key})
     if resp.status_code == 404:
+        return
+    if resp.status_code == 400 and not any(t.get("id") == tag_id for t in await list_tags(api_key=api_key)):
         return
     if resp.status_code not in (200, 204):
         raise RuntimeError(f"HTTP {resp.status_code} — {_server_message(resp) or resp.text[:120]}")

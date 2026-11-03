@@ -29,6 +29,11 @@ P  Flat place names into the places tree: a name one node bears goes into
    named; another spelling chains on; the photo that has the place keeps
    just its node, the one with only flat names gets the deepest node and
    not its parent besides.
+D  Deleting a tag that is gone already: Immich 3 answers 400, not 404 —
+   that is done; a key without the right to delete (403) still fails. A merge
+   whose delete timed out after Immich had deleted the tag (live: 15 big
+   tags) counts as merged, not as left behind. The late answer is
+   simulated, the tags and photos are real.
 
 Real assets (synthetic pictures) are uploaded and deleted again; tags the
 test created and its sandbox go too, the remembered decisions are restored.
@@ -547,6 +552,72 @@ async def part_p():
                 await delete_tag(t[value]["id"])
 
 
+async def part_d():
+    print("\n-- D: deleting a tag that is gone already --")
+    import immich_client
+    from immich_client import delete_tag, ensure_tag_path, get_immich_config
+    from routers import api
+    from routers import tools
+    gone = await ensure_tag_path(f"Weg{TS}")
+    await delete_tag(gone["id"])
+    try:
+        await delete_tag(gone["id"])
+        error = ""
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"
+    check("D-01 deleting a tag that is gone is done (Immich 3 answers 400, not 404)", not error, error)
+
+    url, key = await get_immich_config()
+    kept = await ensure_tag_path(f"Bleibt{TS}")
+    async with httpx.AsyncClient(timeout=30) as c:
+        limited = (await c.post(f"{url}/api/api-keys", headers={"x-api-key": key},
+                                json={"name": f"tag-merge-test-{TS}", "permissions": ["tag.read"]})).json()
+    try:
+        try:
+            await delete_tag(kept["id"], api_key=limited["secret"])
+            error = ""
+        except Exception as e:
+            error = str(e)
+        check("D-02 a key without the right to delete: still an error (Immich: 403), the tag stays",
+              error and f"Bleibt{TS}" in await tags_now(), error)
+    finally:
+        async with httpx.AsyncClient(timeout=30) as c:
+            await c.delete(f"{url}/api/api-keys/{limited['apiKey']['id']}", headers={"x-api-key": key})
+
+    loser, winner = f"zeitlupe{TS}", f"Zeitlupe{TS}"
+    a = [await upload(d) for d in ("Uhr am Bahnhof", "Uhr am Turm", "Uhr im Zimmer")]
+    await immich_idle()
+    await tag(winner, a[0], a[1])
+    await tag(loser, a[2])
+    await immich_idle()
+    await asyncio.sleep(3)
+    res = await run_scan(ai=False, translate=False)
+    it = item(res.get("result") or {"items": []}, loser)
+    check("D-03 pre: the spelling is proposed", it and it["into"] == winner and it["selected"], f"{it}")
+    real, calls = immich_client.delete_tag, []
+
+    async def late(tag_id, **kw):
+        # Immich deletes the tag but answers after the client gave up.
+        await real(tag_id, **kw)
+        calls.append(tag_id)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("")
+    immich_client.delete_tag = late
+    try:
+        api._cleanup_reset("tag_merge")
+        await tools._merge_apply({it["id"]} if it else set())
+    finally:
+        immich_client.delete_tag = real
+    out = api._cleanup_progress.get("result") or {}
+    await immich_idle()
+    await asyncio.sleep(3)
+    t = await tags_now()
+    check("D-04 a delete that timed out after Immich deleted the tag counts as merged, not as left behind",
+          out.get("merged") == 1 and not out.get("failed") and not out.get("failed_names") and loser not in t,
+          f"{ {k: out.get(k) for k in ('merged', 'failed', 'failed_names', 'error')} }")
+    check("D-05 all three photos carry the target", await count(winner, t) == 3, f"{await count(winner, t)}")
+
+
 async def cleanup():
     from config import config_manager
     from immich_client import delete_asset, delete_tag
@@ -577,14 +648,14 @@ async def cleanup():
 
 
 async def main():
-    wanted = {a.upper() for a in sys.argv[1:]} or set("KSARELP")
+    wanted = {a.upper() for a in sys.argv[1:]} or set("KSARELPD")
     print("=" * 60)
     print("Schreibweisen zusammenführen, leere Tags löschen")
     print("=" * 60)
     if "K" in wanted:
         part_k()
     try:
-        if wanted & set("SARELP"):
+        if wanted & set("SARELPD"):
             assets = await setup()
             r = await part_s() if wanted & set("SA") else None
             if "A" in wanted and r:
@@ -597,12 +668,14 @@ async def main():
                 await part_l()
             if "P" in wanted:
                 await part_p()
+            if "D" in wanted:
+                await part_d()
     except Exception as exc:
         import traceback
         traceback.print_exc()
         FAIL.append(f"crashed: {type(exc).__name__}: {exc}")
     finally:
-        if wanted & set("SARELP"):
+        if wanted & set("SARELPD"):
             await cleanup()
     print(f"\n{len(PASS)}/{len(PASS) + len(FAIL)} PASS")
     for f in FAIL:

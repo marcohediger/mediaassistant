@@ -525,8 +525,8 @@ async def _retry_once(label: str, factory):
 
     A single slow answer should not cost a whole tag. Every call retried
     here is idempotent: re-tagging an asset that already carries the tag is
-    a no-op, and deleting a tag that is already gone returns 404, which
-    `delete_tag` treats as done.
+    a no-op, and deleting a tag that is already gone (the first call
+    deleted it but answered too late) is done for `delete_tag`.
     """
     try:
         return await factory()

@@ -1,5 +1,34 @@
 # Changelog
 
+## v3.8.2 — 2026-11-03
+
+### Fix: Ein Tag, das Immich schon gelöscht hat, gilt als gelöscht
+
+Auf Live meldete „Schreibweisen zusammenführen“ 15 von 1836 Tags als „nicht
+zusammengeführt“, alle mit „HTTP 400 — Not found or no tag.delete access“.
+In Wahrheit waren sie zusammengeführt. Die Bilder hingen schon am Ziel, und
+Immich hatte das Tag gelöscht, antwortete bei grossen Tags aber erst nach
+mehr als 30 Sekunden. Der zweite Versuch fand das Tag nicht mehr. Für ein
+Tag, das es nicht mehr gibt, antwortet Immich 3 mit 400, nicht mit 404 wie
+bisher angenommen. Weil diese Tags als Fehlschlag galten, liess die
+Nachkontrolle sie aus.
+
+Jetzt gilt ein Tag, das Immich nicht mehr kennt, als gelöscht: Bei einer
+400 schaut MediaAssistant in der Liste der Tags nach. Ein fehlendes Recht
+bleibt ein Fehler, Immich meldet es mit 403. Das Löschen wartet bis zu
+120 statt 30 Sekunden auf die Antwort. Das gilt für jedes Löschen eines
+Tags: Zusammenführen, Nachkontrolle, Neu taggen, Tag-Aufräumen und leere
+Tags.
+
+Für Live heisst das: Die 15 Tags sind zusammengeführt. Hat Immich bei
+einem davon die alte Schreibweise aus der Sidecar zurückgeholt, schlägt die
+nächste Suche sie wieder vor.
+
+Reproducer `test_tag_merge.py D` gegen echtes Immich: ein schon gelöschtes
+Tag löschen, ein Schlüssel ohne Recht zum Löschen (bleibt Fehler, Tag
+bleibt), Zusammenführen mit verspäteter Antwort beim Löschen. Vor dem Fix
+rot mit genau der Meldung von Live, danach grün.
+
 ## v3.8.1 — 2026-11-03
 
 ### Fix: Werkzeuge verlieren eine lange Aufgabe nicht mehr aus den Augen

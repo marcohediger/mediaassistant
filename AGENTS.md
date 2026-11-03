@@ -300,7 +300,7 @@ PUT /api/jobs/metadataExtraction  {"command": "start"}
 | `backend/test_executor.py` | Ausführung nach Abhängigkeiten: Register als einzige Quelle, IA-03 als Seiten-Task, Betriebsmittel-Grenzen, Stopp-Regeln | `docker exec mediaassistant-dev python /app/test_executor.py` |
 | `backend/test_immich_dedup.py` | Duplikat-Auflösung mit echtem Immich: geteiltes Asset bei Keep, Übertragung, Review-Fälle, Altbestand ohne Hash (D12), Gruppen-Art nur aus den Duplikat-Beziehungen + „Automatisch bereinigen" (D13); Teile wählbar | `docker exec mediaassistant-dev python /app/test_immich_dedup.py [D6 … D13]` |
 | `backend/test_ia04_convert.py` | IA-04 ohne ImageMagick: GIF (erstes Bild) und HEIC-Ausweichweg über Pillow, mit fehlschlagendem `heif-convert` im `PATH` | `docker exec mediaassistant-dev python /app/test_ia04_convert.py` |
-| `backend/test_tag_merge.py` | Werkzeuge „Schreibweisen zusammenführen" (`tag_spelling.py`) und „Leere Tags löschen" gegen echtes Immich und die echte KI: gleiche Buchstaben, Umlaut-Fälle (Bar/Bär getrennt, Gluhwein/Glühwein zusammen), Reparatur aus Beschreibung und durch die KI, Übersetzung in die Sprache der Inhalte, Richtung (→ ✕ ←) und gemerkte Ausnahmen, Umlaut-Ziel nach Anzahl Bilder (Krane/Kräne), Nachkontrolle in Immich, leere Tags samt Altersgrenze und Nachzählen, Sprache der Inhalte (L: ss-Regeln, Deutsch → Englisch), flache Ortsnamen in den Ortsbaum (P: Immich und Sidecars, genauerer Ort bleibt); Teile wählbar | `docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E L P]` |
+| `backend/test_tag_merge.py` | Werkzeuge „Schreibweisen zusammenführen" (`tag_spelling.py`) und „Leere Tags löschen" gegen echtes Immich und die echte KI: gleiche Buchstaben, Umlaut-Fälle (Bar/Bär getrennt, Gluhwein/Glühwein zusammen), Reparatur aus Beschreibung und durch die KI, Übersetzung in die Sprache der Inhalte, Richtung (→ ✕ ←) und gemerkte Ausnahmen, Umlaut-Ziel nach Anzahl Bilder (Krane/Kräne), Nachkontrolle in Immich, leere Tags samt Altersgrenze und Nachzählen, Sprache der Inhalte (L: ss-Regeln, Deutsch → Englisch), flache Ortsnamen in den Ortsbaum (P: Immich und Sidecars, genauerer Ort bleibt), Löschen eines schon gelöschten Tags (D: Immich 3 antwortet 400, verspätete Antwort beim Zusammenführen); Teile wählbar | `docker exec mediaassistant-dev python /app/test_tag_merge.py [K S A R E L P D]` |
 | `backend/test_content_language.py` | Sprache der Inhalte (`content_language.py`): Sprachtabelle, Prompt-Platzhalter, Fingerabdrücke (Standardsprache ändert nichts), Namen der Gruppen und Ordner, Geocoding gegen echtes Nominatim; Teile wählbar | `docker exec mediaassistant-dev python /app/test_content_language.py [T P F G O]` |
 | `backend/test_ai_key.py` | KI-Backends über die OpenAI-Schnittstelle: Ausfallsicherung (Teil F: Wechsel, beiseitegestellt, Rückkehr, kein Wechsel bei 400, beide aus), Modelle prüfen (Teil C: Testbild mit Zahl, Nachdenken abschalten, nur auf Knopfdruck, beim Speichern) und API-Key (Teil K): Modellliste (eingetippter, falscher, gespeicherter Key), Liste der Backends, Dienst-Prüfung der Auto-Pause schicken den Key; Backend im Container, das nur auf seinen Key antwortet; beide Backends werden für den Lauf umgestellt und exakt zurückgesetzt, die Pipeline pausiert | `docker exec mediaassistant-dev python /app/test_ai_key.py [K C F]` |
 | `backend/test_maintenance_results.py` | Ergebnisse der Werkzeuge und der Wartung (`maintenance_results`, #57) über die Diagnose-API: begrenzte Listen, Vorschau „Schreibweisen zusammenführen“ über `?task=`, „Verwaiste aufräumen“ mit Grund und `?status=orphan&since=`, nach einem Neustart der App noch da, Zugriff nur mit Token; zu Unrecht Verwaiste (W: leeres Ziel mit Asset, von MA gesperrt, Zurückholen); Teile wählbar | `docker exec mediaassistant-dev python /app/test_maintenance_results.py [B T O R A W]` |
@@ -698,6 +698,15 @@ Und beim Blättern **beide** Felder bedienen: `nextCursor` (aktuell) und
 `nextPage` (deprecated, aber das einzige, das ältere Instanzen liefern).
 Wer nur eines auswertet, bricht nach der ersten Seite ab und meldet
 trotzdem Erfolg.
+
+### Ein gelöschtes Tag ist 400, nicht 404
+
+Immich 3 beantwortet `DELETE /api/tags/<id>` für ein Tag, das es nicht mehr
+gibt, mit **400** „Not found or no tag.delete access“ (ebenso `GET`). Ein
+Schlüssel ohne Recht bekommt **403** „Missing required permission“. Ein
+grosses Tag zu löschen dauert auf Live länger als 30 s. Der zweite Versuch
+nach der Zeitüberschreitung findet das Tag dann nicht mehr (v3.8.2).
+`delete_tag` prüft bei 400 deshalb die Liste der Tags.
 
 ## Vor jedem Fix
 
